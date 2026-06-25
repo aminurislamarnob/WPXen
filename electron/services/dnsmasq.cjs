@@ -3,6 +3,7 @@
 const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const brew = require('./brew.cjs');
 
 const TLD = 'test';
@@ -17,23 +18,26 @@ function getDnsmasqConfPath() {
 
 function isRunning() {
   try {
-    const out = execSync('pgrep -x dnsmasq', { stdio: 'pipe' }).toString().trim();
-    return out.length > 0;
+    // See nginx.isRunning: launchd starts dnsmasq via absolute path, so
+    // `pgrep -x` alone misses it — fall back to a full-args path match.
+    execSync("pgrep -x dnsmasq || pgrep -f '[/ ]dnsmasq'", { stdio: 'pipe' });
+    return true;
   } catch {
     return false;
   }
 }
 
+// dnsmasq binds port 53 — must run as a root LaunchDaemon (sudo).
 function start() {
-  brew.startBrewService('dnsmasq');
+  brew.startBrewServiceSudo('dnsmasq');
 }
 
 function stop() {
-  brew.stopBrewService('dnsmasq');
+  brew.stopBrewServiceSudo('dnsmasq');
 }
 
 function restart() {
-  brew.restartBrewService('dnsmasq');
+  brew.restartBrewServiceSudo('dnsmasq');
 }
 
 function isConfigured() {
@@ -70,11 +74,27 @@ function configureDnsmasq() {
 function createResolverFile() {
   const resolverContent = `# WPHerd DNS resolver for .${TLD} domains\nnameserver 127.0.0.1\n`;
 
-  // Use osascript to run with admin privileges
-  const script = `
-    do shell script "mkdir -p /etc/resolver && echo '${resolverContent.replace(/'/g, "\\'")}' > ${RESOLVER_FILE}" with administrator privileges
-  `;
-  execSync(`osascript -e '${script.trim()}'`, { stdio: 'pipe' });
+  // Stage the file content in a temp file (no privileges needed), then use
+  // admin rights only to copy it into place. This avoids embedding multi-line
+  // content inside nested AppleScript/shell quoting, which silently corrupts
+  // the command (the newline splits `echo`, breaking the whole script).
+  const tmpFile = path.join(os.tmpdir(), `wpherd-resolver-${TLD}`);
+  fs.writeFileSync(tmpFile, resolverContent, 'utf8');
+
+  // Also flush the DNS cache so macOS drops any negative (NXDOMAIN) result it
+  // cached for *.test before dnsmasq/the resolver existed. Runs as root in the
+  // same privileged step, so killall mDNSResponder succeeds without a 2nd prompt.
+  const shellCmd =
+    `mkdir -p ${RESOLVER_DIR} && cp '${tmpFile}' '${RESOLVER_FILE}' && chmod 644 '${RESOLVER_FILE}'` +
+    ` && dscacheutil -flushcache && killall -HUP mDNSResponder`;
+  const appleScript = `do shell script "${shellCmd.replace(/"/g, '\\"')}" with administrator privileges`;
+  try {
+    execSync(`osascript -e '${appleScript.replace(/'/g, "'\\''")}'`, { stdio: 'pipe' });
+  } finally {
+    try {
+      fs.rmSync(tmpFile, { force: true });
+    } catch {}
+  }
 }
 
 function resolverFileExists() {

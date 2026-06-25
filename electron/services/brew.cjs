@@ -165,6 +165,32 @@ function restartBrewService(name) {
   execBrew(`services restart ${name}`);
 }
 
+// Runs `brew services <action> <name>` as root via a macOS admin-privileges
+// prompt. Required for services that bind privileged ports (<1024) such as
+// dnsmasq (53) and nginx (80) — these are installed as root LaunchDaemons.
+function execBrewServiceSudo(action, name) {
+  const brew = getBrewPath();
+  if (!brew) throw new Error('Homebrew is not installed');
+  const prefix = getBrewPrefix();
+  const shellCmd = `PATH=${prefix}/bin:$PATH ${brew} services ${action} ${name}`;
+  const appleScript = `do shell script "${shellCmd.replace(/"/g, '\\"')}" with administrator privileges`;
+  execSync(`osascript -e '${appleScript.replace(/'/g, "'\\''")}'`, {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+}
+
+function startBrewServiceSudo(name) {
+  execBrewServiceSudo('start', name);
+}
+
+function stopBrewServiceSudo(name) {
+  execBrewServiceSudo('stop', name);
+}
+
+function restartBrewServiceSudo(name) {
+  execBrewServiceSudo('restart', name);
+}
+
 module.exports = {
   getBrewPrefix,
   getBrewPath,
@@ -183,4 +209,7 @@ module.exports = {
   startBrewService,
   stopBrewService,
   restartBrewService,
+  startBrewServiceSudo,
+  stopBrewServiceSudo,
+  restartBrewServiceSudo,
 };

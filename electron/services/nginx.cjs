@@ -28,13 +28,18 @@ function getNginxLogDir() {
 
 function isRunning() {
   try {
-    const out = execSync('pgrep -x nginx', { stdio: 'pipe' }).toString().trim();
-    return out.length > 0;
+    // `pgrep -x nginx` only matches when started by bare name; launchd /
+    // `brew services` launch nginx via absolute path, so fall back to a
+    // full-args match on the binary path or its rewritten master title.
+    execSync("pgrep -x nginx || pgrep -f '[/ ]nginx'", { stdio: 'pipe' });
+    return true;
   } catch {
     return false;
   }
 }
 
+// macOS allows non-root processes to bind ports below 1024, so nginx runs
+// fine as the current user — no admin privileges needed.
 function start() {
   brew.startBrewService('nginx');
 }
@@ -82,7 +87,12 @@ function ensureServersDir() {
 function generateSiteConfig(site) {
   const { name, domain, path: sitePath, phpVersion } = site;
   const prefix = brew.getBrewPrefix();
+  // Homebrew's php-fpm listens on TCP 127.0.0.1:9000 by default and does not
+  // create a unix socket. Use a per-version socket only when one actually
+  // exists; otherwise fall back to the TCP address so PHP requests resolve.
   const socketPath = brew.getPhpFpmSocketPath(phpVersion);
+  const fastcgiPass =
+    socketPath && fs.existsSync(socketPath) ? `unix:${socketPath}` : '127.0.0.1:9000';
   const logDir = getNginxLogDir();
 
   return `# WPHerd: ${name}
@@ -103,7 +113,7 @@ server {
     location ~ \\.php$ {
         try_files $uri =404;
         fastcgi_split_path_info ^(.+\\.php)(/.+)$;
-        fastcgi_pass unix:${socketPath};
+        fastcgi_pass ${fastcgiPass};
         fastcgi_index index.php;
         fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
         fastcgi_param HTTP_PROXY "";
