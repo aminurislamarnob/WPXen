@@ -1,0 +1,65 @@
+{
+  "name": "wpherd",
+  "productName": "WPHerd",
+  "version": "1.0.0",
+  "description": "Blazingly fast local WordPress development for macOS",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "concurrently -k -n \"VITE,ELECTRON\" -c \"cyan,yellow\" \"vite\" \"wait-on http://localhost:5173 && NODE_ENV=development electron .\"",
+    "build": "vite build && electron-builder --mac",
+    "vite": "vite",
+    "electron": "NODE_ENV=development electron .",
+    "pack": "vite build && electron-builder --dir"
+  },
+  "keywords": ["wordpress", "local", "development", "macos", "php", "nginx"],
+  "author": "WPHerd",
+  "license": "MIT",
+  "dependencies": {
+    "lucide-react": "^0.344.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-router-dom": "^6.21.3"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.2.1",
+    "autoprefixer": "^10.4.17",
+    "concurrently": "^8.2.2",
+    "electron": "^28.2.10",
+    "electron-builder": "^24.13.3",
+    "postcss": "^8.4.35",
+    "tailwindcss": "^3.4.1",
+    "vite": "^5.1.4",
+    "wait-on": "^7.2.0"
+  },
+  "build": {
+    "appId": "com.wpherd.app",
+    "productName": "WPHerd",
+    "copyright": "Copyright © 2024 WPHerd",
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "icon": "assets/icon.icns",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "target": [
+        { "target": "dmg", "arch": ["arm64", "x64"] }
+      ]
+    },
+    "directories": {
+      "output": "release",
+      "buildResources": "assets"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "assets/bin",
+        "to": "bin",
+        "filter": ["**/*"]
+      }
+    ]
+  }
+}
