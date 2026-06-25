@@ -38,18 +38,19 @@ function isRunning() {
   }
 }
 
-// macOS allows non-root processes to bind ports below 1024, so nginx runs
-// fine as the current user — no admin privileges needed.
+// nginx must bind port 80 (<1024) so it needs to run as a root LaunchDaemon.
+// startBrewServiceSudo uses passwordless sudo when the WPHerd sudoers file is
+// installed, otherwise falls back to an osascript admin-privileges dialog.
 function start() {
-  brew.startBrewService('nginx');
+  brew.startBrewServiceSudo('nginx');
 }
 
 function stop() {
-  brew.stopBrewService('nginx');
+  brew.stopBrewServiceSudo('nginx');
 }
 
 function restart() {
-  brew.restartBrewService('nginx');
+  brew.restartBrewServiceSudo('nginx');
 }
 
 function reload() {

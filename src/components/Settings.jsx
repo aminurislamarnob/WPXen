@@ -4,10 +4,12 @@ import {
   Save,
   CheckCircle,
   Info,
-  ExternalLink,
-  Terminal,
   Wifi,
   Loader,
+  ShieldCheck,
+  ShieldAlert,
+  ShieldOff,
+  Trash2,
 } from 'lucide-react';
 
 export default function Settings() {
@@ -25,18 +27,50 @@ export default function Settings() {
   const [dnsSetupLoading, setDnsSetupLoading] = useState(false);
   const [dnsMessage, setDnsMessage] = useState(null);
   const [deps, setDeps] = useState(null);
+  const [sudoers, setSudoers] = useState(null);
+  const [sudoersLoading, setSudoersLoading] = useState(false);
+  const [sudoersMessage, setSudoersMessage] = useState(null);
 
   useEffect(() => {
     Promise.all([
       window.electronAPI.getSettings(),
       window.electronAPI.getSystemInfo(),
       window.electronAPI.checkDependencies(),
-    ]).then(([s, sys, d]) => {
+      window.electronAPI.checkSudoers(),
+    ]).then(([s, sys, d, sud]) => {
       setSettings(s);
       setSysInfo(sys);
       setDeps(d);
+      setSudoers(sud);
     });
   }, []);
+
+  async function handleInstallSudoers() {
+    setSudoersLoading(true);
+    setSudoersMessage(null);
+    const result = await window.electronAPI.installSudoers();
+    if (result.success) {
+      const sud = await window.electronAPI.checkSudoers();
+      setSudoers(sud);
+      setSudoersMessage({ type: 'success', text: 'Permissions configured. Services now start silently.' });
+    } else {
+      setSudoersMessage({ type: 'error', text: result.error || 'Setup failed or was cancelled.' });
+    }
+    setSudoersLoading(false);
+  }
+
+  async function handleUninstallSudoers() {
+    setSudoersLoading(true);
+    setSudoersMessage(null);
+    const result = await window.electronAPI.uninstallSudoers();
+    if (result.success) {
+      setSudoers({ configured: false });
+      setSudoersMessage({ type: 'success', text: 'Permissions removed. Services will require your password again.' });
+    } else {
+      setSudoersMessage({ type: 'error', text: result.error });
+    }
+    setSudoersLoading(false);
+  }
 
   async function handleSave() {
     setSaving(true);
@@ -162,6 +196,58 @@ export default function Settings() {
               onChange={(e) => setSettings((s) => ({ ...s, dbPassword: e.target.value }))}
               placeholder="(none)"
             />
+          </div>
+        </div>
+      </section>
+
+      {/* Permissions (sudoers) */}
+      <section className={`rounded-xl border shadow-card ${sudoers?.configured ? 'bg-white border-surface-border' : 'bg-amber-50 border-amber-200'}`}>
+        <div className="px-5 py-4 border-b border-black/5">
+          <div className="flex items-center gap-2">
+            {sudoers?.configured
+              ? <ShieldCheck size={15} className="text-wp-green" />
+              : <ShieldAlert size={15} className="text-amber-600" />}
+            <h2 className="text-sm font-semibold text-gray-800">Permissions</h2>
+            <span className={`ml-auto text-xs font-medium px-2 py-0.5 rounded-full ${sudoers?.configured ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+              {sudoers?.configured ? 'Configured' : 'Not set up'}
+            </span>
+          </div>
+        </div>
+        <div className="p-5">
+          <p className="text-sm text-gray-600 mb-2">
+            {sudoers?.configured
+              ? 'WPHerd can start and stop services silently — no password prompts.'
+              : 'Without this, macOS will ask for your password every time a service starts or stops.'}
+          </p>
+          <p className="text-xs text-gray-400 mb-4">
+            Installs <span className="font-mono bg-gray-100 px-1 rounded">/etc/sudoers.d/wpherd</span> granting
+            passwordless <span className="font-mono bg-gray-100 px-1 rounded">sudo brew services</span>.
+            Requires your password <strong>once</strong> to set up, then never again.
+          </p>
+
+          {sudoersMessage && (
+            <div className={`flex items-start gap-2 px-3 py-2.5 rounded-lg mb-4 text-sm ${sudoersMessage.type === 'error' ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'}`}>
+              <CheckCircle size={14} className="flex-shrink-0 mt-0.5" />
+              {sudoersMessage.text}
+            </div>
+          )}
+
+          <div className="flex gap-2">
+            {!sudoers?.configured ? (
+              <button onClick={handleInstallSudoers} disabled={sudoersLoading} className="btn-primary text-sm">
+                {sudoersLoading
+                  ? <Loader size={13} className="animate-spin mr-1.5" />
+                  : <ShieldCheck size={13} className="mr-1.5" />}
+                Setup Passwordless Services
+              </button>
+            ) : (
+              <button onClick={handleUninstallSudoers} disabled={sudoersLoading} className="btn-ghost text-xs text-gray-400 hover:text-red-600">
+                {sudoersLoading
+                  ? <Loader size={12} className="animate-spin mr-1.5" />
+                  : <ShieldOff size={12} className="mr-1.5" />}
+                Remove Permissions
+              </button>
+            )}
           </div>
         </div>
       </section>

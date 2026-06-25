@@ -11,6 +11,7 @@ const phpService = require('./services/php.cjs');
 const mysql = require('./services/mysql.cjs');
 const dnsmasq = require('./services/dnsmasq.cjs');
 const wordpress = require('./services/wordpress.cjs');
+const sudoers = require('./services/sudoers.cjs');
 
 let store;
 let mainWindow;
@@ -251,6 +252,30 @@ function registerHandlers(win, storeInstance) {
 
   ipcMain.handle('check-dependencies', () => {
     return brew.checkAllDependencies();
+  });
+
+  // ─── Sudoers / Permissions ────────────────────────────────────────────
+
+  ipcMain.handle('check-sudoers', () => {
+    return { configured: sudoers.isConfigured(), path: sudoers.SUDOERS_PATH };
+  });
+
+  ipcMain.handle('install-sudoers', async () => {
+    try {
+      sudoers.install();
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('uninstall-sudoers', async () => {
+    try {
+      sudoers.uninstall();
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
   });
 
   ipcMain.handle('setup-dnsmasq', async () => {

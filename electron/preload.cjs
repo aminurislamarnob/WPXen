@@ -28,6 +28,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   checkDependencies: () => ipcRenderer.invoke('check-dependencies'),
   setupDnsmasq: () => ipcRenderer.invoke('setup-dnsmasq'),
 
+  // Sudoers / Permissions
+  checkSudoers: () => ipcRenderer.invoke('check-sudoers'),
+  installSudoers: () => ipcRenderer.invoke('install-sudoers'),
+  uninstallSudoers: () => ipcRenderer.invoke('uninstall-sudoers'),
+
   // Settings
   getSettings: () => ipcRenderer.invoke('get-settings'),
   saveSettings: (settings) => ipcRenderer.invoke('save-settings', settings),

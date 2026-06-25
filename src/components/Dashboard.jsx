@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Play,
@@ -10,6 +10,7 @@ import {
   Plus,
   ExternalLink,
   ArrowRight,
+  ShieldAlert,
 } from 'lucide-react';
 import { StatusBadge, ServicePill } from './StatusBadge';
 
@@ -81,6 +82,11 @@ function QuickSiteCard({ site }) {
 export default function Dashboard({ serviceStatus, sites, refreshStatus }) {
   const navigate = useNavigate();
   const [actionLoading, setActionLoading] = useState(false);
+  const [sudoersConfigured, setSudoersConfigured] = useState(true);
+
+  useEffect(() => {
+    window.electronAPI.checkSudoers().then(({ configured }) => setSudoersConfigured(configured));
+  }, []);
 
   const { nginx, php, mysql, dnsmasq } = serviceStatus;
 
@@ -111,6 +117,26 @@ export default function Dashboard({ serviceStatus, sites, refreshStatus }) {
 
   return (
     <div className="p-6 max-w-5xl space-y-6 animate-fade-in">
+      {/* Permissions banner */}
+      {!sudoersConfigured && (
+        <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 animate-fade-in">
+          <ShieldAlert size={16} className="text-amber-600 flex-shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-amber-800">Password required for services</p>
+            <p className="text-xs text-amber-700 mt-0.5">
+              macOS will ask for your password every time a service starts or stops.
+              Set up passwordless permissions once to fix this.
+            </p>
+          </div>
+          <button
+            onClick={() => navigate('/settings')}
+            className="flex-shrink-0 text-xs font-semibold text-amber-800 bg-amber-100 hover:bg-amber-200 px-3 py-1.5 rounded-lg transition-colors"
+          >
+            Fix Now
+          </button>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>

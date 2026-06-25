@@ -165,18 +165,32 @@ function restartBrewService(name) {
   execBrew(`services restart ${name}`);
 }
 
-// Runs `brew services <action> <name>` as root via a macOS admin-privileges
-// prompt. Required for services that bind privileged ports (<1024) such as
-// dnsmasq (53) and nginx (80) — these are installed as root LaunchDaemons.
+// Runs `brew services <action> <name>` as root.
+//
+// If the WPHerd sudoers file is installed (/etc/sudoers.d/wpherd), sudo runs
+// silently with no password prompt. Otherwise falls back to an osascript
+// admin-privileges dialog — acceptable for the first run before setup.
 function execBrewServiceSudo(action, name) {
-  const brew = getBrewPath();
-  if (!brew) throw new Error('Homebrew is not installed');
-  const prefix = getBrewPrefix();
-  const shellCmd = `PATH=${prefix}/bin:$PATH ${brew} services ${action} ${name}`;
-  const appleScript = `do shell script "${shellCmd.replace(/"/g, '\\"')}" with administrator privileges`;
-  execSync(`osascript -e '${appleScript.replace(/'/g, "'\\''")}'`, {
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
+  const brewBin = getBrewPath();
+  if (!brewBin) throw new Error('Homebrew is not installed');
+
+  // Lazy-require to avoid a circular dependency at module load time.
+  const sudoers = require('./sudoers.cjs');
+
+  if (sudoers.isConfigured()) {
+    // Passwordless path — no dialog shown to the user.
+    execSync(`sudo ${brewBin} services ${action} ${name}`, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  } else {
+    // Sudoers not yet set up — fall back to osascript (will prompt once).
+    const prefix = getBrewPrefix();
+    const shellCmd = `PATH=${prefix}/bin:$PATH ${brewBin} services ${action} ${name}`;
+    const appleScript = `do shell script "${shellCmd.replace(/"/g, '\\"')}" with administrator privileges`;
+    execSync(`osascript -e '${appleScript.replace(/'/g, "'\\''")}'`, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  }
 }
 
 function startBrewServiceSudo(name) {
