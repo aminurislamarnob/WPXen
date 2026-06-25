@@ -3,6 +3,28 @@
 const { execSync, exec } = require('child_process');
 const brew = require('./brew.cjs');
 
+// DB credentials used for all root-level operations. Defaults to a
+// passwordless root (fresh Homebrew installs); overridden from settings.
+let credentials = { user: 'root', password: '' };
+
+function setCredentials({ user, password } = {}) {
+  credentials = {
+    user: user || 'root',
+    password: password || '',
+  };
+}
+
+function getCredentials() {
+  return { ...credentials };
+}
+
+// Builds the auth flags shared by mysql / mysqladmin invocations.
+function authArgs() {
+  const args = ['-u', credentials.user];
+  if (credentials.password) args.push(`-p${credentials.password}`);
+  return args;
+}
+
 function getMysqlBin() {
   const prefix = brew.getBrewPrefix();
   if (!prefix) return 'mysql';
@@ -43,7 +65,8 @@ function getBrewServiceName() {
 function isRunning() {
   try {
     const mysqladmin = getMysqladminBin();
-    execSync(`${mysqladmin} -u root ping`, { stdio: 'pipe', timeout: 3000 });
+    const args = authArgs().map((a) => `'${a.replace(/'/g, "'\\''")}'`).join(' ');
+    execSync(`${mysqladmin} ${args} ping`, { stdio: 'pipe', timeout: 3000 });
     return true;
   } catch {
     return false;
@@ -64,7 +87,7 @@ function restart() {
 
 function execQuery(sql, opts = {}) {
   const mysql = getMysqlBin();
-  const args = ['-u', 'root'];
+  const args = authArgs();
   if (opts.database) args.push(opts.database);
   args.push('-e', sql);
   const cmd = [mysql, ...args.map((a) => `'${a.replace(/'/g, "'\\''")}'`)].join(' ');
@@ -127,4 +150,6 @@ module.exports = {
   testConnection,
   getBrewServiceName,
   execQuery,
+  setCredentials,
+  getCredentials,
 };

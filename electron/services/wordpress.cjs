@@ -90,8 +90,11 @@ async function createWordPressSite(siteData, progressCallback) {
 
   // 4. Create wp-config.php
   progress({ step: 'config', message: 'Configuring WordPress...' });
+  const { user: dbUser, password: dbPass } = mysql.getCredentials();
+  // Use 'localhost' so PHP connects over the same socket the CLI used,
+  // matching the credentials' host grant (e.g. 'root'@'localhost').
   wp(
-    `config create --dbname="${dbName}" --dbuser=root --dbpass="" --dbhost=127.0.0.1 --force`,
+    `config create --dbname="${dbName}" --dbuser="${dbUser}" --dbpass="${dbPass}" --dbhost=localhost --force`,
     sitePath
   );
 

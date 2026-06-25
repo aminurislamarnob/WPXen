@@ -15,6 +15,8 @@ export default function Settings() {
     sitesDir: '',
     defaultPhpVersion: '',
     startAtLogin: false,
+    dbUser: 'root',
+    dbPassword: '',
     brewPrefix: '',
   });
   const [sysInfo, setSysInfo] = useState(null);
@@ -126,6 +128,41 @@ export default function Settings() {
               />
             </div>
           </label>
+        </div>
+      </section>
+
+      {/* Database */}
+      <section className="bg-white rounded-xl border border-surface-border shadow-card">
+        <div className="px-5 py-4 border-b border-gray-100">
+          <h2 className="text-sm font-semibold text-gray-800">Database</h2>
+        </div>
+        <div className="p-5 space-y-4">
+          <p className="text-xs text-gray-400">
+            Credentials WPHerd uses to create databases and configure WordPress. Leave the
+            password blank for a passwordless root.
+          </p>
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1.5">MySQL User</label>
+            <input
+              type="text"
+              className="form-input font-mono text-xs"
+              value={settings.dbUser || ''}
+              onChange={(e) => setSettings((s) => ({ ...s, dbUser: e.target.value }))}
+              placeholder="root"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1.5">
+              MySQL Password
+            </label>
+            <input
+              type="password"
+              className="form-input font-mono text-xs"
+              value={settings.dbPassword || ''}
+              onChange={(e) => setSettings((s) => ({ ...s, dbPassword: e.target.value }))}
+              placeholder="(none)"
+            />
+          </div>
         </div>
       </section>
 

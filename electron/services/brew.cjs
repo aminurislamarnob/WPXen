@@ -25,6 +25,9 @@ function execBrew(command) {
   if (!brew) throw new Error('Homebrew is not installed');
   return execSync(`${brew} ${command}`, {
     env: { ...process.env, PATH: `${getBrewPrefix()}/bin:${process.env.PATH}` },
+    // Capture stderr into the thrown error instead of leaking it to the
+    // console (e.g. "No such keg" when probing for an uninstalled formula).
+    stdio: ['ignore', 'pipe', 'pipe'],
   })
     .toString()
     .trim();

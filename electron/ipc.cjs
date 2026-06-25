@@ -38,6 +38,12 @@ function registerHandlers(win, storeInstance) {
   mainWindow = win;
   store = storeInstance;
 
+  // Apply persisted DB credentials so MySQL operations authenticate correctly.
+  mysql.setCredentials({
+    user: store.get('settings.dbUser', 'root'),
+    password: store.get('settings.dbPassword', ''),
+  });
+
   // ─── Sites ───────────────────────────────────────────────────────────
 
   ipcMain.handle('get-sites', () => {
@@ -264,6 +270,8 @@ function registerHandlers(win, storeInstance) {
       sitesDir: store.get('settings.sitesDir', wordpress.DEFAULT_SITES_DIR),
       defaultPhpVersion: store.get('settings.defaultPhpVersion', brew.getActivePhpVersion()),
       startAtLogin: store.get('settings.startAtLogin', false),
+      dbUser: store.get('settings.dbUser', 'root'),
+      dbPassword: store.get('settings.dbPassword', ''),
       brewPrefix: brew.getBrewPrefix() || 'Not detected',
     };
   });
@@ -277,6 +285,14 @@ function registerHandlers(win, storeInstance) {
         store.set('settings.startAtLogin', settings.startAtLogin);
         app.setLoginItemSettings({ openAtLogin: settings.startAtLogin });
       }
+      if (typeof settings.dbUser === 'string') store.set('settings.dbUser', settings.dbUser);
+      if (typeof settings.dbPassword === 'string')
+        store.set('settings.dbPassword', settings.dbPassword);
+      // Re-apply credentials immediately so the running session uses them.
+      mysql.setCredentials({
+        user: store.get('settings.dbUser', 'root'),
+        password: store.get('settings.dbPassword', ''),
+      });
       return { success: true };
     } catch (err) {
       return { success: false, error: err.message };
