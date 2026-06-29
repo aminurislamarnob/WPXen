@@ -178,19 +178,26 @@ function execBrewServiceSudo(action, name) {
   const sudoers = require('./sudoers.cjs');
 
   if (sudoers.isConfigured()) {
-    // Passwordless path — no dialog shown to the user.
-    execSync(`sudo ${brewBin} services ${action} ${name}`, {
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-  } else {
-    // Sudoers not yet set up — fall back to osascript (will prompt once).
-    const prefix = getBrewPrefix();
-    const shellCmd = `PATH=${prefix}/bin:$PATH ${brewBin} services ${action} ${name}`;
-    const appleScript = `do shell script "${shellCmd.replace(/"/g, '\\"')}" with administrator privileges`;
-    execSync(`osascript -e '${appleScript.replace(/'/g, "'\\''")}'`, {
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    try {
+      // Passwordless path — `sudo -n` never prompts. If the NOPASSWD rule
+      // doesn't match (stale file, moved brew binary), it fails fast instead
+      // of hanging on a non-existent TTY, and we fall through to the dialog.
+      execSync(`sudo -n ${brewBin} services ${action} ${name}`, {
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      return;
+    } catch {
+      // Fall back to the prompting path below.
+    }
   }
+
+  // Sudoers not set up (or no longer valid) — prompt via osascript.
+  const prefix = getBrewPrefix();
+  const shellCmd = `PATH=${prefix}/bin:$PATH ${brewBin} services ${action} ${name}`;
+  const appleScript = `do shell script "${shellCmd.replace(/"/g, '\\"')}" with administrator privileges`;
+  execSync(`osascript -e '${appleScript.replace(/'/g, "'\\''")}'`, {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
 }
 
 function startBrewServiceSudo(name) {
