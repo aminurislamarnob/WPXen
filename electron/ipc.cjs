@@ -267,8 +267,8 @@ function registerHandlers(win, storeInstance) {
 
   // ─── PHP ─────────────────────────────────────────────────────────────
 
-  ipcMain.handle('get-php-versions', () => {
-    return phpService.getInstalledPhpVersionsWithDetails();
+  ipcMain.handle('get-php-versions', async () => {
+    return phpService.getInstalledPhpVersionsWithDetailsAsync();
   });
 
   ipcMain.handle('switch-php-version', async (_, version) => {

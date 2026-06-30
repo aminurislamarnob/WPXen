@@ -87,6 +87,20 @@ function getPhpVersion(version) {
   }
 }
 
+// Non-blocking variant used by the PHP page (see asyncExec.cjs).
+async function getPhpVersionAsync(version) {
+  const phpBin = getPhpBinPath(version);
+  if (!phpBin) return null;
+  try {
+    const { stdout } = await execAsync(`${phpBin} -r "echo phpversion();"`, {
+      timeout: 4000,
+    });
+    return stdout.trim();
+  } catch {
+    return null;
+  }
+}
+
 function getInstalledPhpVersionsWithDetails() {
   const versions = brew.getInstalledPhpVersions();
   const activeVersion = brew.getActivePhpVersion();
@@ -102,6 +116,29 @@ function getInstalledPhpVersionsWithDetails() {
       socketPath: brew.getPhpFpmSocketPath(v),
     };
   });
+}
+
+// Non-blocking variant used by the get-php-versions IPC handler. Probes every
+// version's full number and FPM state in parallel so opening the PHP page
+// doesn't freeze the main thread.
+async function getInstalledPhpVersionsWithDetailsAsync() {
+  const versions = brew.getInstalledPhpVersions();
+  const [activeVersion, running] = await Promise.all([
+    brew.getActivePhpVersionAsync(),
+    isPhpFpmRunningAsync(),
+  ]);
+
+  const fullVersions = await Promise.all(versions.map((v) => getPhpVersionAsync(v)));
+
+  return versions.map((v, i) => ({
+    version: v,
+    fullVersion: fullVersions[i] || v,
+    active: v === activeVersion,
+    // isPhpFpmRunning isn't version-specific (matches any "php-fpm: master"),
+    // so the single probe result applies to whichever version is active.
+    running,
+    socketPath: brew.getPhpFpmSocketPath(v),
+  }));
 }
 
 function switchActivePhpVersion(version) {
@@ -140,6 +177,7 @@ module.exports = {
   stopPhpFpm,
   stopAllPhpFpm,
   getInstalledPhpVersionsWithDetails,
+  getInstalledPhpVersionsWithDetailsAsync,
   switchActivePhpVersion,
   getBrewServiceName,
 };
