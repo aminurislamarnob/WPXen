@@ -2,6 +2,7 @@
 
 const { execSync, exec } = require('child_process');
 const brew = require('./brew.cjs');
+const execAsync = require('./asyncExec.cjs');
 
 // DB credentials used for all root-level operations. Defaults to a
 // passwordless root (fresh Homebrew installs); overridden from settings.
@@ -67,6 +68,18 @@ function isRunning() {
     const mysqladmin = getMysqladminBin();
     const args = authArgs().map((a) => `'${a.replace(/'/g, "'\\''")}'`).join(' ');
     execSync(`${mysqladmin} ${args} ping`, { stdio: 'pipe', timeout: 3000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Non-blocking variant used by the status poller (see asyncExec.cjs).
+async function isRunningAsync() {
+  try {
+    const mysqladmin = getMysqladminBin();
+    const args = authArgs().map((a) => `'${a.replace(/'/g, "'\\''")}'`).join(' ');
+    await execAsync(`${mysqladmin} ${args} ping`, { timeout: 3000 });
     return true;
   } catch {
     return false;
@@ -140,6 +153,7 @@ function testConnection() {
 
 module.exports = {
   isRunning,
+  isRunningAsync,
   start,
   stop,
   restart,

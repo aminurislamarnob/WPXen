@@ -15,15 +15,30 @@ const sudoers = require('./services/sudoers.cjs');
 
 let store;
 let mainWindow;
-let serviceStatusCache = {};
+let serviceStatusCache = {
+  nginx: { running: false, name: 'nginx' },
+  php: { running: false, name: 'PHP-FPM', version: null },
+  mysql: { running: false, name: 'MySQL' },
+  dnsmasq: { running: false, name: 'dnsmasq' },
+};
 
+// Synchronous, instant — returns the last computed snapshot. Used by the tray
+// and the get-service-status IPC reply so neither blocks on subprocesses.
 function getServiceStatus() {
-  const nginxRunning = nginx.isRunning();
-  const mysqlRunning = mysql.isRunning();
-  const phpVersions = brew.getInstalledPhpVersions();
-  const activePhp = brew.getActivePhpVersion();
-  const phpRunning = phpService.isPhpFpmRunning(activePhp);
-  const dnsmasqRunning = dnsmasq.isRunning();
+  return serviceStatusCache;
+}
+
+// Recomputes the snapshot using non-blocking async probes run in parallel, so
+// the main-thread event loop stays free (no macOS spinning-wait cursor).
+async function computeServiceStatus() {
+  const [nginxRunning, mysqlRunning, dnsmasqRunning, activePhp, phpRunning] =
+    await Promise.all([
+      nginx.isRunningAsync(),
+      mysql.isRunningAsync(),
+      dnsmasq.isRunningAsync(),
+      brew.getActivePhpVersionAsync(),
+      phpService.isPhpFpmRunningAsync(),
+    ]);
 
   serviceStatusCache = {
     nginx: { running: nginxRunning, name: 'nginx' },
@@ -31,8 +46,19 @@ function getServiceStatus() {
     mysql: { running: mysqlRunning, name: 'MySQL' },
     dnsmasq: { running: dnsmasqRunning, name: 'dnsmasq' },
   };
-
   return serviceStatusCache;
+}
+
+// Coalesces concurrent refreshes (poller + on-demand IPC) into one in-flight
+// computation so probes don't pile up on top of each other.
+let statusRefreshInFlight = null;
+function refreshServiceStatus() {
+  if (!statusRefreshInFlight) {
+    statusRefreshInFlight = computeServiceStatus().finally(() => {
+      statusRefreshInFlight = null;
+    });
+  }
+  return statusRefreshInFlight;
 }
 
 function registerHandlers(win, storeInstance) {
@@ -44,6 +70,9 @@ function registerHandlers(win, storeInstance) {
     user: store.get('settings.dbUser', 'root'),
     password: store.get('settings.dbPassword', ''),
   });
+
+  // Populate the status cache once at startup (non-blocking).
+  refreshServiceStatus();
 
   // ─── Sites ───────────────────────────────────────────────────────────
 
@@ -125,7 +154,10 @@ function registerHandlers(win, storeInstance) {
 
   // ─── Services ────────────────────────────────────────────────────────
 
-  ipcMain.handle('get-service-status', () => {
+  ipcMain.handle('get-service-status', async () => {
+    // Refresh on demand (non-blocking) so the renderer gets fresh data, then
+    // return the updated cache.
+    await refreshServiceStatus();
     return getServiceStatus();
   });
 
@@ -250,8 +282,10 @@ function registerHandlers(win, storeInstance) {
 
   // ─── Dependencies ────────────────────────────────────────────────────
 
-  ipcMain.handle('check-dependencies', () => {
-    return brew.checkAllDependencies();
+  ipcMain.handle('check-dependencies', async (_, force = false) => {
+    // Cached after first run and computed off the main thread — navigating to
+    // Settings no longer fires a cascade of blocking `brew list` calls.
+    return brew.checkAllDependenciesAsync(force);
   });
 
   // ─── Sudoers / Permissions ────────────────────────────────────────────
@@ -349,16 +383,20 @@ function registerHandlers(win, storeInstance) {
   });
 }
 
-// Periodically push service status updates to renderer
+// Periodically refresh status (non-blocking) and push it to the renderer.
+// Uses a setTimeout chain rather than setInterval so a slow probe can never
+// stack overlapping runs.
 function startStatusPoller(win) {
-  setInterval(() => {
-    if (win && !win.isDestroyed() && win.webContents) {
-      try {
-        const status = getServiceStatus();
-        win.webContents.send('service-status-update', status);
-      } catch {}
-    }
-  }, 5000);
+  async function tick() {
+    try {
+      await refreshServiceStatus();
+      if (win && !win.isDestroyed() && win.webContents) {
+        win.webContents.send('service-status-update', getServiceStatus());
+      }
+    } catch {}
+    setTimeout(tick, 5000);
+  }
+  tick();
 }
 
 module.exports = { registerHandlers, startStatusPoller, getServiceStatus };

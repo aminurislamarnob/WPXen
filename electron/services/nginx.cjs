@@ -4,6 +4,7 @@ const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const brew = require('./brew.cjs');
+const execAsync = require('./asyncExec.cjs');
 
 function getNginxConfDir() {
   const prefix = brew.getBrewPrefix();
@@ -32,6 +33,16 @@ function isRunning() {
     // `brew services` launch nginx via absolute path, so fall back to a
     // full-args match on the binary path or its rewritten master title.
     execSync("pgrep -x nginx || pgrep -f '[/ ]nginx'", { stdio: 'pipe' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Non-blocking variant used by the status poller (see asyncExec.cjs).
+async function isRunningAsync() {
+  try {
+    await execAsync("pgrep -x nginx || pgrep -f '[/ ]nginx'", { timeout: 4000 });
     return true;
   } catch {
     return false;
@@ -186,6 +197,7 @@ module.exports = {
   getNginxConfDir,
   getServersDir,
   isRunning,
+  isRunningAsync,
   start,
   stop,
   restart,

@@ -3,6 +3,7 @@
 const { execSync } = require('child_process');
 const fs = require('fs');
 const os = require('os');
+const execAsync = require('./asyncExec.cjs');
 
 // Detect Homebrew prefix (Apple Silicon vs Intel)
 function getBrewPrefix() {
@@ -36,6 +37,26 @@ function execBrew(command) {
 function isPackageInstalled(name) {
   try {
     execBrew(`list --formula ${name}`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Non-blocking `brew` runner for the dependency check (see asyncExec.cjs).
+// `brew list` spawns Ruby and can take 1-3s — synchronous calls freeze the UI.
+function execBrewAsync(command) {
+  const brewBin = getBrewPath();
+  if (!brewBin) return Promise.reject(new Error('Homebrew is not installed'));
+  return execAsync(`${brewBin} ${command}`, {
+    env: { ...process.env, PATH: `${getBrewPrefix()}/bin:${process.env.PATH}` },
+    timeout: 8000,
+  });
+}
+
+async function isPackageInstalledAsync(name) {
+  try {
+    await execBrewAsync(`list --formula ${name}`);
     return true;
   } catch {
     return false;
@@ -81,6 +102,24 @@ function getActivePhpVersion() {
     const out = execSync(`${phpBin} -r "echo PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;"`)
       .toString()
       .trim();
+    return out.match(/^\d+\.\d+$/) ? out : null;
+  } catch {
+    return null;
+  }
+}
+
+// Non-blocking variant used by the status poller (see asyncExec.cjs).
+async function getActivePhpVersionAsync() {
+  const prefix = getBrewPrefix();
+  if (!prefix) return null;
+  const phpBin = `${prefix}/bin/php`;
+  if (!fs.existsSync(phpBin)) return null;
+  try {
+    const { stdout } = await execAsync(
+      `${phpBin} -r "echo PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;"`,
+      { timeout: 4000 }
+    );
+    const out = stdout.trim();
     return out.match(/^\d+\.\d+$/) ? out : null;
   } catch {
     return null;
@@ -138,6 +177,50 @@ function checkAllDependencies() {
     dnsmasq: brew && isDnsmasqInstalled(),
     wpCli: isWpCliInstalled(),
   };
+}
+
+// Installed packages don't change during a session, so the result is cached
+// after the first probe. Pass force=true to re-check (e.g. after the user
+// installs something). Runs the slow `brew list` calls in parallel and off the
+// main thread so navigating to Settings no longer freezes the UI.
+let depsCache = null;
+
+async function checkAllDependenciesAsync(force = false) {
+  if (depsCache && !force) return depsCache;
+
+  const brewOk = isBrewInstalled();
+  if (!brewOk) {
+    depsCache = {
+      brew: false,
+      nginx: false,
+      php: false,
+      mysql: false,
+      dnsmasq: false,
+      wpCli: isWpCliInstalled(),
+    };
+    return depsCache;
+  }
+
+  const [nginxOk, mysqlOk, mariadbOk, dnsmasqOk] = await Promise.all([
+    isPackageInstalledAsync('nginx'),
+    isPackageInstalledAsync('mysql'),
+    isPackageInstalledAsync('mariadb'),
+    isPackageInstalledAsync('dnsmasq'),
+  ]);
+
+  depsCache = {
+    brew: true,
+    nginx: nginxOk,
+    php: getInstalledPhpVersions().length > 0,
+    mysql: mysqlOk || mariadbOk,
+    dnsmasq: dnsmasqOk,
+    wpCli: isWpCliInstalled(),
+  };
+  return depsCache;
+}
+
+function invalidateDependencyCache() {
+  depsCache = null;
 }
 
 function getBrewServiceStatus(name) {
@@ -218,14 +301,18 @@ module.exports = {
   isBrewInstalled,
   execBrew,
   isPackageInstalled,
+  isPackageInstalledAsync,
   getInstalledPhpVersions,
   getActivePhpVersion,
+  getActivePhpVersionAsync,
   getPhpFpmSocketPath,
   isNginxInstalled,
   isMysqlInstalled,
   isDnsmasqInstalled,
   isWpCliInstalled,
   checkAllDependencies,
+  checkAllDependenciesAsync,
+  invalidateDependencyCache,
   getBrewServiceStatus,
   startBrewService,
   stopBrewService,

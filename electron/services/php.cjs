@@ -3,6 +3,7 @@
 const { execSync } = require('child_process');
 const fs = require('fs');
 const brew = require('./brew.cjs');
+const execAsync = require('./asyncExec.cjs');
 
 function getPhpBinPath(version) {
   const prefix = brew.getBrewPrefix();
@@ -39,6 +40,16 @@ function isPhpFpmRunning(version) {
   try {
     const out = execSync(`pgrep -f "php-fpm: master"`, { stdio: 'pipe' }).toString().trim();
     return out.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+// Non-blocking variant used by the status poller (see asyncExec.cjs).
+async function isPhpFpmRunningAsync(version) {
+  try {
+    await execAsync(`pgrep -f "php-fpm: master"`, { timeout: 4000 });
+    return true;
   } catch {
     return false;
   }
@@ -124,6 +135,7 @@ module.exports = {
   getPhpBinPath,
   getPhpFpmBinPath,
   isPhpFpmRunning,
+  isPhpFpmRunningAsync,
   startPhpFpm,
   stopPhpFpm,
   stopAllPhpFpm,

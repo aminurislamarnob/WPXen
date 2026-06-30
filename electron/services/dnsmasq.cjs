@@ -5,6 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const brew = require('./brew.cjs');
+const execAsync = require('./asyncExec.cjs');
 
 const TLD = 'test';
 const RESOLVER_DIR = '/etc/resolver';
@@ -21,6 +22,16 @@ function isRunning() {
     // See nginx.isRunning: launchd starts dnsmasq via absolute path, so
     // `pgrep -x` alone misses it — fall back to a full-args path match.
     execSync("pgrep -x dnsmasq || pgrep -f '[/ ]dnsmasq'", { stdio: 'pipe' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Non-blocking variant used by the status poller (see asyncExec.cjs).
+async function isRunningAsync() {
+  try {
+    await execAsync("pgrep -x dnsmasq || pgrep -f '[/ ]dnsmasq'", { timeout: 4000 });
     return true;
   } catch {
     return false;
@@ -108,6 +119,7 @@ function setupComplete() {
 module.exports = {
   TLD,
   isRunning,
+  isRunningAsync,
   start,
   stop,
   restart,
