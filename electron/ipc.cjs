@@ -1,9 +1,26 @@
 'use strict';
 
 const { ipcMain, shell, dialog, app } = require('electron');
+const { execFile } = require('child_process');
 const path = require('path');
 const os = require('os');
 
+// Only ever hand these schemes to shell.openExternal — never file:// or a
+// custom URL handler that a tampered store could smuggle in.
+function openExternalSafely(url) {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+      shell.openExternal(url);
+      return true;
+    }
+  } catch {
+    // fall through
+  }
+  return false;
+}
+
+const fs = require('fs');
 const JsonStore = require('./store.cjs');
 const brew = require('./services/brew.cjs');
 const nginx = require('./services/nginx.cjs');
@@ -12,6 +29,7 @@ const mysql = require('./services/mysql.cjs');
 const dnsmasq = require('./services/dnsmasq.cjs');
 const wordpress = require('./services/wordpress.cjs');
 const sudoers = require('./services/sudoers.cjs');
+const validation = require('./services/validation.cjs');
 
 let store;
 let mainWindow;
@@ -118,10 +136,25 @@ function registerHandlers(win, storeInstance) {
         }
       };
 
+      // Authoritative input validation (renderer validation is advisory only).
+      const { valid, errors } = validation.validateSiteInput(siteData);
+      if (!valid) {
+        return { success: false, error: errors.join(' ') };
+      }
+
       // Validate domain uniqueness
       const sites = store.get('sites', []);
       if (sites.some((s) => s.domain === siteData.domain)) {
         return { success: false, error: `Domain ${siteData.domain} already exists` };
+      }
+
+      // Reject a directory that already contains a WordPress install so we
+      // don't clobber existing files.
+      if (fs.existsSync(path.join(siteData.path, 'wp-config.php'))) {
+        return {
+          success: false,
+          error: `${siteData.path} already contains a WordPress install.`,
+        };
       }
 
       // Ensure MySQL is running
@@ -160,8 +193,8 @@ function registerHandlers(win, storeInstance) {
   });
 
   ipcMain.handle('open-in-browser', (_, url) => {
-    shell.openExternal(url);
-    return { success: true };
+    const ok = openExternalSafely(url);
+    return ok ? { success: true } : { success: false, error: 'Refused to open unsafe URL' };
   });
 
   ipcMain.handle('open-in-finder', (_, sitePath) => {
@@ -170,15 +203,22 @@ function registerHandlers(win, storeInstance) {
   });
 
   ipcMain.handle('open-in-terminal', (_, sitePath) => {
-    // Open Terminal.app at the given path
-    const { execSync } = require('child_process');
-    try {
-      execSync(
-        `osascript -e 'tell application "Terminal" to do script "cd ${sitePath}" activate'`
-      );
-    } catch {
-      shell.openExternal(`file://${sitePath}`);
+    // Build the AppleScript with execFile (no shell) and escape the path for
+    // the AppleScript string literal; `quoted form of` then shell-escapes it
+    // for `cd`. This keeps a path with spaces/quotes from injecting commands.
+    if (typeof sitePath !== 'string' || /[\n\r\0]/.test(sitePath)) {
+      return { success: false, error: 'Invalid path' };
     }
+    const escaped = sitePath.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    const script = [
+      'tell application "Terminal"',
+      '  activate',
+      `  do script "cd " & quoted form of "${escaped}"`,
+      'end tell',
+    ].join('\n');
+    execFile('osascript', ['-e', script], (err) => {
+      if (err) shell.showItemInFolder(sitePath);
+    });
     return { success: true };
   });
 

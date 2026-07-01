@@ -98,6 +98,17 @@ function ensureServersDir() {
 
 function generateSiteConfig(site) {
   const { name, domain, path: sitePath, phpVersion } = site;
+
+  // Guard the values interpolated into the nginx config. A domain or path
+  // containing a newline or `;`/`{`/`}` could otherwise inject arbitrary nginx
+  // directives. Callers validate too, but this is the last line of defense.
+  if (!/^[a-z0-9.-]+$/.test(domain)) {
+    throw new Error(`Unsafe domain for nginx config: ${domain}`);
+  }
+  if (/[\n\r\0;{}]/.test(sitePath)) {
+    throw new Error(`Unsafe site path for nginx config: ${sitePath}`);
+  }
+
   const prefix = brew.getBrewPrefix();
   // Homebrew's php-fpm listens on TCP 127.0.0.1:9000 by default and does not
   // create a unix socket. Use a per-version socket only when one actually

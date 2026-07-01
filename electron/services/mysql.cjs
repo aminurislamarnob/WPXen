@@ -1,8 +1,13 @@
 'use strict';
 
-const { execSync, exec } = require('child_process');
+const { execFileSync, execFile } = require('child_process');
+const { promisify } = require('util');
 const brew = require('./brew.cjs');
-const execAsync = require('./asyncExec.cjs');
+
+// execFile (no shell) for every call that includes user-influenced values —
+// the DB name or root password. This removes the command-injection surface
+// that string-interpolated shell commands would otherwise expose.
+const execFileAsync = promisify(execFile);
 
 // DB credentials used for all root-level operations. Defaults to a
 // passwordless root (fresh Homebrew installs); overridden from settings.
@@ -65,21 +70,20 @@ function getBrewServiceName() {
 
 function isRunning() {
   try {
-    const mysqladmin = getMysqladminBin();
-    const args = authArgs().map((a) => `'${a.replace(/'/g, "'\\''")}'`).join(' ');
-    execSync(`${mysqladmin} ${args} ping`, { stdio: 'pipe', timeout: 3000 });
+    execFileSync(getMysqladminBin(), [...authArgs(), 'ping'], {
+      stdio: 'pipe',
+      timeout: 3000,
+    });
     return true;
   } catch {
     return false;
   }
 }
 
-// Non-blocking variant used by the status poller (see asyncExec.cjs).
+// Non-blocking variant used by the status poller.
 async function isRunningAsync() {
   try {
-    const mysqladmin = getMysqladminBin();
-    const args = authArgs().map((a) => `'${a.replace(/'/g, "'\\''")}'`).join(' ');
-    await execAsync(`${mysqladmin} ${args} ping`, { timeout: 3000 });
+    await execFileAsync(getMysqladminBin(), [...authArgs(), 'ping'], { timeout: 3000 });
     return true;
   } catch {
     return false;
@@ -99,15 +103,27 @@ function restart() {
 }
 
 function execQuery(sql, opts = {}) {
-  const mysql = getMysqlBin();
-  const args = authArgs();
+  const args = [...authArgs()];
   if (opts.database) args.push(opts.database);
   args.push('-e', sql);
-  const cmd = [mysql, ...args.map((a) => `'${a.replace(/'/g, "'\\''")}'`)].join(' ');
-  return execSync(cmd, { stdio: 'pipe', timeout: 10000 }).toString().trim();
+  // execFile: the SQL is a single argv token, never parsed by a shell.
+  return execFileSync(getMysqlBin(), args, { stdio: 'pipe', timeout: 10000 })
+    .toString()
+    .trim();
+}
+
+// A MySQL identifier we're willing to interpolate into SQL. Names are generated
+// from a validated slug ([a-z0-9_]); reject anything else so a stored/edited
+// value can never smuggle a backtick and break out of the identifier quoting.
+function assertSafeDbName(dbName) {
+  if (typeof dbName !== 'string' || !/^[a-zA-Z0-9_]{1,64}$/.test(dbName)) {
+    throw new Error(`Unsafe database name: ${dbName}`);
+  }
+  return dbName;
 }
 
 function databaseExists(dbName) {
+  assertSafeDbName(dbName);
   try {
     const result = execQuery(`SHOW DATABASES LIKE '${dbName}';`);
     return result.includes(dbName);
@@ -117,12 +133,14 @@ function databaseExists(dbName) {
 }
 
 function createDatabase(dbName) {
+  assertSafeDbName(dbName);
   execQuery(
     `CREATE DATABASE IF NOT EXISTS \`${dbName}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;`
   );
 }
 
 function dropDatabase(dbName) {
+  assertSafeDbName(dbName);
   execQuery(`DROP DATABASE IF EXISTS \`${dbName}\`;`);
 }
 

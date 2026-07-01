@@ -1,12 +1,13 @@
 'use strict';
 
-const { execSync, exec } = require('child_process');
+const { execSync, execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const brew = require('./brew.cjs');
 const mysql = require('./mysql.cjs');
 const nginx = require('./nginx.cjs');
+const { validateSiteInput } = require('./validation.cjs');
 
 const DEFAULT_SITES_DIR = path.join(os.homedir(), 'Sites');
 
@@ -38,7 +39,14 @@ function getWpCliBin() {
   }
 }
 
+// Runs WP-CLI. `args` is an ARRAY of arguments — passed via execFileSync with
+// no shell, so values like the site title or admin password can't be
+// interpreted as shell metacharacters (command injection). Never build this
+// from a concatenated string.
 function wp(args, cwd, extraEnv = {}) {
+  if (!Array.isArray(args)) {
+    throw new TypeError('wp() requires an array of arguments');
+  }
   const wpBin = getWpCliBin();
   if (!wpBin) throw new Error('WP-CLI not found. Install with: brew install wp-cli');
   const prefix = brew.getBrewPrefix();
@@ -51,7 +59,7 @@ function wp(args, cwd, extraEnv = {}) {
     ...extraEnv,
   };
 
-  return execSync(`${phpBin} ${wpBin} ${args} --allow-root`, {
+  return execFileSync(phpBin, [wpBin, ...args, '--allow-root'], {
     cwd,
     env,
     stdio: 'pipe',
@@ -76,13 +84,20 @@ async function createWordPressSite(siteData, progressCallback) {
 
   const progress = progressCallback || (() => {});
 
+  // Validate before touching the filesystem, DB, or shelling out. This is the
+  // authoritative check (the renderer's form validation is advisory only).
+  const { valid, errors } = validateSiteInput(siteData);
+  if (!valid) {
+    throw new Error(errors.join(' '));
+  }
+
   // 1. Create site directory
   progress({ step: 'directory', message: 'Creating site directory...' });
   fs.mkdirSync(sitePath, { recursive: true });
 
   // 2. Download WordPress core
   progress({ step: 'download', message: 'Downloading WordPress...' });
-  wp('core download --skip-content', sitePath);
+  wp(['core', 'download', '--skip-content'], sitePath);
 
   // 3. Create database
   progress({ step: 'database', message: 'Creating database...' });
@@ -93,15 +108,33 @@ async function createWordPressSite(siteData, progressCallback) {
   const { user: dbUser, password: dbPass } = mysql.getCredentials();
   // Use 'localhost' so PHP connects over the same socket the CLI used,
   // matching the credentials' host grant (e.g. 'root'@'localhost').
+  // Each array element is a single argv token — no shell, no injection.
   wp(
-    `config create --dbname="${dbName}" --dbuser="${dbUser}" --dbpass="${dbPass}" --dbhost=localhost --force`,
+    [
+      'config',
+      'create',
+      `--dbname=${dbName}`,
+      `--dbuser=${dbUser}`,
+      `--dbpass=${dbPass}`,
+      '--dbhost=localhost',
+      '--force',
+    ],
     sitePath
   );
 
   // 5. Install WordPress
   progress({ step: 'install', message: 'Installing WordPress...' });
   wp(
-    `core install --url="http://${domain}" --title="${title || name}" --admin_user="${adminUser}" --admin_password="${adminPassword}" --admin_email="${adminEmail || `admin@${domain}`}" --skip-email`,
+    [
+      'core',
+      'install',
+      `--url=http://${domain}`,
+      `--title=${title || name}`,
+      `--admin_user=${adminUser}`,
+      `--admin_password=${adminPassword}`,
+      `--admin_email=${adminEmail || `admin@${domain}`}`,
+      '--skip-email',
+    ],
     sitePath
   );
 
@@ -122,7 +155,7 @@ async function createWordPressSite(siteData, progressCallback) {
   // Get WordPress version
   let wpVersion = 'unknown';
   try {
-    wpVersion = wp('core version', sitePath);
+    wpVersion = wp(['core', 'version'], sitePath);
   } catch {}
 
   return {
@@ -164,7 +197,7 @@ function removeWordPressSite(site, opts = {}) {
 
 function getSiteWordPressVersion(sitePath) {
   try {
-    return wp('core version', sitePath);
+    return wp(['core', 'version'], sitePath);
   } catch {
     return null;
   }
@@ -175,8 +208,8 @@ function getWordPressInfo(sitePath) {
     return null;
   }
   try {
-    const version = wp('core version', sitePath);
-    const siteUrl = wp('option get siteurl', sitePath);
+    const version = wp(['core', 'version'], sitePath);
+    const siteUrl = wp(['option', 'get', 'siteurl'], sitePath);
     return { version, siteUrl };
   } catch {
     return null;
