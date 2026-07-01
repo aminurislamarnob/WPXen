@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openSiteInFinder: (sitePath) => ipcRenderer.invoke('open-in-finder', sitePath),
   openSiteInTerminal: (sitePath) => ipcRenderer.invoke('open-in-terminal', sitePath),
   openWpAdmin: (url) => ipcRenderer.invoke('open-in-browser', `${url}/wp-admin`),
+  openPhpMyAdmin: (dbName) => ipcRenderer.invoke('open-phpmyadmin', dbName),
 
   // Services
   getServiceStatus: () => ipcRenderer.invoke('get-service-status'),
@@ -31,6 +32,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('install-php-version', version),
   updatePhpVersion: (version) =>
     ipcRenderer.invoke('update-php-version', version),
+  getPhpIniSettings: () => ipcRenderer.invoke('get-php-ini-settings'),
+  setPhpIniSetting: (version, key, value) =>
+    ipcRenderer.invoke('set-php-ini-setting', version, key, value),
+  setPhpIniSettingAll: (key, value) =>
+    ipcRenderer.invoke('set-php-ini-setting-all', key, value),
 
   // Dependencies & Setup
   checkDependencies: () => ipcRenderer.invoke('check-dependencies'),

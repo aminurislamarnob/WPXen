@@ -59,7 +59,17 @@ function wp(args, cwd, extraEnv = {}) {
     ...extraEnv,
   };
 
-  return execFileSync(phpBin, [wpBin, ...args, '--allow-root'], {
+  // Newer PHP (8.4/8.5) makes WP-CLI's bundled deps emit deprecation notices.
+  // Route all PHP diagnostics to stderr and silence deprecations so they never
+  // contaminate the captured stdout (e.g. `wp core version`).
+  const phpArgs = [
+    '-d',
+    'error_reporting=E_ALL & ~E_DEPRECATED & ~E_STRICT',
+    '-d',
+    'display_errors=stderr',
+  ];
+
+  return execFileSync(phpBin, [...phpArgs, wpBin, ...args, '--allow-root'], {
     cwd,
     env,
     stdio: 'pipe',
@@ -67,6 +77,14 @@ function wp(args, cwd, extraEnv = {}) {
   })
     .toString()
     .trim();
+}
+
+// WP-CLI output should be a bare version like "6.8.2". Guard against any stray
+// warning text sneaking in by keeping only a version-shaped token.
+function sanitizeWpVersion(raw) {
+  if (typeof raw !== 'string') return null;
+  const m = raw.trim().match(/^\d+\.\d+(?:\.\d+)*$/) ? raw.trim() : null;
+  return m;
 }
 
 async function createWordPressSite(siteData, progressCallback) {
@@ -95,9 +113,10 @@ async function createWordPressSite(siteData, progressCallback) {
   progress({ step: 'directory', message: 'Creating site directory...' });
   fs.mkdirSync(sitePath, { recursive: true });
 
-  // 2. Download WordPress core
+  // 2. Download WordPress core (with bundled default themes/plugins — no
+  // --skip-content, so the Twenty* themes ship with the install).
   progress({ step: 'download', message: 'Downloading WordPress...' });
-  wp(['core', 'download', '--skip-content'], sitePath);
+  wp(['core', 'download'], sitePath);
 
   // 3. Create database
   progress({ step: 'database', message: 'Creating database...' });
@@ -138,11 +157,17 @@ async function createWordPressSite(siteData, progressCallback) {
     sitePath
   );
 
-  // 6. Create nginx config
+  // 6. Ensure the newest bundled default theme is active. WP activates it
+  // automatically on a fresh install, but do it explicitly so the site always
+  // lands on the latest Twenty* theme even if that ever changes.
+  progress({ step: 'theme', message: 'Activating default theme...' });
+  activateLatestDefaultTheme(sitePath);
+
+  // 7. Create nginx config
   progress({ step: 'nginx', message: 'Configuring nginx...' });
   nginx.createSiteConfig({ name, domain, path: sitePath, phpVersion });
 
-  // 7. Reload nginx
+  // 8. Reload nginx
   progress({ step: 'reload', message: 'Reloading nginx...' });
   try {
     nginx.reload();
@@ -155,7 +180,7 @@ async function createWordPressSite(siteData, progressCallback) {
   // Get WordPress version
   let wpVersion = 'unknown';
   try {
-    wpVersion = wp(['core', 'version'], sitePath);
+    wpVersion = sanitizeWpVersion(wp(['core', 'version'], sitePath)) || 'unknown';
   } catch {}
 
   return {
@@ -171,6 +196,28 @@ async function createWordPressSite(siteData, progressCallback) {
     url: `http://${domain}`,
     createdAt: new Date().toISOString(),
   };
+}
+
+// Activates the latest bundled core default theme (the newest Twenty* theme).
+// Uses WP_Theme::get_core_default_theme() — the same lookup WordPress itself
+// uses to pick the fallback theme — so it always resolves to the newest one
+// shipped with this WP version. Best-effort: never fails the site creation.
+function activateLatestDefaultTheme(sitePath) {
+  try {
+    const latest = wp(
+      [
+        'eval',
+        'if ($t = WP_Theme::get_core_default_theme()) { echo $t->get_stylesheet(); }',
+      ],
+      sitePath
+    ).trim();
+    if (latest) {
+      wp(['theme', 'activate', latest], sitePath);
+    }
+  } catch {
+    // A fresh install already activates the newest default theme, so this is
+    // only a best-effort guarantee.
+  }
 }
 
 function removeWordPressSite(site, opts = {}) {
@@ -205,7 +252,7 @@ function setSiteUrl(sitePath, url) {
 
 function getSiteWordPressVersion(sitePath) {
   try {
-    return wp(['core', 'version'], sitePath);
+    return sanitizeWpVersion(wp(['core', 'version'], sitePath));
   } catch {
     return null;
   }
@@ -216,7 +263,7 @@ function getWordPressInfo(sitePath) {
     return null;
   }
   try {
-    const version = wp(['core', 'version'], sitePath);
+    const version = sanitizeWpVersion(wp(['core', 'version'], sitePath));
     const siteUrl = wp(['option', 'get', 'siteurl'], sitePath);
     return { version, siteUrl };
   } catch {

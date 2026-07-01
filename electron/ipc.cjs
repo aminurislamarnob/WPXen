@@ -28,6 +28,7 @@ const mysql = require('./services/mysql.cjs');
 const dnsmasq = require('./services/dnsmasq.cjs');
 const wordpress = require('./services/wordpress.cjs');
 const mkcert = require('./services/mkcert.cjs');
+const phpmyadmin = require('./services/phpmyadmin.cjs');
 const sudoers = require('./services/sudoers.cjs');
 const validation = require('./services/validation.cjs');
 const { humanize } = require('./services/errors.cjs');
@@ -126,7 +127,23 @@ function registerHandlers(win, storeInstance) {
   // ─── Sites ───────────────────────────────────────────────────────────
 
   ipcMain.handle('get-sites', () => {
-    return store.get('sites', []);
+    const sites = store.get('sites', []);
+
+    // Heal sites whose stored wpVersion is malformed (older builds captured
+    // WP-CLI's PHP deprecation output into this field). Re-probe just those and
+    // persist the cleaned value so the UI stops showing the warning text.
+    let changed = false;
+    const healed = sites.map((site) => {
+      const v = site.wpVersion;
+      if (v && v !== 'unknown' && !/^\d+\.\d+(?:\.\d+)*$/.test(v)) {
+        const fresh = wordpress.getSiteWordPressVersion(site.path);
+        changed = true;
+        return { ...site, wpVersion: fresh || 'unknown' };
+      }
+      return site;
+    });
+    if (changed) store.set('sites', healed);
+    return healed;
   });
 
   ipcMain.handle('add-site', async (event, siteData) => {
@@ -233,6 +250,21 @@ function registerHandlers(win, storeInstance) {
       sites[idx] = updated;
       store.set('sites', sites);
       return { success: true, site: updated };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('open-phpmyadmin', async (_, dbName) => {
+    try {
+      // Reject anything that isn't a valid DB name before it reaches the URL.
+      if (dbName != null && !/^[a-zA-Z0-9_]{1,64}$/.test(dbName)) {
+        return { success: false, error: 'Invalid database name.' };
+      }
+      phpmyadmin.ensureReady();
+      const url = phpmyadmin.getUrl(dbName);
+      openExternalSafely(url);
+      return { success: true, url };
     } catch (err) {
       return { success: false, error: humanize(err) };
     }
@@ -392,6 +424,28 @@ function registerHandlers(win, storeInstance) {
   ipcMain.handle('switch-php-version', async (_, version) => {
     try {
       phpService.switchActivePhpVersion(version);
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('get-php-ini-settings', async () => {
+    return phpService.getPhpIniSettings();
+  });
+
+  ipcMain.handle('set-php-ini-setting', async (_, version, key, value) => {
+    try {
+      phpService.setPhpIniSetting(version, key, value);
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('set-php-ini-setting-all', async (_, key, value) => {
+    try {
+      phpService.setPhpIniSettingAllVersions(key, value);
       return { success: true };
     } catch (err) {
       return { success: false, error: humanize(err) };

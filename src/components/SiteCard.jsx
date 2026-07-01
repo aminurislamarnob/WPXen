@@ -12,6 +12,7 @@ import {
   Lock,
   Unlock,
   Loader,
+  HardDrive,
 } from 'lucide-react';
 
 function ContextMenu({ site, onDelete, onClose }) {
@@ -60,6 +61,8 @@ export default function SiteCard({ site, onDelete, onToggleHttps }) {
   const [httpsBusy, setHttpsBusy] = useState(false);
   const [httpsError, setHttpsError] = useState(null);
 
+  const [pmaBusy, setPmaBusy] = useState(false);
+
   async function handleToggleHttps() {
     setHttpsBusy(true);
     setHttpsError(null);
@@ -68,6 +71,16 @@ export default function SiteCard({ site, onDelete, onToggleHttps }) {
       setHttpsError(result?.error || 'Failed to update HTTPS.');
     }
     setHttpsBusy(false);
+  }
+
+  async function handlePhpMyAdmin() {
+    setPmaBusy(true);
+    setHttpsError(null);
+    const result = await window.electronAPI.openPhpMyAdmin(site.dbName);
+    if (!result?.success) {
+      setHttpsError(result?.error || 'Failed to open phpMyAdmin.');
+    }
+    setPmaBusy(false);
   }
 
   const actions = [
@@ -80,6 +93,13 @@ export default function SiteCard({ site, onDelete, onToggleHttps }) {
       icon: Settings,
       label: 'wp-admin',
       onClick: () => window.electronAPI.openWpAdmin(site.url),
+    },
+    {
+      icon: pmaBusy ? Loader : HardDrive,
+      label: 'phpMyAdmin',
+      onClick: handlePhpMyAdmin,
+      spinning: pmaBusy,
+      disabled: pmaBusy,
     },
     {
       icon: Folder,
@@ -192,14 +212,15 @@ export default function SiteCard({ site, onDelete, onToggleHttps }) {
 
       {/* Quick actions */}
       <div className="px-4 py-3 border-t border-gray-100 flex gap-1.5 flex-wrap">
-        {actions.map(({ icon: Icon, label, onClick }) => (
+        {actions.map(({ icon: Icon, label, onClick, spinning, disabled }) => (
           <button
             key={label}
             onClick={onClick}
+            disabled={disabled}
             title={label}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-colors font-medium"
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-colors font-medium disabled:opacity-50"
           >
-            <Icon size={12} />
+            <Icon size={12} className={spinning ? 'animate-spin' : ''} />
             {label}
           </button>
         ))}

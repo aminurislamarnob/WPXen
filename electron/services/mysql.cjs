@@ -158,6 +158,20 @@ function listDatabases() {
   }
 }
 
+// Returns the Unix socket the server is listening on (via @@socket), or null.
+// Used so phpMyAdmin connects the same way the CLI does — matching the
+// 'user'@'localhost' grant rather than a TCP grant that may not exist.
+function getSocketPath() {
+  try {
+    const out = execQuery('SELECT @@socket;');
+    const lines = out.split('\n').filter((l) => l.trim());
+    const value = lines[lines.length - 1]?.trim();
+    return value && value !== '@@socket' ? value : null;
+  } catch {
+    return null;
+  }
+}
+
 function testConnection() {
   try {
     execQuery('SELECT 1;');
@@ -180,6 +194,7 @@ module.exports = {
   testConnection,
   getBrewServiceName,
   execQuery,
+  getSocketPath,
   setCredentials,
   getCredentials,
 };

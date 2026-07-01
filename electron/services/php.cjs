@@ -1,6 +1,6 @@
 'use strict';
 
-const { execSync, spawn } = require('child_process');
+const { execSync, execFileSync, spawn } = require('child_process');
 const fs = require('fs');
 const brew = require('./brew.cjs');
 const execAsync = require('./asyncExec.cjs');
@@ -45,17 +45,28 @@ function getPhpFpmBinPath(version) {
 }
 
 function getBrewServiceName(version) {
+  // Resolve the real formula (php vs php@X) by the binary's actual version, not
+  // the opt symlink — a stale symlink (e.g. opt/php@8.5 -> php 8.5) would
+  // otherwise yield a non-existent service name like "php@8.5" and the real
+  // `php` service would never start/stop.
+  return brew.phpFormulaForVersion(version) || 'php';
+}
+
+// Match only the php-fpm master that WPHerd manages — its config lives under
+// the Homebrew prefix ({prefix}/etc/php/...). This deliberately excludes other
+// php-fpm processes on the machine (e.g. Laravel Herd's, whose config is under
+// ~/Library/Application Support/Herd), so the status and Stop button reflect
+// what WPHerd actually controls.
+function phpFpmPgrepPattern() {
   const prefix = brew.getBrewPrefix();
-  // Check if versioned formula exists
-  if (fs.existsSync(`${prefix}/opt/php@${version}`)) {
-    return `php@${version}`;
-  }
-  return 'php';
+  return prefix ? `php-fpm: master.*${prefix}/etc/php` : null;
 }
 
 function isPhpFpmRunning(_version) {
+  const pattern = phpFpmPgrepPattern();
+  if (!pattern) return false;
   try {
-    const out = execSync(`pgrep -f "php-fpm: master"`, { stdio: 'pipe' })
+    const out = execFileSync('pgrep', ['-f', pattern], { stdio: 'pipe' })
       .toString()
       .trim();
     return out.length > 0;
@@ -66,8 +77,10 @@ function isPhpFpmRunning(_version) {
 
 // Non-blocking variant used by the status poller (see asyncExec.cjs).
 async function isPhpFpmRunningAsync(_version) {
+  const pattern = phpFpmPgrepPattern();
+  if (!pattern) return false;
   try {
-    await execAsync(`pgrep -f "php-fpm: master"`, { timeout: 4000 });
+    await execAsync(`pgrep -f ${JSON.stringify(pattern)}`, { timeout: 4000 });
     return true;
   } catch {
     return false;
@@ -272,6 +285,157 @@ function switchActivePhpVersion(version) {
   brew.execBrew(`link --overwrite --force ${targetFormula}`);
 }
 
+// ─── php.ini settings ──────────────────────────────────────────────────────
+//
+// Editable php.ini directives, exposed per installed version. We never touch the
+// user's php.ini; instead we write a WPHerd-managed override into that version's
+// conf.d directory (loaded last, so it wins). Each setting stores a single plain
+// number that maps to one or more directives.
+const PHP_INI_SETTINGS = [
+  {
+    key: 'upload_max_filesize',
+    label: 'Max File Upload Size',
+    unit: 'MB',
+    description:
+      'Maximum file size that PHP will accept as file uploads (in MB).',
+    default: 128,
+    toDirectives: (v) => ({
+      upload_max_filesize: `${v}M`,
+      post_max_size: `${v}M`,
+    }),
+  },
+  {
+    key: 'memory_limit',
+    label: 'Memory Limit',
+    unit: 'MB',
+    description:
+      'Maximum amount of memory your PHP scripts may consume (in MB). -1 for unlimited.',
+    default: 512,
+    toDirectives: (v) => ({ memory_limit: v === -1 ? '-1' : `${v}M` }),
+  },
+  {
+    key: 'max_execution_time',
+    label: 'Max Execution Time',
+    unit: 'seconds',
+    description: 'Maximum time in seconds a script is allowed to run.',
+    default: 60,
+    toDirectives: (v) => ({ max_execution_time: `${v}` }),
+  },
+];
+
+function getManagedIniPath(version) {
+  const prefix = brew.getBrewPrefix();
+  if (!prefix) return null;
+  return `${prefix}/etc/php/${version}/conf.d/zz-wpherd.ini`;
+}
+
+// Validates a raw input against a setting's rules, returning an integer.
+function validateSettingValue(setting, value) {
+  const num = parseInt(value, 10);
+  if (Number.isNaN(num) || String(value).trim() === '') {
+    throw new Error(`${setting.label} must be a number.`);
+  }
+  if (setting.key === 'memory_limit') {
+    if (num !== -1 && num < 1) {
+      throw new Error('Memory limit must be a positive number, or -1 for unlimited.');
+    }
+  } else if (num < 1) {
+    throw new Error(`${setting.label} must be at least 1.`);
+  }
+  if (num > 1_000_000) {
+    throw new Error(`${setting.label} value is too large.`);
+  }
+  return num;
+}
+
+// Reads the WPHerd-managed values for a version, falling back to defaults for
+// any setting that hasn't been customised yet. Values are round-tripped via a
+// `; wpherd:<key>=<number>` comment so the plain number survives directive
+// formatting (e.g. "128M").
+function readManagedValues(version) {
+  const values = {};
+  for (const s of PHP_INI_SETTINGS) values[s.key] = s.default;
+
+  const p = getManagedIniPath(version);
+  try {
+    if (p && fs.existsSync(p)) {
+      const content = fs.readFileSync(p, 'utf8');
+      for (const s of PHP_INI_SETTINGS) {
+        const m = content.match(new RegExp(`^; wpherd:${s.key}=(-?\\d+)`, 'm'));
+        if (m) values[s.key] = parseInt(m[1], 10);
+      }
+    }
+  } catch {}
+  return values;
+}
+
+function writeManagedIni(version, values) {
+  const p = getManagedIniPath(version);
+  if (!p) throw new Error('Could not resolve the PHP config directory.');
+  const dir = p.slice(0, p.lastIndexOf('/'));
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+  const lines = ['; Managed by WPHerd — edit these from the app.', ''];
+  for (const s of PHP_INI_SETTINGS) {
+    const v = values[s.key];
+    lines.push(`; wpherd:${s.key}=${v}`);
+    for (const [directive, val] of Object.entries(s.toDirectives(v))) {
+      lines.push(`${directive} = ${val}`);
+    }
+    lines.push('');
+  }
+  fs.writeFileSync(p, lines.join('\n'), 'utf8');
+}
+
+// Restarts a version's PHP-FPM only if it's currently running, so a config
+// change takes effect without spuriously starting a stopped service.
+function reloadPhpFpmIfRunning(version) {
+  try {
+    const svc = getBrewServiceName(version);
+    if (brew.getBrewServiceStatus(svc) === 'running') {
+      brew.restartBrewService(svc);
+    }
+  } catch {}
+}
+
+function getPhpIniSettings() {
+  const versions = brew.getInstalledPhpVersions();
+  return {
+    settings: PHP_INI_SETTINGS.map(({ key, label, unit, description, default: def }) => ({
+      key,
+      label,
+      unit,
+      description,
+      default: def,
+    })),
+    versions: versions.map((version) => ({
+      version,
+      values: readManagedValues(version),
+    })),
+  };
+}
+
+function setPhpIniSetting(version, key, value) {
+  const setting = PHP_INI_SETTINGS.find((s) => s.key === key);
+  if (!setting) throw new Error(`Unknown PHP setting: ${key}`);
+  if (!/^\d+\.\d+$/.test(String(version))) throw new Error('Invalid PHP version');
+  if (!brew.getInstalledPhpVersions().includes(version)) {
+    throw new Error(`PHP ${version} is not installed`);
+  }
+
+  const num = validateSettingValue(setting, value);
+  const values = readManagedValues(version);
+  values[key] = num;
+  writeManagedIni(version, values);
+  reloadPhpFpmIfRunning(version);
+}
+
+function setPhpIniSettingAllVersions(key, value) {
+  for (const version of brew.getInstalledPhpVersions()) {
+    setPhpIniSetting(version, key, value);
+  }
+}
+
 module.exports = {
   getPhpBinPath,
   getPhpFpmBinPath,
@@ -287,4 +451,7 @@ module.exports = {
   updatePhpVersion,
   switchActivePhpVersion,
   getBrewServiceName,
+  getPhpIniSettings,
+  setPhpIniSetting,
+  setPhpIniSettingAllVersions,
 };

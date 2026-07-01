@@ -6,8 +6,10 @@ import {
   Star,
   Download,
   ArrowUpCircle,
+  Sliders,
 } from 'lucide-react';
 import { StatusBadge } from './StatusBadge';
+import PhpSettings from './PhpSettings';
 
 function VersionCard({ version, onSwitch, switching, onUpdate, updating, logLine }) {
   const isLoading = switching === version.version;
@@ -273,6 +275,12 @@ export default function PHPVersions() {
   const busy = !!installing || !!updating;
   const notInstalled = installable.filter((v) => !v.installed);
 
+  function scrollToSettings() {
+    document
+      .getElementById('php-settings')
+      ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
   return (
     <div className="p-6 max-w-3xl animate-fade-in">
       <div className="flex items-center justify-between mb-5">
@@ -280,13 +288,22 @@ export default function PHPVersions() {
           <h1 className="text-xl font-bold text-gray-900">PHP Versions</h1>
           <p className="text-sm text-gray-500 mt-0.5">Manage installed PHP versions</p>
         </div>
-        <button
-          onClick={loadVersions}
-          disabled={busy}
-          className="btn-secondary text-sm"
-        >
-          Refresh
-        </button>
+        <div className="flex items-stretch gap-2">
+          <button
+            onClick={scrollToSettings}
+            title="PHP configuration"
+            className="btn-secondary text-sm px-2.5 py-0"
+          >
+            <Sliders size={15} />
+          </button>
+          <button
+            onClick={loadVersions}
+            disabled={busy}
+            className="btn-secondary text-sm"
+          >
+            Refresh
+          </button>
+        </div>
       </div>
 
       {message && (
@@ -368,6 +385,8 @@ export default function PHPVersions() {
           </p>
         </div>
       )}
+
+      {!loading && <PhpSettings />}
     </div>
   );
 }
