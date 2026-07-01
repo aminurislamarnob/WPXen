@@ -373,6 +373,20 @@ function registerHandlers(win, storeInstance) {
     }
   });
 
+  ipcMain.handle('update-php-version', async (event, version) => {
+    try {
+      const progress = (line) => {
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('php-install-progress', { version, line });
+        }
+      };
+      await phpService.updatePhpVersion(version, progress);
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
   // ─── Dependencies ────────────────────────────────────────────────────
 
   ipcMain.handle('check-dependencies', async (_, force = false) => {

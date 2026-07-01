@@ -27,6 +27,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('get-installable-php-versions'),
   installPhpVersion: (version) =>
     ipcRenderer.invoke('install-php-version', version),
+  updatePhpVersion: (version) =>
+    ipcRenderer.invoke('update-php-version', version),
 
   // Dependencies & Setup
   checkDependencies: () => ipcRenderer.invoke('check-dependencies'),

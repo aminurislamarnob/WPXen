@@ -165,6 +165,25 @@ async function getActivePhpVersionAsync() {
   }
 }
 
+// Returns the set of outdated formula names (both short and fully-qualified,
+// e.g. "php@8.3" and "shivammathur/php/php@8.3") so callers can check whether an
+// installed formula has an update available. Best-effort — resolves to an empty
+// set on any error.
+async function getOutdatedFormulae() {
+  try {
+    const { stdout } = await execBrewAsync('outdated --json=v2');
+    const data = JSON.parse(stdout);
+    const names = new Set();
+    for (const f of data.formulae || []) {
+      if (f.name) names.add(f.name);
+      if (f.full_name) names.add(f.full_name);
+    }
+    return names;
+  } catch {
+    return new Set();
+  }
+}
+
 function getPhpFpmSocketPath(version) {
   const prefix = getBrewPrefix();
   if (!prefix) return null;
@@ -344,6 +363,7 @@ module.exports = {
   isPackageInstalledAsync,
   getInstalledPhpVersions,
   phpFormulaForVersion,
+  getOutdatedFormulae,
   getActivePhpVersion,
   getActivePhpVersionAsync,
   getPhpFpmSocketPath,

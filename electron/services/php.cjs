@@ -5,9 +5,22 @@ const fs = require('fs');
 const brew = require('./brew.cjs');
 const execAsync = require('./asyncExec.cjs');
 
-// PHP versions available as Homebrew core formulae (php@<version>). Newest
-// first. Kept in sync with the versions probed by brew.getInstalledPhpVersions.
-const KNOWN_PHP_VERSIONS = ['8.4', '8.3', '8.2', '8.1'];
+// PHP versions WPHerd can install. Newer versions ship as Homebrew core
+// formulae (php@<version>); older EOL versions were dropped from core and come
+// from the community shivammathur/php tap instead. Newest first, and kept in
+// sync with the versions probed by brew.getInstalledPhpVersions.
+const CORE_PHP_VERSIONS = ['8.4', '8.3', '8.2', '8.1'];
+const TAP_PHP_VERSIONS = ['8.0', '7.4'];
+const KNOWN_PHP_VERSIONS = [...CORE_PHP_VERSIONS, ...TAP_PHP_VERSIONS];
+
+// Returns the Homebrew formula spec to install a given version. Core versions
+// use the short name; tap versions use the fully-qualified name so `brew
+// install` auto-taps shivammathur/php.
+function installFormulaFor(version) {
+  return TAP_PHP_VERSIONS.includes(version)
+    ? `shivammathur/php/php@${version}`
+    : `php@${version}`;
+}
 
 function getPhpBinPath(version) {
   const prefix = brew.getBrewPrefix();
@@ -128,23 +141,31 @@ function getInstalledPhpVersionsWithDetails() {
 // version's full number and FPM state in parallel so opening the PHP page
 // doesn't freeze the main thread.
 async function getInstalledPhpVersionsWithDetailsAsync() {
+  const prefix = brew.getBrewPrefix();
   const versions = brew.getInstalledPhpVersions();
-  const [activeVersion, running] = await Promise.all([
+  const [activeVersion, running, outdated] = await Promise.all([
     brew.getActivePhpVersionAsync(),
     isPhpFpmRunningAsync(),
+    brew.getOutdatedFormulae(),
   ]);
 
   const fullVersions = await Promise.all(versions.map((v) => getPhpVersionAsync(v)));
 
-  return versions.map((v, i) => ({
-    version: v,
-    fullVersion: fullVersions[i] || v,
-    active: v === activeVersion,
-    // isPhpFpmRunning isn't version-specific (matches any "php-fpm: master"),
-    // so the single probe result applies to whichever version is active.
-    running,
-    socketPath: brew.getPhpFpmSocketPath(v),
-  }));
+  return versions.map((v, i) => {
+    // The formula name (php vs php@X) as brew reports it in `outdated`.
+    const formula =
+      prefix && fs.existsSync(`${prefix}/Cellar/php@${v}`) ? `php@${v}` : 'php';
+    return {
+      version: v,
+      fullVersion: fullVersions[i] || v,
+      active: v === activeVersion,
+      // isPhpFpmRunning isn't version-specific (matches any "php-fpm: master"),
+      // so the single probe result applies to whichever version is active.
+      running,
+      outdated: outdated.has(formula),
+      socketPath: brew.getPhpFpmSocketPath(v),
+    };
+  });
 }
 
 // Lists PHP versions WPHerd can install via Homebrew, each flagged with whether
@@ -158,28 +179,23 @@ function getInstallablePhpVersions() {
     .map((version) => ({ version, installed: installed.has(version) }));
 }
 
-// Installs `php@<version>` via Homebrew, streaming each output line to
-// `onProgress`. Resolves on success; rejects with the tail of brew's output on
-// failure. brew install needs no sudo (it writes into the Homebrew prefix).
-function installPhpVersion(version, onProgress) {
+// Runs `brew <args...>`, streaming each output line to `onProgress`. Resolves on
+// success; rejects with the tail of brew's output on failure. No sudo needed —
+// brew writes into the Homebrew prefix.
+function runBrewStreaming(args, onProgress) {
   return new Promise((resolve, reject) => {
-    if (!/^\d+\.\d+$/.test(String(version))) {
-      reject(new Error('Invalid PHP version'));
-      return;
-    }
     const brewBin = brew.getBrewPath();
     if (!brewBin) {
       reject(new Error('Homebrew is not installed'));
       return;
     }
 
-    const formula = `php@${version}`;
     const prefix = brew.getBrewPrefix();
-    const child = spawn(brewBin, ['install', formula], {
+    const child = spawn(brewBin, args, {
       env: {
         ...process.env,
         PATH: `${prefix}/bin:${process.env.PATH}`,
-        // Skip the slow auto-update on every install; keeps output focused.
+        // Skip the slow auto-update on every run; keeps output focused.
         HOMEBREW_NO_AUTO_UPDATE: '1',
         HOMEBREW_NO_ENV_HINTS: '1',
       },
@@ -204,11 +220,31 @@ function installPhpVersion(version, onProgress) {
         resolve();
       } else {
         reject(
-          new Error(tail.trim() || `brew install ${formula} failed (exit ${code})`)
+          new Error(tail.trim() || `brew ${args.join(' ')} failed (exit ${code})`)
         );
       }
     });
   });
+}
+
+// Installs a PHP version via Homebrew (core or the shivammathur/php tap).
+function installPhpVersion(version, onProgress) {
+  if (!/^\d+\.\d+$/.test(String(version))) {
+    return Promise.reject(new Error('Invalid PHP version'));
+  }
+  return runBrewStreaming(['install', installFormulaFor(version)], onProgress);
+}
+
+// Upgrades an installed PHP version to its latest patch release.
+function updatePhpVersion(version, onProgress) {
+  if (!/^\d+\.\d+$/.test(String(version))) {
+    return Promise.reject(new Error('Invalid PHP version'));
+  }
+  const formula = brew.phpFormulaForVersion(version);
+  if (!formula) {
+    return Promise.reject(new Error(`PHP ${version} is not installed`));
+  }
+  return runBrewStreaming(['upgrade', formula], onProgress);
 }
 
 function switchActivePhpVersion(version) {
@@ -248,6 +284,7 @@ module.exports = {
   getInstalledPhpVersionsWithDetailsAsync,
   getInstallablePhpVersions,
   installPhpVersion,
+  updatePhpVersion,
   switchActivePhpVersion,
   getBrewServiceName,
 };
