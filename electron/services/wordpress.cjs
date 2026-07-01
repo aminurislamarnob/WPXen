@@ -195,6 +195,14 @@ function removeWordPressSite(site, opts = {}) {
   } catch {}
 }
 
+// Updates a site's WordPress home/siteurl options so WP generates links with
+// the given scheme (http/https). Best-effort — a fresh or broken install may
+// not respond, in which case nginx still serves the chosen scheme.
+function setSiteUrl(sitePath, url) {
+  wp(['option', 'update', 'home', url], sitePath);
+  wp(['option', 'update', 'siteurl', url], sitePath);
+}
+
 function getSiteWordPressVersion(sitePath) {
   try {
     return wp(['core', 'version'], sitePath);
@@ -243,6 +251,7 @@ module.exports = {
   getWpCliBin,
   createWordPressSite,
   removeWordPressSite,
+  setSiteUrl,
   getSiteWordPressVersion,
   getWordPressInfo,
   sanitizeDomain,

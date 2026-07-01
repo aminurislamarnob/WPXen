@@ -105,6 +105,14 @@ export default function Sites({ sites, setSites, refreshSites }) {
     setSites((prev) => [...prev, site]);
   }
 
+  async function handleToggleHttps(site) {
+    const result = await window.electronAPI.setSiteHttps(site.id, !site.https);
+    if (result.success) {
+      await refreshSites();
+    }
+    return result;
+  }
+
   return (
     <div className="p-6 max-w-5xl animate-fade-in">
       {/* Header */}
@@ -161,7 +169,12 @@ export default function Sites({ sites, setSites, refreshSites }) {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {filtered.map((site) => (
-            <SiteCard key={site.id} site={site} onDelete={setDeletingSite} />
+            <SiteCard
+              key={site.id}
+              site={site}
+              onDelete={setDeletingSite}
+              onToggleHttps={handleToggleHttps}
+            />
           ))}
         </div>
       )}

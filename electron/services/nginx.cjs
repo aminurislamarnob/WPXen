@@ -94,7 +94,7 @@ function ensureServersDir() {
 }
 
 function generateSiteConfig(site) {
-  const { name, domain, path: sitePath, phpVersion } = site;
+  const { name, domain, path: sitePath, phpVersion, https, certPath, keyPath } = site;
 
   // Guard the values interpolated into the nginx config. A domain or path
   // containing a newline or `;`/`{`/`}` could otherwise inject arbitrary nginx
@@ -106,6 +106,11 @@ function generateSiteConfig(site) {
     throw new Error(`Unsafe site path for nginx config: ${sitePath}`);
   }
 
+  const useHttps = !!(https && certPath && keyPath);
+  if (useHttps && (/[\n\r\0;{}]/.test(certPath) || /[\n\r\0;{}]/.test(keyPath))) {
+    throw new Error('Unsafe certificate path for nginx config');
+  }
+
   // Homebrew's php-fpm listens on TCP 127.0.0.1:9000 by default and does not
   // create a unix socket. Use a per-version socket only when one actually
   // exists; otherwise fall back to the TCP address so PHP requests resolve.
@@ -114,11 +119,9 @@ function generateSiteConfig(site) {
     socketPath && fs.existsSync(socketPath) ? `unix:${socketPath}` : '127.0.0.1:9000';
   const logDir = getNginxLogDir();
 
-  return `# WPHerd: ${name}
-server {
-    listen 80;
-    server_name ${domain};
-    root ${sitePath};
+  // Shared per-site directives (root, logging, PHP handling) — reused by the
+  // http and https server blocks so both behave identically.
+  const body = `    root ${sitePath};
 
     index index.php index.html index.htm;
 
@@ -136,6 +139,7 @@ server {
         fastcgi_index index.php;
         fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
         fastcgi_param HTTP_PROXY "";
+        fastcgi_param HTTPS ${useHttps ? '"on"' : '""'};
         fastcgi_read_timeout 300;
         include fastcgi_params;
     }
@@ -159,7 +163,35 @@ server {
 
     location ~ /\\.ht {
         deny all;
-    }
+    }`;
+
+  if (useHttps) {
+    // Redirect plain http to https, and serve the site over TLS on 443.
+    return `# WPHerd: ${name}
+server {
+    listen 80;
+    server_name ${domain};
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    server_name ${domain};
+
+    ssl_certificate ${certPath};
+    ssl_certificate_key ${keyPath};
+
+${body}
+}
+`;
+  }
+
+  return `# WPHerd: ${name}
+server {
+    listen 80;
+    server_name ${domain};
+
+${body}
 }
 `;
 }
@@ -209,6 +241,7 @@ module.exports = {
   stop,
   restart,
   reload,
+  generateSiteConfig,
   createSiteConfig,
   removeSiteConfig,
   siteConfigExists,

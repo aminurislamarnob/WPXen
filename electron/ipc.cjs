@@ -27,6 +27,7 @@ const phpService = require('./services/php.cjs');
 const mysql = require('./services/mysql.cjs');
 const dnsmasq = require('./services/dnsmasq.cjs');
 const wordpress = require('./services/wordpress.cjs');
+const mkcert = require('./services/mkcert.cjs');
 const sudoers = require('./services/sudoers.cjs');
 const validation = require('./services/validation.cjs');
 const { humanize } = require('./services/errors.cjs');
@@ -190,6 +191,48 @@ function registerHandlers(win, storeInstance) {
         sites.filter((s) => s.id !== id)
       );
       return { success: true };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('set-site-https', async (_, id, enabled) => {
+    try {
+      const sites = store.get('sites', []);
+      const idx = sites.findIndex((s) => s.id === id);
+      if (idx === -1) return { success: false, error: 'Site not found' };
+      const site = sites[idx];
+
+      let updated;
+      if (enabled) {
+        // Ensure mkcert + a trusted local CA, then mint a cert for this domain.
+        mkcert.ensureInstalled();
+        mkcert.ensureCA();
+        const { certPath, keyPath } = mkcert.generateCert(site.domain);
+        updated = {
+          ...site,
+          https: true,
+          certPath,
+          keyPath,
+          url: `https://${site.domain}`,
+        };
+      } else {
+        updated = { ...site, https: false, url: `http://${site.domain}` };
+      }
+
+      // Rewrite the vhost for the new scheme and reload nginx.
+      nginx.createSiteConfig(updated);
+      nginx.reload();
+
+      // Point WordPress at the new URL so it stops redirecting to the old
+      // scheme. Best-effort — nginx already serves the right scheme regardless.
+      try {
+        wordpress.setSiteUrl(site.path, updated.url);
+      } catch {}
+
+      sites[idx] = updated;
+      store.set('sites', sites);
+      return { success: true, site: updated };
     } catch (err) {
       return { success: false, error: humanize(err) };
     }

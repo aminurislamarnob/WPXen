@@ -7,6 +7,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getSites: () => ipcRenderer.invoke('get-sites'),
   addSite: (data) => ipcRenderer.invoke('add-site', data),
   removeSite: (id, opts) => ipcRenderer.invoke('remove-site', id, opts),
+  setSiteHttps: (id, enabled) =>
+    ipcRenderer.invoke('set-site-https', id, enabled),
   openSiteInBrowser: (url) => ipcRenderer.invoke('open-in-browser', url),
   openSiteInFinder: (sitePath) => ipcRenderer.invoke('open-in-finder', sitePath),
   openSiteInTerminal: (sitePath) => ipcRenderer.invoke('open-in-terminal', sitePath),

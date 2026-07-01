@@ -9,6 +9,9 @@ import {
   Trash2,
   Settings,
   Copy,
+  Lock,
+  Unlock,
+  Loader,
 } from 'lucide-react';
 
 function ContextMenu({ site, onDelete, onClose }) {
@@ -52,8 +55,20 @@ function ContextMenu({ site, onDelete, onClose }) {
   );
 }
 
-export default function SiteCard({ site, onDelete }) {
+export default function SiteCard({ site, onDelete, onToggleHttps }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [httpsBusy, setHttpsBusy] = useState(false);
+  const [httpsError, setHttpsError] = useState(null);
+
+  async function handleToggleHttps() {
+    setHttpsBusy(true);
+    setHttpsError(null);
+    const result = await onToggleHttps(site);
+    if (!result?.success) {
+      setHttpsError(result?.error || 'Failed to update HTTPS.');
+    }
+    setHttpsBusy(false);
+  }
 
   const actions = [
     {
@@ -136,6 +151,36 @@ export default function SiteCard({ site, onDelete }) {
             {site.dbName}
           </span>
         </div>
+
+        {/* HTTPS toggle */}
+        <div className="mt-3 flex items-center justify-between">
+          <span className="flex items-center gap-1.5 text-xs text-gray-600">
+            {site.https ? (
+              <Lock size={12} className="text-wp-green" />
+            ) : (
+              <Unlock size={12} className="text-gray-400" />
+            )}
+            HTTPS
+            {httpsBusy && <Loader size={11} className="animate-spin text-gray-400" />}
+          </span>
+          <button
+            role="switch"
+            aria-checked={!!site.https}
+            onClick={handleToggleHttps}
+            disabled={httpsBusy}
+            title={site.https ? 'Disable HTTPS' : 'Enable HTTPS'}
+            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+              site.https ? 'bg-wp-green' : 'bg-gray-300'
+            } ${httpsBusy ? 'opacity-50' : ''}`}
+          >
+            <span
+              className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                site.https ? 'translate-x-4' : 'translate-x-0.5'
+              }`}
+            />
+          </button>
+        </div>
+        {httpsError && <p className="mt-1.5 text-xs text-red-600">{httpsError}</p>}
       </div>
 
       {/* Path */}
