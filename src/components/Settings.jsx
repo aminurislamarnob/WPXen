@@ -9,7 +9,6 @@ import {
   ShieldCheck,
   ShieldAlert,
   ShieldOff,
-  Trash2,
 } from 'lucide-react';
 
 export default function Settings() {
@@ -60,9 +59,15 @@ export default function Settings() {
     if (result.success) {
       const sud = await window.electronAPI.checkSudoers();
       setSudoers(sud);
-      setSudoersMessage({ type: 'success', text: 'Permissions configured. Services now start silently.' });
+      setSudoersMessage({
+        type: 'success',
+        text: 'Permissions configured. Services now start silently.',
+      });
     } else {
-      setSudoersMessage({ type: 'error', text: result.error || 'Setup failed or was cancelled.' });
+      setSudoersMessage({
+        type: 'error',
+        text: result.error || 'Setup failed or was cancelled.',
+      });
     }
     setSudoersLoading(false);
   }
@@ -73,7 +78,10 @@ export default function Settings() {
     const result = await window.electronAPI.uninstallSudoers();
     if (result.success) {
       setSudoers({ configured: false });
-      setSudoersMessage({ type: 'success', text: 'Permissions removed. Services will require your password again.' });
+      setSudoersMessage({
+        type: 'success',
+        text: 'Permissions removed. Services will require your password again.',
+      });
     } else {
       setSudoersMessage({ type: 'error', text: result.error });
     }
@@ -100,7 +108,10 @@ export default function Settings() {
     setDnsSetupLoading(false);
     setDnsMessage(
       result.success
-        ? { type: 'success', text: '*.test DNS configured! Sites will resolve to localhost.' }
+        ? {
+            type: 'success',
+            text: '*.test DNS configured! Sites will resolve to localhost.',
+          }
         : { type: 'error', text: result.error }
     );
   }
@@ -134,7 +145,9 @@ export default function Settings() {
                 <FolderOpen size={15} />
               </button>
             </div>
-            <p className="text-xs text-gray-400 mt-1">New WordPress sites will be created here</p>
+            <p className="text-xs text-gray-400 mt-1">
+              New WordPress sites will be created here
+            </p>
           </div>
 
           <div>
@@ -145,7 +158,9 @@ export default function Settings() {
               type="text"
               className="form-input font-mono text-xs"
               value={settings.defaultPhpVersion || ''}
-              onChange={(e) => setSettings((s) => ({ ...s, defaultPhpVersion: e.target.value }))}
+              onChange={(e) =>
+                setSettings((s) => ({ ...s, defaultPhpVersion: e.target.value }))
+              }
               placeholder="8.2"
             />
           </div>
@@ -153,7 +168,9 @@ export default function Settings() {
           <label className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-gray-700">Start at Login</p>
-              <p className="text-xs text-gray-400">Launch WPHerd when you log into macOS</p>
+              <p className="text-xs text-gray-400">
+                Launch WPHerd when you log into macOS
+              </p>
             </div>
             <div
               onClick={() =>
@@ -184,7 +201,9 @@ export default function Settings() {
             password blank for a passwordless root.
           </p>
           <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1.5">MySQL User</label>
+            <label className="block text-xs font-medium text-gray-700 mb-1.5">
+              MySQL User
+            </label>
             <input
               type="text"
               className="form-input font-mono text-xs"
@@ -209,14 +228,20 @@ export default function Settings() {
       </section>
 
       {/* Permissions (sudoers) */}
-      <section className={`rounded-xl border shadow-card ${sudoers?.configured ? 'bg-white border-surface-border' : 'bg-amber-50 border-amber-200'}`}>
+      <section
+        className={`rounded-xl border shadow-card ${sudoers?.configured ? 'bg-white border-surface-border' : 'bg-amber-50 border-amber-200'}`}
+      >
         <div className="px-5 py-4 border-b border-black/5">
           <div className="flex items-center gap-2">
-            {sudoers?.configured
-              ? <ShieldCheck size={15} className="text-wp-green" />
-              : <ShieldAlert size={15} className="text-amber-600" />}
+            {sudoers?.configured ? (
+              <ShieldCheck size={15} className="text-wp-green" />
+            ) : (
+              <ShieldAlert size={15} className="text-amber-600" />
+            )}
             <h2 className="text-sm font-semibold text-gray-800">Permissions</h2>
-            <span className={`ml-auto text-xs font-medium px-2 py-0.5 rounded-full ${sudoers?.configured ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+            <span
+              className={`ml-auto text-xs font-medium px-2 py-0.5 rounded-full ${sudoers?.configured ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}
+            >
               {sudoers?.configured ? 'Configured' : 'Not set up'}
             </span>
           </div>
@@ -228,13 +253,19 @@ export default function Settings() {
               : 'Without this, macOS will ask for your password every time a service starts or stops.'}
           </p>
           <p className="text-xs text-gray-400 mb-4">
-            Installs <span className="font-mono bg-gray-100 px-1 rounded">/etc/sudoers.d/wpherd</span> granting
-            passwordless <span className="font-mono bg-gray-100 px-1 rounded">sudo brew services</span>.
-            Requires your password <strong>once</strong> to set up, then never again.
+            Installs{' '}
+            <span className="font-mono bg-gray-100 px-1 rounded">
+              /etc/sudoers.d/wpherd
+            </span>{' '}
+            granting passwordless{' '}
+            <span className="font-mono bg-gray-100 px-1 rounded">sudo brew services</span>
+            . Requires your password <strong>once</strong> to set up, then never again.
           </p>
 
           {sudoersMessage && (
-            <div className={`flex items-start gap-2 px-3 py-2.5 rounded-lg mb-4 text-sm ${sudoersMessage.type === 'error' ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'}`}>
+            <div
+              className={`flex items-start gap-2 px-3 py-2.5 rounded-lg mb-4 text-sm ${sudoersMessage.type === 'error' ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'}`}
+            >
               <CheckCircle size={14} className="flex-shrink-0 mt-0.5" />
               {sudoersMessage.text}
             </div>
@@ -242,17 +273,29 @@ export default function Settings() {
 
           <div className="flex gap-2">
             {!sudoers?.configured ? (
-              <button onClick={handleInstallSudoers} disabled={sudoersLoading} className="btn-primary text-sm">
-                {sudoersLoading
-                  ? <Loader size={13} className="animate-spin mr-1.5" />
-                  : <ShieldCheck size={13} className="mr-1.5" />}
+              <button
+                onClick={handleInstallSudoers}
+                disabled={sudoersLoading}
+                className="btn-primary text-sm"
+              >
+                {sudoersLoading ? (
+                  <Loader size={13} className="animate-spin mr-1.5" />
+                ) : (
+                  <ShieldCheck size={13} className="mr-1.5" />
+                )}
                 Setup Passwordless Services
               </button>
             ) : (
-              <button onClick={handleUninstallSudoers} disabled={sudoersLoading} className="btn-ghost text-xs text-gray-400 hover:text-red-600">
-                {sudoersLoading
-                  ? <Loader size={12} className="animate-spin mr-1.5" />
-                  : <ShieldOff size={12} className="mr-1.5" />}
+              <button
+                onClick={handleUninstallSudoers}
+                disabled={sudoersLoading}
+                className="btn-ghost text-xs text-gray-400 hover:text-red-600"
+              >
+                {sudoersLoading ? (
+                  <Loader size={12} className="animate-spin mr-1.5" />
+                ) : (
+                  <ShieldOff size={12} className="mr-1.5" />
+                )}
                 Remove Permissions
               </button>
             )}
@@ -267,8 +310,9 @@ export default function Settings() {
         </div>
         <div className="p-5">
           <p className="text-sm text-gray-600 mb-4">
-            Configure dnsmasq to resolve <span className="font-mono text-wp-blue">*.test</span>{' '}
-            domains to localhost. This requires administrator privileges.
+            Configure dnsmasq to resolve{' '}
+            <span className="font-mono text-wp-blue">*.test</span> domains to localhost.
+            This requires administrator privileges.
           </p>
           {dnsMessage && (
             <div
@@ -331,9 +375,7 @@ export default function Settings() {
               <span>
                 Install Homebrew first:{' '}
                 <button
-                  onClick={() =>
-                    window.electronAPI.openSiteInBrowser('https://brew.sh')
-                  }
+                  onClick={() => window.electronAPI.openSiteInBrowser('https://brew.sh')}
                   className="underline"
                 >
                   brew.sh

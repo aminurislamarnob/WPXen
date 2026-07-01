@@ -27,7 +27,10 @@ const SERVICE_CONFIG = [
     name: 'PHP-FPM',
     description: 'PHP FastCGI Process Manager — processes PHP scripts',
     icon: ({ size, className }) => (
-      <span className={`text-base font-bold font-mono ${className}`} style={{ fontSize: size }}>
+      <span
+        className={`text-base font-bold font-mono ${className}`}
+        style={{ fontSize: size }}
+      >
         P
       </span>
     ),
@@ -81,7 +84,9 @@ function ServiceRow({ config, running, onAction, loadingAction }) {
           <div className="flex items-center gap-2 mb-0.5">
             <h3 className="text-sm font-semibold text-gray-900">{config.name}</h3>
             <StatusBadge running={running} />
-            <span className={`text-xs font-medium ${running ? 'text-wp-green' : 'text-gray-400'}`}>
+            <span
+              className={`text-xs font-medium ${running ? 'text-wp-green' : 'text-gray-400'}`}
+            >
               {running ? 'Running' : 'Stopped'}
             </span>
           </div>
@@ -141,7 +146,8 @@ export default function Services({ serviceStatus, refreshStatus }) {
     try {
       let result;
       if (action === 'start') result = await window.electronAPI.startService(serviceId);
-      else if (action === 'stop') result = await window.electronAPI.stopService(serviceId);
+      else if (action === 'stop')
+        result = await window.electronAPI.stopService(serviceId);
       else result = await window.electronAPI.restartService(serviceId);
 
       if (!result.success) {
@@ -191,7 +197,11 @@ export default function Services({ serviceStatus, refreshStatus }) {
             disabled={globalLoading || runningCount === 0}
             className="btn-secondary text-sm"
           >
-            {globalLoading ? <Loader size={13} className="animate-spin mr-1.5" /> : <Square size={13} className="mr-1.5" />}
+            {globalLoading ? (
+              <Loader size={13} className="animate-spin mr-1.5" />
+            ) : (
+              <Square size={13} className="mr-1.5" />
+            )}
             Stop All
           </button>
           <button
@@ -199,7 +209,11 @@ export default function Services({ serviceStatus, refreshStatus }) {
             disabled={globalLoading || runningCount === SERVICE_CONFIG.length}
             className="btn-primary text-sm"
           >
-            {globalLoading ? <Loader size={13} className="animate-spin mr-1.5" /> : <Play size={13} className="mr-1.5" />}
+            {globalLoading ? (
+              <Loader size={13} className="animate-spin mr-1.5" />
+            ) : (
+              <Play size={13} className="mr-1.5" />
+            )}
             Start All
           </button>
         </div>
@@ -214,11 +228,7 @@ export default function Services({ serviceStatus, refreshStatus }) {
               : 'bg-green-50 text-green-700'
           }`}
         >
-          {message.type === 'error' ? (
-            <XCircle size={15} />
-          ) : (
-            <CheckCircle size={15} />
-          )}
+          {message.type === 'error' ? <XCircle size={15} /> : <CheckCircle size={15} />}
           {message.text}
         </div>
       )}
@@ -243,7 +253,9 @@ export default function Services({ serviceStatus, refreshStatus }) {
           <p className="font-medium">Homebrew services</p>
           <p className="text-xs text-blue-600 mt-0.5">
             WPHerd manages services installed via Homebrew. Install missing services with{' '}
-            <span className="font-mono bg-blue-100 px-1 rounded">brew install nginx php mysql dnsmasq</span>
+            <span className="font-mono bg-blue-100 px-1 rounded">
+              brew install nginx php mysql dnsmasq
+            </span>
           </p>
         </div>
       </div>

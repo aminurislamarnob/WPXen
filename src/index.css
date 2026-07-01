@@ -42,8 +42,13 @@ body {
 
 /* Status dot animations */
 @keyframes blink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
 }
 
 .status-dot-running {
@@ -57,8 +62,12 @@ body {
 
 /* Progress bar animation */
 @keyframes progress-slide {
-  0% { transform: translateX(-100%); }
-  100% { transform: translateX(400%); }
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(400%);
+  }
 }
 
 .progress-indeterminate::after {
@@ -88,7 +97,9 @@ body {
 }
 
 /* Input focus ring */
-input:focus, select:focus, textarea:focus {
+input:focus,
+select:focus,
+textarea:focus {
   @apply outline-none ring-2 ring-wp-blue ring-opacity-30 border-wp-blue;
 }
 

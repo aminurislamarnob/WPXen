@@ -12,7 +12,7 @@ import {
   ArrowRight,
   ShieldAlert,
 } from 'lucide-react';
-import { StatusBadge, ServicePill } from './StatusBadge';
+import { StatusBadge } from './StatusBadge';
 
 function ServiceCard({ name, icon: Icon, running, onStart, onStop, loading }) {
   return (
@@ -28,7 +28,9 @@ function ServiceCard({ name, icon: Icon, running, onStart, onStop, loading }) {
           </div>
           <div>
             <p className="text-sm font-semibold text-gray-900">{name}</p>
-            <p className={`text-xs mt-0.5 ${running ? 'text-wp-green' : 'text-gray-400'}`}>
+            <p
+              className={`text-xs mt-0.5 ${running ? 'text-wp-green' : 'text-gray-400'}`}
+            >
               {running ? 'Running' : 'Stopped'}
             </p>
           </div>
@@ -85,7 +87,9 @@ export default function Dashboard({ serviceStatus, sites, refreshStatus }) {
   const [sudoersConfigured, setSudoersConfigured] = useState(true);
 
   useEffect(() => {
-    window.electronAPI.checkSudoers().then(({ configured }) => setSudoersConfigured(configured));
+    window.electronAPI
+      .checkSudoers()
+      .then(({ configured }) => setSudoersConfigured(configured));
   }, []);
 
   const { nginx, php, mysql, dnsmasq } = serviceStatus;
@@ -122,10 +126,12 @@ export default function Dashboard({ serviceStatus, sites, refreshStatus }) {
         <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 animate-fade-in">
           <ShieldAlert size={16} className="text-amber-600 flex-shrink-0 mt-0.5" />
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-amber-800">Password required for services</p>
+            <p className="text-sm font-semibold text-amber-800">
+              Password required for services
+            </p>
             <p className="text-xs text-amber-700 mt-0.5">
-              macOS will ask for your password every time a service starts or stops.
-              Set up passwordless permissions once to fix this.
+              macOS will ask for your password every time a service starts or stops. Set
+              up passwordless permissions once to fix this.
             </p>
           </div>
           <button
@@ -178,7 +184,13 @@ export default function Dashboard({ serviceStatus, sites, refreshStatus }) {
         <ServiceCard
           name="PHP-FPM"
           icon={({ size, className }) => (
-            <svg viewBox="0 0 24 24" width={size} height={size} className={className} fill="currentColor">
+            <svg
+              viewBox="0 0 24 24"
+              width={size}
+              height={size}
+              className={className}
+              fill="currentColor"
+            >
               <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z" />
             </svg>
           )}
@@ -229,10 +241,7 @@ export default function Dashboard({ serviceStatus, sites, refreshStatus }) {
             <p className="text-xs text-gray-400 mt-1 mb-4">
               Create your first local WordPress site to get started
             </p>
-            <button
-              onClick={() => navigate('/sites')}
-              className="btn-primary text-xs"
-            >
+            <button onClick={() => navigate('/sites')} className="btn-primary text-xs">
               <Plus size={13} className="mr-1.5" />
               Add Site
             </button>
@@ -261,7 +270,10 @@ export default function Dashboard({ serviceStatus, sites, refreshStatus }) {
             color: 'text-purple-600',
           },
         ].map(({ label, value, color }) => (
-          <div key={label} className="bg-white rounded-xl border border-surface-border shadow-card p-4">
+          <div
+            key={label}
+            className="bg-white rounded-xl border border-surface-border shadow-card p-4"
+          >
             <p className="text-xs text-gray-400">{label}</p>
             <p className={`text-2xl font-bold mt-1 ${color}`}>{value}</p>
           </div>

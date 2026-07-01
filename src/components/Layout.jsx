@@ -1,12 +1,5 @@
 import { NavLink, Outlet } from 'react-router-dom';
-import {
-  LayoutDashboard,
-  Globe,
-  Server,
-  Code2,
-  Settings,
-  Circle,
-} from 'lucide-react';
+import { LayoutDashboard, Globe, Server, Code2, Settings, Circle } from 'lucide-react';
 
 const navItems = [
   { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
@@ -30,8 +23,8 @@ export default function Layout({ serviceStatus }) {
   const statusColor = allRunning
     ? 'text-wp-green'
     : anyRunning
-    ? 'text-wp-yellow'
-    : 'text-gray-400';
+      ? 'text-wp-yellow'
+      : 'text-gray-400';
 
   return (
     <div className="h-screen flex overflow-hidden bg-surface">
@@ -45,7 +38,9 @@ export default function Layout({ serviceStatus }) {
             <div className="w-6 h-6 rounded-md bg-wp-blue flex items-center justify-center flex-shrink-0">
               <span className="text-white text-xs font-bold">W</span>
             </div>
-            <span className="text-white text-sm font-semibold tracking-tight">WPHerd</span>
+            <span className="text-white text-sm font-semibold tracking-tight">
+              WPHerd
+            </span>
           </div>
         </div>
 
@@ -79,7 +74,11 @@ export default function Layout({ serviceStatus }) {
               }`}
             />
             <span className="text-xs text-sidebar-text truncate">
-              {allRunning ? 'All services running' : anyRunning ? 'Partially running' : 'Services stopped'}
+              {allRunning
+                ? 'All services running'
+                : anyRunning
+                  ? 'Partially running'
+                  : 'Services stopped'}
             </span>
           </div>
           <p className="text-xs text-sidebar-text/50 mt-1">WPHerd v1.0</p>

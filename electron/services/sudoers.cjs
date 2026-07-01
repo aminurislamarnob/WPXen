@@ -78,11 +78,15 @@ function install() {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
   } finally {
-    try { fs.rmSync(tmpFile, { force: true }); } catch {}
+    try {
+      fs.rmSync(tmpFile, { force: true });
+    } catch {}
   }
 
   if (!isConfigured()) {
-    throw new Error('Sudoers file was not written — visudo may have rejected the syntax.');
+    throw new Error(
+      'Sudoers file was not written — visudo may have rejected the syntax.'
+    );
   }
 }
 

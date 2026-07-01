@@ -24,7 +24,9 @@ function VersionCard({ version, onSwitch, switching }) {
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h3 className="text-sm font-semibold text-gray-900">PHP {version.version}</h3>
+              <h3 className="text-sm font-semibold text-gray-900">
+                PHP {version.version}
+              </h3>
               {version.active && (
                 <span className="flex items-center gap-1 px-2 py-0.5 bg-wp-blue/10 text-wp-blue rounded-full text-xs font-medium">
                   <Star size={10} fill="currentColor" />
@@ -51,7 +53,10 @@ function VersionCard({ version, onSwitch, switching }) {
       {/* Socket path */}
       {version.socketPath && (
         <div className="mt-3 px-3 py-2 bg-gray-50 rounded-lg">
-          <p className="text-xs text-gray-400 font-mono truncate" title={version.socketPath}>
+          <p
+            className="text-xs text-gray-400 font-mono truncate"
+            title={version.socketPath}
+          >
             {version.socketPath}
           </p>
         </div>
@@ -107,7 +112,10 @@ export default function PHPVersions() {
     setMessage(null);
     const result = await window.electronAPI.switchPhpVersion(version);
     if (result.success) {
-      setMessage({ type: 'success', text: `Switched to PHP ${version}. Restart PHP-FPM to apply.` });
+      setMessage({
+        type: 'success',
+        text: `Switched to PHP ${version}. Restart PHP-FPM to apply.`,
+      });
       await loadVersions();
     } else {
       setMessage({ type: 'error', text: result.error });
@@ -130,7 +138,9 @@ export default function PHPVersions() {
       {message && (
         <div
           className={`flex items-center gap-2 px-4 py-3 rounded-xl mb-4 text-sm animate-fade-in ${
-            message.type === 'error' ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'
+            message.type === 'error'
+              ? 'bg-red-50 text-red-700'
+              : 'bg-green-50 text-green-700'
           }`}
         >
           <CheckCircle size={15} />
@@ -173,8 +183,10 @@ export default function PHPVersions() {
         <div>
           <p className="font-medium">Install more PHP versions</p>
           <p className="text-xs text-blue-600 mt-0.5">
-            <span className="font-mono bg-blue-100 px-1 rounded">brew install php@8.1 php@8.2 php@8.3</span>
-            {' '}— then restart WPHerd.
+            <span className="font-mono bg-blue-100 px-1 rounded">
+              brew install php@8.1 php@8.2 php@8.3
+            </span>{' '}
+            — then restart WPHerd.
           </p>
         </div>
       </div>

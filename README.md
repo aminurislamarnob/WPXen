@@ -20,16 +20,16 @@ Inspired by [Laravel Herd](https://herd.laravel.com).
 
 ## Screenshots
 
-| Dashboard | Sites |
-|---|---|
+| Dashboard                        | Sites                    |
+| -------------------------------- | ------------------------ |
 | ![Dashboard](docs/dashboard.png) | ![Sites](docs/sites.png) |
 
-| Add Site | Services |
-|---|---|
+| Add Site                       | Services                       |
+| ------------------------------ | ------------------------------ |
 | ![Add Site](docs/add-site.png) | ![Services](docs/services.png) |
 
-| PHP Versions | Settings |
-|---|---|
+| PHP Versions         | Settings                       |
+| -------------------- | ------------------------------ |
 | ![PHP](docs/php.png) | ![Settings](docs/settings.png) |
 
 ---
@@ -149,10 +149,10 @@ wpherd/
 
 WPHerd auto-detects your Homebrew prefix:
 
-| Mac | Homebrew prefix |
-|---|---|
+| Mac                      | Homebrew prefix |
+| ------------------------ | --------------- |
 | Apple Silicon (M1/M2/M3) | `/opt/homebrew` |
-| Intel | `/usr/local` |
+| Intel                    | `/usr/local`    |
 
 nginx vhosts are written to `{prefix}/etc/nginx/servers/`.  
 PHP-FPM sockets are expected at `{prefix}/var/run/php/php{version}-fpm.sock`.
@@ -167,21 +167,21 @@ Sites are served under `.test` domains (e.g. `mysite.test`). WPHerd configures t
 2. Creating `/etc/resolver/test` with `nameserver 127.0.0.1` (requires your admin password — a macOS dialog will appear)
 3. Starting dnsmasq via Homebrew services
 
-Click **Settings → Setup *.test DNS** to run this one-time setup.
+Click *_Settings → Setup *.test DNS*_ to run this one-time setup.
 
 ---
 
 ## Tech stack
 
-| | |
-|---|---|
-| Desktop shell | Electron 28 |
-| UI | React 18 + React Router 6 |
-| Styling | Tailwind CSS 3 |
-| Build | Vite 5 |
-| Packaging | electron-builder (DMG, arm64 + x64) |
-| Icons | lucide-react |
-| Persistence | Custom JSON store (no external deps) |
+|               |                                      |
+| ------------- | ------------------------------------ |
+| Desktop shell | Electron 28                          |
+| UI            | React 18 + React Router 6            |
+| Styling       | Tailwind CSS 3                       |
+| Build         | Vite 5                               |
+| Packaging     | electron-builder (DMG, arm64 + x64)  |
+| Icons         | lucide-react                         |
+| Persistence   | Custom JSON store (no external deps) |
 
 ---
 

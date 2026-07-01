@@ -47,7 +47,9 @@ function validateSiteInput(data = {}) {
   if (!isNonEmptyString(data.dbName)) {
     errors.push('Database name is required.');
   } else if (!DB_NAME_RE.test(data.dbName)) {
-    errors.push('Database name may only contain letters, numbers and underscores (max 64).');
+    errors.push(
+      'Database name may only contain letters, numbers and underscores (max 64).'
+    );
   }
 
   if (!isNonEmptyString(data.path)) {
@@ -63,10 +65,16 @@ function validateSiteInput(data = {}) {
   }
 
   if (data.adminUser != null && !WP_USER_RE.test(String(data.adminUser))) {
-    errors.push('Admin username may only contain letters, numbers and . _ @ - characters.');
+    errors.push(
+      'Admin username may only contain letters, numbers and . _ @ - characters.'
+    );
   }
 
-  if (data.adminEmail != null && data.adminEmail !== '' && !EMAIL_RE.test(String(data.adminEmail))) {
+  if (
+    data.adminEmail != null &&
+    data.adminEmail !== '' &&
+    !EMAIL_RE.test(String(data.adminEmail))
+  ) {
     errors.push('Admin email is not a valid email address.');
   }
 

@@ -70,7 +70,14 @@ export default function App() {
     );
   }
 
-  const sharedProps = { serviceStatus, sites, setSites, refreshSites, refreshStatus, deps };
+  const sharedProps = {
+    serviceStatus,
+    sites,
+    setSites,
+    refreshSites,
+    refreshStatus,
+    deps,
+  };
 
   return (
     <HashRouter>

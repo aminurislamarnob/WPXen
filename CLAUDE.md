@@ -21,18 +21,21 @@ WPHerd is an Electron macOS menu-bar app that orchestrates Homebrew-installed se
 **not** bundle these binaries — it shells out to the user's Homebrew install.
 
 Two processes, separated by file extension:
+
 - **Main process** — `electron/*.cjs` (CommonJS). Node access, runs all system commands.
 - **Renderer** — `src/**/*.jsx` (React 18 + React Router 6 + Tailwind, built by Vite).
 
 The two communicate **only** through the contextBridge in `electron/preload.cjs`, which
 exposes `window.electronAPI`. There is no `nodeIntegration`; the renderer cannot touch
 Node directly. When adding a feature that crosses the boundary you must touch three places:
+
 1. `electron/ipc.cjs` — register an `ipcMain.handle(...)` handler.
 2. `electron/preload.cjs` — expose a wrapper method (and whitelist any new event channel
    in the `validChannels` arrays for `on`/`off`).
 3. `src/components/*.jsx` — call `window.electronAPI.<method>()`.
 
 ### Main process layout
+
 - `main.cjs` — app lifecycle, single-instance lock, window. Note the app is dock-hidden
   by default; closing the window hides to tray (doesn't quit). `before-quit` removes the
   close listener so the app can actually exit.
@@ -50,6 +53,7 @@ Node directly. When adding a feature that crosses the boundary you must touch th
   - `php.cjs`, `mysql.cjs`, `dnsmasq.cjs`, `wordpress.cjs` (WP-CLI install flow).
 
 ### Key implementation notes
+
 - Service modules run real `brew services` / `pgrep` / `mysql` / `wp` commands against
   the user's machine — changes here have real side effects (start daemons, write configs,
   create databases). Be deliberate when editing them.

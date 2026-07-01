@@ -35,11 +35,7 @@ function getMysqlBin() {
   const prefix = brew.getBrewPrefix();
   if (!prefix) return 'mysql';
   // Check mariadb first, then mysql
-  const candidates = [
-    `${prefix}/bin/mariadb`,
-    `${prefix}/bin/mysql`,
-    'mysql',
-  ];
+  const candidates = [`${prefix}/bin/mariadb`, `${prefix}/bin/mysql`, 'mysql'];
   const fs = require('fs');
   for (const c of candidates) {
     if (fs.existsSync(c)) return c;
@@ -153,7 +149,9 @@ function listDatabases() {
       .filter(
         (db) =>
           db.trim() &&
-          !['information_schema', 'performance_schema', 'mysql', 'sys'].includes(db.trim())
+          !['information_schema', 'performance_schema', 'mysql', 'sys'].includes(
+            db.trim()
+          )
       );
   } catch {
     return [];

@@ -90,7 +90,9 @@ export default function SiteCard({ site, onDelete }) {
               </span>
             </div>
             <div className="min-w-0">
-              <h3 className="text-sm font-semibold text-gray-900 truncate">{site.name}</h3>
+              <h3 className="text-sm font-semibold text-gray-900 truncate">
+                {site.name}
+              </h3>
               <button
                 onClick={() => window.electronAPI.openSiteInBrowser(site.url)}
                 className="text-xs text-wp-blue hover:underline flex items-center gap-1 mt-0.5"
@@ -110,7 +112,11 @@ export default function SiteCard({ site, onDelete }) {
               <MoreHorizontal size={15} />
             </button>
             {menuOpen && (
-              <ContextMenu site={site} onDelete={onDelete} onClose={() => setMenuOpen(false)} />
+              <ContextMenu
+                site={site}
+                onDelete={onDelete}
+                onClose={() => setMenuOpen(false)}
+              />
             )}
           </div>
         </div>
