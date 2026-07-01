@@ -61,6 +61,22 @@ function refreshServiceStatus() {
   return statusRefreshInFlight;
 }
 
+// Force-rechecks Homebrew dependencies and pushes the fresh result to the
+// renderer. Rate-limited so rapid window-focus events can't spawn `brew list`
+// storms — one real re-check every few seconds at most.
+let lastDepsRefresh = 0;
+async function refreshDependencies(win, { minIntervalMs = 3000 } = {}) {
+  const now = Date.now();
+  if (now - lastDepsRefresh < minIntervalMs) return;
+  lastDepsRefresh = now;
+  try {
+    const deps = await brew.checkAllDependenciesAsync(true);
+    if (win && !win.isDestroyed() && win.webContents) {
+      win.webContents.send('dependencies-update', deps);
+    }
+  } catch {}
+}
+
 function registerHandlers(win, storeInstance) {
   mainWindow = win;
   store = storeInstance;
@@ -73,6 +89,20 @@ function registerHandlers(win, storeInstance) {
 
   // Populate the status cache once at startup (non-blocking).
   refreshServiceStatus();
+
+  // When the user returns to the app (e.g. after `brew install`-ing something
+  // in a terminal), re-check dependencies and service status automatically —
+  // no manual refresh needed. Both are non-blocking and rate-limited.
+  if (win) {
+    win.on('focus', () => {
+      refreshDependencies(win);
+      refreshServiceStatus().then(() => {
+        if (win && !win.isDestroyed() && win.webContents) {
+          win.webContents.send('service-status-update', getServiceStatus());
+        }
+      });
+    });
+  }
 
   // ─── Sites ───────────────────────────────────────────────────────────
 

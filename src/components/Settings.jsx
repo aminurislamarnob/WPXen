@@ -45,6 +45,14 @@ export default function Settings() {
     });
   }, []);
 
+  // Main process re-checks dependencies whenever the app regains focus (e.g.
+  // after installing something via Homebrew), so the list stays current
+  // without a manual refresh.
+  useEffect(() => {
+    window.electronAPI.on('dependencies-update', (fresh) => setDeps(fresh));
+    return () => window.electronAPI.off('dependencies-update');
+  }, []);
+
   async function handleInstallSudoers() {
     setSudoersLoading(true);
     setSudoersMessage(null);

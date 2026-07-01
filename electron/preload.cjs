@@ -48,6 +48,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const validChannels = [
       'service-status-update',
       'site-create-progress',
+      'dependencies-update',
       'notification',
     ];
     if (validChannels.includes(channel)) {
@@ -58,6 +59,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const validChannels = [
       'service-status-update',
       'site-create-progress',
+      'dependencies-update',
       'notification',
     ];
     if (validChannels.includes(channel)) {
