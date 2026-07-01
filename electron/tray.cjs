@@ -1,6 +1,6 @@
 'use strict';
 
-const { Tray, Menu, nativeImage, app, BrowserWindow } = require('electron');
+const { Tray, Menu, nativeImage, app } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -21,7 +21,7 @@ function createTrayIcon() {
 }
 
 function buildContextMenu(mainWindow, serviceStatus, sites) {
-  const { nginx, php, mysql, dnsmasq } = serviceStatus || {};
+  const { nginx, php, mysql } = serviceStatus || {};
 
   const statusIcon = (running) => (running ? '●' : '○');
 

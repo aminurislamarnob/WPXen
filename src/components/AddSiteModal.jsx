@@ -1,5 +1,12 @@
 import { useState, useEffect } from 'react';
-import { X, FolderOpen, CheckCircle, AlertCircle, Loader, ChevronRight } from 'lucide-react';
+import {
+  X,
+  FolderOpen,
+  CheckCircle,
+  AlertCircle,
+  Loader,
+  ChevronRight,
+} from 'lucide-react';
 
 const STEPS = ['Details', 'Directory', 'WordPress', 'Creating'];
 
@@ -13,14 +20,16 @@ function StepIndicator({ current, steps }) {
               i < current
                 ? 'bg-wp-green text-white'
                 : i === current
-                ? 'bg-wp-blue text-white'
-                : 'bg-gray-200 text-gray-400'
+                  ? 'bg-wp-blue text-white'
+                  : 'bg-gray-200 text-gray-400'
             }`}
           >
             {i < current ? '✓' : i + 1}
           </div>
           {i < steps.length - 1 && (
-            <div className={`w-8 h-0.5 mx-1 ${i < current ? 'bg-wp-green' : 'bg-gray-200'}`} />
+            <div
+              className={`w-8 h-0.5 mx-1 ${i < current ? 'bg-wp-green' : 'bg-gray-200'}`}
+            />
           )}
         </div>
       ))}
@@ -32,9 +41,15 @@ function ProgressLog({ messages }) {
   return (
     <div className="mt-4 bg-gray-900 rounded-lg p-4 h-40 overflow-y-auto font-mono text-xs">
       {messages.map((msg, i) => (
-        <div key={i} className={`flex items-start gap-2 ${i === messages.length - 1 ? 'text-white' : 'text-gray-400'}`}>
+        <div
+          key={i}
+          className={`flex items-start gap-2 ${i === messages.length - 1 ? 'text-white' : 'text-gray-400'}`}
+        >
           {i === messages.length - 1 ? (
-            <Loader size={11} className="animate-spin mt-0.5 flex-shrink-0 text-wp-blue-light" />
+            <Loader
+              size={11}
+              className="animate-spin mt-0.5 flex-shrink-0 text-wp-blue-light"
+            />
           ) : (
             <CheckCircle size={11} className="mt-0.5 flex-shrink-0 text-wp-green" />
           )}
@@ -59,7 +74,7 @@ export default function AddSiteModal({ onClose, onSiteAdded, phpVersions }) {
     title: '',
   });
   const [error, setError] = useState('');
-  const [creating, setCreating] = useState(false);
+  const [, setCreating] = useState(false);
   const [progressMessages, setProgressMessages] = useState([]);
   const [done, setDone] = useState(false);
 
@@ -92,8 +107,10 @@ export default function AddSiteModal({ onClose, onSiteAdded, phpVersions }) {
 
   async function loadDefaultPath() {
     if (!formData.path && formData.domain) {
+      // sitesDir is always provided by the main process (it falls back to
+      // ~/Sites there); the renderer has no access to process.env.
       const settings = await window.electronAPI.getSettings();
-      const sitesDir = settings.sitesDir || `${process.env.HOME}/Sites`;
+      const sitesDir = settings.sitesDir;
       const slug = formData.domain.replace('.test', '');
       setFormData((prev) => ({
         ...prev,
@@ -150,15 +167,23 @@ export default function AddSiteModal({ onClose, onSiteAdded, phpVersions }) {
   }
 
   return (
-    <div className="modal-overlay animate-fade-in" onClick={(e) => e.target === e.currentTarget && onClose()}>
+    <div
+      className="modal-overlay animate-fade-in"
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
       <div className="bg-white rounded-2xl shadow-window w-[520px] max-h-[90vh] overflow-hidden animate-slide-in">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
           <div>
             <h2 className="text-base font-bold text-gray-900">Add WordPress Site</h2>
-            <p className="text-xs text-gray-400 mt-0.5">Set up a new local WordPress site</p>
+            <p className="text-xs text-gray-400 mt-0.5">
+              Set up a new local WordPress site
+            </p>
           </div>
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400">
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400"
+          >
             <X size={16} />
           </button>
         </div>
@@ -170,7 +195,9 @@ export default function AddSiteModal({ onClose, onSiteAdded, phpVersions }) {
           {step === 0 && (
             <div className="space-y-4 animate-fade-in">
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1.5">Site Name</label>
+                <label className="block text-xs font-medium text-gray-700 mb-1.5">
+                  Site Name
+                </label>
                 <input
                   type="text"
                   className="form-input"
@@ -189,16 +216,23 @@ export default function AddSiteModal({ onClose, onSiteAdded, phpVersions }) {
                     type="text"
                     className="form-input"
                     value={formData.domain}
-                    onChange={(e) => setFormData((p) => ({ ...p, domain: e.target.value }))}
+                    onChange={(e) =>
+                      setFormData((p) => ({ ...p, domain: e.target.value }))
+                    }
                     placeholder="mysite.test"
                   />
                 </div>
                 <p className="text-xs text-gray-400 mt-1">
-                  Accessible at <span className="font-mono text-wp-blue">{formData.domain || 'mysite.test'}</span>
+                  Accessible at{' '}
+                  <span className="font-mono text-wp-blue">
+                    {formData.domain || 'mysite.test'}
+                  </span>
                 </p>
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1.5">Site Title</label>
+                <label className="block text-xs font-medium text-gray-700 mb-1.5">
+                  Site Title
+                </label>
                 <input
                   type="text"
                   className="form-input"
@@ -225,11 +259,16 @@ export default function AddSiteModal({ onClose, onSiteAdded, phpVersions }) {
                     onChange={(e) => setFormData((p) => ({ ...p, path: e.target.value }))}
                     placeholder={`~/Sites/${formData.domain.replace('.test', '')}`}
                   />
-                  <button onClick={handleSelectFolder} className="btn-secondary px-3 flex-shrink-0">
+                  <button
+                    onClick={handleSelectFolder}
+                    className="btn-secondary px-3 flex-shrink-0"
+                  >
                     <FolderOpen size={15} />
                   </button>
                 </div>
-                <p className="text-xs text-gray-400 mt-1">WordPress files will be installed here</p>
+                <p className="text-xs text-gray-400 mt-1">
+                  WordPress files will be installed here
+                </p>
               </div>
 
               <div>
@@ -239,7 +278,9 @@ export default function AddSiteModal({ onClose, onSiteAdded, phpVersions }) {
                 <select
                   className="form-input"
                   value={formData.phpVersion}
-                  onChange={(e) => setFormData((p) => ({ ...p, phpVersion: e.target.value }))}
+                  onChange={(e) =>
+                    setFormData((p) => ({ ...p, phpVersion: e.target.value }))
+                  }
                 >
                   {phpVersions && phpVersions.length > 0 ? (
                     phpVersions.map((v) => (
@@ -259,7 +300,9 @@ export default function AddSiteModal({ onClose, onSiteAdded, phpVersions }) {
           {step === 2 && (
             <div className="space-y-4 animate-fade-in">
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1.5">Database Name</label>
+                <label className="block text-xs font-medium text-gray-700 mb-1.5">
+                  Database Name
+                </label>
                 <input
                   type="text"
                   className="form-input font-mono text-xs"
@@ -276,7 +319,9 @@ export default function AddSiteModal({ onClose, onSiteAdded, phpVersions }) {
                     type="text"
                     className="form-input"
                     value={formData.adminUser}
-                    onChange={(e) => setFormData((p) => ({ ...p, adminUser: e.target.value }))}
+                    onChange={(e) =>
+                      setFormData((p) => ({ ...p, adminUser: e.target.value }))
+                    }
                   />
                 </div>
                 <div>
@@ -287,23 +332,29 @@ export default function AddSiteModal({ onClose, onSiteAdded, phpVersions }) {
                     type="text"
                     className="form-input"
                     value={formData.adminPassword}
-                    onChange={(e) => setFormData((p) => ({ ...p, adminPassword: e.target.value }))}
+                    onChange={(e) =>
+                      setFormData((p) => ({ ...p, adminPassword: e.target.value }))
+                    }
                   />
                 </div>
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1.5">Admin Email</label>
+                <label className="block text-xs font-medium text-gray-700 mb-1.5">
+                  Admin Email
+                </label>
                 <input
                   type="email"
                   className="form-input"
                   value={formData.adminEmail}
-                  onChange={(e) => setFormData((p) => ({ ...p, adminEmail: e.target.value }))}
+                  onChange={(e) =>
+                    setFormData((p) => ({ ...p, adminEmail: e.target.value }))
+                  }
                 />
               </div>
               <div className="bg-blue-50 rounded-lg px-4 py-3 text-xs text-blue-700">
                 WordPress will be installed at{' '}
-                <span className="font-semibold font-mono">{formData.domain}</span> with the
-                credentials above.
+                <span className="font-semibold font-mono">{formData.domain}</span> with
+                the credentials above.
               </div>
             </div>
           )}
@@ -320,7 +371,9 @@ export default function AddSiteModal({ onClose, onSiteAdded, phpVersions }) {
                   <p className="text-sm text-gray-500 mt-1 mb-4">
                     Your WordPress site is ready at{' '}
                     <button
-                      onClick={() => window.electronAPI.openSiteInBrowser(`http://${formData.domain}`)}
+                      onClick={() =>
+                        window.electronAPI.openSiteInBrowser(`http://${formData.domain}`)
+                      }
                       className="text-wp-blue hover:underline font-medium"
                     >
                       {formData.domain}
@@ -351,8 +404,13 @@ export default function AddSiteModal({ onClose, onSiteAdded, phpVersions }) {
               ) : (
                 <div>
                   <div className="flex items-center gap-3 mb-2">
-                    <Loader size={18} className="animate-spin text-wp-blue flex-shrink-0" />
-                    <p className="text-sm font-medium text-gray-700">Creating WordPress site…</p>
+                    <Loader
+                      size={18}
+                      className="animate-spin text-wp-blue flex-shrink-0"
+                    />
+                    <p className="text-sm font-medium text-gray-700">
+                      Creating WordPress site…
+                    </p>
                   </div>
                   <ProgressLog messages={progressMessages} />
                 </div>

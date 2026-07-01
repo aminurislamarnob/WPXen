@@ -21,7 +21,6 @@ function openExternalSafely(url) {
 }
 
 const fs = require('fs');
-const JsonStore = require('./store.cjs');
 const brew = require('./services/brew.cjs');
 const nginx = require('./services/nginx.cjs');
 const phpService = require('./services/php.cjs');
@@ -159,7 +158,10 @@ function registerHandlers(win, storeInstance) {
 
       // Ensure MySQL is running
       if (!mysql.isRunning()) {
-        return { success: false, error: 'MySQL is not running. Start it in the Services panel.' };
+        return {
+          success: false,
+          error: 'MySQL is not running. Start it in the Services panel.',
+        };
       }
 
       const site = await wordpress.createWordPressSite(siteData, progress);
@@ -194,7 +196,9 @@ function registerHandlers(win, storeInstance) {
 
   ipcMain.handle('open-in-browser', (_, url) => {
     const ok = openExternalSafely(url);
-    return ok ? { success: true } : { success: false, error: 'Refused to open unsafe URL' };
+    return ok
+      ? { success: true }
+      : { success: false, error: 'Refused to open unsafe URL' };
   });
 
   ipcMain.handle('open-in-finder', (_, sitePath) => {
@@ -397,7 +401,10 @@ function registerHandlers(win, storeInstance) {
   ipcMain.handle('get-settings', () => {
     return {
       sitesDir: store.get('settings.sitesDir', wordpress.DEFAULT_SITES_DIR),
-      defaultPhpVersion: store.get('settings.defaultPhpVersion', brew.getActivePhpVersion()),
+      defaultPhpVersion: store.get(
+        'settings.defaultPhpVersion',
+        brew.getActivePhpVersion()
+      ),
       startAtLogin: store.get('settings.startAtLogin', false),
       dbUser: store.get('settings.dbUser', 'root'),
       dbPassword: store.get('settings.dbPassword', ''),
@@ -414,7 +421,8 @@ function registerHandlers(win, storeInstance) {
         store.set('settings.startAtLogin', settings.startAtLogin);
         app.setLoginItemSettings({ openAtLogin: settings.startAtLogin });
       }
-      if (typeof settings.dbUser === 'string') store.set('settings.dbUser', settings.dbUser);
+      if (typeof settings.dbUser === 'string')
+        store.set('settings.dbUser', settings.dbUser);
       if (typeof settings.dbPassword === 'string')
         store.set('settings.dbPassword', settings.dbPassword);
       // Re-apply credentials immediately so the running session uses them.

@@ -14,7 +14,10 @@ function DeleteConfirmModal({ site, onConfirm, onClose }) {
   }
 
   return (
-    <div className="modal-overlay animate-fade-in" onClick={(e) => e.target === e.currentTarget && onClose()}>
+    <div
+      className="modal-overlay animate-fade-in"
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
       <div className="bg-white rounded-2xl shadow-window w-96 animate-slide-in">
         <div className="p-6">
           <div className="flex items-center gap-3 mb-4">
@@ -64,9 +67,7 @@ function DeleteConfirmModal({ site, onConfirm, onClose }) {
               disabled={loading}
               className="btn-danger flex-1 text-sm"
             >
-              {loading ? (
-                <Loader size={14} className="animate-spin mr-2" />
-              ) : null}
+              {loading ? <Loader size={14} className="animate-spin mr-2" /> : null}
               Remove Site
             </button>
           </div>
@@ -76,7 +77,7 @@ function DeleteConfirmModal({ site, onConfirm, onClose }) {
   );
 }
 
-export default function Sites({ sites, setSites, refreshSites, serviceStatus }) {
+export default function Sites({ sites, setSites, refreshSites }) {
   const [showAddModal, setShowAddModal] = useState(false);
   const [search, setSearch] = useState('');
   const [deletingSite, setDeletingSite] = useState(null);
@@ -123,7 +124,10 @@ export default function Sites({ sites, setSites, refreshSites, serviceStatus }) 
       {/* Search */}
       {sites.length > 0 && (
         <div className="relative mb-5">
-          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <Search
+            size={15}
+            className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+          />
           <input
             type="text"
             placeholder="Search sites…"
@@ -142,7 +146,8 @@ export default function Sites({ sites, setSites, refreshSites, serviceStatus }) 
           </div>
           <h2 className="text-base font-bold text-gray-800">No sites yet</h2>
           <p className="text-sm text-gray-400 mt-2 mb-6 max-w-xs">
-            Create your first local WordPress site. It'll be up and running in minutes.
+            Create your first local WordPress site. It&apos;ll be up and running in
+            minutes.
           </p>
           <button onClick={() => setShowAddModal(true)} className="btn-primary">
             <Plus size={15} className="mr-2" />
@@ -151,16 +156,12 @@ export default function Sites({ sites, setSites, refreshSites, serviceStatus }) 
         </div>
       ) : filtered.length === 0 ? (
         <div className="text-center py-16">
-          <p className="text-sm text-gray-400">No sites match "{search}"</p>
+          <p className="text-sm text-gray-400">No sites match &quot;{search}&quot;</p>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {filtered.map((site) => (
-            <SiteCard
-              key={site.id}
-              site={site}
-              onDelete={setDeletingSite}
-            />
+            <SiteCard key={site.id} site={site} onDelete={setDeletingSite} />
           ))}
         </div>
       )}

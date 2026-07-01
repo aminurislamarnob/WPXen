@@ -7,15 +7,29 @@
   "scripts": {
     "dev": "concurrently -k -n \"VITE,ELECTRON\" -c \"cyan,yellow\" \"vite\" \"wait-on http://localhost:5173 && NODE_ENV=development electron .\"",
     "build": "vite build && electron-builder --mac",
+    "build:renderer": "vite build",
     "vite": "vite",
     "electron": "NODE_ENV=development electron .",
-    "pack": "vite build && electron-builder --dir"
+    "pack": "vite build && electron-builder --dir",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "engines": {
     "node": ">=18.0.0",
     "npm": ">=9.0.0"
   },
-  "keywords": ["wordpress", "local", "development", "macos", "php", "nginx"],
+  "keywords": [
+    "wordpress",
+    "local",
+    "development",
+    "macos",
+    "php",
+    "nginx"
+  ],
   "author": "WPHerd",
   "license": "MIT",
   "dependencies": {
@@ -25,14 +39,22 @@
     "react-router-dom": "^6.21.3"
   },
   "devDependencies": {
+    "@eslint/js": "^9.9.0",
     "@vitejs/plugin-react": "^4.2.1",
     "autoprefixer": "^10.4.17",
     "concurrently": "^8.2.2",
     "electron": "^28.2.10",
     "electron-builder": "^24.13.3",
+    "eslint": "^9.9.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-react": "^7.35.0",
+    "eslint-plugin-react-hooks": "^5.0.0",
+    "globals": "^15.9.0",
     "postcss": "^8.4.35",
+    "prettier": "^3.3.3",
     "tailwindcss": "^3.4.1",
     "vite": "^5.1.4",
+    "vitest": "^2.0.5",
     "wait-on": "^7.2.0"
   },
   "build": {
@@ -45,7 +67,13 @@
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
       "target": [
-        { "target": "dmg", "arch": ["arm64", "x64"] }
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
       ]
     },
     "directories": {
@@ -62,7 +90,9 @@
       {
         "from": "assets/bin",
         "to": "bin",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       }
     ]
   }

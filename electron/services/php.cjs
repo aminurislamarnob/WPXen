@@ -36,9 +36,11 @@ function getBrewServiceName(version) {
   return 'php';
 }
 
-function isPhpFpmRunning(version) {
+function isPhpFpmRunning(_version) {
   try {
-    const out = execSync(`pgrep -f "php-fpm: master"`, { stdio: 'pipe' }).toString().trim();
+    const out = execSync(`pgrep -f "php-fpm: master"`, { stdio: 'pipe' })
+      .toString()
+      .trim();
     return out.length > 0;
   } catch {
     return false;
@@ -46,7 +48,7 @@ function isPhpFpmRunning(version) {
 }
 
 // Non-blocking variant used by the status poller (see asyncExec.cjs).
-async function isPhpFpmRunningAsync(version) {
+async function isPhpFpmRunningAsync(_version) {
   try {
     await execAsync(`pgrep -f "php-fpm: master"`, { timeout: 4000 });
     return true;

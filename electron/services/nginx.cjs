@@ -87,10 +87,7 @@ function ensureServersDir() {
     const content = fs.readFileSync(confFile, 'utf8');
     if (!content.includes('servers/')) {
       // Inject include directive before the last closing brace
-      const updated = content.replace(
-        /(\s*}\s*)$/,
-        '\n    include servers/*;\n$1'
-      );
+      const updated = content.replace(/(\s*}\s*)$/, '\n    include servers/*;\n$1');
       fs.writeFileSync(confFile, updated, 'utf8');
     }
   }
@@ -109,7 +106,6 @@ function generateSiteConfig(site) {
     throw new Error(`Unsafe site path for nginx config: ${sitePath}`);
   }
 
-  const prefix = brew.getBrewPrefix();
   // Homebrew's php-fpm listens on TCP 127.0.0.1:9000 by default and does not
   // create a unix socket. Use a per-version socket only when one actually
   // exists; otherwise fall back to the TCP address so PHP requests resolve.

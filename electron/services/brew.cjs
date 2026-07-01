@@ -2,7 +2,6 @@
 
 const { execSync } = require('child_process');
 const fs = require('fs');
-const os = require('os');
 const execAsync = require('./asyncExec.cjs');
 
 // Detect Homebrew prefix (Apple Silicon vs Intel)
@@ -72,7 +71,9 @@ function getInstalledPhpVersions() {
   // Check for default php
   if (fs.existsSync(`${prefix}/bin/php`)) {
     try {
-      const out = execSync(`${prefix}/bin/php -r "echo PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;"`)
+      const out = execSync(
+        `${prefix}/bin/php -r "echo PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;"`
+      )
         .toString()
         .trim();
       if (out.match(/^\d+\.\d+$/)) {
@@ -90,7 +91,9 @@ function getInstalledPhpVersions() {
     }
   }
 
-  return [...new Set(versions)].sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
+  return [...new Set(versions)].sort((a, b) =>
+    b.localeCompare(a, undefined, { numeric: true })
+  );
 }
 
 function getActivePhpVersion() {
