@@ -62,38 +62,74 @@ async function isPackageInstalledAsync(name) {
   }
 }
 
+// Runs a php binary and returns its major.minor (e.g. "8.3"), or null. Used to
+// verify a formula's *actual* version rather than trusting its name — an `opt`
+// symlink can be stale (e.g. php@8.4 -> Cellar/php/8.5.7 after an upgrade).
+function phpBinaryVersion(phpBin) {
+  try {
+    const out = execSync(
+      `${phpBin} -r "echo PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;"`,
+      { stdio: ['ignore', 'pipe', 'pipe'] }
+    )
+      .toString()
+      .trim();
+    return /^\d+\.\d+$/.test(out) ? out : null;
+  } catch {
+    return null;
+  }
+}
+
+// Candidate versioned formulae WPHerd knows how to detect/install.
+const PHP_VERSION_CANDIDATES = ['8.4', '8.3', '8.2', '8.1', '8.0', '7.4'];
+
 function getInstalledPhpVersions() {
   const prefix = getBrewPrefix();
   if (!prefix) return [];
 
-  const versions = [];
+  const versions = new Set();
 
-  // Check for default php
-  if (fs.existsSync(`${prefix}/bin/php`)) {
-    try {
-      const out = execSync(
-        `${prefix}/bin/php -r "echo PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;"`
-      )
-        .toString()
-        .trim();
-      if (out.match(/^\d+\.\d+$/)) {
-        versions.push(out);
-      }
-    } catch {}
+  // Unversioned `php` formula — record whatever major.minor it actually is
+  // (the "latest" formula tracks the newest release, e.g. 8.5). Probe its
+  // canonical opt path, not ${prefix}/bin/php, so it's still detected when
+  // currently unlinked because another version is active.
+  const defaultOpt = `${prefix}/opt/php/bin/php`;
+  if (fs.existsSync(defaultOpt)) {
+    const v = phpBinaryVersion(defaultOpt);
+    if (v) versions.add(v);
   }
 
-  // Check for versioned php formulae
-  const phpVersions = ['8.4', '8.3', '8.2', '8.1', '8.0', '7.4'];
-  for (const v of phpVersions) {
+  // Versioned php@X formulae. Trust the binary's reported version, not the
+  // formula name, so a stale opt symlink pointing at a different keg (e.g.
+  // php@8.4 -> php 8.5) isn't counted as that version.
+  for (const v of PHP_VERSION_CANDIDATES) {
     const phpBin = `${prefix}/opt/php@${v}/bin/php`;
-    if (fs.existsSync(phpBin)) {
-      if (!versions.includes(v)) versions.push(v);
+    if (fs.existsSync(phpBin) && phpBinaryVersion(phpBin) === v) {
+      versions.add(v);
     }
   }
 
-  return [...new Set(versions)].sort((a, b) =>
+  return [...versions].sort((a, b) =>
     b.localeCompare(a, undefined, { numeric: true })
   );
+}
+
+// Resolves the Homebrew formula that actually provides `version`, or null if it
+// isn't installed. Prefers a real versioned keg (Cellar/php@X); otherwise falls
+// back to the unversioned `php` when it currently reports that version.
+function phpFormulaForVersion(version) {
+  const prefix = getBrewPrefix();
+  if (!prefix) return null;
+
+  if (fs.existsSync(`${prefix}/Cellar/php@${version}`)) {
+    return `php@${version}`;
+  }
+
+  const defaultOpt = `${prefix}/opt/php/bin/php`;
+  if (fs.existsSync(defaultOpt) && phpBinaryVersion(defaultOpt) === version) {
+    return 'php';
+  }
+
+  return null;
 }
 
 function getActivePhpVersion() {
@@ -278,10 +314,11 @@ function execBrewServiceSudo(action, name) {
   }
 
   // Sudoers not set up (or no longer valid) — prompt via osascript.
+  const { adminOsascript } = require('./admin.cjs');
   const prefix = getBrewPrefix();
   const shellCmd = `PATH=${prefix}/bin:$PATH ${brewBin} services ${action} ${name}`;
-  const appleScript = `do shell script "${shellCmd.replace(/"/g, '\\"')}" with administrator privileges`;
-  execSync(`osascript -e '${appleScript.replace(/'/g, "'\\''")}'`, {
+  const reason = `WPHerd wants to ${action} the ${name} service.`;
+  execSync(adminOsascript(shellCmd, reason), {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 }
@@ -306,6 +343,7 @@ module.exports = {
   isPackageInstalled,
   isPackageInstalledAsync,
   getInstalledPhpVersions,
+  phpFormulaForVersion,
   getActivePhpVersion,
   getActivePhpVersionAsync,
   getPhpFpmSocketPath,

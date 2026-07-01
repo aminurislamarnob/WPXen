@@ -1,9 +1,13 @@
 'use strict';
 
-const { execSync } = require('child_process');
+const { execSync, spawn } = require('child_process');
 const fs = require('fs');
 const brew = require('./brew.cjs');
 const execAsync = require('./asyncExec.cjs');
+
+// PHP versions available as Homebrew core formulae (php@<version>). Newest
+// first. Kept in sync with the versions probed by brew.getInstalledPhpVersions.
+const KNOWN_PHP_VERSIONS = ['8.4', '8.3', '8.2', '8.1'];
 
 function getPhpBinPath(version) {
   const prefix = brew.getBrewPrefix();
@@ -143,31 +147,93 @@ async function getInstalledPhpVersionsWithDetailsAsync() {
   }));
 }
 
+// Lists PHP versions WPHerd can install via Homebrew, each flagged with whether
+// it's already installed. Any installed version not in the known list (e.g. a
+// newer release from a tap) is appended so nothing installed is ever hidden.
+function getInstallablePhpVersions() {
+  const installed = new Set(brew.getInstalledPhpVersions());
+  const versions = [...new Set([...KNOWN_PHP_VERSIONS, ...installed])];
+  return versions
+    .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))
+    .map((version) => ({ version, installed: installed.has(version) }));
+}
+
+// Installs `php@<version>` via Homebrew, streaming each output line to
+// `onProgress`. Resolves on success; rejects with the tail of brew's output on
+// failure. brew install needs no sudo (it writes into the Homebrew prefix).
+function installPhpVersion(version, onProgress) {
+  return new Promise((resolve, reject) => {
+    if (!/^\d+\.\d+$/.test(String(version))) {
+      reject(new Error('Invalid PHP version'));
+      return;
+    }
+    const brewBin = brew.getBrewPath();
+    if (!brewBin) {
+      reject(new Error('Homebrew is not installed'));
+      return;
+    }
+
+    const formula = `php@${version}`;
+    const prefix = brew.getBrewPrefix();
+    const child = spawn(brewBin, ['install', formula], {
+      env: {
+        ...process.env,
+        PATH: `${prefix}/bin:${process.env.PATH}`,
+        // Skip the slow auto-update on every install; keeps output focused.
+        HOMEBREW_NO_AUTO_UPDATE: '1',
+        HOMEBREW_NO_ENV_HINTS: '1',
+      },
+    });
+
+    // brew writes most progress to stderr; keep a rolling tail for the error.
+    let tail = '';
+    const emit = (buf) => {
+      const text = buf.toString();
+      tail = (tail + text).slice(-4000);
+      for (const line of text.split('\n')) {
+        const trimmed = line.trim();
+        if (trimmed && typeof onProgress === 'function') onProgress(trimmed);
+      }
+    };
+
+    child.stdout.on('data', emit);
+    child.stderr.on('data', emit);
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code === 0) {
+        resolve();
+      } else {
+        reject(
+          new Error(tail.trim() || `brew install ${formula} failed (exit ${code})`)
+        );
+      }
+    });
+  });
+}
+
 function switchActivePhpVersion(version) {
   const prefix = brew.getBrewPrefix();
   if (!prefix) throw new Error('Homebrew not found');
 
-  // Unlink current php
+  // Resolve the real formula for this version up front (php@X vs the
+  // unversioned php), so we fail cleanly instead of trying to link a
+  // non-existent keg via a stale opt symlink.
+  const targetFormula = brew.phpFormulaForVersion(version);
+  if (!targetFormula) {
+    throw new Error(`PHP ${version} is not installed`);
+  }
+
+  // Unlink every installed php formula (best-effort) before linking the target.
   try {
     brew.execBrew('unlink php');
   } catch {}
-
-  // Unlink all php versions
-  const versions = brew.getInstalledPhpVersions();
-  for (const v of versions) {
+  for (const v of brew.getInstalledPhpVersions()) {
     try {
       brew.execBrew(`unlink php@${v}`);
     } catch {}
   }
 
-  // Link new version
-  const targetFormula = `php@${version}`;
-  const prefix2 = brew.getBrewPrefix();
-  if (fs.existsSync(`${prefix2}/opt/${targetFormula}`)) {
-    brew.execBrew(`link --overwrite --force ${targetFormula}`);
-  } else {
-    brew.execBrew('link --overwrite --force php');
-  }
+  brew.execBrew(`link --overwrite --force ${targetFormula}`);
 }
 
 module.exports = {
@@ -180,6 +246,8 @@ module.exports = {
   stopAllPhpFpm,
   getInstalledPhpVersionsWithDetails,
   getInstalledPhpVersionsWithDetailsAsync,
+  getInstallablePhpVersions,
+  installPhpVersion,
   switchActivePhpVersion,
   getBrewServiceName,
 };

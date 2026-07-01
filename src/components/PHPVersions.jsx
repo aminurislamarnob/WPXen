@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { CheckCircle, Loader, Code2, Star, Info } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { CheckCircle, Loader, Code2, Star, Download } from 'lucide-react';
 import { StatusBadge } from './StatusBadge';
 
 function VersionCard({ version, onSwitch, switching }) {
@@ -85,26 +85,99 @@ function VersionCard({ version, onSwitch, switching }) {
   );
 }
 
+function InstallRow({ version, onInstall, installing, logLine }) {
+  const isInstalling = installing === version;
+
+  return (
+    <div className="bg-white rounded-xl border border-surface-border shadow-card p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-lg bg-purple-50 text-purple-700 flex items-center justify-center font-mono text-xs font-bold">
+            {version}
+          </div>
+          <div>
+            <h4 className="text-sm font-semibold text-gray-900">PHP {version}</h4>
+            <p className="text-xs text-gray-400 font-mono">php@{version}</p>
+          </div>
+        </div>
+        <button
+          onClick={() => onInstall(version)}
+          disabled={!!installing}
+          className="btn-secondary text-xs justify-center min-w-[110px]"
+        >
+          {isInstalling ? (
+            <>
+              <Loader size={12} className="animate-spin mr-1.5" />
+              Installing…
+            </>
+          ) : (
+            <>
+              <Download size={12} className="mr-1.5" />
+              Install
+            </>
+          )}
+        </button>
+      </div>
+
+      {isInstalling && (
+        <div className="mt-3 px-3 py-2 bg-gray-900 rounded-lg">
+          <p className="text-xs text-green-400 font-mono truncate" title={logLine}>
+            {logLine || 'Starting…'}
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function PHPVersions() {
   const [versions, setVersions] = useState([]);
+  const [installable, setInstallable] = useState([]);
   const [loading, setLoading] = useState(true);
   const [switching, setSwitching] = useState(null);
+  const [installing, setInstalling] = useState(null);
+  const [logLine, setLogLine] = useState('');
   const [message, setMessage] = useState(null);
+
+  // Keep the latest installing version available to the progress listener
+  // without re-subscribing on every change.
+  const installingRef = useRef(null);
+  useEffect(() => {
+    installingRef.current = installing;
+  }, [installing]);
 
   useEffect(() => {
     loadVersions();
+
+    const handleProgress = (data) => {
+      if (data && data.version === installingRef.current) {
+        setLogLine(data.line);
+      }
+    };
+    window.electronAPI.on('php-install-progress', handleProgress);
+    return () => window.electronAPI.off('php-install-progress');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function loadVersions() {
     setLoading(true);
-    try {
-      const v = await window.electronAPI.getPhpVersions();
-      setVersions(v);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
+    // Load each list independently so a failure in one (e.g. an older main
+    // process without the installable-versions handler) can't blank the other.
+    const [installedResult, installableResult] = await Promise.allSettled([
+      window.electronAPI.getPhpVersions(),
+      window.electronAPI.getInstallablePhpVersions(),
+    ]);
+    if (installedResult.status === 'fulfilled') {
+      setVersions(installedResult.value);
+    } else {
+      console.error(installedResult.reason);
     }
+    if (installableResult.status === 'fulfilled') {
+      setInstallable(installableResult.value);
+    } else {
+      console.error(installableResult.reason);
+    }
+    setLoading(false);
   }
 
   async function handleSwitch(version) {
@@ -123,6 +196,23 @@ export default function PHPVersions() {
     setSwitching(null);
   }
 
+  async function handleInstall(version) {
+    setInstalling(version);
+    setLogLine('');
+    setMessage(null);
+    const result = await window.electronAPI.installPhpVersion(version);
+    if (result.success) {
+      setMessage({ type: 'success', text: `PHP ${version} installed.` });
+      await loadVersions();
+    } else {
+      setMessage({ type: 'error', text: result.error });
+    }
+    setInstalling(null);
+    setLogLine('');
+  }
+
+  const notInstalled = installable.filter((v) => !v.installed);
+
   return (
     <div className="p-6 max-w-3xl animate-fade-in">
       <div className="flex items-center justify-between mb-5">
@@ -130,7 +220,11 @@ export default function PHPVersions() {
           <h1 className="text-xl font-bold text-gray-900">PHP Versions</h1>
           <p className="text-sm text-gray-500 mt-0.5">Manage installed PHP versions</p>
         </div>
-        <button onClick={loadVersions} className="btn-secondary text-sm">
+        <button
+          onClick={loadVersions}
+          disabled={!!installing}
+          className="btn-secondary text-sm"
+        >
           Refresh
         </button>
       </div>
@@ -153,17 +247,14 @@ export default function PHPVersions() {
           <Loader size={22} className="animate-spin text-wp-blue" />
         </div>
       ) : versions.length === 0 ? (
-        <div className="text-center py-16">
+        <div className="text-center py-12">
           <div className="w-14 h-14 rounded-xl bg-purple-50 flex items-center justify-center mx-auto mb-3">
             <Code2 size={24} className="text-purple-500" />
           </div>
           <h3 className="text-sm font-bold text-gray-700">No PHP versions found</h3>
-          <p className="text-xs text-gray-400 mt-2 mb-4">
-            Install PHP via Homebrew to get started
+          <p className="text-xs text-gray-400 mt-2">
+            Install one below to get started.
           </p>
-          <code className="block bg-gray-900 text-green-400 px-4 py-2 rounded-lg text-xs font-mono">
-            brew install php@8.2
-          </code>
         </div>
       ) : (
         <div className="space-y-3">
@@ -178,18 +269,40 @@ export default function PHPVersions() {
         </div>
       )}
 
-      <div className="mt-5 flex items-start gap-3 bg-blue-50 rounded-xl px-4 py-3 text-sm text-blue-700">
-        <Info size={15} className="flex-shrink-0 mt-0.5" />
-        <div>
-          <p className="font-medium">Install more PHP versions</p>
-          <p className="text-xs text-blue-600 mt-0.5">
-            <span className="font-mono bg-blue-100 px-1 rounded">
-              brew install php@8.1 php@8.2 php@8.3
-            </span>{' '}
-            — then restart WPHerd.
+      {/* Install more PHP versions */}
+      {!loading && (
+        <div className="mt-8">
+          <div className="flex items-center gap-2 mb-3">
+            <Download size={16} className="text-gray-500" />
+            <h2 className="text-sm font-semibold text-gray-900">
+              Install PHP versions
+            </h2>
+          </div>
+          {notInstalled.length === 0 ? (
+            installable.length > 0 && (
+              <p className="text-xs text-gray-400">
+                All available PHP versions are installed.
+              </p>
+            )
+          ) : (
+            <div className="space-y-3">
+              {notInstalled.map((v) => (
+                <InstallRow
+                  key={v.version}
+                  version={v.version}
+                  onInstall={handleInstall}
+                  installing={installing}
+                  logLine={logLine}
+                />
+              ))}
+            </div>
+          )}
+          <p className="text-xs text-gray-400 mt-3">
+            Installs <span className="font-mono">php@&lt;version&gt;</span> via
+            Homebrew. This can take a few minutes.
           </p>
         </div>
-      </div>
+      )}
     </div>
   );
 }

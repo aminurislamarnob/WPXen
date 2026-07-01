@@ -6,6 +6,7 @@ const path = require('path');
 const os = require('os');
 const brew = require('./brew.cjs');
 const execAsync = require('./asyncExec.cjs');
+const { adminOsascript } = require('./admin.cjs');
 
 const TLD = 'test';
 const RESOLVER_DIR = '/etc/resolver';
@@ -98,9 +99,11 @@ function createResolverFile() {
   const shellCmd =
     `mkdir -p ${RESOLVER_DIR} && cp '${tmpFile}' '${RESOLVER_FILE}' && chmod 644 '${RESOLVER_FILE}'` +
     ` && dscacheutil -flushcache && killall -HUP mDNSResponder`;
-  const appleScript = `do shell script "${shellCmd.replace(/"/g, '\\"')}" with administrator privileges`;
+  const reason =
+    `WPHerd wants to configure macOS so that .${TLD} sites resolve to your ` +
+    'local machine.';
   try {
-    execSync(`osascript -e '${appleScript.replace(/'/g, "'\\''")}'`, { stdio: 'pipe' });
+    execSync(adminOsascript(shellCmd, reason), { stdio: 'pipe' });
   } finally {
     try {
       fs.rmSync(tmpFile, { force: true });

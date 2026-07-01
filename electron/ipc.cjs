@@ -29,6 +29,7 @@ const dnsmasq = require('./services/dnsmasq.cjs');
 const wordpress = require('./services/wordpress.cjs');
 const sudoers = require('./services/sudoers.cjs');
 const validation = require('./services/validation.cjs');
+const { humanize } = require('./services/errors.cjs');
 
 let store;
 let mainWindow;
@@ -172,7 +173,7 @@ function registerHandlers(win, storeInstance) {
       return { success: true, site };
     } catch (err) {
       console.error('add-site error:', err);
-      return { success: false, error: err.message };
+      return { success: false, error: humanize(err) };
     }
   });
 
@@ -190,7 +191,7 @@ function registerHandlers(win, storeInstance) {
       );
       return { success: true };
     } catch (err) {
-      return { success: false, error: err.message };
+      return { success: false, error: humanize(err) };
     }
   });
 
@@ -244,7 +245,7 @@ function registerHandlers(win, storeInstance) {
       dnsmasq.start();
       return { success: true };
     } catch (err) {
-      return { success: false, error: err.message };
+      return { success: false, error: humanize(err) };
     }
   });
 
@@ -256,7 +257,7 @@ function registerHandlers(win, storeInstance) {
       dnsmasq.stop();
       return { success: true };
     } catch (err) {
-      return { success: false, error: err.message };
+      return { success: false, error: humanize(err) };
     }
   });
 
@@ -282,7 +283,7 @@ function registerHandlers(win, storeInstance) {
       }
       return { success: true };
     } catch (err) {
-      return { success: false, error: err.message };
+      return { success: false, error: humanize(err) };
     }
   });
 
@@ -306,7 +307,7 @@ function registerHandlers(win, storeInstance) {
       }
       return { success: true };
     } catch (err) {
-      return { success: false, error: err.message };
+      return { success: false, error: humanize(err) };
     }
   });
 
@@ -335,7 +336,7 @@ function registerHandlers(win, storeInstance) {
       }
       return { success: true };
     } catch (err) {
-      return { success: false, error: err.message };
+      return { success: false, error: humanize(err) };
     }
   });
 
@@ -350,7 +351,25 @@ function registerHandlers(win, storeInstance) {
       phpService.switchActivePhpVersion(version);
       return { success: true };
     } catch (err) {
-      return { success: false, error: err.message };
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('get-installable-php-versions', async () => {
+    return phpService.getInstallablePhpVersions();
+  });
+
+  ipcMain.handle('install-php-version', async (event, version) => {
+    try {
+      const progress = (line) => {
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('php-install-progress', { version, line });
+        }
+      };
+      await phpService.installPhpVersion(version, progress);
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
     }
   });
 
@@ -373,7 +392,7 @@ function registerHandlers(win, storeInstance) {
       sudoers.install();
       return { success: true };
     } catch (err) {
-      return { success: false, error: err.message };
+      return { success: false, error: humanize(err) };
     }
   });
 
@@ -382,7 +401,7 @@ function registerHandlers(win, storeInstance) {
       sudoers.uninstall();
       return { success: true };
     } catch (err) {
-      return { success: false, error: err.message };
+      return { success: false, error: humanize(err) };
     }
   });
 
@@ -392,7 +411,7 @@ function registerHandlers(win, storeInstance) {
       dnsmasq.start();
       return { success: true };
     } catch (err) {
-      return { success: false, error: err.message };
+      return { success: false, error: humanize(err) };
     }
   });
 
@@ -432,7 +451,7 @@ function registerHandlers(win, storeInstance) {
       });
       return { success: true };
     } catch (err) {
-      return { success: false, error: err.message };
+      return { success: false, error: humanize(err) };
     }
   });
 

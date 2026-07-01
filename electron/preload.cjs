@@ -23,6 +23,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // PHP
   getPhpVersions: () => ipcRenderer.invoke('get-php-versions'),
   switchPhpVersion: (version) => ipcRenderer.invoke('switch-php-version', version),
+  getInstallablePhpVersions: () =>
+    ipcRenderer.invoke('get-installable-php-versions'),
+  installPhpVersion: (version) =>
+    ipcRenderer.invoke('install-php-version', version),
 
   // Dependencies & Setup
   checkDependencies: () => ipcRenderer.invoke('check-dependencies'),
@@ -48,6 +52,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const validChannels = [
       'service-status-update',
       'site-create-progress',
+      'php-install-progress',
       'dependencies-update',
       'notification',
     ];
@@ -59,6 +64,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const validChannels = [
       'service-status-update',
       'site-create-progress',
+      'php-install-progress',
       'dependencies-update',
       'notification',
     ];

@@ -5,6 +5,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const brew = require('./brew.cjs');
+const { adminOsascript } = require('./admin.cjs');
 
 const SUDOERS_PATH = '/etc/sudoers.d/wpherd';
 const MARKER = '# WPHerd sudoers';
@@ -12,8 +13,18 @@ const MARKER = '# WPHerd sudoers';
 function isConfigured() {
   try {
     if (!fs.existsSync(SUDOERS_PATH)) return false;
-    const content = fs.readFileSync(SUDOERS_PATH, 'utf8');
-    return content.includes(MARKER);
+    // The file is installed root-owned with mode 0440, so the Electron app
+    // (running as a non-root user, typically not in the `wheel` group) usually
+    // cannot read its contents. An EACCES/EPERM here means the file exists and
+    // is correctly locked down — i.e. configured. Only a successful read that's
+    // missing our marker means some other file is squatting the path.
+    try {
+      const content = fs.readFileSync(SUDOERS_PATH, 'utf8');
+      return content.includes(MARKER);
+    } catch (err) {
+      if (err.code === 'EACCES' || err.code === 'EPERM') return true;
+      throw err;
+    }
   } catch {
     return false;
   }
@@ -71,10 +82,12 @@ function install() {
     `visudo -cf '${SUDOERS_PATH}' || rm -f '${SUDOERS_PATH}'`,
   ].join(' && ');
 
-  const appleScript = `do shell script "${shellCmd.replace(/"/g, '\\"')}" with administrator privileges`;
+  const reason =
+    'WPHerd wants to set up passwordless permissions so it will not ask for your ' +
+    'password every time a service starts or stops.';
 
   try {
-    execSync(`osascript -e '${appleScript.replace(/'/g, "'\\''")}'`, {
+    execSync(adminOsascript(shellCmd, reason), {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
   } finally {
@@ -92,8 +105,8 @@ function install() {
 
 function uninstall() {
   if (!fs.existsSync(SUDOERS_PATH)) return;
-  const appleScript = `do shell script "rm -f '${SUDOERS_PATH}'" with administrator privileges`;
-  execSync(`osascript -e '${appleScript.replace(/'/g, "'\\''")}'`, {
+  const reason = 'WPHerd wants to remove its passwordless permissions.';
+  execSync(adminOsascript(`rm -f '${SUDOERS_PATH}'`, reason), {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 }
