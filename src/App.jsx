@@ -6,6 +6,7 @@ import Sites from './components/Sites';
 import Services from './components/Services';
 import PHPVersions from './components/PHPVersions';
 import Settings from './components/Settings';
+import logo from './assets/logo.png';
 
 export default function App() {
   const [serviceStatus, setServiceStatus] = useState({
@@ -60,10 +61,8 @@ export default function App() {
   if (loading) {
     return (
       <div className="h-screen flex items-center justify-center bg-surface">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-wp-blue flex items-center justify-center">
-            <span className="text-white text-xl font-bold">W</span>
-          </div>
+        <div className="flex flex-col items-center gap-4">
+          <img src={logo} alt="WPHerd" className="h-9 w-auto" draggable={false} />
           <p className="text-sm text-gray-500">Starting WPHerd…</p>
         </div>
       </div>

@@ -1,5 +1,6 @@
 import { NavLink, Outlet } from 'react-router-dom';
 import { LayoutDashboard, Globe, Server, Code2, Settings, Circle } from 'lucide-react';
+import logo from '../assets/logo.png';
 
 const navItems = [
   { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
@@ -30,19 +31,8 @@ export default function Layout({ serviceStatus }) {
     <div className="h-screen flex overflow-hidden bg-surface">
       {/* Sidebar */}
       <aside className="w-56 flex flex-col bg-sidebar flex-shrink-0">
-        {/* App header (title bar drag region) */}
-        <div className="drag-region h-14 flex items-center px-5 flex-shrink-0">
-          {/* Traffic light placeholder (hiddenInset handles real ones) */}
-          <div className="w-16 flex-shrink-0" />
-          <div className="flex items-center gap-2 no-drag ml-1">
-            <div className="w-6 h-6 rounded-md bg-wp-blue flex items-center justify-center flex-shrink-0">
-              <span className="text-white text-xs font-bold">W</span>
-            </div>
-            <span className="text-white text-sm font-semibold tracking-tight">
-              WPHerd
-            </span>
-          </div>
-        </div>
+        {/* App header (title bar drag region — hosts the macOS traffic lights) */}
+        <div className="drag-region h-14 flex-shrink-0" />
 
         {/* Navigation */}
         <nav className="flex-1 px-3 py-2 space-y-0.5">
@@ -81,7 +71,15 @@ export default function Layout({ serviceStatus }) {
                   : 'Services stopped'}
             </span>
           </div>
-          <p className="text-xs text-sidebar-text/50 mt-1">WPHerd v1.0</p>
+          <div className="flex items-center gap-1.5 mt-2">
+            <img
+              src={logo}
+              alt="WPHerd"
+              className="h-4 w-auto"
+              draggable={false}
+            />
+            <span className="text-xs text-sidebar-text/50">v1.0</span>
+          </div>
         </div>
       </aside>
 
