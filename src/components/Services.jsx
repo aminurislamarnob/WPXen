@@ -13,6 +13,7 @@ import {
   Loader,
   Info,
 } from 'lucide-react';
+import { Card, Row, SectionLabel, IconTile } from './ui';
 import { StatusBadge } from './StatusBadge';
 
 const SERVICE_CONFIG = [
@@ -22,15 +23,13 @@ const SERVICE_CONFIG = [
     description: 'Web server — serves your WordPress sites via HTTP',
     icon: Server,
     color: 'green',
-    brew: 'nginx',
   },
   {
     id: 'php',
     name: 'PHP-FPM',
     description: 'PHP FastCGI Process Manager — processes PHP scripts',
     icon: Code2,
-    color: 'purple',
-    brew: 'php',
+    color: 'indigo',
   },
   {
     id: 'mysql',
@@ -38,7 +37,6 @@ const SERVICE_CONFIG = [
     description: 'Database server — stores WordPress site data',
     icon: Database,
     color: 'orange',
-    brew: 'mysql',
   },
   {
     id: 'dnsmasq',
@@ -46,117 +44,80 @@ const SERVICE_CONFIG = [
     description: 'DNS resolver — routes *.test domains to localhost',
     icon: Wifi,
     color: 'blue',
-    brew: 'dnsmasq',
+    system: true,
   },
   {
     id: 'mailpit',
     name: 'Mailpit',
     description: 'Email catcher — captures outgoing mail from your sites',
     icon: Mail,
-    color: 'rose',
-    brew: 'mailpit',
+    color: 'red',
     // Optional add-on — only listed once installed (see the Mail page).
     optional: true,
   },
 ];
 
-const COLOR_MAP = {
-  green: { bg: 'bg-green-50', icon: 'text-green-600', ring: 'ring-green-200' },
-  purple: { bg: 'bg-purple-50', icon: 'text-purple-600', ring: 'ring-purple-200' },
-  orange: { bg: 'bg-orange-50', icon: 'text-orange-600', ring: 'ring-orange-200' },
-  blue: { bg: 'bg-blue-50', icon: 'text-blue-600', ring: 'ring-blue-200' },
-  rose: { bg: 'bg-rose-50', icon: 'text-rose-500', ring: 'ring-rose-200' },
-};
-
 function ServiceRow({ config, status, onAction, loadingAction }) {
-  const colors = COLOR_MAP[config.color];
-  const Icon = config.icon;
-  const isLoading = loadingAction === config.id;
   const running = status?.running ?? false;
   const failed = status?.state === 'failed';
+  const isLoading = loadingAction === config.id;
 
   return (
-    <div className="bg-white rounded-xl border border-surface-border shadow-card p-5">
-      <div className="flex items-start gap-4">
-        {/* Icon */}
-        <div
-          className={`w-11 h-11 rounded-xl ${colors.bg} flex items-center justify-center flex-shrink-0 ${
-            running ? `ring-2 ${colors.ring}` : ''
-          }`}
-        >
-          <Icon size={20} className={colors.icon} />
-        </div>
-
-        {/* Info */}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-0.5">
-            <h3 className="text-sm font-semibold text-gray-900">{config.name}</h3>
-            <StatusBadge running={running} />
+    <Row
+      icon={<IconTile icon={config.icon} color={config.color} size={30} />}
+      title={
+        <span className="font-medium flex items-center gap-2">
+          {config.name}
+          <StatusBadge running={running} size="xs" />
+          <span className={`text-xs font-normal ${running ? 'text-wp-green' : 'text-gray-400'}`}>
+            {running ? 'Running' : 'Stopped'}
+          </span>
+        </span>
+      }
+      subtitle={
+        failed && status?.error ? (
+          <span className="text-red-600">
+            {status.error}{' '}
             <span
-              className={`text-xs font-medium ${running ? 'text-wp-green' : 'text-gray-400'}`}
+              role="button"
+              tabIndex={0}
+              onClick={() => window.electronAPI.openServiceLog(config.id)}
+              className="underline cursor-pointer"
             >
-              {running ? 'Running' : 'Stopped'}
+              View log
             </span>
-          </div>
-          <p className="text-xs text-gray-400">{config.description}</p>
-          {config.id === 'dnsmasq' ? (
-            <p className="text-xs text-gray-300 font-mono mt-1">
-              brew services {running ? 'stop' : 'start'} {config.brew}
-            </p>
-          ) : (
-            <p className="text-xs text-gray-300 mt-1">
-              Runs as part of WPHerd — stops when the app quits
-            </p>
-          )}
-          {failed && status?.error && (
-            <div className="flex items-center gap-2 mt-1.5">
-              <p className="text-xs text-red-600 truncate">{status.error}</p>
-              <button
-                onClick={() => window.electronAPI.openServiceLog(config.id)}
-                className="text-xs text-red-600 underline flex-shrink-0 hover:text-red-700"
-              >
-                View log
-              </button>
-            </div>
-          )}
-        </div>
-
-        {/* Actions */}
-        <div className="flex items-center gap-1.5 flex-shrink-0">
-          <button
-            onClick={() => onAction('restart', config.id)}
-            disabled={!running || isLoading}
-            title="Restart"
-            className="p-2 rounded-lg hover:bg-gray-100 text-gray-400 disabled:opacity-30 transition-colors"
-          >
-            {isLoading ? (
-              <Loader size={14} className="animate-spin" />
-            ) : (
-              <RotateCw size={14} />
-            )}
-          </button>
-          {running ? (
-            <button
-              onClick={() => onAction('stop', config.id)}
-              disabled={isLoading}
-              className="service-toggle bg-red-50 text-red-600 hover:bg-red-100"
-            >
-              <Square size={11} className="mr-1.5 inline" />
-              Stop
-            </button>
-          ) : (
-            <button
-              onClick={() => onAction('start', config.id)}
-              disabled={isLoading}
-              className="service-toggle bg-green-50 text-green-700 hover:bg-green-100"
-            >
-              <Play size={11} className="mr-1.5 inline" />
-              Start
-            </button>
-          )}
-        </div>
-      </div>
-    </div>
+          </span>
+        ) : (
+          config.description
+        )
+      }
+    >
+      <button
+        onClick={() => onAction('restart', config.id)}
+        disabled={!running || isLoading}
+        title="Restart"
+        className="p-1.5 rounded-md hover:bg-black/5 text-gray-400 disabled:opacity-30 transition-colors"
+      >
+        {isLoading ? <Loader size={13} className="animate-spin" /> : <RotateCw size={13} />}
+      </button>
+      {running ? (
+        <button
+          onClick={() => onAction('stop', config.id)}
+          disabled={isLoading}
+          className="btn-secondary !px-3 !py-1 text-xs w-[70px] text-red-600"
+        >
+          Stop
+        </button>
+      ) : (
+        <button
+          onClick={() => onAction('start', config.id)}
+          disabled={isLoading}
+          className="btn-secondary !px-3 !py-1 text-xs w-[70px] text-green-700"
+        >
+          Start
+        </button>
+      )}
+    </Row>
   );
 }
 
@@ -211,38 +172,38 @@ export default function Services({ serviceStatus, refreshStatus }) {
     (s) => serviceStatus?.[s.id]?.running
   ).length;
 
+  const appManaged = visibleServices.filter((s) => !s.system);
+  const systemManaged = visibleServices.filter((s) => s.system);
+
   return (
-    <div className="p-6 max-w-3xl animate-fade-in">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-5">
-        <div>
-          <h1 className="text-xl font-bold text-gray-900">Services</h1>
-          <p className="text-sm text-gray-500 mt-0.5">
-            {runningCount} of {visibleServices.length} services running
-          </p>
-        </div>
+    <div className="px-6 pb-6 max-w-2xl mx-auto animate-fade-in">
+      {/* Header actions */}
+      <div className="flex items-center justify-between mb-4">
+        <p className="text-xs text-gray-500">
+          {runningCount} of {visibleServices.length} services running
+        </p>
         <div className="flex gap-2">
           <button
             onClick={handleStopAll}
             disabled={globalLoading || runningCount === 0}
-            className="btn-secondary text-sm"
+            className="btn-secondary text-xs"
           >
             {globalLoading ? (
-              <Loader size={13} className="animate-spin mr-1.5" />
+              <Loader size={12} className="animate-spin mr-1.5" />
             ) : (
-              <Square size={13} className="mr-1.5" />
+              <Square size={12} className="mr-1.5" />
             )}
             Stop All
           </button>
           <button
             onClick={handleStartAll}
             disabled={globalLoading || runningCount === visibleServices.length}
-            className="btn-primary text-sm"
+            className="btn-primary text-xs"
           >
             {globalLoading ? (
-              <Loader size={13} className="animate-spin mr-1.5" />
+              <Loader size={12} className="animate-spin mr-1.5" />
             ) : (
-              <Play size={13} className="mr-1.5" />
+              <Play size={12} className="mr-1.5" />
             )}
             Start All
           </button>
@@ -251,21 +212,22 @@ export default function Services({ serviceStatus, refreshStatus }) {
 
       {/* Status message */}
       {message && (
-        <div
-          className={`flex items-center gap-2 px-4 py-3 rounded-xl mb-4 text-sm animate-fade-in ${
-            message.type === 'error'
-              ? 'bg-red-50 text-red-700'
-              : 'bg-green-50 text-green-700'
-          }`}
-        >
-          {message.type === 'error' ? <XCircle size={15} /> : <CheckCircle size={15} />}
-          {message.text}
-        </div>
+        <Card className={`mb-4 ${message.type === 'error' ? '!bg-red-50' : '!bg-green-50'}`}>
+          <div
+            className={`flex items-center gap-2 px-4 py-3 text-[13px] ${
+              message.type === 'error' ? 'text-red-700' : 'text-green-700'
+            }`}
+          >
+            {message.type === 'error' ? <XCircle size={14} /> : <CheckCircle size={14} />}
+            {message.text}
+          </div>
+        </Card>
       )}
 
-      {/* Service rows */}
-      <div className="space-y-3">
-        {visibleServices.map((config) => (
+      {/* App-managed services */}
+      <SectionLabel>Managed by WPHerd</SectionLabel>
+      <Card className="mb-6">
+        {appManaged.map((config) => (
           <ServiceRow
             key={config.id}
             config={config}
@@ -274,24 +236,37 @@ export default function Services({ serviceStatus, refreshStatus }) {
             loadingAction={loadingAction}
           />
         ))}
-      </div>
+      </Card>
 
-      {/* Info box */}
-      <div className="mt-5 flex items-start gap-3 bg-blue-50 rounded-xl px-4 py-3 text-sm text-blue-700">
-        <Info size={15} className="flex-shrink-0 mt-0.5" />
-        <div>
-          <p className="font-medium">App-managed services</p>
-          <p className="text-xs text-blue-600 mt-0.5">
-            WPHerd runs nginx, PHP-FPM, MySQL, and Mailpit as part of the app —
-            they stop when it quits and don&apos;t appear as background items in
-            macOS. Only dnsmasq runs as a system service (DNS keeps working when
-            the app is closed). Install missing services with{' '}
+      {/* System services */}
+      <SectionLabel>System Services</SectionLabel>
+      <Card className="mb-4">
+        {systemManaged.map((config) => (
+          <ServiceRow
+            key={config.id}
+            config={config}
+            status={serviceStatus?.[config.id]}
+            onAction={handleAction}
+            loadingAction={loadingAction}
+          />
+        ))}
+      </Card>
+
+      {/* Info */}
+      <Card className="!bg-blue-50/70">
+        <div className="flex items-start gap-3 px-4 py-3 text-[13px] text-blue-700">
+          <Info size={14} className="flex-shrink-0 mt-0.5" />
+          <p className="text-xs">
+            nginx, PHP-FPM, MySQL, and Mailpit run as part of WPHerd — they stop when
+            the app quits and don&apos;t appear as background items in macOS. dnsmasq
+            runs as a system service so <span className="font-mono">*.test</span> DNS
+            keeps working when the app is closed. Install missing services with{' '}
             <span className="font-mono bg-blue-100 px-1 rounded">
               brew install nginx php mysql dnsmasq
             </span>
           </p>
         </div>
-      </div>
+      </Card>
     </div>
   );
 }

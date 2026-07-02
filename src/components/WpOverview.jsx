@@ -12,7 +12,7 @@ import {
 
 function StatCard({ icon: Icon, label, value, description, updates, tint }) {
   return (
-    <div className="bg-white rounded-xl border border-surface-border shadow-card p-5">
+    <div className="settings-card p-5">
       <div className="flex items-start justify-between">
         <span className="text-sm font-semibold text-gray-700">{label}</span>
         <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${tint}`}>
@@ -136,7 +136,7 @@ export default function WpOverview({ site, onSaved }) {
       ) : data ? (
         <div className="space-y-4">
           {/* WordPress Core */}
-          <div className="bg-white rounded-xl border border-surface-border shadow-card p-5">
+          <div className="settings-card p-5">
             <div className="flex items-center justify-between gap-4">
               <div className="flex items-center gap-3 min-w-0">
                 <div
@@ -217,7 +217,7 @@ export default function WpOverview({ site, onSaved }) {
           </div>
 
           {/* Available updates */}
-          <div className="bg-white rounded-xl border border-surface-border shadow-card">
+          <div className="settings-card">
             <div className="flex items-center justify-between gap-3 p-5 pb-4">
               <div>
                 <h3 className="text-sm font-semibold text-gray-900">

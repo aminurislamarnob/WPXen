@@ -157,7 +157,7 @@ export default function SitePhpSettings({ site, onSaved }) {
           <Loader size={22} className="animate-spin text-wp-blue" />
         </div>
       ) : (
-        <div className="bg-white rounded-xl border border-surface-border shadow-card p-5 space-y-5">
+        <div className="settings-card p-5 space-y-5">
           {/* PHP Version */}
           <div>
             <label className="block text-sm font-semibold text-gray-900 mb-1.5">

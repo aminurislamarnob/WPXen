@@ -5,26 +5,34 @@ module.exports = {
   theme: {
     extend: {
       colors: {
+        // macOS System Settings palette. `wp.*` names are kept as aliases so
+        // existing utility classes keep compiling, but they now map to system
+        // colors (accent blue, system green/red/etc.).
+        accent: {
+          DEFAULT: '#0a60ff', // selection blue (System Settings active pill)
+          hover: '#0a55e0',
+        },
         wp: {
-          blue: '#0073aa',
-          'blue-dark': '#005177',
-          'blue-light': '#00a0d2',
-          green: '#46b450',
-          red: '#dc3232',
-          yellow: '#ffb900',
-          orange: '#f56e28',
+          blue: '#0a60ff',
+          'blue-dark': '#0a55e0',
+          'blue-light': '#3b82f6',
+          green: '#28c840', // macOS system green
+          red: '#ff3b30',
+          yellow: '#ffcc00',
+          orange: '#ff9500',
         },
         sidebar: {
-          DEFAULT: '#1d2327',
-          hover: '#2c3338',
-          active: '#2271b1',
-          text: '#a7aaad',
+          DEFAULT: '#e7e6e8', // light translucent sidebar
+          hover: '#dddcdf',
+          active: '#0a60ff',
+          text: '#3d3d3d',
           'text-active': '#ffffff',
         },
         surface: {
-          DEFAULT: '#f0f0f1',
-          card: '#ffffff',
-          border: '#dcdcde',
+          DEFAULT: '#f5f4f6', // window content background
+          card: '#ffffff', // grouped card background
+          border: '#e5e4e7',
+          hairline: '#e9e8ea', // row dividers inside cards
         },
       },
       fontFamily: {
@@ -40,8 +48,8 @@ module.exports = {
         mono: ['"SF Mono"', '"Fira Code"', 'Menlo', 'Monaco', 'Consolas', 'monospace'],
       },
       boxShadow: {
-        card: '0 1px 3px 0 rgba(0,0,0,0.07), 0 1px 2px 0 rgba(0,0,0,0.05)',
-        'card-hover': '0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06)',
+        card: '0 0 0 0.5px rgba(0,0,0,0.08), 0 1px 2px 0 rgba(0,0,0,0.04)',
+        'card-hover': '0 0 0 0.5px rgba(0,0,0,0.1), 0 2px 6px 0 rgba(0,0,0,0.08)',
         window: '0 20px 60px rgba(0,0,0,0.3)',
       },
       animation: {

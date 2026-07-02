@@ -495,7 +495,7 @@ export default function WpThemes({ site, onSaved }) {
           </button>
         </div>
       ) : (
-        <div className="bg-white rounded-xl border border-surface-border shadow-card">
+        <div className="settings-card">
           {/* Table head */}
           <div className="flex items-center gap-3 px-5 py-2.5 bg-gray-50 rounded-t-xl text-xs text-gray-500 uppercase tracking-wide">
             <input

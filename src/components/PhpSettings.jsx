@@ -54,7 +54,7 @@ function SettingGroup({ setting, versions, onSaveOne, onSaveAll }) {
   const masterValue = allEqual ? vals[0] : '';
 
   return (
-    <div className="bg-white rounded-xl border border-surface-border shadow-card">
+    <div className="settings-card">
       <div className="flex items-center justify-between gap-3 p-4">
         <button
           onClick={() => setOpen((o) => !o)}

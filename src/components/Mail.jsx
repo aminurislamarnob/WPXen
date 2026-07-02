@@ -16,6 +16,7 @@ import {
   FileText,
   Code2,
 } from 'lucide-react';
+import { Toggle } from './ui';
 
 const PAGE_SIZE = 50;
 
@@ -95,7 +96,7 @@ function InstallCard({ onInstalled }) {
   }
 
   return (
-    <div className="bg-white rounded-xl border border-surface-border shadow-card p-8 text-center">
+    <div className="settings-card p-8 text-center">
       <div className="w-14 h-14 rounded-2xl bg-rose-50 flex items-center justify-center mx-auto mb-4">
         <MailIcon size={26} className="text-rose-500" />
       </div>
@@ -454,26 +455,23 @@ export default function Mail({ refreshStatus }) {
   const hasMore = messages.length < (search.trim() ? matchTotal : total);
 
   return (
-    <div className="p-6 h-full flex flex-col animate-fade-in">
+    <div className="px-6 pb-6 h-full flex flex-col animate-fade-in">
       {/* Header */}
       <div className="flex items-center justify-between mb-4 flex-shrink-0">
-        <div>
-          <h1 className="text-xl font-bold text-gray-900">Mail</h1>
-          <p className="text-sm text-gray-500 mt-0.5">
-            {status.installed
-              ? `${total} message${total === 1 ? '' : 's'} captured${
-                  unread > 0 ? ` · ${unread} unread` : ''
-                }`
-              : 'Capture outgoing email from your sites'}
-          </p>
-        </div>
+        <p className="text-xs text-gray-500">
+          {status.installed
+            ? `${total} message${total === 1 ? '' : 's'} captured${
+                unread > 0 ? ` · ${unread} unread` : ''
+              }`
+            : 'Capture outgoing email from your sites'}
+        </p>
         {status.installed && (
           <button
             onClick={() => window.electronAPI.openMailpit()}
-            className="btn-secondary text-sm"
+            className="btn-secondary text-xs"
             title="Open the full Mailpit web UI"
           >
-            <ExternalLink size={13} className="mr-1.5" />
+            <ExternalLink size={12} className="mr-1.5" />
             Open Mailpit UI
           </button>
         )}
@@ -525,35 +523,26 @@ export default function Mail({ refreshStatus }) {
           )}
 
           {/* Catch toggle */}
-          <div className="flex items-center justify-between bg-white rounded-xl border border-surface-border shadow-card px-4 py-3 mb-4 flex-shrink-0">
+          <div className="settings-card flex items-center justify-between px-4 py-3 mb-4 flex-shrink-0">
             <div className="min-w-0 pr-4">
-              <p className="text-sm font-medium text-gray-900">Catch outgoing email</p>
+              <p className="text-[13px] font-medium text-gray-900">Catch outgoing email</p>
               <p className="text-xs text-gray-400 mt-0.5">
                 Routes PHP <span className="font-mono">mail()</span> — and therefore{' '}
                 <span className="font-mono">wp_mail()</span> — from every site into Mailpit.
                 No mail leaves your machine while this is on.
               </p>
             </div>
-            <button
-              onClick={handleToggleCatching}
+            <Toggle
+              checked={!!status.catching}
+              onChange={handleToggleCatching}
               disabled={busy === 'toggle'}
-              role="switch"
-              aria-checked={status.catching}
-              className={`relative w-10 h-6 rounded-full transition-colors flex-shrink-0 ${
-                status.catching ? 'bg-wp-green' : 'bg-gray-200'
-              } ${busy === 'toggle' ? 'opacity-50' : ''}`}
-            >
-              <span
-                className={`absolute left-0 top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${
-                  status.catching ? 'translate-x-[18px]' : 'translate-x-0.5'
-                }`}
-              />
-            </button>
+              label="Catch outgoing email"
+            />
           </div>
 
           {/* Inbox */}
           {status.running && (
-            <div className="flex-1 min-h-0 flex flex-col bg-white rounded-xl border border-surface-border shadow-card overflow-hidden">
+            <div className="flex-1 min-h-0 flex flex-col settings-card">
               {/* Toolbar */}
               <div className="flex items-center gap-2 px-4 py-3 border-b border-surface-border flex-shrink-0">
                 <div className="relative flex-1 max-w-xs">

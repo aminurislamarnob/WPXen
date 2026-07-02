@@ -128,7 +128,7 @@ export default function WpConfigManager({ site }) {
           <Loader size={22} className="animate-spin text-wp-blue" />
         </div>
       ) : (
-        <div className="bg-white rounded-xl border border-surface-border shadow-card divide-y divide-gray-100">
+        <div className="settings-card divide-y divide-gray-100">
           {schema.map((setting) => {
             const blocked = setting.dependsOn && !draft[setting.dependsOn];
             const depLabel =
