@@ -113,7 +113,7 @@ export default function Layout({ serviceStatus }) {
         {/* Navigation groups */}
         <nav className="flex-1 px-3 py-1 overflow-y-auto no-drag">
           {groups.map((group, gi) => (
-            <div key={gi} className={gi > 0 ? 'mt-4' : ''}>
+            <div key={gi}>
               {group.map(({ to, icon: Icon, label, color }) => (
                 <NavLink
                   key={to}
