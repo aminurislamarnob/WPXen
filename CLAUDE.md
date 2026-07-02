@@ -10,9 +10,12 @@ npm run vite     # Renderer only
 npm run electron # Electron only against an already-running renderer
 npm run build    # vite build + electron-builder --mac → .dmg in release/ (arm64 + x64)
 npm run pack     # Unpacked build (electron-builder --dir), no installer
+npm run test     # vitest run (tests live in test/, cover electron/services logic)
+npm run lint     # eslint . (lint:fix to autofix)
+npm run format   # prettier --write .
 ```
 
-There is no test suite, linter, or typechecker configured. The codebase is plain JS/JSX.
+There is no typechecker; the codebase is plain JS/JSX.
 
 ## Architecture
 
@@ -64,6 +67,35 @@ Node directly. When adding a feature that crosses the boundary you must touch th
     `sendmail_path` override (`zz-wpherd-mailpit.ini`) into every installed
     PHP version's conf.d. Also wraps Mailpit's REST API for the in-app inbox
     (Mail page in the renderer).
+
+### Renderer UI conventions
+
+The UI mimics macOS System Settings. Pages compose the shared primitives in
+`src/components/ui.jsx` (`Card`, `Row`, `SectionLabel`, `IconTile`, `Toggle`,
+`PageHeader`) plus the `.settings-card` / `.settings-row` / `.btn-*` /
+`.form-input` / `.panel` classes in `src/index.css` — don't hand-roll cards,
+rows, or buttons.
+
+**Dark mode.** The app supports Auto/Light/Dark (Appearance section in
+Settings). How it works, and what to do when adding UI:
+
+- The main process sets `nativeTheme.themeSource` from the persisted
+  `settings.appearance` (`set-appearance` IPC handler); that flips the
+  renderer's `prefers-color-scheme`, which Tailwind consumes via
+  `darkMode: 'media'`.
+- All theme-dependent colors resolve through CSS variables defined in
+  `src/index.css` and wired up in `tailwind.config.js`. The **gray scale
+  inverts in dark mode** — `text-gray-900` is always "primary text",
+  `bg-gray-50` always "subtle fill" — so standard gray/surface/accent
+  utilities need no `dark:` variants.
+- `dark:` variants ARE needed for literal colors: colored tint boxes and
+  badges (use translucent tints, e.g. `bg-red-50 text-red-700
+  dark:bg-red-500/10 dark:text-red-400`), `hover:bg-black/5` →
+  `dark:hover:bg-white/10`, and destructive hover states.
+- Modals and context menus use the `.panel` class (white in light,
+  `#2c2c2e` in dark), never raw `bg-white`.
+- Terminal/log panels use fixed `bg-zinc-900` (+ `text-zinc-*`) so they stay
+  dark in both modes — never `bg-gray-900`, which inverts to near-white.
 
 ### Key implementation notes
 
