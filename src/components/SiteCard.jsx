@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Globe,
   Folder,
@@ -17,14 +18,26 @@ import {
   Check,
   Download,
   X,
+  SlidersHorizontal,
 } from 'lucide-react';
 
-function ContextMenu({ site, onDelete, onClose }) {
+function ContextMenu({ site, onDelete, onManage, onClose }) {
   return (
     <div
       className="absolute right-0 top-8 z-50 bg-white rounded-xl shadow-card-hover border border-gray-100 py-1 w-48 animate-fade-in"
       onMouseLeave={onClose}
     >
+      <button
+        onClick={() => {
+          onManage();
+          onClose();
+        }}
+        className="flex w-full items-center gap-2.5 px-3 py-2 text-xs text-gray-700 hover:bg-gray-50"
+      >
+        <SlidersHorizontal size={13} />
+        Manage / Settings
+      </button>
+      <div className="border-t border-gray-100 my-1" />
       <button
         onClick={() => {
           navigator.clipboard.writeText(site.url);
@@ -72,6 +85,9 @@ export default function SiteCard({
   onStopTunnel,
   onInstallCloudflared,
 }) {
+  const navigate = useNavigate();
+  const openDetail = () => navigate(`/sites/${site.id}`);
+
   const [menuOpen, setMenuOpen] = useState(false);
   const [httpsBusy, setHttpsBusy] = useState(false);
   const [httpsError, setHttpsError] = useState(null);
@@ -161,15 +177,23 @@ export default function SiteCard({
       <div className="p-4 pb-3">
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-3 min-w-0">
-            <div className="w-10 h-10 rounded-xl bg-wp-blue flex items-center justify-center flex-shrink-0">
+            <button
+              onClick={openDetail}
+              title="Manage site"
+              className="w-10 h-10 rounded-xl bg-wp-blue flex items-center justify-center flex-shrink-0 hover:bg-wp-blue-dark transition-colors"
+            >
               <span className="text-white text-sm font-bold">
                 {site.name.charAt(0).toUpperCase()}
               </span>
-            </div>
+            </button>
             <div className="min-w-0">
-              <h3 className="text-sm font-semibold text-gray-900 truncate">
+              <button
+                onClick={openDetail}
+                className="text-sm font-semibold text-gray-900 truncate hover:text-wp-blue transition-colors block max-w-full text-left"
+                title="Manage site"
+              >
                 {site.name}
-              </h3>
+              </button>
               <button
                 onClick={() => window.electronAPI.openSiteInBrowser(site.url)}
                 className="text-xs text-wp-blue hover:underline flex items-center gap-1 mt-0.5"
@@ -192,6 +216,7 @@ export default function SiteCard({
               <ContextMenu
                 site={site}
                 onDelete={onDelete}
+                onManage={openDetail}
                 onClose={() => setMenuOpen(false)}
               />
             )}

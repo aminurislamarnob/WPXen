@@ -304,6 +304,161 @@ function getSiteWordPressVersion(sitePath) {
   }
 }
 
+// ─── WP Config Manager ─────────────────────────────────────────────────────
+//
+// Managed wp-config.php constants, edited through WP-CLI's `config` command
+// (which uses the WPConfigTransformer under the hood — no DB required, and it
+// preserves the rest of the file). Each is exposed as a toggle or a select in
+// the site's WP Config panel.
+const WP_CONFIG_SETTINGS = [
+  {
+    key: 'WP_DEBUG',
+    label: 'Enable Debug Mode',
+    type: 'bool',
+    default: false,
+    description:
+      "WP_DEBUG is the master switch for WordPress debugging. It must be on for the debug log and debug display below to have any effect. Keep it off unless you're actively debugging.",
+  },
+  {
+    key: 'WP_DEBUG_LOG',
+    label: 'Enable Debug Log',
+    type: 'bool',
+    default: false,
+    dependsOn: 'WP_DEBUG',
+    description:
+      'Write errors and notices to wp-content/debug.log. Requires Debug Mode to be enabled.',
+  },
+  {
+    key: 'WP_DEBUG_DISPLAY',
+    label: 'Enable Debug Display',
+    type: 'bool',
+    // WordPress defaults this to true (errors shown) once WP_DEBUG is on.
+    default: true,
+    dependsOn: 'WP_DEBUG',
+    description:
+      'Show PHP errors and notices in the page output. Requires Debug Mode. Turn this off to log errors without printing them on the site.',
+  },
+  {
+    key: 'SCRIPT_DEBUG',
+    label: 'Enable Script Debug',
+    type: 'bool',
+    default: false,
+    description:
+      "Load the unminified 'dev' versions of core CSS and JavaScript. Useful when debugging front-end or admin scripts.",
+  },
+  {
+    key: 'CONCATENATE_SCRIPTS',
+    label: 'Enable Script Concatenation',
+    type: 'bool',
+    default: false,
+    description:
+      'Concatenate admin JavaScript into fewer requests. Disable this if you are debugging JavaScript in the admin area.',
+  },
+  {
+    key: 'SAVEQUERIES',
+    label: 'Enable Save Queries',
+    type: 'bool',
+    default: false,
+    description:
+      'Store every database query (with call stack and timing) in $wpdb->queries for analysis. Has a performance cost — leave off unless debugging.',
+  },
+];
+
+function isTruthyConfigValue(raw) {
+  if (raw == null) return false;
+  const v = String(raw).trim().toLowerCase();
+  return v === 'true' || v === '1';
+}
+
+// Reads the managed constants from a site's wp-config.php via WP-CLI. Returns a
+// values map keyed by constant, with sensible defaults for anything unset.
+function getWpConfig(sitePath) {
+  const values = {};
+  for (const s of WP_CONFIG_SETTINGS) {
+    values[s.key] = s.type === 'bool' ? (s.default ?? false) : s.default;
+  }
+
+  let list = [];
+  try {
+    const out = wp(
+      ['config', 'list', '--fields=name,value,type', '--format=json'],
+      sitePath
+    );
+    list = JSON.parse(out);
+  } catch {
+    return values;
+  }
+
+  const byName = new Map();
+  for (const item of list) {
+    if (item && item.name) byName.set(item.name, item.value);
+  }
+
+  for (const s of WP_CONFIG_SETTINGS) {
+    if (!byName.has(s.key)) continue;
+    if (s.type === 'bool') {
+      values[s.key] = isTruthyConfigValue(byName.get(s.key));
+    }
+  }
+  return values;
+}
+
+// Applies a partial set of changes to wp-config.php. `changes` is a map of
+// constant -> value (booleans for toggles, 'all'|'minor'|'disabled' for auto
+// updates). Unknown keys are ignored.
+function setWpConfig(sitePath, changes = {}) {
+  if (!fs.existsSync(path.join(sitePath, 'wp-config.php'))) {
+    throw new Error('wp-config.php not found for this site.');
+  }
+
+  // Safety net: enabling a dependent constant (e.g. WP_DEBUG_LOG) is a no-op in
+  // WordPress unless its dependency (WP_DEBUG) is also on. If the caller enabled
+  // a dependent without turning the dependency on, enable it too so the toggle
+  // actually takes effect.
+  const merged = { ...changes };
+  for (const setting of WP_CONFIG_SETTINGS) {
+    if (setting.dependsOn && merged[setting.key] === true) {
+      if (merged[setting.dependsOn] !== true) merged[setting.dependsOn] = true;
+    }
+  }
+  changes = merged;
+
+  for (const [key, value] of Object.entries(changes)) {
+    const setting = WP_CONFIG_SETTINGS.find((s) => s.key === key);
+    if (!setting) continue;
+
+    if (setting.type === 'bool') {
+      wp(
+        ['config', 'set', key, value ? 'true' : 'false', '--raw', '--type=constant'],
+        sitePath
+      );
+    }
+  }
+}
+
+function getWpConfigSchema() {
+  return WP_CONFIG_SETTINGS;
+}
+
+// Raw wp-config.php contents, for the "Edit Manually" view.
+function getWpConfigRaw(sitePath) {
+  const file = path.join(sitePath, 'wp-config.php');
+  if (!fs.existsSync(file)) throw new Error('wp-config.php not found for this site.');
+  return fs.readFileSync(file, 'utf8');
+}
+
+// Overwrites wp-config.php, keeping a one-off .bak so a bad manual edit can be
+// recovered. Rejects content that doesn't look like a PHP file.
+function saveWpConfigRaw(sitePath, contents) {
+  const file = path.join(sitePath, 'wp-config.php');
+  if (!fs.existsSync(file)) throw new Error('wp-config.php not found for this site.');
+  if (typeof contents !== 'string' || !contents.trimStart().startsWith('<?php')) {
+    throw new Error('wp-config.php must start with <?php.');
+  }
+  fs.copyFileSync(file, `${file}.bak`);
+  fs.writeFileSync(file, contents, 'utf8');
+}
+
 function getWordPressInfo(sitePath) {
   if (!fs.existsSync(path.join(sitePath, 'wp-config.php'))) {
     return null;
@@ -346,6 +501,11 @@ module.exports = {
   removeWordPressSite,
   setSiteUrl,
   ensureTunnelMuPlugin,
+  getWpConfigSchema,
+  getWpConfig,
+  setWpConfig,
+  getWpConfigRaw,
+  saveWpConfigRaw,
   getSiteWordPressVersion,
   getWordPressInfo,
   sanitizeDomain,

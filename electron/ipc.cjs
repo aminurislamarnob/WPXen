@@ -263,6 +263,58 @@ function registerHandlers(win, storeInstance) {
     }
   });
 
+  // ─── Site config (WP Config Manager) ───────────────────────────────────
+
+  function findSite(id) {
+    return store.get('sites', []).find((s) => s.id === id) || null;
+  }
+
+  ipcMain.handle('get-wp-config', async (_, id) => {
+    try {
+      const site = findSite(id);
+      if (!site) return { success: false, error: 'Site not found' };
+      return {
+        success: true,
+        schema: wordpress.getWpConfigSchema(),
+        values: wordpress.getWpConfig(site.path),
+      };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('set-wp-config', async (_, id, changes) => {
+    try {
+      const site = findSite(id);
+      if (!site) return { success: false, error: 'Site not found' };
+      wordpress.setWpConfig(site.path, changes || {});
+      return { success: true, values: wordpress.getWpConfig(site.path) };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('get-wp-config-raw', async (_, id) => {
+    try {
+      const site = findSite(id);
+      if (!site) return { success: false, error: 'Site not found' };
+      return { success: true, contents: wordpress.getWpConfigRaw(site.path) };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('save-wp-config-raw', async (_, id, contents) => {
+    try {
+      const site = findSite(id);
+      if (!site) return { success: false, error: 'Site not found' };
+      wordpress.saveWpConfigRaw(site.path, contents);
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
   ipcMain.handle('open-phpmyadmin', async (_, dbName) => {
     try {
       // Reject anything that isn't a valid DB name before it reaches the URL.

@@ -3,6 +3,7 @@ import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Layout from './components/Layout';
 import Dashboard from './components/Dashboard';
 import Sites from './components/Sites';
+import SiteDetail from './components/SiteDetail';
 import Services from './components/Services';
 import PHPVersions from './components/PHPVersions';
 import Settings from './components/Settings';
@@ -85,6 +86,7 @@ export default function App() {
           <Route index element={<Navigate to="/dashboard" replace />} />
           <Route path="dashboard" element={<Dashboard {...sharedProps} />} />
           <Route path="sites" element={<Sites {...sharedProps} />} />
+          <Route path="sites/:id" element={<SiteDetail {...sharedProps} />} />
           <Route path="services" element={<Services {...sharedProps} />} />
           <Route path="php" element={<PHPVersions {...sharedProps} />} />
           <Route path="settings" element={<Settings {...sharedProps} />} />

@@ -15,6 +15,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openWpAdmin: (url) => ipcRenderer.invoke('open-in-browser', `${url}/wp-admin`),
   openPhpMyAdmin: (dbName) => ipcRenderer.invoke('open-phpmyadmin', dbName),
 
+  // Site config (WP Config Manager)
+  getWpConfig: (id) => ipcRenderer.invoke('get-wp-config', id),
+  setWpConfig: (id, changes) => ipcRenderer.invoke('set-wp-config', id, changes),
+  getWpConfigRaw: (id) => ipcRenderer.invoke('get-wp-config-raw', id),
+  saveWpConfigRaw: (id, contents) =>
+    ipcRenderer.invoke('save-wp-config-raw', id, contents),
+
   // Share tunnels (Cloudflare)
   checkCloudflared: () => ipcRenderer.invoke('check-cloudflared'),
   installCloudflared: () => ipcRenderer.invoke('install-cloudflared'),
