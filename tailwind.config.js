@@ -5,16 +5,33 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        // macOS System Settings palette. `wp.*` names are kept as aliases so
-        // existing utility classes keep compiling, but they now map to system
-        // colors (accent blue, system green/red/etc.).
+        // macOS System Settings palette. All theme-dependent colors resolve
+        // through CSS variables (see src/index.css) so the whole app flips
+        // between light and dark with prefers-color-scheme, which the main
+        // process drives via nativeTheme.themeSource (Auto/Light/Dark).
+        //
+        // The gray scale is remapped too: in dark mode it inverts (gray-900
+        // stays "primary text", gray-50 stays "subtle fill"), so the many
+        // existing text-gray-*/bg-gray-* utilities adapt automatically.
         accent: {
-          DEFAULT: '#0a60ff', // selection blue (System Settings active pill)
-          hover: '#0a55e0',
+          DEFAULT: 'rgb(var(--accent) / <alpha-value>)', // selection blue
+          hover: 'rgb(var(--accent-hover) / <alpha-value>)',
+        },
+        gray: {
+          50: 'rgb(var(--gray-50) / <alpha-value>)',
+          100: 'rgb(var(--gray-100) / <alpha-value>)',
+          200: 'rgb(var(--gray-200) / <alpha-value>)',
+          300: 'rgb(var(--gray-300) / <alpha-value>)',
+          400: 'rgb(var(--gray-400) / <alpha-value>)',
+          500: 'rgb(var(--gray-500) / <alpha-value>)',
+          600: 'rgb(var(--gray-600) / <alpha-value>)',
+          700: 'rgb(var(--gray-700) / <alpha-value>)',
+          800: 'rgb(var(--gray-800) / <alpha-value>)',
+          900: 'rgb(var(--gray-900) / <alpha-value>)',
         },
         wp: {
-          blue: '#0a60ff',
-          'blue-dark': '#0a55e0',
+          blue: 'rgb(var(--accent) / <alpha-value>)',
+          'blue-dark': 'rgb(var(--accent-hover) / <alpha-value>)',
           'blue-light': '#3b82f6',
           green: '#28c840', // macOS system green
           red: '#ff3b30',
@@ -22,17 +39,17 @@ module.exports = {
           orange: '#ff9500',
         },
         sidebar: {
-          DEFAULT: '#e7e6e8', // light translucent sidebar
-          hover: '#dddcdf',
-          active: '#0a60ff',
+          DEFAULT: 'rgb(var(--sidebar) / <alpha-value>)', // translucent sidebar
+          hover: 'rgb(var(--sidebar-hover) / <alpha-value>)',
+          active: 'rgb(var(--accent) / <alpha-value>)',
           text: '#3d3d3d',
           'text-active': '#ffffff',
         },
         surface: {
-          DEFAULT: '#f5f4f6', // window content background
-          card: '#ffffff', // grouped card background
-          border: '#e5e4e7',
-          hairline: '#e9e8ea', // row dividers inside cards
+          DEFAULT: 'rgb(var(--surface) / <alpha-value>)', // window content background
+          card: 'rgb(var(--surface-card) / <alpha-value>)', // grouped card background
+          border: 'rgb(var(--surface-border) / <alpha-value>)',
+          hairline: 'rgb(var(--surface-hairline) / <alpha-value>)', // row dividers inside cards
         },
       },
       fontFamily: {
@@ -48,8 +65,8 @@ module.exports = {
         mono: ['"SF Mono"', '"Fira Code"', 'Menlo', 'Monaco', 'Consolas', 'monospace'],
       },
       boxShadow: {
-        card: '0 0 0 0.5px rgba(0,0,0,0.08), 0 1px 2px 0 rgba(0,0,0,0.04)',
-        'card-hover': '0 0 0 0.5px rgba(0,0,0,0.1), 0 2px 6px 0 rgba(0,0,0,0.08)',
+        card: 'var(--shadow-card)',
+        'card-hover': 'var(--shadow-card-hover)',
         window: '0 20px 60px rgba(0,0,0,0.3)',
       },
       animation: {

@@ -23,7 +23,7 @@ function StatCard({ icon: Icon, label, value, description, updates, tint }) {
       <div className="flex items-end justify-between gap-2 mt-1.5">
         <p className="text-xs text-gray-500 leading-relaxed">{description}</p>
         {updates > 0 && (
-          <span className="flex-shrink-0 px-2 py-0.5 bg-amber-100 text-amber-700 rounded-full text-xs font-medium">
+          <span className="flex-shrink-0 px-2 py-0.5 bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300 rounded-full text-xs font-medium">
             {updates} update{updates !== 1 ? 's' : ''}
           </span>
         )}
@@ -109,8 +109,8 @@ export default function WpOverview({ site, onSaved }) {
         <div
           className={`flex items-center gap-2 px-4 py-3 rounded-xl mb-4 text-sm ${
             message.type === 'error'
-              ? 'bg-red-50 text-red-700'
-              : 'bg-green-50 text-green-700'
+              ? 'bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400'
+              : 'bg-green-50 text-green-700 dark:bg-green-500/10 dark:text-green-400'
           }`}
         >
           {message.type === 'error' ? (
@@ -127,7 +127,7 @@ export default function WpOverview({ site, onSaved }) {
           <Loader size={22} className="animate-spin text-wp-blue" />
         </div>
       ) : error ? (
-        <div className="bg-red-50 text-red-700 rounded-xl px-4 py-3 text-sm">
+        <div className="bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400 rounded-xl px-4 py-3 text-sm">
           <p>{error}</p>
           <button onClick={() => load(true)} className="btn-secondary text-xs mt-3">
             Try again
@@ -142,8 +142,8 @@ export default function WpOverview({ site, onSaved }) {
                 <div
                   className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${
                     core.updateVersion
-                      ? 'bg-amber-100 text-amber-600'
-                      : 'bg-green-50 text-wp-green'
+                      ? 'bg-amber-100 text-amber-600 dark:bg-amber-500/15 dark:text-amber-400'
+                      : 'bg-green-50 text-wp-green dark:bg-green-500/15'
                   }`}
                 >
                   {core.updateVersion ? (
@@ -196,7 +196,7 @@ export default function WpOverview({ site, onSaved }) {
               value={data.counts.plugins}
               description="Installed plugins currently available on this site."
               updates={data.counts.pluginUpdates}
-              tint="bg-blue-50 text-wp-blue"
+              tint="bg-blue-50 text-wp-blue dark:bg-blue-500/15"
             />
             <StatCard
               icon={Palette}
@@ -204,7 +204,7 @@ export default function WpOverview({ site, onSaved }) {
               value={data.counts.themes}
               description="Installed themes ready for editors and site admins."
               updates={data.counts.themeUpdates}
-              tint="bg-green-50 text-wp-green"
+              tint="bg-green-50 text-wp-green dark:bg-green-500/15"
             />
             <StatCard
               icon={Users}
@@ -212,7 +212,7 @@ export default function WpOverview({ site, onSaved }) {
               value={data.counts.users}
               description="WordPress user accounts on this site."
               updates={0}
-              tint="bg-amber-50 text-amber-600"
+              tint="bg-amber-50 text-amber-600 dark:bg-amber-500/15 dark:text-amber-400"
             />
           </div>
 

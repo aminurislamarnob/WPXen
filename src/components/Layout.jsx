@@ -84,7 +84,7 @@ export default function Layout({ serviceStatus }) {
   return (
     <div className="h-screen flex overflow-hidden bg-surface">
       {/* Sidebar — light, translucent, System Settings style */}
-      <aside className="w-56 flex flex-col bg-sidebar/80 backdrop-macos border-r border-black/10 flex-shrink-0">
+      <aside className="w-56 flex flex-col bg-sidebar/80 backdrop-macos border-r border-black/10 dark:border-white/10 flex-shrink-0">
         {/* Title bar drag region (hosts the traffic lights) */}
         <div className="drag-region h-12 flex-shrink-0" />
 
@@ -100,7 +100,7 @@ export default function Layout({ serviceStatus }) {
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
               placeholder="Search"
-              className="w-full pl-8 pr-3 py-1.5 text-[13px] bg-black/[0.06] border-0 rounded-lg placeholder-gray-500 focus:ring-2 focus:ring-accent/40"
+              className="w-full pl-8 pr-3 py-1.5 text-[13px] bg-black/[0.06] dark:bg-white/10 border-0 rounded-lg placeholder-gray-500 focus:ring-2 focus:ring-accent/40"
             />
           </div>
         </div>
@@ -122,7 +122,7 @@ export default function Layout({ serviceStatus }) {
                     `flex items-center gap-2.5 px-2 py-[5px] rounded-md text-[13px] sidebar-item ${
                       isActive
                         ? 'bg-sidebar-active text-white font-medium'
-                        : 'text-gray-800 hover:bg-black/[0.05]'
+                        : 'text-gray-800 hover:bg-black/[0.05] dark:hover:bg-white/[0.07]'
                     }`
                   }
                 >

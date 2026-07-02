@@ -70,17 +70,24 @@ export default function Dashboard({ serviceStatus, sites, refreshStatus }) {
     <div className="px-6 pb-6 max-w-2xl mx-auto animate-fade-in">
       {/* Permissions banner */}
       {!sudoersConfigured && (
-        <Card className="mb-4 !bg-amber-50">
+        <Card className="mb-4 !bg-amber-50 dark:!bg-amber-500/10">
           <Row
-            icon={<ShieldAlert size={18} className="text-amber-600 flex-shrink-0" />}
+            icon={
+              <ShieldAlert
+                size={18}
+                className="text-amber-600 dark:text-amber-400 flex-shrink-0"
+              />
+            }
             title={
-              <span className="font-semibold text-amber-800">Password required for DNS</span>
+              <span className="font-semibold text-amber-800 dark:text-amber-300">
+                Password required for DNS
+              </span>
             }
             subtitle="macOS asks for your password when the dnsmasq DNS resolver starts or stops."
           >
             <button
               onClick={() => navigate('/settings')}
-              className="text-xs font-semibold text-amber-800 bg-amber-100 hover:bg-amber-200 px-3 py-1.5 rounded-md transition-colors flex-shrink-0"
+              className="text-xs font-semibold text-amber-800 bg-amber-100 hover:bg-amber-200 dark:text-amber-200 dark:bg-amber-500/20 dark:hover:bg-amber-500/30 px-3 py-1.5 rounded-md transition-colors flex-shrink-0"
             >
               Set Up
             </button>
@@ -191,7 +198,7 @@ export default function Dashboard({ serviceStatus, sites, refreshStatus }) {
                 }}
                 onKeyDown={(e) => e.key === 'Enter' && e.stopPropagation()}
                 title="Open in browser"
-                className="p-1.5 rounded-md hover:bg-black/5 text-gray-400 flex-shrink-0"
+                className="p-1.5 rounded-md hover:bg-black/5 dark:hover:bg-white/10 text-gray-400 flex-shrink-0"
               >
                 <ExternalLink size={13} />
               </span>

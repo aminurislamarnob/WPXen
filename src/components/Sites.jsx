@@ -18,11 +18,11 @@ function DeleteConfirmModal({ site, onConfirm, onClose }) {
       className="modal-overlay animate-fade-in"
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
-      <div className="bg-white rounded-2xl shadow-window w-96 animate-slide-in">
+      <div className="panel rounded-2xl shadow-window w-96 animate-slide-in">
         <div className="p-6">
           <div className="flex items-center gap-3 mb-4">
-            <div className="w-10 h-10 rounded-xl bg-red-100 flex items-center justify-center">
-              <AlertTriangle size={20} className="text-red-600" />
+            <div className="w-10 h-10 rounded-xl bg-red-100 dark:bg-red-500/15 flex items-center justify-center">
+              <AlertTriangle size={20} className="text-red-600 dark:text-red-400" />
             </div>
             <div>
               <h3 className="text-base font-bold text-gray-900">Remove Site</h3>

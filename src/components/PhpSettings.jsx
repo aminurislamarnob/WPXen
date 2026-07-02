@@ -141,7 +141,7 @@ export default function PhpSettings() {
       </div>
 
       {error && (
-        <div className="mb-3 px-4 py-2.5 rounded-xl bg-red-50 text-red-700 text-sm">
+        <div className="mb-3 px-4 py-2.5 rounded-xl bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400 text-sm">
           {error}
         </div>
       )}

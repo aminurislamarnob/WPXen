@@ -25,7 +25,7 @@ import { Toggle } from './ui';
 function ContextMenu({ site, onDelete, onManage, onClose }) {
   return (
     <div
-      className="absolute right-0 top-8 z-50 bg-white rounded-xl shadow-card-hover border border-gray-100 py-1 w-48 animate-fade-in"
+      className="absolute right-0 top-8 z-50 panel rounded-xl shadow-card-hover border border-gray-100 py-1 w-48 animate-fade-in"
       onMouseLeave={onClose}
     >
       <button
@@ -65,7 +65,7 @@ function ContextMenu({ site, onDelete, onManage, onClose }) {
           onDelete(site);
           onClose();
         }}
-        className="flex w-full items-center gap-2.5 px-3 py-2 text-xs text-red-600 hover:bg-red-50"
+        className="flex w-full items-center gap-2.5 px-3 py-2 text-xs text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-500/10"
       >
         <Trash2 size={13} />
         Remove Site…
@@ -226,11 +226,11 @@ export default function SiteCard({
 
         {/* Tags */}
         <div className="flex flex-wrap gap-1.5 mt-3">
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-purple-50 text-purple-700 rounded-full text-xs font-medium">
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-purple-50 text-purple-700 dark:bg-purple-500/15 dark:text-purple-300 rounded-full text-xs font-medium">
             PHP {site.phpVersion}
           </span>
           {site.wpVersion && (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-50 text-blue-700 rounded-full text-xs font-medium">
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-50 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300 rounded-full text-xs font-medium">
               WP {site.wpVersion}
             </span>
           )}
@@ -258,7 +258,9 @@ export default function SiteCard({
             label={site.https ? 'Disable HTTPS' : 'Enable HTTPS'}
           />
         </div>
-        {httpsError && <p className="mt-1.5 text-xs text-red-600">{httpsError}</p>}
+        {httpsError && (
+          <p className="mt-1.5 text-xs text-red-600 dark:text-red-400">{httpsError}</p>
+        )}
       </div>
 
       {/* Path */}
@@ -335,7 +337,7 @@ export default function SiteCard({
                 )}
               </button>
               {cfInstalling && cfLog && (
-                <div className="mt-2 px-3 py-2 bg-gray-900 rounded-lg">
+                <div className="mt-2 px-3 py-2 bg-zinc-900 rounded-lg">
                   <p className="text-xs text-green-400 font-mono truncate" title={cfLog}>
                     {cfLog}
                   </p>
@@ -366,7 +368,7 @@ export default function SiteCard({
                 <button
                   onClick={() => onStopTunnel(site)}
                   title="Stop sharing"
-                  className="p-1.5 rounded-lg text-red-500 hover:bg-red-50"
+                  className="p-1.5 rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10"
                 >
                   <X size={13} />
                 </button>
@@ -382,7 +384,7 @@ export default function SiteCard({
             </div>
           ) : tunnel?.status === 'error' ? (
             <div>
-              <p className="text-xs text-red-600 mb-2">
+              <p className="text-xs text-red-600 dark:text-red-400 mb-2">
                 {tunnel.error || 'Failed to start the tunnel.'}
               </p>
               <button

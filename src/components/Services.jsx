@@ -76,7 +76,7 @@ function ServiceRow({ config, status, onAction, loadingAction }) {
       }
       subtitle={
         failed && status?.error ? (
-          <span className="text-red-600">
+          <span className="text-red-600 dark:text-red-400">
             {status.error}{' '}
             <span
               role="button"
@@ -96,7 +96,7 @@ function ServiceRow({ config, status, onAction, loadingAction }) {
         onClick={() => onAction('restart', config.id)}
         disabled={!running || isLoading}
         title="Restart"
-        className="p-1.5 rounded-md hover:bg-black/5 text-gray-400 disabled:opacity-30 transition-colors"
+        className="p-1.5 rounded-md hover:bg-black/5 dark:hover:bg-white/10 text-gray-400 disabled:opacity-30 transition-colors"
       >
         {isLoading ? <Loader size={13} className="animate-spin" /> : <RotateCw size={13} />}
       </button>
@@ -104,7 +104,7 @@ function ServiceRow({ config, status, onAction, loadingAction }) {
         <button
           onClick={() => onAction('stop', config.id)}
           disabled={isLoading}
-          className="btn-secondary !px-3 !py-1 text-xs w-[70px] text-red-600"
+          className="btn-secondary !px-3 !py-1 text-xs w-[70px] text-red-600 dark:text-red-400"
         >
           Stop
         </button>
@@ -112,7 +112,7 @@ function ServiceRow({ config, status, onAction, loadingAction }) {
         <button
           onClick={() => onAction('start', config.id)}
           disabled={isLoading}
-          className="btn-secondary !px-3 !py-1 text-xs w-[70px] text-green-700"
+          className="btn-secondary !px-3 !py-1 text-xs w-[70px] text-green-700 dark:text-green-400"
         >
           Start
         </button>
@@ -212,10 +212,18 @@ export default function Services({ serviceStatus, refreshStatus }) {
 
       {/* Status message */}
       {message && (
-        <Card className={`mb-4 ${message.type === 'error' ? '!bg-red-50' : '!bg-green-50'}`}>
+        <Card
+          className={`mb-4 ${
+            message.type === 'error'
+              ? '!bg-red-50 dark:!bg-red-500/10'
+              : '!bg-green-50 dark:!bg-green-500/10'
+          }`}
+        >
           <div
             className={`flex items-center gap-2 px-4 py-3 text-[13px] ${
-              message.type === 'error' ? 'text-red-700' : 'text-green-700'
+              message.type === 'error'
+                ? 'text-red-700 dark:text-red-400'
+                : 'text-green-700 dark:text-green-400'
             }`}
           >
             {message.type === 'error' ? <XCircle size={14} /> : <CheckCircle size={14} />}
@@ -253,15 +261,15 @@ export default function Services({ serviceStatus, refreshStatus }) {
       </Card>
 
       {/* Info */}
-      <Card className="!bg-blue-50/70">
-        <div className="flex items-start gap-3 px-4 py-3 text-[13px] text-blue-700">
+      <Card className="!bg-blue-50/70 dark:!bg-blue-500/10">
+        <div className="flex items-start gap-3 px-4 py-3 text-[13px] text-blue-700 dark:text-blue-300">
           <Info size={14} className="flex-shrink-0 mt-0.5" />
           <p className="text-xs">
             nginx, PHP-FPM, MySQL, and Mailpit run as part of WPHerd — they stop when
             the app quits and don&apos;t appear as background items in macOS. dnsmasq
             runs as a system service so <span className="font-mono">*.test</span> DNS
             keeps working when the app is closed. Install missing services with{' '}
-            <span className="font-mono bg-blue-100 px-1 rounded">
+            <span className="font-mono bg-blue-100 dark:bg-blue-500/20 px-1 rounded">
               brew install nginx php mysql dnsmasq
             </span>
           </p>

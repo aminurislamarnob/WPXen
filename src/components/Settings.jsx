@@ -12,6 +12,74 @@ import {
 } from 'lucide-react';
 import { Card, Row, SectionLabel, Toggle } from './ui';
 
+// Mini window preview for the Appearance picker, like macOS System Settings.
+// mode: 'light' | 'dark' — 'system' overlays both diagonally.
+function ThemeThumb({ variant }) {
+  const window = (dark) => (
+    <div
+      className={`absolute inset-0 flex ${dark ? 'bg-[#1e1e1e]' : 'bg-[#e8e7ea]'}`}
+    >
+      <div
+        className={`w-[34%] p-1.5 space-y-1 ${dark ? 'bg-[#2c2c2e]' : 'bg-[#f6f5f7]'}`}
+      >
+        <div className="h-1 rounded-full bg-accent" />
+        <div className={`h-1 rounded-full ${dark ? 'bg-white/20' : 'bg-black/15'}`} />
+        <div className={`h-1 rounded-full ${dark ? 'bg-white/20' : 'bg-black/15'}`} />
+      </div>
+      <div className="flex-1 p-1.5 space-y-1">
+        <div className={`h-2 rounded-sm ${dark ? 'bg-[#3a3a3c]' : 'bg-white'}`} />
+        <div className={`h-2 rounded-sm ${dark ? 'bg-[#3a3a3c]' : 'bg-white'}`} />
+      </div>
+    </div>
+  );
+  return (
+    <div className="relative w-[76px] h-[52px] rounded-md overflow-hidden">
+      {window(variant === 'dark')}
+      {variant === 'system' && (
+        <div
+          className="absolute inset-0"
+          style={{ clipPath: 'polygon(55% 0, 100% 0, 100% 100%, 30% 100%)' }}
+        >
+          {window(true)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const APPEARANCE_OPTIONS = [
+  { id: 'system', label: 'Auto' },
+  { id: 'light', label: 'Light' },
+  { id: 'dark', label: 'Dark' },
+];
+
+function AppearancePicker({ value, onChange }) {
+  return (
+    <div className="flex items-center gap-5">
+      {APPEARANCE_OPTIONS.map((opt) => (
+        <button key={opt.id} onClick={() => onChange(opt.id)} className="group">
+          <span
+            className={`block rounded-lg p-0.5 ring-2 transition-all ${
+              value === opt.id
+                ? 'ring-accent'
+                : 'ring-transparent group-hover:ring-gray-300'
+            }`}
+          >
+            <ThemeThumb variant={opt.id} />
+          </span>
+          <span
+            className={`block text-center text-xs mt-1.5 ${
+              value === opt.id ? 'font-semibold text-gray-900' : 'text-gray-500'
+            }`}
+          >
+            {opt.label}
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export default function Settings() {
   const [settings, setSettings] = useState({
     sitesDir: '',
@@ -20,6 +88,7 @@ export default function Settings() {
     dbUser: 'root',
     dbPassword: '',
     brewPrefix: '',
+    appearance: 'system',
   });
   const [sysInfo, setSysInfo] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -102,6 +171,13 @@ export default function Settings() {
     if (folder) setSettings((s) => ({ ...s, sitesDir: folder }));
   }
 
+  // Applies instantly (nativeTheme in the main process flips the whole app),
+  // no Save needed — like the macOS Appearance pane.
+  async function handleAppearanceChange(value) {
+    setSettings((s) => ({ ...s, appearance: value }));
+    await window.electronAPI.setAppearance(value);
+  }
+
   async function handleSetupDns() {
     setDnsSetupLoading(true);
     setDnsMessage(null);
@@ -119,6 +195,22 @@ export default function Settings() {
 
   return (
     <div className="px-6 pb-6 max-w-2xl mx-auto animate-fade-in space-y-6">
+      {/* Appearance */}
+      <div>
+        <SectionLabel>Appearance</SectionLabel>
+        <Card>
+          <Row
+            title="Appearance"
+            subtitle="Auto matches your macOS appearance setting"
+          >
+            <AppearancePicker
+              value={settings.appearance || 'system'}
+              onChange={handleAppearanceChange}
+            />
+          </Row>
+        </Card>
+      </div>
+
       {/* General */}
       <div>
         <SectionLabel>General</SectionLabel>
@@ -196,7 +288,10 @@ export default function Settings() {
               sudoers?.configured ? (
                 <ShieldCheck size={18} className="text-wp-green flex-shrink-0" />
               ) : (
-                <ShieldAlert size={18} className="text-amber-600 flex-shrink-0" />
+                <ShieldAlert
+                  size={18}
+                  className="text-amber-600 dark:text-amber-400 flex-shrink-0"
+                />
               )
             }
             title="Passwordless DNS Control"
@@ -223,7 +318,7 @@ export default function Settings() {
               <button
                 onClick={handleUninstallSudoers}
                 disabled={sudoersLoading}
-                className="btn-ghost text-xs text-gray-400 hover:text-red-600"
+                className="btn-ghost text-xs text-gray-400 hover:text-red-600 dark:hover:text-red-400"
               >
                 {sudoersLoading ? (
                   <Loader size={12} className="animate-spin mr-1.5" />
@@ -261,7 +356,9 @@ export default function Settings() {
             <div
               key={i}
               className={`flex items-start gap-2 px-3 py-2.5 rounded-lg mt-2 text-[13px] ${
-                m.type === 'error' ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'
+                m.type === 'error'
+                  ? 'bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400'
+                  : 'bg-green-50 text-green-700 dark:bg-green-500/10 dark:text-green-400'
               }`}
             >
               <CheckCircle size={14} className="flex-shrink-0 mt-0.5" />
@@ -296,7 +393,7 @@ export default function Settings() {
             ))}
         </Card>
         {deps && !deps.brew && (
-          <div className="flex items-start gap-2 bg-orange-50 rounded-lg px-3 py-2.5 mt-2 text-xs text-orange-700">
+          <div className="flex items-start gap-2 bg-orange-50 dark:bg-orange-500/10 rounded-lg px-3 py-2.5 mt-2 text-xs text-orange-700 dark:text-orange-300">
             <Info size={13} className="flex-shrink-0 mt-0.5" />
             <span>
               Install Homebrew first:{' '}

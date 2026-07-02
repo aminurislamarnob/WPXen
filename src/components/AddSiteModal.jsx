@@ -40,11 +40,11 @@ function StepIndicator({ current, steps }) {
 
 function ProgressLog({ messages }) {
   return (
-    <div className="mt-4 bg-gray-900 rounded-lg p-4 h-40 overflow-y-auto font-mono text-xs">
+    <div className="mt-4 bg-zinc-900 rounded-lg p-4 h-40 overflow-y-auto font-mono text-xs">
       {messages.map((msg, i) => (
         <div
           key={i}
-          className={`flex items-start gap-2 ${i === messages.length - 1 ? 'text-white' : 'text-gray-400'}`}
+          className={`flex items-start gap-2 ${i === messages.length - 1 ? 'text-white' : 'text-zinc-400'}`}
         >
           {i === messages.length - 1 ? (
             <Loader
@@ -172,7 +172,7 @@ export default function AddSiteModal({ onClose, onSiteAdded, phpVersions }) {
       className="modal-overlay animate-fade-in"
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
-      <div className="bg-white rounded-2xl shadow-window w-[520px] max-h-[90vh] overflow-hidden animate-slide-in">
+      <div className="panel rounded-2xl shadow-window w-[520px] max-h-[90vh] overflow-hidden animate-slide-in">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
           <div>
@@ -352,7 +352,7 @@ export default function AddSiteModal({ onClose, onSiteAdded, phpVersions }) {
                   }
                 />
               </div>
-              <div className="bg-blue-50 rounded-lg px-4 py-3 text-xs text-blue-700">
+              <div className="bg-blue-50 dark:bg-blue-500/10 rounded-lg px-4 py-3 text-xs text-blue-700 dark:text-blue-300">
                 WordPress will be installed at{' '}
                 <span className="font-semibold font-mono">{formData.domain}</span> with
                 the credentials above.
@@ -365,7 +365,7 @@ export default function AddSiteModal({ onClose, onSiteAdded, phpVersions }) {
             <div className="animate-fade-in">
               {done ? (
                 <div className="text-center py-4">
-                  <div className="w-14 h-14 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-3">
+                  <div className="w-14 h-14 rounded-full bg-green-100 dark:bg-green-500/15 flex items-center justify-center mx-auto mb-3">
                     <CheckCircle size={28} className="text-wp-green" />
                   </div>
                   <h3 className="text-base font-bold text-gray-900">Site Created!</h3>
@@ -421,7 +421,7 @@ export default function AddSiteModal({ onClose, onSiteAdded, phpVersions }) {
 
           {/* Error */}
           {error && (
-            <div className="mt-4 flex items-start gap-2 bg-red-50 text-red-700 rounded-lg px-4 py-3 text-sm">
+            <div className="mt-4 flex items-start gap-2 bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400 rounded-lg px-4 py-3 text-sm">
               <AlertCircle size={16} className="flex-shrink-0 mt-0.5" />
               <span>{error}</span>
             </div>
