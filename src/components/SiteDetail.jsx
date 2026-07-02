@@ -11,10 +11,14 @@ import {
   Globe,
   Database,
   Folder,
+  FileText,
 } from 'lucide-react';
 import WpConfigManager from './WpConfigManager';
 import SitePhpSettings from './SitePhpSettings';
 import WpOverview from './WpOverview';
+import WpPlugins from './WpPlugins';
+import WpThemes from './WpThemes';
+import SiteLogs from './SiteLogs';
 
 const NAV = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard },
@@ -37,19 +41,8 @@ const NAV = [
       { id: 'wp-themes', label: 'Themes' },
     ],
   },
+  { id: 'logs', label: 'Logs', icon: FileText },
 ];
-
-function Placeholder({ title }) {
-  return (
-    <div className="bg-white rounded-xl border border-surface-border shadow-card p-10 text-center">
-      <div className="w-12 h-12 rounded-xl bg-gray-100 flex items-center justify-center mx-auto mb-3">
-        <Wrench size={22} className="text-gray-400" />
-      </div>
-      <h3 className="text-sm font-semibold text-gray-700">{title}</h3>
-      <p className="text-xs text-gray-400 mt-1.5">Coming soon.</p>
-    </div>
-  );
-}
 
 function Overview({ site }) {
   const rows = [
@@ -186,8 +179,9 @@ export default function SiteDetail({ sites, refreshSites }) {
           {active === 'wp-overview' && (
             <WpOverview site={site} onSaved={refreshSites} />
           )}
-          {active === 'wp-plugins' && <Placeholder title="Plugins" />}
-          {active === 'wp-themes' && <Placeholder title="Themes" />}
+          {active === 'wp-plugins' && <WpPlugins site={site} onSaved={refreshSites} />}
+          {active === 'wp-themes' && <WpThemes site={site} onSaved={refreshSites} />}
+          {active === 'logs' && <SiteLogs site={site} />}
         </div>
       </div>
     </div>

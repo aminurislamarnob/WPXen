@@ -31,6 +31,7 @@ const mkcert = require('./services/mkcert.cjs');
 const phpmyadmin = require('./services/phpmyadmin.cjs');
 const cloudflared = require('./services/cloudflared.cjs');
 const sudoers = require('./services/sudoers.cjs');
+const logs = require('./services/logs.cjs');
 const validation = require('./services/validation.cjs');
 const { humanize } = require('./services/errors.cjs');
 
@@ -396,6 +397,164 @@ function registerHandlers(win, storeInstance) {
       if (!site) return { success: false, error: 'Site not found' };
       await wordpress.updateWpAll(site.path);
       return { success: true };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  // ─── Plugin management ─────────────────────────────────────────────────
+
+  ipcMain.handle('get-wp-plugins', async (_, id) => {
+    try {
+      const site = findSite(id);
+      if (!site) return { success: false, error: 'Site not found' };
+      return { success: true, plugins: await wordpress.listPlugins(site.path) };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  // Runs a lifecycle action (activate/deactivate/update/delete) on one or more
+  // plugins sequentially, collecting per-plugin failures instead of aborting.
+  ipcMain.handle('wp-plugin-action', async (_, id, action, names) => {
+    try {
+      const site = findSite(id);
+      if (!site) return { success: false, error: 'Site not found' };
+      const list = Array.isArray(names) ? names : [names];
+      const errors = [];
+      for (const name of list) {
+        try {
+          await wordpress.pluginAction(site.path, action, name);
+        } catch (err) {
+          errors.push(`${name}: ${humanize(err)}`);
+        }
+      }
+      if (errors.length > 0) {
+        return { success: false, error: errors.join(' — ') };
+      }
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('wp-plugin-auto-update', async (_, id, name, enabled) => {
+    try {
+      const site = findSite(id);
+      if (!site) return { success: false, error: 'Site not found' };
+      await wordpress.setPluginAutoUpdate(site.path, name, !!enabled);
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('wp-plugin-install', async (_, id, slug, activate) => {
+    try {
+      const site = findSite(id);
+      if (!site) return { success: false, error: 'Site not found' };
+      await wordpress.installPlugin(site.path, slug, !!activate);
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  // ─── Theme management ──────────────────────────────────────────────────
+
+  ipcMain.handle('get-wp-themes', async (_, id) => {
+    try {
+      const site = findSite(id);
+      if (!site) return { success: false, error: 'Site not found' };
+      return { success: true, themes: await wordpress.listThemes(site.path) };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('wp-theme-action', async (_, id, action, names) => {
+    try {
+      const site = findSite(id);
+      if (!site) return { success: false, error: 'Site not found' };
+      const list = Array.isArray(names) ? names : [names];
+      const errors = [];
+      for (const name of list) {
+        try {
+          await wordpress.themeAction(site.path, action, name);
+        } catch (err) {
+          errors.push(`${name}: ${humanize(err)}`);
+        }
+      }
+      if (errors.length > 0) {
+        return { success: false, error: errors.join(' — ') };
+      }
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('wp-theme-auto-update', async (_, id, name, enabled) => {
+    try {
+      const site = findSite(id);
+      if (!site) return { success: false, error: 'Site not found' };
+      await wordpress.setThemeAutoUpdate(site.path, name, !!enabled);
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('wp-theme-install', async (_, id, slug, activate) => {
+    try {
+      const site = findSite(id);
+      if (!site) return { success: false, error: 'Site not found' };
+      await wordpress.installTheme(site.path, slug, !!activate);
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  // ─── Site logs ─────────────────────────────────────────────────────────
+
+  ipcMain.handle('get-site-log', async (_, id, kind) => {
+    try {
+      const site = findSite(id);
+      if (!site) return { success: false, error: 'Site not found' };
+      return { success: true, log: logs.readLog(site, kind) };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('clear-site-log', async (_, id, kind) => {
+    try {
+      const site = findSite(id);
+      if (!site) return { success: false, error: 'Site not found' };
+      logs.clearLog(site, kind);
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('save-site-log', async (_, id, kind) => {
+    try {
+      const site = findSite(id);
+      if (!site) return { success: false, error: 'Site not found' };
+      const src = logs.resolveLogPath(site, kind);
+      if (!fs.existsSync(src)) {
+        return { success: false, error: 'The log file does not exist yet.' };
+      }
+      const result = await dialog.showSaveDialog(mainWindow, {
+        defaultPath: path.join(os.homedir(), 'Downloads', `${site.domain}-${kind}.log`),
+      });
+      if (result.canceled || !result.filePath) {
+        return { success: true, canceled: true };
+      }
+      fs.copyFileSync(src, result.filePath);
+      return { success: true, path: result.filePath };
     } catch (err) {
       return { success: false, error: humanize(err) };
     }

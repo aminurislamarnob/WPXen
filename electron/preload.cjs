@@ -33,6 +33,29 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('update-wp-item', id, type, name),
   updateWpAll: (id) => ipcRenderer.invoke('update-wp-all', id),
 
+  // Plugin management
+  getWpPlugins: (id) => ipcRenderer.invoke('get-wp-plugins', id),
+  wpPluginAction: (id, action, names) =>
+    ipcRenderer.invoke('wp-plugin-action', id, action, names),
+  wpPluginAutoUpdate: (id, name, enabled) =>
+    ipcRenderer.invoke('wp-plugin-auto-update', id, name, enabled),
+  wpPluginInstall: (id, slug, activate) =>
+    ipcRenderer.invoke('wp-plugin-install', id, slug, activate),
+
+  // Theme management
+  getWpThemes: (id) => ipcRenderer.invoke('get-wp-themes', id),
+  wpThemeAction: (id, action, names) =>
+    ipcRenderer.invoke('wp-theme-action', id, action, names),
+  wpThemeAutoUpdate: (id, name, enabled) =>
+    ipcRenderer.invoke('wp-theme-auto-update', id, name, enabled),
+  wpThemeInstall: (id, slug, activate) =>
+    ipcRenderer.invoke('wp-theme-install', id, slug, activate),
+
+  // Site logs
+  getSiteLog: (id, kind) => ipcRenderer.invoke('get-site-log', id, kind),
+  clearSiteLog: (id, kind) => ipcRenderer.invoke('clear-site-log', id, kind),
+  saveSiteLog: (id, kind) => ipcRenderer.invoke('save-site-log', id, kind),
+
   // Share tunnels (Cloudflare)
   checkCloudflared: () => ipcRenderer.invoke('check-cloudflared'),
   installCloudflared: () => ipcRenderer.invoke('install-cloudflared'),

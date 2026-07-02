@@ -35,6 +35,7 @@ function StatCard({ icon: Icon, label, value, description, updates, tint }) {
 export default function WpOverview({ site, onSaved }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
   // '__core__' | '__all__' | '<type>:<name>' while an update is running.
   const [updating, setUpdating] = useState(null);
@@ -43,6 +44,7 @@ export default function WpOverview({ site, onSaved }) {
   const load = useCallback(
     async (initial = false) => {
       if (initial) setLoading(true);
+      else setRefreshing(true);
       setError(null);
       const result = await window.electronAPI.getWpOverview(site.id);
       if (result.success) {
@@ -51,6 +53,7 @@ export default function WpOverview({ site, onSaved }) {
         setError(result.error);
       }
       setLoading(false);
+      setRefreshing(false);
     },
     [site.id]
   );
@@ -87,12 +90,18 @@ export default function WpOverview({ site, onSaved }) {
           </p>
         </div>
         <button
-          onClick={() => load()}
-          disabled={loading || busy}
+          onClick={() => {
+            setMessage(null);
+            load();
+          }}
+          disabled={loading || refreshing || busy}
           title="Refresh"
           className="btn-secondary text-sm"
         >
-          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+          <RefreshCw
+            size={14}
+            className={loading || refreshing ? 'animate-spin' : ''}
+          />
         </button>
       </div>
 

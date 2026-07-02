@@ -571,6 +571,174 @@ async function getWpOverview(sitePath) {
   };
 }
 
+// Minimal HTML → text for WP-CLI list output (descriptions/authors carry
+// markup like <strong> and <cite>).
+function stripHtml(raw) {
+  if (typeof raw !== 'string') return '';
+  return raw
+    .replace(/<[^>]*>/g, '')
+    .replace(/&amp;/g, '&')
+    .replace(/&#0?39;|&#8217;/g, "'")
+    .replace(/&quot;|&#8220;|&#8221;/g, '"')
+    .replace(/&hellip;/g, '…')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+const WP_ITEM_NAME_RE = /^[a-zA-Z0-9._-]+$/;
+
+// Full plugin inventory for the management screen. Excludes must-use plugins
+// and drop-ins — they have no activate/deactivate/update lifecycle.
+//
+// Not every WordPress/WP-CLI combination exposes the same list fields (e.g.
+// `author` is missing on some versions and makes the whole command fail with
+// "Invalid field"), so degrade through progressively smaller field sets.
+const ITEM_LIST_FIELDS = [
+  'name,title,status,version,update,update_version,auto_update,description,author',
+  'name,title,status,version,update,update_version,auto_update,description',
+  'name,title,status,version,update,update_version',
+  'name,status,version,update',
+];
+
+// Shared plugin/theme inventory fetch with the field-fallback chain.
+async function listWpItems(sitePath, kind) {
+  let raw = null;
+  let lastErr = null;
+  for (const fields of ITEM_LIST_FIELDS) {
+    try {
+      raw = await wpAsync(
+        [kind, 'list', `--fields=${fields}`, '--format=json'],
+        sitePath
+      );
+      break;
+    } catch (err) {
+      lastErr = err;
+      const text = `${err.stderr || ''}${err.message || ''}`;
+      // Only retry with fewer fields when the failure is about the fields.
+      if (!/invalid field/i.test(text)) throw err;
+    }
+  }
+  if (raw == null) throw lastErr;
+
+  return parseJsonList(raw).map((p) => ({
+    name: p.name,
+    title: stripHtml(p.title) || p.name,
+    status: p.status,
+    version: p.version,
+    updateAvailable: p.update === 'available',
+    updateVersion: p.update_version || null,
+    autoUpdate: p.auto_update === 'on',
+    description: stripHtml(p.description),
+    author: stripHtml(p.author),
+  }));
+}
+
+async function listPlugins(sitePath) {
+  const items = await listWpItems(sitePath, 'plugin');
+  return items.filter((p) => p.status !== 'must-use' && p.status !== 'dropin');
+}
+
+// Theme inventory. Status is 'active', 'inactive', or 'parent' (parent theme
+// of the active child theme).
+async function listThemes(sitePath) {
+  return listWpItems(sitePath, 'theme');
+}
+
+// Runs a lifecycle action on one plugin. Delete deactivates first so hooks
+// (e.g. custom tables cleanup on deactivate) get a chance to run.
+async function pluginAction(sitePath, action, name) {
+  if (typeof name !== 'string' || !WP_ITEM_NAME_RE.test(name)) {
+    throw new Error('Invalid plugin name.');
+  }
+  switch (action) {
+    case 'activate':
+      await wpAsync(['plugin', 'activate', name], sitePath, { timeout: 300000 });
+      break;
+    case 'deactivate':
+      await wpAsync(['plugin', 'deactivate', name], sitePath, { timeout: 300000 });
+      break;
+    case 'update':
+      await wpAsync(['plugin', 'update', name], sitePath, { timeout: 600000 });
+      break;
+    case 'delete':
+      await wpAsync(['plugin', 'deactivate', name], sitePath, {
+        timeout: 300000,
+      }).catch(() => {});
+      await wpAsync(['plugin', 'delete', name], sitePath, { timeout: 300000 });
+      break;
+    default:
+      throw new Error(`Unknown plugin action: ${action}`);
+  }
+}
+
+async function setPluginAutoUpdate(sitePath, name, enabled) {
+  if (typeof name !== 'string' || !WP_ITEM_NAME_RE.test(name)) {
+    throw new Error('Invalid plugin name.');
+  }
+  await wpAsync(
+    ['plugin', 'auto-updates', enabled ? 'enable' : 'disable', name],
+    sitePath,
+    { timeout: 120000 }
+  );
+}
+
+// Installs a plugin from the wordpress.org directory by slug.
+async function installPlugin(sitePath, slug, activate = false) {
+  if (typeof slug !== 'string' || !/^[a-z0-9-]+$/.test(slug)) {
+    throw new Error(
+      'Invalid plugin slug. Use the wordpress.org slug, e.g. "woocommerce".'
+    );
+  }
+  const args = ['plugin', 'install', slug];
+  if (activate) args.push('--activate');
+  await wpAsync(args, sitePath, { timeout: 600000 });
+}
+
+// Runs a lifecycle action on one theme. Themes have no deactivate — activating
+// another theme replaces the current one — and WP-CLI refuses to delete the
+// active theme, which surfaces as a normal error.
+async function themeAction(sitePath, action, name) {
+  if (typeof name !== 'string' || !WP_ITEM_NAME_RE.test(name)) {
+    throw new Error('Invalid theme name.');
+  }
+  switch (action) {
+    case 'activate':
+      await wpAsync(['theme', 'activate', name], sitePath, { timeout: 300000 });
+      break;
+    case 'update':
+      await wpAsync(['theme', 'update', name], sitePath, { timeout: 600000 });
+      break;
+    case 'delete':
+      await wpAsync(['theme', 'delete', name], sitePath, { timeout: 300000 });
+      break;
+    default:
+      throw new Error(`Unknown theme action: ${action}`);
+  }
+}
+
+async function setThemeAutoUpdate(sitePath, name, enabled) {
+  if (typeof name !== 'string' || !WP_ITEM_NAME_RE.test(name)) {
+    throw new Error('Invalid theme name.');
+  }
+  await wpAsync(
+    ['theme', 'auto-updates', enabled ? 'enable' : 'disable', name],
+    sitePath,
+    { timeout: 120000 }
+  );
+}
+
+// Installs a theme from the wordpress.org directory by slug.
+async function installTheme(sitePath, slug, activate = false) {
+  if (typeof slug !== 'string' || !/^[a-z0-9-]+$/.test(slug)) {
+    throw new Error(
+      'Invalid theme slug. Use the wordpress.org slug, e.g. "astra".'
+    );
+  }
+  const args = ['theme', 'install', slug];
+  if (activate) args.push('--activate');
+  await wpAsync(args, sitePath, { timeout: 600000 });
+}
+
 // Updates WordPress core (plus the DB schema step core updates may need).
 async function updateWpCore(sitePath) {
   await wpAsync(['core', 'update'], sitePath, { timeout: 600000 });
@@ -645,6 +813,14 @@ module.exports = {
   updateWpCore,
   updateWpItem,
   updateWpAll,
+  listPlugins,
+  pluginAction,
+  setPluginAutoUpdate,
+  installPlugin,
+  listThemes,
+  themeAction,
+  setThemeAutoUpdate,
+  installTheme,
   getSiteWordPressVersion,
   getWordPressInfo,
   sanitizeDomain,
