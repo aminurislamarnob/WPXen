@@ -127,11 +127,11 @@ export default function Dashboard({ serviceStatus, sites, refreshStatus }) {
           <ShieldAlert size={16} className="text-amber-600 flex-shrink-0 mt-0.5" />
           <div className="flex-1 min-w-0">
             <p className="text-sm font-semibold text-amber-800">
-              Password required for services
+              Password required for DNS
             </p>
             <p className="text-xs text-amber-700 mt-0.5">
-              macOS will ask for your password every time a service starts or stops. Set
-              up passwordless permissions once to fix this.
+              macOS will ask for your password when the dnsmasq DNS resolver starts or
+              stops. Set up passwordless permissions once to fix this.
             </p>
           </div>
           <button

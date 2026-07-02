@@ -4,6 +4,7 @@ const { execSync, execFileSync, spawn } = require('child_process');
 const fs = require('fs');
 const brew = require('./brew.cjs');
 const execAsync = require('./asyncExec.cjs');
+const procman = require('./procman.cjs');
 
 // PHP versions WPHerd can install. Newer versions ship as Homebrew core
 // formulae (php@<version>); older EOL versions were dropped from core and come
@@ -87,24 +88,75 @@ async function isPhpFpmRunningAsync(_version) {
   }
 }
 
-function startPhpFpm(version) {
-  const serviceName = getBrewServiceName(version);
-  brew.startBrewService(serviceName);
+// php-fpm runs as a single supervised child of WPHerd (registry slot 'php',
+// see procman.cjs) — one version at a time, matching today's behavior: every
+// version's pool listens on 127.0.0.1:9000, so two can't coexist anyway.
+function buildFpmSpec(version) {
+  const bin = getPhpFpmBinPath(version);
+  if (!bin) throw new Error(`PHP ${version} is not installed`);
+  const prefix = brew.getBrewPrefix();
+  return {
+    name: 'php',
+    bin,
+    // Explicit --fpm-config: the unversioned `php` keg's compiled-in default
+    // doesn't always match the etc/php/<version> layout brew services used.
+    args: [
+      '--nodaemonize',
+      '--fpm-config',
+      `${prefix}/etc/php/${version}/php-fpm.conf`,
+    ],
+    cwd: `${prefix}/var`,
+    stopSignal: 'SIGQUIT', // graceful: workers finish in-flight requests
+    stopTimeoutMs: 10_000,
+    meta: { version },
+    // A SIGKILLed master orphans its pool workers (reparented to launchd),
+    // which keep 127.0.0.1:9000 bound — sweep them before every (re)spawn.
+    preSpawn: async () => {
+      try {
+        await execAsync(
+          `ps -axo pid=,ppid=,command= | awk '$2==1 && $0 ~ /php-fpm: pool/ {print $1}' | xargs kill -9`,
+          { timeout: 4000 }
+        );
+      } catch {}
+    },
+    readyProbe: () => isPhpFpmRunningAsync(),
+    readyTimeoutMs: 10_000,
+    // A pre-migration launchd instance may still hold :9000 — clear it.
+    conflictProbe: () => isPhpFpmRunningAsync(),
+    takeover: async () => {
+      for (const v of brew.getInstalledPhpVersions()) {
+        try {
+          brew.stopBrewService(getBrewServiceName(v));
+        } catch {}
+      }
+    },
+  };
 }
 
-function stopPhpFpm(version) {
-  const serviceName = getBrewServiceName(version);
-  brew.stopBrewService(serviceName);
+// The version the supervised FPM child is currently running, or null.
+function getRunningFpmVersion() {
+  const st = procman.status('php');
+  if (st.state === 'running' || st.state === 'starting') {
+    return st.meta?.version ?? null;
+  }
+  return null;
+}
+
+async function startPhpFpm(version) {
+  const running = getRunningFpmVersion();
+  if (running && running !== version) {
+    await procman.stop('php');
+  }
+  return procman.start(buildFpmSpec(version));
+}
+
+// Version argument kept for API compatibility; only one FPM child exists.
+function stopPhpFpm(_version) {
+  return procman.stop('php');
 }
 
 function stopAllPhpFpm() {
-  const versions = brew.getInstalledPhpVersions();
-  for (const v of versions) {
-    try {
-      const serviceName = getBrewServiceName(v);
-      brew.stopBrewService(serviceName);
-    } catch {}
-  }
+  return procman.stop('php');
 }
 
 function getPhpVersion(version) {
@@ -570,13 +622,14 @@ function writeManagedIni(version, values) {
   fs.writeFileSync(p, lines.join('\n'), 'utf8');
 }
 
-// Restarts a version's PHP-FPM only if it's currently running, so a config
-// change takes effect without spuriously starting a stopped service.
+// Reloads the supervised FPM child only if it's currently running *this*
+// version, so a config change takes effect without spuriously starting a
+// stopped service. SIGUSR2 is php-fpm's graceful reload: workers respawn and
+// re-read php.ini/conf.d with zero dropped requests.
 function reloadPhpFpmIfRunning(version) {
   try {
-    const svc = getBrewServiceName(version);
-    if (brew.getBrewServiceStatus(svc) === 'running') {
-      brew.restartBrewService(svc);
+    if (getRunningFpmVersion() === version && procman.isSupervised('php')) {
+      procman.signal('php', 'SIGUSR2');
     }
   } catch {}
 }
@@ -627,6 +680,7 @@ module.exports = {
   startPhpFpm,
   stopPhpFpm,
   stopAllPhpFpm,
+  getRunningFpmVersion,
   getInstalledPhpVersionsWithDetails,
   getInstalledPhpVersionsWithDetailsAsync,
   getInstallablePhpVersions,
@@ -635,6 +689,7 @@ module.exports = {
   switchActivePhpVersion,
   getBrewServiceName,
   getPhpIniSettings,
+  reloadPhpFpmIfRunning,
   setPhpIniSetting,
   setPhpIniSettingAllVersions,
   getSitePhpSettingsSchema,

@@ -41,6 +41,14 @@ Node directly. When adding a feature that crosses the boundary you must touch th
   close listener so the app can actually exit.
 - `ipc.cjs` — all IPC handlers; also owns `getServiceStatus()` and `startStatusPoller()`
   which pushes `service-status-update` events to the renderer on an interval.
+- `services/procman.cjs` — child-process supervisor. nginx, PHP-FPM, MySQL, and
+  Mailpit run as supervised **children of the app** (spawned from spec objects each
+  service module builds), NOT via `brew services` — this keeps them out of macOS
+  "App Background Activity". Crash restart with backoff, graceful-stop escalation,
+  pid-file orphan reconciliation after a hard app crash. Services stop on quit and
+  auto-start on launch (`main.cjs`). Only dnsmasq still uses `brew services` (root
+  LaunchDaemon, port 53). `services/migration.cjs` unregisters the old brew services
+  once per machine.
 - `store.cjs` — `JsonStore`, a dependency-free JSON persistence layer at
   `userData/wpherd-data.json`. Supports dotted key paths (`get('a.b', default)`).
   Sites and settings live here.
@@ -51,6 +59,11 @@ Node directly. When adding a feature that crosses the boundary you must touch th
     service modules derive their config paths from `brew.getBrewPrefix()`.
   - `nginx.cjs` — generates per-site vhosts in `{prefix}/etc/nginx/servers/<domain>.conf`.
   - `php.cjs`, `mysql.cjs`, `dnsmasq.cjs`, `wordpress.cjs` (WP-CLI install flow).
+  - `mailpit.cjs` — email catching: runs Mailpit (SMTP sink + web inbox on
+    :8025) via `brew services` and routes PHP `mail()` into it by writing a
+    `sendmail_path` override (`zz-wpherd-mailpit.ini`) into every installed
+    PHP version's conf.d. Also wraps Mailpit's REST API for the in-app inbox
+    (Mail page in the renderer).
 
 ### Key implementation notes
 

@@ -249,8 +249,8 @@ export default function Settings() {
         <div className="p-5">
           <p className="text-sm text-gray-600 mb-2">
             {sudoers?.configured
-              ? 'WPHerd can start and stop services silently — no password prompts.'
-              : 'Without this, macOS will ask for your password every time a service starts or stops.'}
+              ? 'WPHerd can manage the dnsmasq DNS resolver silently — no password prompts.'
+              : 'Without this, macOS will ask for your password when the dnsmasq DNS resolver starts or stops.'}
           </p>
           <p className="text-xs text-gray-400 mb-4">
             Installs{' '}
@@ -259,7 +259,9 @@ export default function Settings() {
             </span>{' '}
             granting passwordless{' '}
             <span className="font-mono bg-gray-100 px-1 rounded">sudo brew services</span>
-            . Requires your password <strong>once</strong> to set up, then never again.
+            , used only for dnsmasq — the other services run inside WPHerd and need no
+            privileges. Requires your password <strong>once</strong> to set up, then
+            never again.
           </p>
 
           {sudoersMessage && (

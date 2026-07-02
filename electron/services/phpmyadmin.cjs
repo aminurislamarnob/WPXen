@@ -84,25 +84,25 @@ function ensureVhost() {
 }
 
 // Makes sure the services phpMyAdmin depends on are up.
-function ensureServices() {
+async function ensureServices() {
   const active = brew.getActivePhpVersion();
   if (active && !php.isPhpFpmRunning(active)) {
     try {
-      php.startPhpFpm(active);
+      await php.startPhpFpm(active);
     } catch {}
   }
   if (!nginx.isRunning()) {
     try {
-      nginx.start();
+      await nginx.start();
     } catch {}
   }
 }
 
-function ensureReady() {
+async function ensureReady() {
   ensureInstalled();
   writeConfig();
   ensureVhost();
-  ensureServices();
+  await ensureServices();
 }
 
 function getUrl(dbName) {

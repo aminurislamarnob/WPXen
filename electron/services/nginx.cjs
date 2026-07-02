@@ -6,6 +6,7 @@ const path = require('path');
 const brew = require('./brew.cjs');
 const phpService = require('./php.cjs');
 const execAsync = require('./asyncExec.cjs');
+const procman = require('./procman.cjs');
 
 function getNginxConfDir() {
   const prefix = brew.getBrewPrefix();
@@ -50,27 +51,139 @@ async function isRunningAsync() {
   }
 }
 
-// nginx must bind port 80 (<1024) so it needs to run as a root LaunchDaemon.
-// startBrewServiceSudo uses passwordless sudo when the WPHerd sudoers file is
-// installed, otherwise falls back to an osascript admin-privileges dialog.
-function start() {
-  brew.startBrewServiceSudo('nginx');
+function getNginxBinPath() {
+  const prefix = brew.getBrewPrefix();
+  if (!prefix) return null;
+  const optPath = `${prefix}/opt/nginx/bin/nginx`;
+  if (fs.existsSync(optPath)) return optPath;
+  const linkedPath = `${prefix}/bin/nginx`;
+  if (fs.existsSync(linkedPath)) return linkedPath;
+  return null;
+}
+
+// nginx runs as a supervised child of WPHerd (see procman.cjs). No root
+// needed: since macOS 10.14 unprivileged processes may bind ports below 1024,
+// so 80/443 work from a plain child process (this is how Herd does it too).
+function buildSpec() {
+  const bin = getNginxBinPath();
+  if (!bin) throw new Error('nginx is not installed.');
+  const prefix = brew.getBrewPrefix();
+  return {
+    name: 'nginx',
+    bin,
+    // launchd/brew runs the same invocation: stay in the foreground so the
+    // supervisor owns the master process (nginx self-daemonizes by default).
+    args: ['-g', 'daemon off;'],
+    cwd: prefix,
+    stopSignal: 'SIGQUIT', // graceful: workers finish in-flight requests
+    stopTimeoutMs: 10_000,
+    // A SIGKILLed master leaves its workers orphaned (reparented to launchd),
+    // still holding :80/:443 — sweep them before every (re)spawn and after a
+    // forced kill of our own child.
+    preSpawn: async () => {
+      try {
+        await execAsync(
+          `ps -axo pid=,ppid=,command= | awk '$2==1 && $0 ~ /nginx: worker process/ {print $1}' | xargs kill -9`,
+          { timeout: 4000 }
+        );
+      } catch {}
+    },
+    onForceKilled: async () => {
+      try {
+        await execAsync("pkill -f 'nginx: worker process'", { timeout: 4000 });
+      } catch {}
+    },
+    // A pre-migration launchd instance (root daemon) can't be cleared without
+    // sudo; the takeover uses the sudo path (silent when sudoers installed).
+    conflictProbe: isRunningAsync,
+    takeover: async () => {
+      try {
+        brew.stopBrewServiceSudo('nginx');
+      } catch {}
+      try {
+        brew.stopBrewService('nginx');
+      } catch {}
+    },
+  };
+}
+
+// The pre-migration nginx ran as a root LaunchDaemon, leaving root-owned log
+// files and nobody-owned worker temp dirs behind. Our unprivileged child can't
+// open those, so `nginx -t` fails with EACCES. The parent dirs are user-owned
+// (Homebrew keeps its prefix user-owned), so we can simply delete anything not
+// ours — nginx recreates it on start with the right owner.
+function removeForeignArtifacts() {
+  const prefix = brew.getBrewPrefix();
+  if (!prefix) return;
+  const uid = process.getuid ? process.getuid() : null;
+  if (uid == null) return;
+
+  const sweep = (dir) => {
+    let entries = [];
+    try {
+      entries = fs.readdirSync(dir);
+    } catch {
+      return;
+    }
+    for (const name of entries) {
+      const p = path.join(dir, name);
+      try {
+        if (fs.lstatSync(p).uid !== uid) {
+          fs.rmSync(p, { recursive: true, force: true });
+        }
+      } catch {}
+    }
+  };
+
+  sweep(`${prefix}/var/log/nginx`);
+  sweep(`${prefix}/var/run/nginx`);
+  try {
+    const pidFile = `${prefix}/var/run/nginx.pid`;
+    if (fs.existsSync(pidFile) && fs.lstatSync(pidFile).uid !== uid) {
+      fs.rmSync(pidFile, { force: true });
+    }
+  } catch {}
+}
+
+async function start() {
+  removeForeignArtifacts();
+  // Pre-flight the config so a typo yields "nginx -t" output instead of a
+  // silent crash loop.
+  const { valid, error } = validateConfig();
+  if (!valid) {
+    throw new Error(`nginx config test failed: ${error}`);
+  }
+  return procman.start(buildSpec());
 }
 
 function stop() {
-  brew.stopBrewServiceSudo('nginx');
+  return procman.stop('nginx');
 }
 
-function restart() {
-  brew.restartBrewServiceSudo('nginx');
+async function restart() {
+  const { valid, error } = validateConfig();
+  if (!valid) {
+    throw new Error(`nginx config test failed: ${error}`);
+  }
+  return procman.restart(buildSpec());
 }
 
 function reload() {
+  // Prefer signaling our own supervised master; fall back to the pid-file
+  // based `nginx -s reload` for an instance we didn't spawn.
+  if (procman.isSupervised('nginx')) {
+    try {
+      procman.signal('nginx', 'SIGHUP');
+      return;
+    } catch {}
+  }
   try {
-    const prefix = brew.getBrewPrefix();
-    execSync(`${prefix}/bin/nginx -s reload`, { stdio: 'pipe' });
+    execSync(`${getNginxBinPath()} -s reload`, { stdio: 'pipe' });
   } catch {
-    restart();
+    // No reachable master — bring nginx up instead (matches the old
+    // reload-falls-back-to-restart behavior callers rely on during site
+    // creation). Fire-and-forget: callers treat reload as best-effort.
+    start().catch(() => {});
   }
 }
 
@@ -261,8 +374,7 @@ function siteConfigExists(domain) {
 
 function validateConfig() {
   try {
-    const prefix = brew.getBrewPrefix();
-    execSync(`${prefix}/bin/nginx -t`, { stdio: 'pipe' });
+    execSync(`${getNginxBinPath()} -t`, { stdio: 'pipe' });
     return { valid: true };
   } catch (err) {
     return { valid: false, error: err.stderr?.toString() || err.message };
@@ -271,6 +383,7 @@ function validateConfig() {
 
 module.exports = {
   getNginxConfDir,
+  getNginxBinPath,
   getServersDir,
   isRunning,
   isRunningAsync,

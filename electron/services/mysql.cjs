@@ -2,7 +2,9 @@
 
 const { execFileSync, execFile } = require('child_process');
 const { promisify } = require('util');
+const fs = require('fs');
 const brew = require('./brew.cjs');
+const procman = require('./procman.cjs');
 
 // execFile (no shell) for every call that includes user-influenced values —
 // the DB name or root password. This removes the command-injection surface
@@ -86,16 +88,69 @@ async function isRunningAsync() {
   }
 }
 
+// Resolves the actual server daemon. We spawn mysqld/mariadbd directly, NOT
+// mysqld_safe — that wrapper is itself a supervisor (respawns the server and
+// swallows signals), which would fight procman's crash-restart and make
+// graceful stop unreliable.
+function getServerBin() {
+  const prefix = brew.getBrewPrefix();
+  if (!prefix) return null;
+  const candidates = [
+    `${prefix}/opt/mariadb/bin/mariadbd`,
+    `${prefix}/opt/mysql/bin/mysqld`,
+    `${prefix}/bin/mariadbd`,
+    `${prefix}/bin/mysqld`,
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c;
+  }
+  return null;
+}
+
+// MySQL runs as a supervised child of WPHerd (see procman.cjs).
+function buildSpec() {
+  const bin = getServerBin();
+  if (!bin) throw new Error('MySQL/MariaDB is not installed.');
+  const prefix = brew.getBrewPrefix();
+  return {
+    name: 'mysql',
+    bin,
+    // Same datadir the brew service used; the server error log stays at the
+    // datadir default (*.err) so existing debugging habits keep working.
+    args: [`--datadir=${prefix}/var/mysql`],
+    cwd: `${prefix}/var`,
+    // Clean shutdown first via mysqladmin (fast, credential-aware)…
+    gracefulStop: () =>
+      execFileAsync(getMysqladminBin(), [...authArgs(), 'shutdown'], {
+        timeout: 20_000,
+      }),
+    // …falling back to SIGTERM, which mysqld also treats as clean shutdown
+    // (covers wrong/changed credentials).
+    stopSignal: 'SIGTERM',
+    stopTimeoutMs: 15_000,
+    // InnoDB recovery can take a few seconds — gate "started" on a real ping
+    // so site creation and Start buttons don't race a warming server.
+    readyProbe: isRunningAsync,
+    readyTimeoutMs: 30_000,
+    conflictProbe: isRunningAsync,
+    takeover: async () => {
+      try {
+        brew.stopBrewService(getBrewServiceName());
+      } catch {}
+    },
+  };
+}
+
 function start() {
-  brew.startBrewService(getBrewServiceName());
+  return procman.start(buildSpec());
 }
 
 function stop() {
-  brew.stopBrewService(getBrewServiceName());
+  return procman.stop('mysql');
 }
 
 function restart() {
-  brew.restartBrewService(getBrewServiceName());
+  return procman.restart(buildSpec());
 }
 
 function execQuery(sql, opts = {}) {
