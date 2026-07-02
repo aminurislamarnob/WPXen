@@ -106,14 +106,14 @@ export default function Layout({ serviceStatus }) {
         </div>
 
         {/* App identity */}
-        <div className="flex items-center px-4 py-2 mb-1">
-          <img src={logo} alt="WPHerd" className="h-6 w-auto object-contain" draggable={false} />
+        <div className="flex items-center px-4 py-2 mb-3">
+          <img src={logo} alt="WPHerd" className="h-5 w-auto object-contain" draggable={false} />
         </div>
 
         {/* Navigation groups */}
         <nav className="flex-1 px-3 py-1 overflow-y-auto no-drag">
           {groups.map((group, gi) => (
-            <div key={gi}>
+            <div key={gi} className="space-y-1.5 mb-2 last:mb-0">
               {group.map(({ to, icon: Icon, label, color }) => (
                 <NavLink
                   key={to}
