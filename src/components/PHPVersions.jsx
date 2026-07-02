@@ -76,7 +76,7 @@ function VersionRow({ version, onSwitch, switching, onUpdate, updating, logLine 
         )}
       </Row>
       {isUpdating && (
-        <div className="px-4 py-2 bg-gray-900">
+        <div className="px-4 py-2 bg-zinc-900">
           <p className="text-xs text-green-400 font-mono truncate" title={logLine}>
             {logLine || 'Starting…'}
           </p>
@@ -119,7 +119,7 @@ function InstallRow({ version, onInstall, installing, logLine, disabled }) {
         </button>
       </Row>
       {isInstalling && (
-        <div className="px-4 py-2 bg-gray-900">
+        <div className="px-4 py-2 bg-zinc-900">
           <p className="text-xs text-green-400 font-mono truncate" title={logLine}>
             {logLine || 'Starting…'}
           </p>
@@ -254,8 +254,8 @@ export default function PHPVersions() {
         <div
           className={`flex items-center gap-2 px-4 py-3 rounded-[10px] mb-4 text-[13px] animate-fade-in ${
             message.type === 'error'
-              ? 'bg-red-50 text-red-700'
-              : 'bg-green-50 text-green-700'
+              ? 'bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400'
+              : 'bg-green-50 text-green-700 dark:bg-green-500/10 dark:text-green-400'
           }`}
         >
           <CheckCircle size={14} />
@@ -269,8 +269,8 @@ export default function PHPVersions() {
         </div>
       ) : versions.length === 0 ? (
         <Card className="px-6 py-10 text-center">
-          <div className="w-12 h-12 rounded-xl bg-purple-50 flex items-center justify-center mx-auto mb-3">
-            <Code2 size={22} className="text-purple-500" />
+          <div className="w-12 h-12 rounded-xl bg-purple-50 dark:bg-purple-500/15 flex items-center justify-center mx-auto mb-3">
+            <Code2 size={22} className="text-purple-500 dark:text-purple-300" />
           </div>
           <h3 className="text-[13px] font-bold text-gray-700">No PHP versions found</h3>
           <p className="text-xs text-gray-400 mt-1">Install one below to get started.</p>

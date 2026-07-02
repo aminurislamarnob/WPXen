@@ -201,19 +201,21 @@ function Overview({ site }) {
             <button
               onClick={handleStopTunnel}
               title="Stop sharing"
-              className="p-1.5 rounded-lg text-red-500 hover:bg-red-50"
+              className="p-1.5 rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10"
             >
               <X size={13} />
             </button>
           </div>
         )}
         {tunnel?.status === 'error' && (
-          <p className="mt-2 px-2.5 text-xs text-red-600">
+          <p className="mt-2 px-2.5 text-xs text-red-600 dark:text-red-400">
             {tunnel.error || 'Failed to start the tunnel.'}
           </p>
         )}
         {actionError && (
-          <p className="mt-2 px-2.5 text-xs text-red-600">{actionError}</p>
+          <p className="mt-2 px-2.5 text-xs text-red-600 dark:text-red-400">
+            {actionError}
+          </p>
         )}
       </div>
 
@@ -265,7 +267,7 @@ export default function SiteDetail({ sites, refreshSites }) {
             <button
               onClick={() => navigate('/sites')}
               title="Back to Sites"
-              className="p-1.5 rounded-lg hover:bg-black/5 text-gray-500 flex-shrink-0"
+              className="p-1.5 rounded-lg hover:bg-black/5 dark:hover:bg-white/10 text-gray-500 flex-shrink-0"
             >
               <ChevronLeft size={17} />
             </button>
@@ -313,7 +315,7 @@ export default function SiteDetail({ sites, refreshSites }) {
                       className={`w-full text-left pl-9 pr-3 py-1.5 rounded-md text-[13px] transition-colors ${
                         active === child.id
                           ? 'bg-accent text-white font-medium'
-                          : 'text-gray-600 hover:bg-black/5'
+                          : 'text-gray-600 hover:bg-black/5 dark:hover:bg-white/10'
                       }`}
                     >
                       {child.label}
@@ -328,7 +330,7 @@ export default function SiteDetail({ sites, refreshSites }) {
                 className={`w-full flex items-center gap-2.5 px-3 py-1.5 rounded-md text-[13px] transition-colors ${
                   active === item.id
                     ? 'bg-accent text-white font-medium'
-                    : 'text-gray-600 hover:bg-black/5'
+                    : 'text-gray-600 hover:bg-black/5 dark:hover:bg-white/10'
                 }`}
               >
                 <item.icon size={14} />

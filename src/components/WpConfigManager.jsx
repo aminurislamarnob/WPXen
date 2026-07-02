@@ -110,8 +110,8 @@ export default function WpConfigManager({ site }) {
         <div
           className={`flex items-center gap-2 px-4 py-3 rounded-xl mb-4 text-sm ${
             message.type === 'error'
-              ? 'bg-red-50 text-red-700'
-              : 'bg-green-50 text-green-700'
+              ? 'bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400'
+              : 'bg-green-50 text-green-700 dark:bg-green-500/10 dark:text-green-400'
           }`}
         >
           {message.type === 'error' ? (
@@ -147,7 +147,7 @@ export default function WpConfigManager({ site }) {
                     {setting.description}
                   </p>
                   {blocked && (
-                    <p className="text-xs text-amber-600 mt-1 font-medium">
+                    <p className="text-xs text-amber-600 dark:text-amber-400 mt-1 font-medium">
                       Requires “{depLabel}” to be enabled.
                     </p>
                   )}
@@ -268,8 +268,8 @@ function ManualEditor({ site, onClose, onSaved }) {
         <div
           className={`flex items-center gap-2 px-4 py-3 rounded-xl mb-4 text-sm ${
             message.type === 'error'
-              ? 'bg-red-50 text-red-700'
-              : 'bg-green-50 text-green-700'
+              ? 'bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400'
+              : 'bg-green-50 text-green-700 dark:bg-green-500/10 dark:text-green-400'
           }`}
         >
           {message.type === 'error' ? (
@@ -290,7 +290,7 @@ function ManualEditor({ site, onClose, onSaved }) {
           value={contents}
           onChange={(e) => setContents(e.target.value)}
           spellCheck={false}
-          className="w-full h-[26rem] font-mono text-xs p-4 rounded-xl border border-surface-border bg-gray-900 text-gray-100 focus:ring-2 focus:ring-wp-blue/40 focus:border-wp-blue resize-y"
+          className="w-full h-[26rem] font-mono text-xs p-4 rounded-xl border border-surface-border bg-zinc-900 text-zinc-100 focus:ring-2 focus:ring-wp-blue/40 focus:border-wp-blue resize-y"
         />
       )}
     </div>
