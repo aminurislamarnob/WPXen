@@ -116,6 +116,12 @@ if (!gotLock) {
 
 // Handle macOS quit properly
 app.on('before-quit', () => {
+  // Kill any live share tunnels so no orphan cloudflared processes linger and
+  // no stale nginx server_name aliases are left behind.
+  try {
+    require('./services/cloudflared.cjs').stopAll();
+  } catch {}
+
   // Allow the window to actually close on quit
   if (mainWindow) {
     mainWindow.removeAllListeners('close');

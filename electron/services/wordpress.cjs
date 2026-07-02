@@ -250,6 +250,52 @@ function setSiteUrl(sitePath, url) {
   wp(['option', 'update', 'siteurl', url], sitePath);
 }
 
+// Drops a must-use plugin that makes WordPress emit URLs for whatever host the
+// request actually arrived on when that host is a *.trycloudflare.com share
+// domain. Without it, WP would generate `http://<site>.test` links that break
+// for anyone visiting through the public tunnel. Idempotent, and inert for
+// normal local (.test) access. Best-effort — a missing wp-content is ignored.
+function ensureTunnelMuPlugin(sitePath) {
+  const muDir = path.join(sitePath, 'wp-content', 'mu-plugins');
+  const file = path.join(muDir, 'wpherd-tunnel.php');
+  const contents = `<?php
+/**
+ * Plugin Name: WPHerd Share Tunnel
+ * Description: Serves correct URLs when the site is accessed through a WPHerd Cloudflare share tunnel. Managed by WPHerd.
+ */
+if (!defined('ABSPATH')) {
+    exit;
+}
+
+/**
+ * When the request host is a Cloudflare quick-tunnel domain, override the
+ * home/siteurl so all generated links point at the public tunnel URL.
+ */
+function wpherd_tunnel_filter_url($value) {
+    if (empty($_SERVER['HTTP_HOST'])) {
+        return $value;
+    }
+    $host = $_SERVER['HTTP_HOST'];
+    if (substr($host, -18) === '.trycloudflare.com') {
+        // Cloudflare quick tunnels are always served over https at the edge.
+        return 'https://' . $host;
+    }
+    return $value;
+}
+add_filter('option_home', 'wpherd_tunnel_filter_url');
+add_filter('option_siteurl', 'wpherd_tunnel_filter_url');
+`;
+
+  try {
+    if (!fs.existsSync(path.join(sitePath, 'wp-content'))) return false;
+    if (!fs.existsSync(muDir)) fs.mkdirSync(muDir, { recursive: true });
+    fs.writeFileSync(file, contents, 'utf8');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function getSiteWordPressVersion(sitePath) {
   try {
     return sanitizeWpVersion(wp(['core', 'version'], sitePath));
@@ -299,6 +345,7 @@ module.exports = {
   createWordPressSite,
   removeWordPressSite,
   setSiteUrl,
+  ensureTunnelMuPlugin,
   getSiteWordPressVersion,
   getWordPressInfo,
   sanitizeDomain,

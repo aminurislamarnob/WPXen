@@ -15,6 +15,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openWpAdmin: (url) => ipcRenderer.invoke('open-in-browser', `${url}/wp-admin`),
   openPhpMyAdmin: (dbName) => ipcRenderer.invoke('open-phpmyadmin', dbName),
 
+  // Share tunnels (Cloudflare)
+  checkCloudflared: () => ipcRenderer.invoke('check-cloudflared'),
+  installCloudflared: () => ipcRenderer.invoke('install-cloudflared'),
+  getTunnels: () => ipcRenderer.invoke('get-tunnels'),
+  startTunnel: (id) => ipcRenderer.invoke('start-tunnel', id),
+  stopTunnel: (id) => ipcRenderer.invoke('stop-tunnel', id),
+
   // Services
   getServiceStatus: () => ipcRenderer.invoke('get-service-status'),
   startServices: () => ipcRenderer.invoke('start-services'),
@@ -65,6 +72,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       'php-install-progress',
       'dependencies-update',
       'notification',
+      'tunnel-update',
+      'cloudflared-install-progress',
     ];
     if (validChannels.includes(channel)) {
       ipcRenderer.on(channel, (_, data) => callback(data));
@@ -77,6 +86,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       'php-install-progress',
       'dependencies-update',
       'notification',
+      'tunnel-update',
+      'cloudflared-install-progress',
     ];
     if (validChannels.includes(channel)) {
       ipcRenderer.removeAllListeners(channel);

@@ -83,9 +83,94 @@ export default function Sites({ sites, setSites, refreshSites }) {
   const [deletingSite, setDeletingSite] = useState(null);
   const [phpVersions, setPhpVersions] = useState([]);
 
+  // Share tunnels: cloudflared availability + per-site tunnel state, keyed by
+  // site id. Lifted here so a single 'tunnel-update' subscription serves every
+  // card (the preload event bridge removes all listeners per channel on off()).
+  const [cfInstalled, setCfInstalled] = useState(null);
+  const [cfInstalling, setCfInstalling] = useState(false);
+  const [cfLog, setCfLog] = useState('');
+  const [tunnels, setTunnels] = useState({});
+
   useEffect(() => {
     window.electronAPI.getPhpVersions().then(setPhpVersions).catch(console.error);
   }, []);
+
+  useEffect(() => {
+    window.electronAPI
+      .checkCloudflared()
+      .then((r) => setCfInstalled(!!r.installed))
+      .catch(() => setCfInstalled(false));
+
+    window.electronAPI
+      .getTunnels()
+      .then((list) => {
+        const map = {};
+        for (const t of list || []) map[t.siteId] = t;
+        setTunnels(map);
+      })
+      .catch(console.error);
+
+    const onTunnel = (t) => {
+      if (!t) return;
+      setTunnels((prev) => {
+        const next = { ...prev };
+        if (t.status === 'stopped') {
+          delete next[t.siteId];
+        } else {
+          next[t.siteId] = t;
+        }
+        return next;
+      });
+    };
+    const onInstallLog = (data) => data && setCfLog(data.line);
+
+    window.electronAPI.on('tunnel-update', onTunnel);
+    window.electronAPI.on('cloudflared-install-progress', onInstallLog);
+    return () => {
+      window.electronAPI.off('tunnel-update');
+      window.electronAPI.off('cloudflared-install-progress');
+    };
+  }, []);
+
+  async function handleInstallCloudflared() {
+    setCfInstalling(true);
+    setCfLog('');
+    const result = await window.electronAPI.installCloudflared();
+    setCfInstalling(false);
+    setCfLog('');
+    if (result.success) setCfInstalled(true);
+    return result;
+  }
+
+  async function handleStartTunnel(site) {
+    // Optimistically show a "starting" state until the URL (or an error) lands.
+    setTunnels((prev) => ({
+      ...prev,
+      [site.id]: { siteId: site.id, domain: site.domain, status: 'starting' },
+    }));
+    const result = await window.electronAPI.startTunnel(site.id);
+    if (!result.success) {
+      setTunnels((prev) => ({
+        ...prev,
+        [site.id]: {
+          siteId: site.id,
+          domain: site.domain,
+          status: 'error',
+          error: result.error,
+        },
+      }));
+    }
+    return result;
+  }
+
+  async function handleStopTunnel(site) {
+    await window.electronAPI.stopTunnel(site.id);
+    setTunnels((prev) => {
+      const next = { ...prev };
+      delete next[site.id];
+      return next;
+    });
+  }
 
   const filtered = sites.filter(
     (s) =>
@@ -174,6 +259,13 @@ export default function Sites({ sites, setSites, refreshSites }) {
               site={site}
               onDelete={setDeletingSite}
               onToggleHttps={handleToggleHttps}
+              tunnel={tunnels[site.id]}
+              cfInstalled={cfInstalled}
+              cfInstalling={cfInstalling}
+              cfLog={cfLog}
+              onStartTunnel={handleStartTunnel}
+              onStopTunnel={handleStopTunnel}
+              onInstallCloudflared={handleInstallCloudflared}
             />
           ))}
         </div>

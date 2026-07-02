@@ -29,6 +29,7 @@ const dnsmasq = require('./services/dnsmasq.cjs');
 const wordpress = require('./services/wordpress.cjs');
 const mkcert = require('./services/mkcert.cjs');
 const phpmyadmin = require('./services/phpmyadmin.cjs');
+const cloudflared = require('./services/cloudflared.cjs');
 const sudoers = require('./services/sudoers.cjs');
 const validation = require('./services/validation.cjs');
 const { humanize } = require('./services/errors.cjs');
@@ -201,6 +202,9 @@ function registerHandlers(win, storeInstance) {
       const site = sites.find((s) => s.id === id);
       if (!site) return { success: false, error: 'Site not found' };
 
+      // Tear down any live share tunnel before removing the vhost/files.
+      cloudflared.stopTunnel(id);
+
       wordpress.removeWordPressSite(site, opts);
 
       store.set(
@@ -219,6 +223,10 @@ function registerHandlers(win, storeInstance) {
       const idx = sites.findIndex((s) => s.id === id);
       if (idx === -1) return { success: false, error: 'Site not found' };
       const site = sites[idx];
+
+      // Switching scheme rewrites the vhost; drop any live tunnel first so its
+      // server_name alias isn't silently lost (the user can re-share after).
+      cloudflared.stopTunnel(id);
 
       let updated;
       if (enabled) {
@@ -265,6 +273,57 @@ function registerHandlers(win, storeInstance) {
       const url = phpmyadmin.getUrl(dbName);
       openExternalSafely(url);
       return { success: true, url };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  // ─── Share tunnels (Cloudflare) ────────────────────────────────────────
+
+  ipcMain.handle('check-cloudflared', async () => {
+    return { installed: await cloudflared.isInstalledAsync() };
+  });
+
+  ipcMain.handle('install-cloudflared', async (event) => {
+    try {
+      await cloudflared.install((line) => {
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('cloudflared-install-progress', { line });
+        }
+      });
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('get-tunnels', () => {
+    return cloudflared.getAllTunnels();
+  });
+
+  ipcMain.handle('start-tunnel', async (_, id) => {
+    try {
+      const sites = store.get('sites', []);
+      const site = sites.find((s) => s.id === id);
+      if (!site) return { success: false, error: 'Site not found' };
+
+      const broadcast = (tunnel) => {
+        if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents) {
+          mainWindow.webContents.send('tunnel-update', tunnel);
+        }
+      };
+
+      const tunnel = await cloudflared.startTunnel(site, broadcast);
+      return { success: true, tunnel };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('stop-tunnel', async (_, id) => {
+    try {
+      cloudflared.stopTunnel(id);
+      return { success: true };
     } catch (err) {
       return { success: false, error: humanize(err) };
     }

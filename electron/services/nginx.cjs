@@ -96,12 +96,24 @@ function ensureServersDir() {
 function generateSiteConfig(site) {
   const { name, domain, path: sitePath, phpVersion, https, certPath, keyPath } = site;
 
+  // Extra hostnames the vhost should also answer to (e.g. a transient
+  // *.trycloudflare.com share host). Each is validated like the primary domain.
+  const aliases = Array.isArray(site.aliases) ? site.aliases : [];
+
   // Guard the values interpolated into the nginx config. A domain or path
   // containing a newline or `;`/`{`/`}` could otherwise inject arbitrary nginx
   // directives. Callers validate too, but this is the last line of defense.
   if (!/^[a-z0-9.-]+$/.test(domain)) {
     throw new Error(`Unsafe domain for nginx config: ${domain}`);
   }
+  for (const alias of aliases) {
+    if (!/^[a-z0-9.-]+$/.test(alias)) {
+      throw new Error(`Unsafe server-name alias for nginx config: ${alias}`);
+    }
+  }
+
+  // Space-separated list for the `server_name` directive.
+  const serverNames = [domain, ...aliases].join(' ');
   if (/[\n\r\0;{}]/.test(sitePath)) {
     throw new Error(`Unsafe site path for nginx config: ${sitePath}`);
   }
@@ -170,13 +182,13 @@ function generateSiteConfig(site) {
     return `# WPHerd: ${name}
 server {
     listen 80;
-    server_name ${domain};
+    server_name ${serverNames};
     return 301 https://$host$request_uri;
 }
 
 server {
     listen 443 ssl;
-    server_name ${domain};
+    server_name ${serverNames};
 
     ssl_certificate ${certPath};
     ssl_certificate_key ${keyPath};
@@ -189,7 +201,7 @@ ${body}
   return `# WPHerd: ${name}
 server {
     listen 80;
-    server_name ${domain};
+    server_name ${serverNames};
 
 ${body}
 }
