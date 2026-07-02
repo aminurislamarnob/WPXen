@@ -22,6 +22,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveWpConfigRaw: (id, contents) =>
     ipcRenderer.invoke('save-wp-config-raw', id, contents),
 
+  // Site PHP settings
+  getSitePhp: (id) => ipcRenderer.invoke('get-site-php', id),
+  setSitePhp: (id, payload) => ipcRenderer.invoke('set-site-php', id, payload),
+
   // Share tunnels (Cloudflare)
   checkCloudflared: () => ipcRenderer.invoke('check-cloudflared'),
   installCloudflared: () => ipcRenderer.invoke('install-cloudflared'),

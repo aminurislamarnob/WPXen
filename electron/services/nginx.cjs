@@ -4,6 +4,7 @@ const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const brew = require('./brew.cjs');
+const phpService = require('./php.cjs');
 const execAsync = require('./asyncExec.cjs');
 
 function getNginxConfDir() {
@@ -131,6 +132,17 @@ function generateSiteConfig(site) {
     socketPath && fs.existsSync(socketPath) ? `unix:${socketPath}` : '127.0.0.1:9000';
   const logDir = getNginxLogDir();
 
+  // Per-site PHP overrides, passed to FPM via PHP_VALUE (newline-separated
+  // directives). buildSitePhpValue only emits validated `key=<int>[M]` lines;
+  // the regex is a last line of defense against config injection.
+  const phpValue = phpService.buildSitePhpValue(site.phpSettings);
+  if (phpValue && !/^[a-z_]+=-?\d+M?(\n[a-z_]+=-?\d+M?)*$/.test(phpValue)) {
+    throw new Error('Unsafe PHP settings for nginx config');
+  }
+  const phpValueParam = phpValue
+    ? `\n        fastcgi_param PHP_VALUE "${phpValue}";`
+    : '';
+
   // Shared per-site directives (root, logging, PHP handling) — reused by the
   // http and https server blocks so both behave identically.
   const body = `    root ${sitePath};
@@ -151,7 +163,7 @@ function generateSiteConfig(site) {
         fastcgi_index index.php;
         fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
         fastcgi_param HTTP_PROXY "";
-        fastcgi_param HTTPS ${useHttps ? '"on"' : '""'};
+        fastcgi_param HTTPS ${useHttps ? '"on"' : '""'};${phpValueParam}
         fastcgi_read_timeout 300;
         include fastcgi_params;
     }

@@ -315,6 +315,78 @@ function registerHandlers(win, storeInstance) {
     }
   });
 
+  // ─── Site PHP settings ─────────────────────────────────────────────────
+
+  ipcMain.handle('get-site-php', async (_, id) => {
+    try {
+      const site = findSite(id);
+      if (!site) return { success: false, error: 'Site not found' };
+
+      const schema = phpService.getSitePhpSettingsSchema();
+      // Baseline = the global PHP configuration for this site's version. A site
+      // without saved overrides shows (and keeps following) the global values.
+      const globals = phpService.getGlobalSitePhpValues(site.phpVersion);
+
+      return {
+        success: true,
+        schema,
+        values: { ...globals, ...(site.phpSettings || {}) },
+        globals,
+        customized: Object.keys(site.phpSettings || {}),
+        phpVersion: site.phpVersion,
+        installedVersions: brew.getInstalledPhpVersions(),
+      };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('set-site-php', async (_, id, payload = {}) => {
+    try {
+      const sites = store.get('sites', []);
+      const idx = sites.findIndex((s) => s.id === id);
+      if (idx === -1) return { success: false, error: 'Site not found' };
+      const site = sites[idx];
+
+      // Validate the PHP version (must be an installed major.minor).
+      let phpVersion = site.phpVersion;
+      if (payload.phpVersion != null) {
+        if (
+          !/^\d+\.\d+$/.test(String(payload.phpVersion)) ||
+          !brew.getInstalledPhpVersions().includes(payload.phpVersion)
+        ) {
+          return { success: false, error: 'Selected PHP version is not installed.' };
+        }
+        phpVersion = payload.phpVersion;
+      }
+
+      // Validate the ini overrides (throws a human message on bad input), then
+      // keep only the values that actually differ from the global configuration
+      // — fields left at the global value keep inheriting it, and a site with
+      // no differences carries no PHP_VALUE block at all.
+      const requested = phpService.validateSitePhpSettings(payload.settings || {});
+      const globals = phpService.getGlobalSitePhpValues(phpVersion);
+      const phpSettings = {};
+      for (const [key, value] of Object.entries(requested)) {
+        if (value !== globals[key]) phpSettings[key] = value;
+      }
+
+      // The vhost is about to be rewritten — drop any live share tunnel so its
+      // transient server_name alias isn't silently lost.
+      cloudflared.stopTunnel(id);
+
+      const updated = { ...site, phpVersion, phpSettings };
+      nginx.createSiteConfig(updated);
+      nginx.reload();
+
+      sites[idx] = updated;
+      store.set('sites', sites);
+      return { success: true, site: updated };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
   ipcMain.handle('open-phpmyadmin', async (_, dbName) => {
     try {
       // Reject anything that isn't a valid DB name before it reaches the URL.

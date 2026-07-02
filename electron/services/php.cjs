@@ -323,6 +323,189 @@ const PHP_INI_SETTINGS = [
   },
 ];
 
+// ─── Per-site PHP settings ──────────────────────────────────────────────────
+//
+// Site-specific overrides applied through the site's nginx vhost via
+// `fastcgi_param PHP_VALUE` (all of these directives are PHP_INI_PERDIR or
+// PHP_INI_ALL, so FPM honours them per request). They take precedence over the
+// global php.ini and the WPHerd-managed conf.d file — for this site only.
+const SITE_PHP_SETTINGS = [
+  {
+    key: 'memory_limit',
+    label: 'PHP Memory Limit',
+    unit: 'MB',
+    default: 256,
+    description:
+      'Maximum amount of memory a script may consume for this site. -1 for unlimited.',
+    toDirectives: (v) => ({ memory_limit: v === -1 ? '-1' : `${v}M` }),
+  },
+  {
+    key: 'max_execution_time',
+    label: 'Max Execution Time',
+    unit: 'Seconds',
+    default: 60,
+    description:
+      'Maximum time in seconds that a script is allowed to run before it is terminated.',
+    toDirectives: (v) => ({ max_execution_time: `${v}` }),
+  },
+  {
+    key: 'max_file_uploads',
+    label: 'Max File Upload',
+    unit: null,
+    default: 20,
+    description: 'Maximum number of files that can be uploaded at once.',
+    toDirectives: (v) => ({ max_file_uploads: `${v}` }),
+  },
+  {
+    key: 'upload_max_filesize',
+    label: 'Max File Upload Size',
+    unit: 'MB',
+    default: 100,
+    description: 'Maximum file size that can be uploaded.',
+    toDirectives: (v) => ({
+      upload_max_filesize: `${v}M`,
+      post_max_size: `${v}M`,
+    }),
+  },
+  {
+    key: 'max_input_time',
+    label: 'Max Input Time',
+    unit: 'Seconds',
+    default: 60,
+    description:
+      'Maximum time in seconds that a script is allowed to parse input data.',
+    toDirectives: (v) => ({ max_input_time: `${v}` }),
+  },
+  {
+    key: 'max_input_vars',
+    label: 'Max Input Vars',
+    unit: null,
+    default: 1000,
+    description: 'Maximum number of input variables that can be accepted.',
+    toDirectives: (v) => ({ max_input_vars: `${v}` }),
+  },
+];
+
+// Validates a raw per-site settings object, returning a clean {key: int} map
+// containing only known keys. Throws on non-numeric or out-of-range values.
+function validateSitePhpSettings(raw = {}) {
+  const clean = {};
+  for (const s of SITE_PHP_SETTINGS) {
+    if (raw[s.key] == null || raw[s.key] === '') continue;
+    const num = parseInt(raw[s.key], 10);
+    if (Number.isNaN(num)) throw new Error(`${s.label} must be a number.`);
+    if (s.key === 'memory_limit') {
+      if (num !== -1 && num < 1) {
+        throw new Error('Memory limit must be a positive number, or -1 for unlimited.');
+      }
+    } else if (num < 1) {
+      throw new Error(`${s.label} must be at least 1.`);
+    }
+    if (num > 1_000_000) throw new Error(`${s.label} value is too large.`);
+    clean[s.key] = num;
+  }
+  return clean;
+}
+
+// Builds the newline-separated directive list for `fastcgi_param PHP_VALUE`
+// from a validated per-site settings map. Returns null when nothing is set.
+function buildSitePhpValue(settings = {}) {
+  const lines = [];
+  for (const s of SITE_PHP_SETTINGS) {
+    const v = settings[s.key];
+    if (v == null) continue;
+    if (!Number.isInteger(v)) continue; // only validated integers reach nginx
+    for (const [directive, val] of Object.entries(s.toDirectives(v))) {
+      lines.push(`${directive}=${val}`);
+    }
+  }
+  return lines.length > 0 ? lines.join('\n') : null;
+}
+
+// Parses a php.ini shorthand size ("128M", "1G", "-1", bytes) into whole MB.
+function iniSizeToMB(raw) {
+  if (raw == null) return null;
+  const s = String(raw).trim();
+  if (s === '') return null;
+  const m = s.match(/^(-?\d+(?:\.\d+)?)\s*([KMG])?$/i);
+  if (!m) return null;
+  const num = parseFloat(m[1]);
+  if (num === -1) return -1;
+  const unit = (m[2] || '').toUpperCase();
+  if (unit === 'G') return Math.round(num * 1024);
+  if (unit === 'M') return Math.round(num);
+  if (unit === 'K') return Math.max(1, Math.round(num / 1024));
+  // Bare number = bytes.
+  return Math.max(1, Math.round(num / (1024 * 1024)));
+}
+
+// Reads the *global* effective values for the per-site settings from a PHP
+// version's configuration — what FPM applies when a site has no override.
+// ini_get() covers most keys, but the CLI SAPI force-overrides the time
+// directives (max_execution_time -> 0, max_input_time -> -1) at startup, so
+// those are re-read from the ini file chain (php.ini + conf.d scan dir — the
+// same files FPM loads). Falls back to schema defaults on any failure.
+function getGlobalSitePhpValues(version) {
+  const values = {};
+  for (const s of SITE_PHP_SETTINGS) values[s.key] = s.default;
+
+  const phpBin = getPhpBinPath(version);
+  if (!phpBin) return values;
+
+  const keys = SITE_PHP_SETTINGS.map((s) => s.key);
+  const script = `
+    $keys = ${JSON.stringify(keys)};
+    $vals = [];
+    foreach ($keys as $k) $vals[$k] = ini_get($k);
+    $files = [];
+    if ($f = php_ini_loaded_file()) $files[] = $f;
+    if ($s = php_ini_scanned_files()) {
+      foreach (array_map('trim', explode(',', $s)) as $x) if ($x !== '') $files[] = $x;
+    }
+    $fromIni = [];
+    foreach ($files as $f) {
+      $arr = @parse_ini_file($f, false, INI_SCANNER_RAW);
+      if (is_array($arr)) {
+        foreach ($keys as $k) if (array_key_exists($k, $arr)) $fromIni[$k] = $arr[$k];
+      }
+    }
+    foreach (['max_execution_time', 'max_input_time'] as $k) {
+      if (isset($fromIni[$k])) $vals[$k] = $fromIni[$k];
+    }
+    echo json_encode($vals);
+  `;
+
+  try {
+    const out = execFileSync(phpBin, ['-r', script], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 10000,
+    })
+      .toString()
+      .trim();
+    const raw = JSON.parse(out.slice(out.indexOf('{')));
+
+    for (const s of SITE_PHP_SETTINGS) {
+      const v = raw[s.key];
+      if (v == null || v === '' || v === false) continue;
+      const num = s.unit === 'MB' ? iniSizeToMB(v) : parseInt(v, 10);
+      if (num != null && !Number.isNaN(num)) values[s.key] = num;
+    }
+  } catch {
+    // Keep schema defaults.
+  }
+  return values;
+}
+
+function getSitePhpSettingsSchema() {
+  return SITE_PHP_SETTINGS.map(({ key, label, unit, default: def, description }) => ({
+    key,
+    label,
+    unit,
+    default: def,
+    description,
+  }));
+}
+
 function getManagedIniPath(version) {
   const prefix = brew.getBrewPrefix();
   if (!prefix) return null;
@@ -454,4 +637,8 @@ module.exports = {
   getPhpIniSettings,
   setPhpIniSetting,
   setPhpIniSettingAllVersions,
+  getSitePhpSettingsSchema,
+  getGlobalSitePhpValues,
+  validateSitePhpSettings,
+  buildSitePhpValue,
 };

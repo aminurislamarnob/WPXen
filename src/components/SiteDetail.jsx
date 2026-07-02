@@ -13,6 +13,7 @@ import {
   Folder,
 } from 'lucide-react';
 import WpConfigManager from './WpConfigManager';
+import SitePhpSettings from './SitePhpSettings';
 
 const NAV = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard },
@@ -69,7 +70,7 @@ function Overview({ site }) {
   );
 }
 
-export default function SiteDetail({ sites }) {
+export default function SiteDetail({ sites, refreshSites }) {
   const { id } = useParams();
   const navigate = useNavigate();
   const [active, setActive] = useState('wpconfig');
@@ -171,7 +172,7 @@ export default function SiteDetail({ sites }) {
         <div className="flex-1 min-w-0 max-w-3xl">
           {active === 'overview' && <Overview site={site} />}
           {active === 'wpconfig' && <WpConfigManager site={site} />}
-          {active === 'php' && <Placeholder title="Per-site PHP configuration" />}
+          {active === 'php' && <SitePhpSettings site={site} onSaved={refreshSites} />}
           {active === 'nginx' && <Placeholder title="Nginx configuration" />}
         </div>
       </div>
