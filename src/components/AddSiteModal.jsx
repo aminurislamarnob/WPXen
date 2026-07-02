@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import {
   X,
   FolderOpen,
+  Check,
   CheckCircle,
   AlertCircle,
   Loader,
@@ -24,7 +25,7 @@ function StepIndicator({ current, steps }) {
                   : 'bg-gray-200 text-gray-400'
             }`}
           >
-            {i < current ? '✓' : i + 1}
+            {i < current ? <Check size={13} strokeWidth={3} /> : i + 1}
           </div>
           {i < steps.length - 1 && (
             <div

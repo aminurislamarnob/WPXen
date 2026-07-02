@@ -4,6 +4,7 @@ import {
   Database,
   Wifi,
   Mail,
+  Code2,
   Play,
   Square,
   RotateCw,
@@ -27,14 +28,7 @@ const SERVICE_CONFIG = [
     id: 'php',
     name: 'PHP-FPM',
     description: 'PHP FastCGI Process Manager — processes PHP scripts',
-    icon: ({ size, className }) => (
-      <span
-        className={`text-base font-bold font-mono ${className}`}
-        style={{ fontSize: size }}
-      >
-        P
-      </span>
-    ),
+    icon: Code2,
     color: 'purple',
     brew: 'php',
   },
