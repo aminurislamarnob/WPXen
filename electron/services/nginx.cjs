@@ -132,6 +132,17 @@ function generateSiteConfig(site) {
     socketPath && fs.existsSync(socketPath) ? `unix:${socketPath}` : '127.0.0.1:9000';
   const logDir = getNginxLogDir();
 
+  // nginx rejects request bodies larger than client_max_body_size (default
+  // 1M) with "413 Request Entity Too Large" before PHP ever sees them, which
+  // breaks wp-admin plugin/theme uploads. Size it from the site's effective
+  // upload limit (override or global), with headroom for multipart overhead.
+  let uploadMB =
+    site.phpSettings && Number.isInteger(site.phpSettings.upload_max_filesize)
+      ? site.phpSettings.upload_max_filesize
+      : phpService.getGlobalSitePhpValues(phpVersion).upload_max_filesize;
+  if (!Number.isInteger(uploadMB) || uploadMB < 1) uploadMB = 100;
+  const bodyLimitMB = Math.max(8, Math.ceil(uploadMB * 1.1));
+
   // Per-site PHP overrides, passed to FPM via PHP_VALUE (newline-separated
   // directives). buildSitePhpValue only emits validated `key=<int>[M]` lines;
   // the regex is a last line of defense against config injection.
@@ -146,6 +157,8 @@ function generateSiteConfig(site) {
   // Shared per-site directives (root, logging, PHP handling) — reused by the
   // http and https server blocks so both behave identically.
   const body = `    root ${sitePath};
+
+    client_max_body_size ${bodyLimitMB}m;
 
     index index.php index.html index.htm;
 

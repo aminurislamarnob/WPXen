@@ -1,6 +1,6 @@
 'use strict';
 
-const { execSync, execFileSync } = require('child_process');
+const { execSync, execFileSync, execFile } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -77,6 +77,49 @@ function wp(args, cwd, extraEnv = {}) {
   })
     .toString()
     .trim();
+}
+
+// Async variant of wp() for long-running or UI-facing calls (core/plugin/theme
+// updates, inventory listing). Same no-shell argv contract and PHP diagnostics
+// routing, but runs off the main thread so the app stays responsive.
+function wpAsync(args, cwd, { timeout = 120000 } = {}) {
+  return new Promise((resolve, reject) => {
+    if (!Array.isArray(args)) {
+      reject(new TypeError('wpAsync() requires an array of arguments'));
+      return;
+    }
+    const wpBin = getWpCliBin();
+    if (!wpBin) {
+      reject(new Error('WP-CLI not found. Install with: brew install wp-cli'));
+      return;
+    }
+    const prefix = brew.getBrewPrefix();
+    const phpBin = prefix ? `${prefix}/bin/php` : 'php';
+    const env = {
+      ...process.env,
+      PATH: `${prefix}/bin:${process.env.PATH}`,
+      HOME: os.homedir(),
+    };
+    const phpArgs = [
+      '-d',
+      'error_reporting=E_ALL & ~E_DEPRECATED & ~E_STRICT',
+      '-d',
+      'display_errors=stderr',
+    ];
+    execFile(
+      phpBin,
+      [...phpArgs, wpBin, ...args, '--allow-root'],
+      { cwd, env, timeout, maxBuffer: 16 * 1024 * 1024 },
+      (err, stdout, stderr) => {
+        if (err) {
+          err.stderr = stderr;
+          reject(err);
+        } else {
+          resolve(stdout.toString().trim());
+        }
+      }
+    );
+  });
 }
 
 // WP-CLI output should be a bare version like "6.8.2". Guard against any stray
@@ -459,6 +502,98 @@ function saveWpConfigRaw(sitePath, contents) {
   fs.writeFileSync(file, contents, 'utf8');
 }
 
+// ─── WordPress overview (core / plugins / themes / users) ──────────────────
+
+function parseJsonList(raw) {
+  try {
+    const data = JSON.parse(raw.slice(raw.indexOf('[')));
+    return Array.isArray(data) ? data : [];
+  } catch {
+    return [];
+  }
+}
+
+// Gathers everything the site's WordPress overview screen shows, in parallel:
+// core version + available core update, plugin/theme inventories with pending
+// updates, and the user count.
+async function getWpOverview(sitePath) {
+  if (!fs.existsSync(path.join(sitePath, 'wp-config.php'))) {
+    throw new Error('wp-config.php not found for this site.');
+  }
+
+  const listFields = '--fields=name,title,status,version,update,update_version';
+  const [coreVersion, coreCheckRaw, pluginsRaw, themesRaw, userCountRaw] =
+    await Promise.all([
+      wpAsync(['core', 'version'], sitePath),
+      // Exits non-zero / prints nothing when already at the latest version.
+      wpAsync(['core', 'check-update', '--format=json'], sitePath).catch(() => ''),
+      wpAsync(['plugin', 'list', listFields, '--format=json'], sitePath),
+      wpAsync(['theme', 'list', listFields, '--format=json'], sitePath),
+      wpAsync(['user', 'list', '--format=count'], sitePath).catch(() => ''),
+    ]);
+
+  const plugins = parseJsonList(pluginsRaw);
+  const themes = parseJsonList(themesRaw);
+
+  // Highest available core version (check-update can list minor + major).
+  const coreUpdates = parseJsonList(coreCheckRaw)
+    .map((u) => u.version)
+    .filter((v) => /^\d+\.\d+(?:\.\d+)*$/.test(v || ''))
+    .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
+
+  const toUpdateRow = (item, type) => ({
+    name: item.name,
+    title: item.title || item.name,
+    type,
+    version: item.version,
+    latest: item.update_version || null,
+  });
+
+  const updates = [
+    ...plugins.filter((p) => p.update === 'available').map((p) => toUpdateRow(p, 'plugin')),
+    ...themes.filter((t) => t.update === 'available').map((t) => toUpdateRow(t, 'theme')),
+  ];
+
+  return {
+    core: {
+      version: sanitizeWpVersion(coreVersion) || coreVersion,
+      updateVersion: coreUpdates[0] || null,
+    },
+    counts: {
+      plugins: plugins.length,
+      themes: themes.length,
+      users: parseInt(userCountRaw, 10) || 0,
+      pluginUpdates: updates.filter((u) => u.type === 'plugin').length,
+      themeUpdates: updates.filter((u) => u.type === 'theme').length,
+    },
+    updates,
+    syncedAt: new Date().toISOString(),
+  };
+}
+
+// Updates WordPress core (plus the DB schema step core updates may need).
+async function updateWpCore(sitePath) {
+  await wpAsync(['core', 'update'], sitePath, { timeout: 600000 });
+  await wpAsync(['core', 'update-db'], sitePath, { timeout: 300000 }).catch(() => {});
+}
+
+// Updates a single plugin or theme by slug.
+async function updateWpItem(sitePath, type, name) {
+  if (type !== 'plugin' && type !== 'theme') {
+    throw new Error('Invalid update type.');
+  }
+  if (typeof name !== 'string' || !/^[a-zA-Z0-9._-]+$/.test(name)) {
+    throw new Error('Invalid plugin/theme name.');
+  }
+  await wpAsync([type, 'update', name], sitePath, { timeout: 600000 });
+}
+
+// Updates every plugin and theme with a pending update.
+async function updateWpAll(sitePath) {
+  await wpAsync(['plugin', 'update', '--all'], sitePath, { timeout: 900000 });
+  await wpAsync(['theme', 'update', '--all'], sitePath, { timeout: 900000 });
+}
+
 function getWordPressInfo(sitePath) {
   if (!fs.existsSync(path.join(sitePath, 'wp-config.php'))) {
     return null;
@@ -506,6 +641,10 @@ module.exports = {
   setWpConfig,
   getWpConfigRaw,
   saveWpConfigRaw,
+  getWpOverview,
+  updateWpCore,
+  updateWpItem,
+  updateWpAll,
   getSiteWordPressVersion,
   getWordPressInfo,
   sanitizeDomain,

@@ -26,6 +26,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getSitePhp: (id) => ipcRenderer.invoke('get-site-php', id),
   setSitePhp: (id, payload) => ipcRenderer.invoke('set-site-php', id, payload),
 
+  // WordPress overview / updates
+  getWpOverview: (id) => ipcRenderer.invoke('get-wp-overview', id),
+  updateWpCore: (id) => ipcRenderer.invoke('update-wp-core', id),
+  updateWpItem: (id, type, name) =>
+    ipcRenderer.invoke('update-wp-item', id, type, name),
+  updateWpAll: (id) => ipcRenderer.invoke('update-wp-all', id),
+
   // Share tunnels (Cloudflare)
   checkCloudflared: () => ipcRenderer.invoke('check-cloudflared'),
   installCloudflared: () => ipcRenderer.invoke('install-cloudflared'),

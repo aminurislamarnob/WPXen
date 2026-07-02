@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import WpConfigManager from './WpConfigManager';
 import SitePhpSettings from './SitePhpSettings';
+import WpOverview from './WpOverview';
 
 const NAV = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard },
@@ -24,7 +25,16 @@ const NAV = [
     children: [
       { id: 'wpconfig', label: 'WP Config' },
       { id: 'php', label: 'PHP' },
-      { id: 'nginx', label: 'Nginx' },
+    ],
+  },
+  {
+    label: 'WordPress',
+    icon: Globe,
+    group: true,
+    children: [
+      { id: 'wp-overview', label: 'Overview' },
+      { id: 'wp-plugins', label: 'Plugins' },
+      { id: 'wp-themes', label: 'Themes' },
     ],
   },
 ];
@@ -173,7 +183,11 @@ export default function SiteDetail({ sites, refreshSites }) {
           {active === 'overview' && <Overview site={site} />}
           {active === 'wpconfig' && <WpConfigManager site={site} />}
           {active === 'php' && <SitePhpSettings site={site} onSaved={refreshSites} />}
-          {active === 'nginx' && <Placeholder title="Nginx configuration" />}
+          {active === 'wp-overview' && (
+            <WpOverview site={site} onSaved={refreshSites} />
+          )}
+          {active === 'wp-plugins' && <Placeholder title="Plugins" />}
+          {active === 'wp-themes' && <Placeholder title="Themes" />}
         </div>
       </div>
     </div>

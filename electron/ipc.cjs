@@ -111,6 +111,36 @@ function registerHandlers(win, storeInstance) {
   // Populate the status cache once at startup (non-blocking).
   refreshServiceStatus();
 
+  // Heal per-site vhosts shortly after startup: regenerate each from the
+  // current template and rewrite only the ones that differ (e.g. sites created
+  // before client_max_body_size / PHP_VALUE support), then reload nginx once.
+  setTimeout(() => {
+    try {
+      const sites = store.get('sites', []);
+      const serversDir = nginx.getServersDir();
+      if (!serversDir || !fs.existsSync(serversDir)) return;
+      let changed = false;
+      for (const site of sites) {
+        try {
+          const desired = nginx.generateSiteConfig(site);
+          const confPath = path.join(serversDir, `${site.domain}.conf`);
+          const current = fs.existsSync(confPath)
+            ? fs.readFileSync(confPath, 'utf8')
+            : null;
+          if (current !== desired) {
+            fs.writeFileSync(confPath, desired, 'utf8');
+            changed = true;
+          }
+        } catch {}
+      }
+      if (changed) {
+        try {
+          nginx.reload();
+        } catch {}
+      }
+    } catch {}
+  }, 3000);
+
   // When the user returns to the app (e.g. after `brew install`-ing something
   // in a terminal), re-check dependencies and service status automatically —
   // no manual refresh needed. Both are non-blocking and rate-limited.
@@ -309,6 +339,62 @@ function registerHandlers(win, storeInstance) {
       const site = findSite(id);
       if (!site) return { success: false, error: 'Site not found' };
       wordpress.saveWpConfigRaw(site.path, contents);
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  // ─── WordPress overview / updates ──────────────────────────────────────
+
+  ipcMain.handle('get-wp-overview', async (_, id) => {
+    try {
+      const site = findSite(id);
+      if (!site) return { success: false, error: 'Site not found' };
+      return { success: true, overview: await wordpress.getWpOverview(site.path) };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('update-wp-core', async (_, id) => {
+    try {
+      const site = findSite(id);
+      if (!site) return { success: false, error: 'Site not found' };
+      await wordpress.updateWpCore(site.path);
+
+      // Persist the fresh core version so the site card badge stays accurate.
+      const fresh = wordpress.getSiteWordPressVersion(site.path);
+      if (fresh) {
+        const sites = store.get('sites', []);
+        const idx = sites.findIndex((s) => s.id === id);
+        if (idx !== -1) {
+          sites[idx] = { ...sites[idx], wpVersion: fresh };
+          store.set('sites', sites);
+        }
+      }
+      return { success: true, wpVersion: fresh };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('update-wp-item', async (_, id, type, name) => {
+    try {
+      const site = findSite(id);
+      if (!site) return { success: false, error: 'Site not found' };
+      await wordpress.updateWpItem(site.path, type, name);
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('update-wp-all', async (_, id) => {
+    try {
+      const site = findSite(id);
+      if (!site) return { success: false, error: 'Site not found' };
+      await wordpress.updateWpAll(site.path);
       return { success: true };
     } catch (err) {
       return { success: false, error: humanize(err) };
