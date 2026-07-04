@@ -118,7 +118,7 @@ export default function Settings() {
   }
 
   return (
-    <div className="px-6 pb-6 max-w-2xl mx-auto animate-fade-in space-y-6">
+    <div className="px-6 pb-6 max-w-[735px] mx-auto animate-fade-in space-y-6">
       {/* General */}
       <div>
         <SectionLabel>General</SectionLabel>

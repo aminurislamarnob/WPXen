@@ -67,7 +67,7 @@ export default function Dashboard({ serviceStatus, sites, refreshStatus }) {
   const recentSites = sites.slice(0, 5);
 
   return (
-    <div className="px-6 pb-6 max-w-2xl mx-auto animate-fade-in">
+    <div className="px-6 pb-6 max-w-[735px] mx-auto animate-fade-in">
       {/* Permissions banner */}
       {!sudoersConfigured && (
         <Card className="mb-4 !bg-amber-50 dark:!bg-amber-500/10">

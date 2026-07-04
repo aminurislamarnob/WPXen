@@ -74,7 +74,7 @@ The UI mimics macOS System Settings. Pages compose the shared primitives in
 `src/components/ui.jsx` (`Button`, `Card`, `Row`, `SectionLabel`, `IconTile`,
 `Toggle`, `PageHeader`) plus the `.settings-card` / `.settings-row` / `.btn-*` /
 `.form-input` / `.panel` classes in `src/index.css` — don't hand-roll cards,
-rows, or buttons. Page content wraps in `px-6 pb-6 max-w-2xl mx-auto`.
+rows, or buttons. Page content wraps in `px-6 pb-6 max-w-[735px] mx-auto`.
 
 **Buttons.** All shape/size lives in the base `.btn` class (`src/index.css`):
 capsule (`rounded-full`), `min-h-[32px]` (matches the header back/forward

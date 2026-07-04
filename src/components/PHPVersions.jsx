@@ -237,7 +237,7 @@ export default function PHPVersions() {
   }
 
   return (
-    <div className="px-6 pb-6 max-w-2xl mx-auto animate-fade-in">
+    <div className="px-6 pb-6 max-w-[735px] mx-auto animate-fade-in">
       <div className="flex items-center justify-end gap-2 mb-4">
         <button
           onClick={scrollToSettings}

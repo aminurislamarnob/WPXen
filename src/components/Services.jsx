@@ -176,7 +176,7 @@ export default function Services({ serviceStatus, refreshStatus }) {
   const systemManaged = visibleServices.filter((s) => s.system);
 
   return (
-    <div className="px-6 pb-6 max-w-2xl mx-auto animate-fade-in">
+    <div className="px-6 pb-6 max-w-[735px] mx-auto animate-fade-in">
       {/* Header actions */}
       <div className="flex items-center justify-between mb-4">
         <p className="text-xs text-gray-500">

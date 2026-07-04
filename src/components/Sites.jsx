@@ -199,7 +199,7 @@ export default function Sites({ sites, setSites, refreshSites }) {
   }
 
   return (
-    <div className="px-6 pb-6 max-w-2xl mx-auto animate-fade-in">
+    <div className="px-6 pb-6 max-w-[735px] mx-auto animate-fade-in">
       {/* Header */}
       <div className="flex items-center justify-between mb-4 gap-3">
         {sites.length > 0 ? (
@@ -248,7 +248,7 @@ export default function Sites({ sites, setSites, refreshSites }) {
           <p className="text-sm text-gray-400">No sites match &quot;{search}&quot;</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="space-y-3">
           {filtered.map((site) => (
             <SiteCard
               key={site.id}
