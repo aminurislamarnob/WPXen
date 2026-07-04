@@ -84,7 +84,7 @@ export default function App() {
   return (
     <HashRouter>
       <Routes>
-        <Route path="/" element={<Layout serviceStatus={serviceStatus} />}>
+        <Route path="/" element={<Layout />}>
           <Route index element={<Navigate to="/dashboard" replace />} />
           <Route path="dashboard" element={<Dashboard {...sharedProps} />} />
           <Route path="sites" element={<Sites {...sharedProps} />} />

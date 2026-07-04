@@ -19,7 +19,6 @@ import {
   X,
   SlidersHorizontal,
 } from 'lucide-react';
-import { Toggle } from './ui';
 import { WordPressIcon } from './icons';
 
 function ContextMenu({ site, onDelete, onManage, onClose }) {
@@ -174,8 +173,8 @@ export default function SiteCard({
 
   return (
     <div className={`site-card settings-card group relative ${menuOpen ? 'z-40' : ''}`}>
-      {/* Main row: tile · name/domain/path · chips · HTTPS · actions · menu */}
-      <div className="flex items-center gap-3 px-4 py-3">
+      {/* Main row: tile · [ title + chips + HTTPS / domain · path ] · menu */}
+      <div className="flex items-start gap-3 px-4 py-3">
         <button
           onClick={openDetail}
           title="Manage site"
@@ -187,14 +186,55 @@ export default function SiteCard({
         </button>
 
         <div className="min-w-0 flex-1">
-          <button
-            onClick={openDetail}
-            className="text-sm font-semibold text-gray-900 truncate hover:text-wp-blue transition-colors block max-w-full text-left"
-            title="Manage site"
-          >
-            {site.name}
-          </button>
-          <div className="flex items-center gap-1.5 mt-0.5 min-w-0">
+          {/* Top line: title · version chips · db name · HTTPS */}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={openDetail}
+              className="text-sm font-semibold text-gray-900 truncate hover:text-wp-blue transition-colors text-left min-w-0"
+              title="Manage site"
+            >
+              {site.name}
+            </button>
+
+            <div className="flex items-center gap-1.5 flex-shrink-0 ml-auto">
+              <span className="inline-flex items-center px-2 py-0.5 bg-purple-50 text-purple-700 dark:bg-purple-500/15 dark:text-purple-300 rounded-full text-xs font-medium">
+                PHP {site.phpVersion}
+              </span>
+              {site.wpVersion && (
+                <span className="inline-flex items-center px-2 py-0.5 bg-blue-50 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300 rounded-full text-xs font-medium">
+                  WP {site.wpVersion}
+                </span>
+              )}
+              <span
+                className="inline-flex items-center gap-1 px-2 py-0.5 bg-gray-100 text-gray-500 rounded-full text-xs font-mono"
+                title={site.dbName}
+              >
+                <Database size={9} className="flex-shrink-0" />
+                {site.dbName}
+              </span>
+
+              {/* HTTPS lock toggle — click the icon to enable/disable HTTPS */}
+              <button
+                onClick={handleToggleHttps}
+                disabled={httpsBusy}
+                title={site.https ? 'Disable HTTPS' : 'Enable HTTPS'}
+                aria-label={site.https ? 'Disable HTTPS' : 'Enable HTTPS'}
+                aria-pressed={!!site.https}
+                className="p-1.5 rounded-lg hover:bg-gray-100 disabled:opacity-50 transition-colors"
+              >
+                {httpsBusy ? (
+                  <Loader size={14} className="animate-spin text-gray-400" />
+                ) : site.https ? (
+                  <Lock size={14} className="text-wp-green" />
+                ) : (
+                  <Unlock size={14} className="text-gray-400" />
+                )}
+              </button>
+            </div>
+          </div>
+
+          {/* Bottom line: domain · full folder path */}
+          <div className="flex items-center gap-1.5 mt-0.5">
             <button
               onClick={() => window.electronAPI.openSiteInBrowser(site.url)}
               className="text-xs text-wp-blue hover:underline flex items-center gap-1 flex-shrink-0"
@@ -203,49 +243,10 @@ export default function SiteCard({
               {site.domain}
             </button>
             <span className="text-xs text-gray-400 flex-shrink-0">·</span>
-            <span className="text-xs text-gray-400 font-mono truncate" title={site.path}>
+            <span className="text-xs text-gray-400 font-mono break-all" title={site.path}>
               {site.path}
             </span>
           </div>
-        </div>
-
-        {/* Version chips */}
-        <div className="flex items-center gap-1.5 flex-shrink-0">
-          <span className="inline-flex items-center px-2 py-0.5 bg-purple-50 text-purple-700 dark:bg-purple-500/15 dark:text-purple-300 rounded-full text-xs font-medium">
-            PHP {site.phpVersion}
-          </span>
-          {site.wpVersion && (
-            <span className="inline-flex items-center px-2 py-0.5 bg-blue-50 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300 rounded-full text-xs font-medium">
-              WP {site.wpVersion}
-            </span>
-          )}
-          <span
-            className="inline-flex items-center gap-1 px-2 py-0.5 bg-gray-100 text-gray-500 rounded-full text-xs font-mono max-w-[110px]"
-            title={site.dbName}
-          >
-            <Database size={9} className="flex-shrink-0" />
-            <span className="truncate">{site.dbName}</span>
-          </span>
-        </div>
-
-        {/* HTTPS toggle */}
-        <div
-          className="flex items-center gap-1.5 flex-shrink-0"
-          title={site.https ? 'Disable HTTPS' : 'Enable HTTPS'}
-        >
-          {httpsBusy ? (
-            <Loader size={12} className="animate-spin text-gray-400" />
-          ) : site.https ? (
-            <Lock size={12} className="text-wp-green" />
-          ) : (
-            <Unlock size={12} className="text-gray-400" />
-          )}
-          <Toggle
-            checked={!!site.https}
-            onChange={handleToggleHttps}
-            disabled={httpsBusy}
-            label={site.https ? 'Disable HTTPS' : 'Enable HTTPS'}
-          />
         </div>
 
         {/* More menu */}

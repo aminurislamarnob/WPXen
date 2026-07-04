@@ -45,32 +45,10 @@ const PAGE_TITLES = {
   '/settings': 'Settings',
 };
 
-export default function Layout({ serviceStatus }) {
+export default function Layout() {
   const [filter, setFilter] = useState('');
   const location = useLocation();
   const navigate = useNavigate();
-
-  const allRunning =
-    serviceStatus?.nginx?.running &&
-    serviceStatus?.php?.running &&
-    serviceStatus?.mysql?.running;
-
-  const anyRunning =
-    serviceStatus?.nginx?.running ||
-    serviceStatus?.php?.running ||
-    serviceStatus?.mysql?.running;
-
-  const statusText = allRunning
-    ? 'All services running'
-    : anyRunning
-      ? 'Partially running'
-      : 'Services stopped';
-
-  const statusColor = allRunning
-    ? 'bg-wp-green'
-    : anyRunning
-      ? 'bg-wp-yellow'
-      : 'bg-gray-400';
 
   const title =
     PAGE_TITLES[
@@ -109,11 +87,6 @@ export default function Layout({ serviceStatus }) {
           </div>
         </div>
 
-        {/* App identity */}
-        <div className="flex items-center px-4 py-2 mb-3">
-          <img src={logo} alt="WPHerd" className="h-5 w-auto object-contain" draggable={false} />
-        </div>
-
         {/* Navigation groups */}
         <nav className="flex-1 px-3 py-1 overflow-y-auto no-drag">
           {groups.map((group, gi) => (
@@ -148,15 +121,9 @@ export default function Layout({ serviceStatus }) {
           ))}
         </nav>
 
-        {/* Footer */}
-        <div className="px-4 py-3">
-          <p className="text-[11px] text-gray-500 flex items-center gap-1.5 mb-1">
-            <span
-              className={`inline-block w-1.5 h-1.5 rounded-full ${statusColor} ${anyRunning ? 'status-dot-running' : ''}`}
-            />
-            {statusText}
-          </p>
-          <span className="text-[11px] text-gray-400">WPHerd v1.0</span>
+        {/* Footer — app logo */}
+        <div className="flex items-center px-4 py-3">
+          <img src={logo} alt="WPHerd" className="h-5 w-auto object-contain" draggable={false} />
         </div>
       </aside>
 
