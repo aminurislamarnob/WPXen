@@ -41,7 +41,7 @@ function Toggle({ checked, onChange, disabled }) {
 function RowMenu({ plugin, busy, onAction, onClose }) {
   return (
     <div
-      className="absolute right-0 top-7 z-30 panel rounded-xl shadow-card-hover border border-gray-100 py-1 w-40 animate-fade-in"
+      className="absolute right-0 top-7 z-30 panel-menu rounded-xl shadow-card-hover border border-gray-100 py-1 w-40 animate-fade-in"
       onMouseLeave={onClose}
     >
       {plugin.status === 'active' ? (

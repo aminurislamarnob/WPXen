@@ -8,7 +8,6 @@ import {
   Database,
   MoreHorizontal,
   Trash2,
-  Settings,
   Copy,
   Lock,
   Unlock,
@@ -21,11 +20,12 @@ import {
   SlidersHorizontal,
 } from 'lucide-react';
 import { Toggle } from './ui';
+import { WordPressIcon } from './icons';
 
 function ContextMenu({ site, onDelete, onManage, onClose }) {
   return (
     <div
-      className="absolute right-0 top-8 z-50 panel rounded-xl shadow-card-hover border border-gray-100 py-1 w-48 animate-fade-in"
+      className="absolute right-0 top-8 z-50 panel-menu rounded-xl shadow-card-hover border border-gray-100 py-1 w-48 animate-fade-in"
       onMouseLeave={onClose}
     >
       <button
@@ -142,7 +142,7 @@ export default function SiteCard({
       onClick: () => window.electronAPI.openSiteInBrowser(site.url),
     },
     {
-      icon: Settings,
+      icon: WordPressIcon,
       label: 'wp-admin',
       onClick: () => window.electronAPI.openWpAdmin(site.url),
     },
@@ -173,7 +173,7 @@ export default function SiteCard({
   ];
 
   return (
-    <div className="site-card settings-card group">
+    <div className={`site-card settings-card group relative ${menuOpen ? 'z-40' : ''}`}>
       {/* Main row: tile · name/domain/path · chips · HTTPS · actions · menu */}
       <div className="flex items-center gap-3 px-4 py-3">
         <button
@@ -293,7 +293,7 @@ export default function SiteCard({
 
       {/* Share tunnel panel */}
       {panelOpen && (
-        <div className="px-4 py-3 border-t border-gray-100 bg-gray-50/60 animate-fade-in">
+        <div className="px-4 py-3 border-t border-gray-100 bg-gray-50/60 rounded-b-2xl animate-fade-in">
           <div className="flex items-center justify-between mb-2">
             <span className="flex items-center gap-1.5 text-xs font-semibold text-gray-700">
               <Share2 size={12} />

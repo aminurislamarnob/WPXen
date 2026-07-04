@@ -26,6 +26,7 @@ import WpOverview from './WpOverview';
 import WpPlugins from './WpPlugins';
 import WpThemes from './WpThemes';
 import SiteLogs from './SiteLogs';
+import { WordPressIcon } from './icons';
 
 const NAV = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard },
@@ -113,7 +114,7 @@ function Overview({ site }) {
       onClick: () => window.electronAPI.openSiteInBrowser(site.url),
     },
     {
-      icon: Settings,
+      icon: WordPressIcon,
       label: 'wp-admin',
       onClick: () => window.electronAPI.openWpAdmin(site.url),
     },

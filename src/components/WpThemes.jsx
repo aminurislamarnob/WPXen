@@ -64,7 +64,7 @@ function RowMenu({ theme, busy, onAction, onClose }) {
   const deletable = theme.status !== 'active' && theme.status !== 'parent';
   return (
     <div
-      className="absolute right-0 top-7 z-30 panel rounded-xl shadow-card-hover border border-gray-100 py-1 w-44 animate-fade-in"
+      className="absolute right-0 top-7 z-30 panel-menu rounded-xl shadow-card-hover border border-gray-100 py-1 w-44 animate-fade-in"
       onMouseLeave={onClose}
     >
       {theme.status !== 'active' && (

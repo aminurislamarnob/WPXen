@@ -157,6 +157,13 @@ body {
   @apply transition-all duration-200;
 }
 
+/* Override .settings-card's overflow-hidden (needs higher specificity since
+   .settings-card is defined later) so the actions dropdown can escape the
+   card bounds instead of being clipped. */
+.site-card.settings-card {
+  overflow: visible;
+}
+
 .site-card:hover {
   @apply shadow-card-hover -translate-y-0.5;
 }
@@ -305,6 +312,14 @@ textarea:focus {
    Call sites keep their own radius/shadow classes. */
 .panel {
   background: rgb(var(--surface-card) / 0.75);
+  backdrop-filter: blur(30px) saturate(180%);
+  -webkit-backdrop-filter: blur(30px) saturate(180%);
+}
+
+/* Popover menus overlap sharp text on the same card, where 0.75 opacity lets
+   it bleed through — use a near-opaque frosted background instead. */
+.panel-menu {
+  background: rgb(var(--surface-card) / 0.97);
   backdrop-filter: blur(30px) saturate(180%);
   -webkit-backdrop-filter: blur(30px) saturate(180%);
 }
