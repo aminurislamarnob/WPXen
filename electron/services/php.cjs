@@ -283,31 +283,62 @@ function runBrewStreaming(args, onProgress) {
     child.on('close', (code) => {
       if (code === 0) {
         resolve();
-      } else {
-        reject(
-          new Error(tail.trim() || `brew ${args.join(' ')} failed (exit ${code})`)
-        );
+        return;
       }
+      // brew prefixes real failures with "Error:". Prefer that over the raw
+      // tail so unrelated warnings — e.g. Homebrew 6's multi-line "taps are
+      // not trusted" notice about other taps on the machine — can't mask the
+      // actual error in the UI.
+      const errIdx = tail.search(/^Error[:!]/m);
+      const message =
+        errIdx !== -1
+          ? tail.slice(errIdx).trim()
+          : tail.trim() || `brew ${args.join(' ')} failed (exit ${code})`;
+      reject(new Error(message));
     });
   });
 }
 
+// Homebrew 6.0 turned on HOMEBREW_REQUIRE_TAP_TRUST by default, so it refuses
+// to load formulae from untrusted third-party taps — which breaks install and
+// upgrade of the EOL PHP versions WPHerd pulls from shivammathur/php (they fail
+// with "the following taps are not trusted"). `brew tap` clones the repo and
+// `brew trust` whitelists it in trust.json; both are idempotent, and on older
+// Homebrew that lacks `brew trust` the failure is swallowed (trust isn't
+// required there, so the install/upgrade below still runs and surfaces any
+// real error itself).
+const WPHERD_PHP_TAP = 'shivammathur/php';
+
+async function ensurePhpTapTrusted(onProgress) {
+  // Tap must exist before it can be trusted or its formulae loaded.
+  await runBrewStreaming(['tap', WPHERD_PHP_TAP], onProgress).catch(() => {});
+  await runBrewStreaming(['trust', WPHERD_PHP_TAP], onProgress).catch(() => {});
+}
+
 // Installs a PHP version via Homebrew (core or the shivammathur/php tap).
-function installPhpVersion(version, onProgress) {
+async function installPhpVersion(version, onProgress) {
   if (!/^\d+\.\d+$/.test(String(version))) {
-    return Promise.reject(new Error('Invalid PHP version'));
+    throw new Error('Invalid PHP version');
+  }
+  if (TAP_PHP_VERSIONS.includes(version)) {
+    await ensurePhpTapTrusted(onProgress);
   }
   return runBrewStreaming(['install', installFormulaFor(version)], onProgress);
 }
 
 // Upgrades an installed PHP version to its latest patch release.
-function updatePhpVersion(version, onProgress) {
+async function updatePhpVersion(version, onProgress) {
   if (!/^\d+\.\d+$/.test(String(version))) {
-    return Promise.reject(new Error('Invalid PHP version'));
+    throw new Error('Invalid PHP version');
   }
   const formula = brew.phpFormulaForVersion(version);
   if (!formula) {
-    return Promise.reject(new Error(`PHP ${version} is not installed`));
+    throw new Error(`PHP ${version} is not installed`);
+  }
+  // php@7.4 / php@8.0 live in the untrusted shivammathur/php tap; trust it
+  // first or Homebrew 6.0 refuses to load the formula for the upgrade.
+  if (TAP_PHP_VERSIONS.includes(version)) {
+    await ensurePhpTapTrusted(onProgress);
   }
   return runBrewStreaming(['upgrade', formula], onProgress);
 }
