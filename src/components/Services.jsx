@@ -104,7 +104,7 @@ function ServiceRow({ config, status, onAction, loadingAction }) {
         <button
           onClick={() => onAction('stop', config.id)}
           disabled={isLoading}
-          className="btn-secondary !px-3 !py-1 text-xs w-[70px] text-red-600 dark:text-red-400"
+          className="btn-secondary text-xs w-[72px] text-red-600 dark:text-red-400"
         >
           Stop
         </button>
@@ -112,7 +112,7 @@ function ServiceRow({ config, status, onAction, loadingAction }) {
         <button
           onClick={() => onAction('start', config.id)}
           disabled={isLoading}
-          className="btn-secondary !px-3 !py-1 text-xs w-[70px] text-green-700 dark:text-green-400"
+          className="btn-secondary text-xs w-[72px] text-green-700 dark:text-green-400"
         >
           Start
         </button>
@@ -186,24 +186,24 @@ export default function Services({ serviceStatus, refreshStatus }) {
           <button
             onClick={handleStopAll}
             disabled={globalLoading || runningCount === 0}
-            className="btn-secondary text-xs"
+            className="btn-secondary"
           >
             {globalLoading ? (
-              <Loader size={12} className="animate-spin mr-1.5" />
+              <Loader size={12} className="animate-spin" />
             ) : (
-              <Square size={12} className="mr-1.5" />
+              <Square size={12} strokeWidth={2.5} />
             )}
             Stop All
           </button>
           <button
             onClick={handleStartAll}
             disabled={globalLoading || runningCount === visibleServices.length}
-            className="btn-primary text-xs"
+            className="btn-primary"
           >
             {globalLoading ? (
-              <Loader size={12} className="animate-spin mr-1.5" />
+              <Loader size={12} className="animate-spin" />
             ) : (
-              <Play size={12} className="mr-1.5" />
+              <Play size={12} strokeWidth={2.5} fill="currentColor" />
             )}
             Start All
           </button>

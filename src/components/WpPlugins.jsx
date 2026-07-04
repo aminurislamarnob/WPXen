@@ -197,7 +197,7 @@ function DeleteModal({ names, deleting, onConfirm, onClose }) {
             disabled={deleting}
             className="btn-danger flex-1 text-sm"
           >
-            {deleting ? <Loader size={14} className="animate-spin mr-2" /> : null}
+            {deleting ? <Loader size={14} className="animate-spin mr-1.5" /> : null}
             Delete
           </button>
         </div>

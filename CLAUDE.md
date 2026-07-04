@@ -71,17 +71,37 @@ Node directly. When adding a feature that crosses the boundary you must touch th
 ### Renderer UI conventions
 
 The UI mimics macOS System Settings. Pages compose the shared primitives in
-`src/components/ui.jsx` (`Card`, `Row`, `SectionLabel`, `IconTile`, `Toggle`,
-`PageHeader`) plus the `.settings-card` / `.settings-row` / `.btn-*` /
+`src/components/ui.jsx` (`Button`, `Card`, `Row`, `SectionLabel`, `IconTile`,
+`Toggle`, `PageHeader`) plus the `.settings-card` / `.settings-row` / `.btn-*` /
 `.form-input` / `.panel` classes in `src/index.css` — don't hand-roll cards,
-rows, or buttons.
+rows, or buttons. Page content wraps in `px-6 pb-6 max-w-2xl mx-auto`.
 
-**Dark mode.** The app supports Auto/Light/Dark (Appearance section in
-Settings). How it works, and what to do when adding UI:
+**Buttons.** All shape/size lives in the base `.btn` class (`src/index.css`):
+capsule (`rounded-full`), `min-h-[32px]` (matches the header back/forward
+pill), `text-[12px]`, `px-3.5`, and `gap-1.5` for icon+label spacing. Variants
+(`.btn-primary/secondary/danger/ghost`) add color only; the `Button` component
+in `ui.jsx` maps `variant` → class. Conventions: icons are `size={12}
+strokeWidth={2.5}` (`Play` also `fill="currentColor"`); never add `mr-*` to a
+button icon (it doubles the base gap) and never re-set `text-xs`/`text-sm` at
+call sites. New button styles = new variant + `.btn-*` rule, not inline
+styling.
 
-- The main process sets `nativeTheme.themeSource` from the persisted
-  `settings.appearance` (`set-appearance` IPC handler); that flips the
-  renderer's `prefers-color-scheme`, which Tailwind consumes via
+**Liquid Glass.** The window is transparent over an NSVisualEffectView
+(`backgroundColor: '#00000000'` + `vibrancy: 'sidebar'` in `main.cjs`), macOS
+26 style — one continuous glass sheet like Tahoe System Settings. The sidebar
+is raw vibrancy (no background), the content pane carries a faint
+`bg-surface/55` tint, `.settings-card` and `.panel` are frosted glass, and
+buttons are capsules (`rounded-full`). Never paint opaque full-bleed
+backgrounds (`bg-surface`, `bg-white`) over page areas — use translucent
+tints (`bg-surface/55`) or the `.glass` primitive so vibrancy shows through.
+Glass edge/highlight tokens are `--glass-border`, `--glass-highlight`,
+`--shadow-glass` in `src/index.css`.
+
+**Dark mode.** Light/dark follows the macOS system appearance — there is no
+in-app switcher. How it works, and what to do when adding UI:
+
+- `nativeTheme` stays on its default `'system'` source, so the renderer's
+  `prefers-color-scheme` tracks macOS, which Tailwind consumes via
   `darkMode: 'media'`.
 - All theme-dependent colors resolve through CSS variables defined in
   `src/index.css` and wired up in `tailwind.config.js`. The **gray scale
@@ -107,5 +127,13 @@ Settings). How it works, and what to do when adding UI:
   install → write nginx vhost → reload nginx).
 - `dnsmasq` setup writes `/etc/resolver/test`, which requires sudo — it triggers a macOS
   admin password dialog. This is intentionally a one-click action from Settings.
+- **Homebrew 6 tap trust.** Homebrew 6.0 enables `HOMEBREW_REQUIRE_TAP_TRUST` by
+  default and refuses formulae from untrusted taps. EOL PHP versions (8.0, 7.4)
+  come from the `shivammathur/php` tap, so `php.cjs` runs `ensurePhpTapTrusted()`
+  (`brew tap` + `brew trust`, both idempotent, errors swallowed for pre-6.0 brew)
+  before installing/upgrading a `TAP_PHP_VERSIONS` entry. Also note brew prints a
+  multi-line "taps are not trusted" *warning* about any unrelated untrusted taps
+  on the machine — `runBrewStreaming` therefore extracts the real `Error:` line
+  for rejections instead of the raw output tail.
 
 For service flow, DNS setup, and Homebrew path details, see `README.md`.

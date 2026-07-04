@@ -67,7 +67,7 @@ function DeleteConfirmModal({ site, onConfirm, onClose }) {
               disabled={loading}
               className="btn-danger flex-1 text-sm"
             >
-              {loading ? <Loader size={14} className="animate-spin mr-2" /> : null}
+              {loading ? <Loader size={14} className="animate-spin mr-1.5" /> : null}
               Remove Site
             </button>
           </div>
@@ -199,7 +199,7 @@ export default function Sites({ sites, setSites, refreshSites }) {
   }
 
   return (
-    <div className="px-6 pb-6 max-w-4xl mx-auto animate-fade-in">
+    <div className="px-6 pb-6 max-w-2xl mx-auto animate-fade-in">
       {/* Header */}
       <div className="flex items-center justify-between mb-4 gap-3">
         {sites.length > 0 ? (
@@ -221,8 +221,8 @@ export default function Sites({ sites, setSites, refreshSites }) {
             {sites.length} WordPress site{sites.length !== 1 ? 's' : ''}
           </p>
         )}
-        <button onClick={() => setShowAddModal(true)} className="btn-primary text-xs">
-          <Plus size={13} className="mr-1.5" />
+        <button onClick={() => setShowAddModal(true)} className="btn-primary">
+          <Plus size={12} strokeWidth={2.5} />
           Add Site
         </button>
       </div>
@@ -239,7 +239,7 @@ export default function Sites({ sites, setSites, refreshSites }) {
             minutes.
           </p>
           <button onClick={() => setShowAddModal(true)} className="btn-primary">
-            <Plus size={15} className="mr-2" />
+            <Plus size={15} className="mr-1.5" />
             Add Your First Site
           </button>
         </div>

@@ -3,6 +3,33 @@ import { ChevronRight } from 'lucide-react';
 // Shared macOS System Settings primitives. Pages compose these instead of
 // hand-rolling cards so the whole app reads as one native surface.
 
+// Common button. All shape/size/color lives in the .btn-* classes
+// (src/index.css) — this just maps a `variant` to the right class so every
+// button in the app shares one design. Pass `className` for layout-only
+// extras (flex-1, w-full, justify-center); design new buttons by adding a
+// variant here + a .btn-* rule, never by hand-rolling styles at the call site.
+const BUTTON_VARIANTS = {
+  primary: 'btn-primary',
+  secondary: 'btn-secondary',
+  danger: 'btn-danger',
+  ghost: 'btn-ghost',
+};
+
+export function Button({
+  variant = 'secondary',
+  type = 'button',
+  className = '',
+  children,
+  ...props
+}) {
+  const base = BUTTON_VARIANTS[variant] || BUTTON_VARIANTS.secondary;
+  return (
+    <button type={type} className={`${base} ${className}`.trim()} {...props}>
+      {children}
+    </button>
+  );
+}
+
 // Grouped rounded card holding hairline-divided rows.
 export function Card({ className = '', children }) {
   return <div className={`settings-card ${className}`}>{children}</div>;

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { NavLink, Outlet, useLocation } from 'react-router-dom';
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard,
   Globe,
@@ -8,6 +8,8 @@ import {
   Mail,
   Settings,
   Search,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import logo from '../assets/logo.png';
 
@@ -46,6 +48,7 @@ const PAGE_TITLES = {
 export default function Layout({ serviceStatus }) {
   const [filter, setFilter] = useState('');
   const location = useLocation();
+  const navigate = useNavigate();
 
   const allRunning =
     serviceStatus?.nginx?.running &&
@@ -82,9 +85,10 @@ export default function Layout({ serviceStatus }) {
     : NAV_GROUPS;
 
   return (
-    <div className="h-screen flex overflow-hidden bg-surface">
-      {/* Sidebar — light, translucent, System Settings style */}
-      <aside className="w-56 flex flex-col bg-sidebar/80 backdrop-macos border-r border-black/10 dark:border-white/10 flex-shrink-0">
+    <div className="h-screen flex overflow-hidden">
+      {/* Sidebar — raw window vibrancy, one continuous glass sheet with the
+          content pane (macOS 26 System Settings) */}
+      <aside className="w-56 flex flex-col flex-shrink-0 border-r border-black/[0.06] dark:border-white/[0.06]">
         {/* Title bar drag region (hosts the traffic lights) */}
         <div className="drag-region h-12 flex-shrink-0" />
 
@@ -100,7 +104,7 @@ export default function Layout({ serviceStatus }) {
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
               placeholder="Search"
-              className="w-full pl-8 pr-3 py-1.5 text-[13px] bg-black/[0.06] dark:bg-white/10 border-0 rounded-lg placeholder-gray-500 focus:ring-2 focus:ring-accent/40"
+              className="w-full pl-8 pr-3 py-1.5 text-[13px] bg-black/[0.06] dark:bg-white/10 border-0 rounded-full placeholder-gray-500 focus:ring-2 focus:ring-accent/40"
             />
           </div>
         </div>
@@ -156,10 +160,30 @@ export default function Layout({ serviceStatus }) {
         </div>
       </aside>
 
-      {/* Main content */}
-      <main className="flex-1 flex flex-col overflow-hidden bg-surface">
-        {/* Top bar: drag region + centered-left page title */}
-        <div className="drag-region h-12 flex items-center px-6 flex-shrink-0">
+      {/* Main content — faint tint over the vibrancy, slightly lighter than
+          the sidebar like System Settings */}
+      <main className="flex-1 flex flex-col overflow-hidden bg-surface/55">
+        {/* Top bar: drag region + back/forward capsule + page title */}
+        <div className="drag-region h-[62px] flex items-center gap-3 px-4 flex-shrink-0">
+          {/* Back/forward capsule: one glass pill, hairline divider between
+              the chevrons, forward dimmed — like System Settings */}
+          <div className="no-drag flex items-stretch rounded-full glass overflow-hidden">
+            <button
+              onClick={() => navigate(-1)}
+              aria-label="Back"
+              className="pl-4 pr-3 py-3 text-gray-800 hover:bg-black/5 active:bg-black/10 dark:hover:bg-white/10 dark:active:bg-white/15 transition-colors"
+            >
+              <ChevronLeft size={16} strokeWidth={2.6} />
+            </button>
+            <span className="w-px my-2.5 bg-black/10 dark:bg-white/[0.14]" />
+            <button
+              onClick={() => navigate(1)}
+              aria-label="Forward"
+              className="pl-3 pr-4 py-3 text-gray-400 hover:bg-black/5 active:bg-black/10 dark:hover:bg-white/10 dark:active:bg-white/15 transition-colors"
+            >
+              <ChevronRight size={16} strokeWidth={2.6} />
+            </button>
+          </div>
           <h1 className="text-[15px] font-bold text-gray-900">{title}</h1>
         </div>
         <div className="flex-1 overflow-y-auto">

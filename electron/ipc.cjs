@@ -1,6 +1,6 @@
 'use strict';
 
-const { ipcMain, shell, dialog, app, nativeTheme } = require('electron');
+const { ipcMain, shell, dialog, app } = require('electron');
 const { execFile } = require('child_process');
 const path = require('path');
 const os = require('os');
@@ -1160,19 +1160,7 @@ function registerHandlers(win, storeInstance) {
       dbUser: store.get('settings.dbUser', 'root'),
       dbPassword: store.get('settings.dbPassword', ''),
       brewPrefix: brew.getBrewPrefix() || 'Not detected',
-      appearance: store.get('settings.appearance', 'system'),
     };
-  });
-
-  // Appearance (Auto / Light / Dark). Applies instantly: nativeTheme drives
-  // the renderer's prefers-color-scheme, which Tailwind's dark: variants use.
-  ipcMain.handle('set-appearance', (_, value) => {
-    if (!['system', 'light', 'dark'].includes(value)) {
-      return { success: false, error: 'Invalid appearance value.' };
-    }
-    store.set('settings.appearance', value);
-    nativeTheme.themeSource = value;
-    return { success: true };
   });
 
   ipcMain.handle('save-settings', async (_, settings) => {

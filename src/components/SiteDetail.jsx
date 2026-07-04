@@ -250,7 +250,7 @@ export default function SiteDetail({ sites, refreshSites }) {
           onClick={() => navigate('/sites')}
           className="btn-secondary text-sm mb-4"
         >
-          <ChevronLeft size={15} className="mr-1" />
+          <ChevronLeft size={15} className="mr-1.5" />
           Back to Sites
         </button>
         <p className="text-sm text-gray-500">Site not found.</p>
