@@ -260,15 +260,45 @@ textarea:focus {
    leading icon) win over the base padding here. */
 @layer components {
   .form-input {
-    @apply w-full px-3 py-1.5 border border-gray-300/60 rounded-lg text-[13px] text-gray-900 bg-white/60 placeholder-gray-400 transition-colors duration-150 dark:bg-white/[0.08] dark:border-white/10;
+    @apply w-full px-3 py-1.5 border border-gray-300/60 rounded-[10px] text-[13px] text-gray-900 bg-white/60 placeholder-gray-400 transition-colors duration-150 dark:bg-white/[0.08] dark:border-white/10;
   }
 }
 
-/* Modal overlay */
+/* Modal overlay — macOS sheets dim the window without blurring it */
 .modal-overlay {
   @apply fixed inset-0 z-50 flex items-center justify-center;
-  background: rgba(0, 0, 0, 0.5);
-  backdrop-filter: blur(4px);
+  background: rgba(0, 0, 0, 0.32);
+}
+
+/* ── Dialog sheet (macOS System Settings style) ───────────────────────────
+   Near-opaque rounded sheet with a title/description block top-left, form
+   content recessed in a .sheet-well, and buttons bottom-right. Radius and
+   shadow live here so every dialog matches. */
+.sheet {
+  @apply rounded-[26px];
+  background: rgb(var(--surface-card) / 0.98);
+  backdrop-filter: blur(30px) saturate(180%);
+  -webkit-backdrop-filter: blur(30px) saturate(180%);
+  box-shadow:
+    var(--glass-highlight),
+    inset 0 0 0 0.5px var(--glass-border),
+    0 0 0 0.5px rgba(0, 0, 0, 0.12),
+    0 24px 70px rgba(0, 0, 0, 0.35);
+}
+
+/* Recessed content area inside a sheet (the inner gray panel in
+   System Settings sheets like "Arrange Displays") */
+.sheet-well {
+  @apply rounded-2xl p-4;
+  background: rgba(0, 0, 0, 0.03);
+  box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.06);
+}
+
+@media (prefers-color-scheme: dark) {
+  .sheet-well {
+    background: rgba(255, 255, 255, 0.045);
+    box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.07);
+  }
 }
 
 /* Modal / popover panel surface (dialogs, context menus) — frosted glass.

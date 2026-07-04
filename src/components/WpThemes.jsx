@@ -9,7 +9,6 @@ import {
   MoreVertical,
   Trash2,
   Palette,
-  X,
 } from 'lucide-react';
 
 const TABS = [
@@ -119,60 +118,52 @@ function InstallModal({ onInstall, installing, onClose }) {
       className="modal-overlay animate-fade-in"
       onClick={(e) => e.target === e.currentTarget && !installing && onClose()}
     >
-      <div className="panel rounded-2xl shadow-window w-[26rem] animate-slide-in p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-base font-bold text-gray-900">Add New Theme</h3>
-          <button
-            onClick={onClose}
-            disabled={installing}
-            className="text-gray-400 hover:text-gray-600"
-          >
-            <X size={16} />
-          </button>
-        </div>
-        <label className="block text-sm font-medium text-gray-700 mb-1.5">
-          wordpress.org theme slug
-        </label>
-        <input
-          type="text"
-          value={slug}
-          onChange={(e) => setSlug(e.target.value.trim().toLowerCase())}
-          placeholder="e.g. astra"
-          autoFocus
-          className="form-input font-mono text-sm"
-          onKeyDown={(e) =>
-            e.key === 'Enter' && slug && !installing && onInstall(slug, activate)
-          }
-        />
-        <p className="text-xs text-gray-400 mt-1.5">
-          The slug is the last part of the theme&apos;s wordpress.org URL, e.g.{' '}
-          <span className="font-mono">wordpress.org/themes/astra</span>.
+      <div className="sheet w-[26rem] animate-slide-in p-6">
+        <h3 className="text-[15px] font-bold text-gray-900">Add New Theme</h3>
+        <p className="text-[13px] text-gray-500 mt-0.5">
+          Install a theme from wordpress.org
         </p>
-        <label className="flex items-center gap-2.5 mt-4 cursor-pointer">
+        <div className="sheet-well mt-4">
+          <label className="block text-xs font-medium text-gray-700 mb-1.5">
+            wordpress.org theme slug
+          </label>
           <input
-            type="checkbox"
-            checked={activate}
-            onChange={(e) => setActivate(e.target.checked)}
-            className="w-4 h-4 rounded border-gray-300 text-wp-blue"
+            type="text"
+            value={slug}
+            onChange={(e) => setSlug(e.target.value.trim().toLowerCase())}
+            placeholder="e.g. astra"
+            autoFocus
+            className="form-input font-mono text-xs"
+            onKeyDown={(e) =>
+              e.key === 'Enter' && slug && !installing && onInstall(slug, activate)
+            }
           />
-          <span className="text-sm text-gray-700">Activate after install</span>
-        </label>
-        <div className="flex gap-2 mt-5">
-          <button
-            onClick={onClose}
-            disabled={installing}
-            className="btn-secondary flex-1 text-sm"
-          >
+          <p className="text-xs text-gray-400 mt-1.5">
+            The slug is the last part of the theme&apos;s wordpress.org URL, e.g.{' '}
+            <span className="font-mono">wordpress.org/themes/astra</span>.
+          </p>
+          <label className="flex items-center gap-2.5 mt-4 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={activate}
+              onChange={(e) => setActivate(e.target.checked)}
+              className="w-4 h-4 rounded border-gray-300 text-wp-blue"
+            />
+            <span className="text-sm text-gray-700">Activate after install</span>
+          </label>
+        </div>
+        <div className="flex justify-end gap-2 mt-5">
+          <button onClick={onClose} disabled={installing} className="btn-secondary">
             Cancel
           </button>
           <button
             onClick={() => onInstall(slug, activate)}
             disabled={!slug || installing}
-            className="btn-primary flex-1 text-sm"
+            className="btn-primary"
           >
             {installing ? (
               <>
-                <Loader size={14} className="animate-spin mr-1.5" />
+                <Loader size={12} className="animate-spin" />
                 Installing…
               </>
             ) : (
@@ -191,35 +182,29 @@ function DeleteModal({ names, deleting, onConfirm, onClose }) {
       className="modal-overlay animate-fade-in"
       onClick={(e) => e.target === e.currentTarget && !deleting && onClose()}
     >
-      <div className="panel rounded-2xl shadow-window w-96 animate-slide-in p-6">
-        <div className="flex items-center gap-3 mb-4">
-          <div className="w-10 h-10 rounded-xl bg-red-100 dark:bg-red-500/15 flex items-center justify-center">
+      <div className="sheet w-[420px] animate-slide-in p-6">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-red-100 dark:bg-red-500/15 flex items-center justify-center flex-shrink-0">
             <AlertTriangle size={20} className="text-red-600 dark:text-red-400" />
           </div>
           <div>
-            <h3 className="text-base font-bold text-gray-900">
+            <h3 className="text-[15px] font-bold text-gray-900">
               Delete theme{names.length !== 1 ? 's' : ''}
             </h3>
-            <p className="text-xs text-gray-500">This removes the theme files</p>
+            <p className="text-[13px] text-gray-500 mt-0.5">
+              This removes the theme files
+            </p>
           </div>
         </div>
-        <p className="text-sm text-gray-700 mb-5 break-words">
+        <p className="text-sm text-gray-700 mt-4 break-words">
           Delete <span className="font-semibold">{names.join(', ')}</span>?
         </p>
-        <div className="flex gap-2">
-          <button
-            onClick={onClose}
-            disabled={deleting}
-            className="btn-secondary flex-1 text-sm"
-          >
+        <div className="flex justify-end gap-2 mt-5">
+          <button onClick={onClose} disabled={deleting} className="btn-secondary">
             Cancel
           </button>
-          <button
-            onClick={onConfirm}
-            disabled={deleting}
-            className="btn-danger flex-1 text-sm"
-          >
-            {deleting ? <Loader size={14} className="animate-spin mr-1.5" /> : null}
+          <button onClick={onConfirm} disabled={deleting} className="btn-danger">
+            {deleting ? <Loader size={12} className="animate-spin" /> : null}
             Delete
           </button>
         </div>
