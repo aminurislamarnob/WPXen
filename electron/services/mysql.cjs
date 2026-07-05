@@ -1,8 +1,9 @@
 'use strict';
 
-const { execFileSync, execFile } = require('child_process');
+const { execFileSync, execFile, spawn } = require('child_process');
 const { promisify } = require('util');
 const fs = require('fs');
+const zlib = require('zlib');
 const brew = require('./brew.cjs');
 const procman = require('./procman.cjs');
 
@@ -58,6 +59,121 @@ function getMysqladminBin() {
     if (fs.existsSync(c)) return c;
   }
   return 'mysqladmin';
+}
+
+function getMysqldumpBin() {
+  const prefix = brew.getBrewPrefix();
+  if (!prefix) return 'mysqldump';
+  const candidates = [
+    `${prefix}/bin/mariadb-dump`,
+    `${prefix}/bin/mysqldump`,
+    'mysqldump',
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c;
+  }
+  return 'mysqldump';
+}
+
+// Argv for a consistent dump of one database. Exported (pure) for tests.
+function buildDumpArgs(dbName, creds = credentials) {
+  const args = ['-u', creds.user];
+  if (creds.password) args.push(`-p${creds.password}`);
+  args.push('--single-transaction', '--routines', '--triggers', dbName);
+  return args;
+}
+
+// Streams `mysqldump <db>` through gzip into destGzPath. Argv-only (no shell),
+// matching this module's injection stance; rejects with the stderr tail on a
+// nonzero exit and removes the partial file.
+function dumpDatabase(dbName, destGzPath) {
+  assertSafeDbName(dbName);
+  return new Promise((resolve, reject) => {
+    const child = spawn(getMysqldumpBin(), buildDumpArgs(dbName), {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const out = fs.createWriteStream(destGzPath, { mode: 0o600 });
+    let stderrTail = '';
+    let exitCode = null;
+    let finished = false;
+    let settled = false;
+
+    const fail = (err) => {
+      if (settled) return;
+      settled = true;
+      try {
+        fs.unlinkSync(destGzPath);
+      } catch {}
+      reject(err);
+    };
+    // Settle only once the process exited AND the gzip stream fully flushed,
+    // so a resolved promise always means a complete file on disk.
+    const trySettle = () => {
+      if (settled || exitCode === null || !finished) return;
+      if (exitCode === 0) {
+        settled = true;
+        resolve(destGzPath);
+      } else {
+        fail(new Error(stderrTail.trim() || `mysqldump exited (code ${exitCode}).`));
+      }
+    };
+
+    child.stderr.on('data', (b) => {
+      stderrTail = (stderrTail + b.toString()).slice(-4000);
+    });
+    child.stdout.pipe(zlib.createGzip()).pipe(out);
+    child.on('error', fail);
+    out.on('error', fail);
+    child.on('close', (code) => {
+      exitCode = code;
+      trySettle();
+    });
+    out.on('finish', () => {
+      finished = true;
+      trySettle();
+    });
+  });
+}
+
+// Streams a gzipped SQL dump into `mysql <db>` via stdin.
+function importDatabase(dbName, srcGzPath) {
+  assertSafeDbName(dbName);
+  return new Promise((resolve, reject) => {
+    const child = spawn(getMysqlBin(), [...authArgs(), dbName], {
+      stdio: ['pipe', 'ignore', 'pipe'],
+    });
+    let stderrTail = '';
+    let settled = false;
+    const fail = (err) => {
+      if (settled) return;
+      settled = true;
+      try {
+        child.kill();
+      } catch {}
+      reject(err);
+    };
+
+    child.stderr.on('data', (b) => {
+      stderrTail = (stderrTail + b.toString()).slice(-4000);
+    });
+    // An early mysql exit EPIPEs stdin — swallow it, the close handler carries
+    // the real error from stderr.
+    child.stdin.on('error', () => {});
+
+    const input = fs.createReadStream(srcGzPath);
+    const gunzip = zlib.createGunzip();
+    input.on('error', fail);
+    gunzip.on('error', fail);
+    input.pipe(gunzip).pipe(child.stdin);
+
+    child.on('error', fail);
+    child.on('close', (code) => {
+      if (settled) return;
+      settled = true;
+      if (code === 0) resolve();
+      else reject(new Error(stderrTail.trim() || `mysql exited (code ${code}).`));
+    });
+  });
 }
 
 function getBrewServiceName() {
@@ -252,4 +368,8 @@ module.exports = {
   getSocketPath,
   setCredentials,
   getCredentials,
+  getMysqldumpBin,
+  buildDumpArgs,
+  dumpDatabase,
+  importDatabase,
 };

@@ -34,6 +34,7 @@ const mailpit = require('./services/mailpit.cjs');
 const procman = require('./services/procman.cjs');
 const cloudflared = require('./services/cloudflared.cjs');
 const htpasswd = require('./services/htpasswd.cjs');
+const backups = require('./services/backups.cjs');
 const sudoers = require('./services/sudoers.cjs');
 const setup = require('./services/setup.cjs');
 const logs = require('./services/logs.cjs');
@@ -1064,6 +1065,68 @@ function registerHandlers(win, storeInstance) {
     return ok
       ? { success: true }
       : { success: false, error: 'Refused to open unsafe URL' };
+  });
+
+  // ─── Backups (local snapshots) ─────────────────────────────────────────
+
+  ipcMain.handle('list-backups', async (_, id) => {
+    try {
+      const site = findSite(id);
+      if (!site) return { success: false, error: 'Site not found' };
+      return { success: true, backups: backups.listBackups(id) };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('create-backup', async (event, id) => {
+    try {
+      const site = findSite(id);
+      if (!site) return { success: false, error: 'Site not found' };
+      const progress = (data) => {
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('backup-progress', { siteId: id, ...data });
+        }
+      };
+      const result = await backups.createBackup(site, progress);
+      return { success: true, ...result };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('restore-backup', async (event, id, timestamp) => {
+    try {
+      const site = findSite(id);
+      if (!site) return { success: false, error: 'Site not found' };
+      const progress = (data) => {
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('backup-progress', { siteId: id, ...data });
+        }
+      };
+      const result = await backups.restoreBackup(site, timestamp, progress);
+      return { success: true, ...result };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('delete-backup', async (_, id, timestamp) => {
+    try {
+      backups.deleteBackup(id, timestamp);
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('reveal-backup', async (_, id, timestamp) => {
+    try {
+      shell.showItemInFolder(backups.getBackupManifestPath(id, timestamp));
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
   });
 
   ipcMain.handle('open-in-finder', (_, sitePath) => {

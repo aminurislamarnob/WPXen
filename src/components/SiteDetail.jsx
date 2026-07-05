@@ -17,9 +17,11 @@ import {
   Share2,
   Loader,
   KeyRound,
+  Archive,
 } from 'lucide-react';
 import { Toggle } from './ui';
 import SharePanel from './SharePanel';
+import SiteBackups from './SiteBackups';
 import WpConfigManager from './WpConfigManager';
 import SitePhpSettings from './SitePhpSettings';
 import WpOverview from './WpOverview';
@@ -49,6 +51,7 @@ const NAV = [
       { id: 'wp-themes', label: 'Themes' },
     ],
   },
+  { id: 'backups', label: 'Backups', icon: Archive },
   { id: 'logs', label: 'Logs', icon: FileText },
 ];
 
@@ -455,6 +458,7 @@ export default function SiteDetail({ sites, refreshSites }) {
           {active === 'wp-overview' && <WpOverview site={site} onSaved={refreshSites} />}
           {active === 'wp-plugins' && <WpPlugins site={site} onSaved={refreshSites} />}
           {active === 'wp-themes' && <WpThemes site={site} onSaved={refreshSites} />}
+          {active === 'backups' && <SiteBackups site={site} />}
           {active === 'logs' && <SiteLogs site={site} />}
         </div>
       </div>

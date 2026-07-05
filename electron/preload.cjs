@@ -78,6 +78,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getCfAccount: () => ipcRenderer.invoke('get-cf-account'),
   cfLogin: () => ipcRenderer.invoke('cf-login'),
 
+  // Backups (local snapshots)
+  listBackups: (id) => ipcRenderer.invoke('list-backups', id),
+  createBackup: (id) => ipcRenderer.invoke('create-backup', id),
+  restoreBackup: (id, timestamp) => ipcRenderer.invoke('restore-backup', id, timestamp),
+  deleteBackup: (id, timestamp) => ipcRenderer.invoke('delete-backup', id, timestamp),
+  revealBackup: (id, timestamp) => ipcRenderer.invoke('reveal-backup', id, timestamp),
+
   // Services
   getServiceStatus: () => ipcRenderer.invoke('get-service-status'),
   startServices: () => ipcRenderer.invoke('start-services'),
@@ -135,6 +142,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       'tunnel-update',
       'cloudflared-install-progress',
       'cf-login-progress',
+      'backup-progress',
       'mailpit-install-progress',
       'core-deps-install-progress',
     ];
@@ -152,6 +160,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       'tunnel-update',
       'cloudflared-install-progress',
       'cf-login-progress',
+      'backup-progress',
       'mailpit-install-progress',
       'core-deps-install-progress',
     ];
