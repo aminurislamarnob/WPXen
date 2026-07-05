@@ -114,11 +114,7 @@ export default function WpConfigManager({ site }) {
               : 'bg-green-50 text-green-700 dark:bg-green-500/10 dark:text-green-400'
           }`}
         >
-          {message.type === 'error' ? (
-            <AlertTriangle size={15} />
-          ) : (
-            <Check size={15} />
-          )}
+          {message.type === 'error' ? <AlertTriangle size={15} /> : <Check size={15} />}
           {message.text}
         </div>
       )}
@@ -133,7 +129,8 @@ export default function WpConfigManager({ site }) {
             const blocked = setting.dependsOn && !draft[setting.dependsOn];
             const depLabel =
               blocked &&
-              (schema.find((s) => s.key === setting.dependsOn)?.label || 'its dependency');
+              (schema.find((s) => s.key === setting.dependsOn)?.label ||
+                'its dependency');
             return (
               <div
                 key={setting.key}
@@ -181,11 +178,7 @@ export default function WpConfigManager({ site }) {
 
       {dirty && !loading && (
         <div className="mt-4 flex justify-end">
-          <button
-            onClick={save}
-            disabled={saving}
-            className="btn-primary text-sm"
-          >
+          <button onClick={save} disabled={saving} className="btn-primary text-sm">
             {saving ? (
               <Loader size={14} className="animate-spin mr-1.5" />
             ) : (
@@ -240,8 +233,8 @@ function ManualEditor({ site, onClose, onSaved }) {
         <div>
           <h2 className="text-lg font-bold text-gray-900">Edit wp-config.php</h2>
           <p className="text-sm text-gray-500 mt-0.5">
-            Direct file editing. A <span className="font-mono">.bak</span> copy is kept
-            on save.
+            Direct file editing. A <span className="font-mono">.bak</span> copy is kept on
+            save.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -272,11 +265,7 @@ function ManualEditor({ site, onClose, onSaved }) {
               : 'bg-green-50 text-green-700 dark:bg-green-500/10 dark:text-green-400'
           }`}
         >
-          {message.type === 'error' ? (
-            <AlertTriangle size={15} />
-          ) : (
-            <Check size={15} />
-          )}
+          {message.type === 'error' ? <AlertTriangle size={15} /> : <Check size={15} />}
           {message.text}
         </div>
       )}

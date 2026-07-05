@@ -247,10 +247,7 @@ export default function SiteDetail({ sites, refreshSites }) {
   if (!site) {
     return (
       <div className="p-6">
-        <button
-          onClick={() => navigate('/sites')}
-          className="btn-secondary text-sm mb-4"
-        >
+        <button onClick={() => navigate('/sites')} className="btn-secondary text-sm mb-4">
           <ChevronLeft size={15} className="mr-1.5" />
           Back to Sites
         </button>
@@ -345,9 +342,7 @@ export default function SiteDetail({ sites, refreshSites }) {
           {active === 'overview' && <Overview site={site} />}
           {active === 'wpconfig' && <WpConfigManager site={site} />}
           {active === 'php' && <SitePhpSettings site={site} onSaved={refreshSites} />}
-          {active === 'wp-overview' && (
-            <WpOverview site={site} onSaved={refreshSites} />
-          )}
+          {active === 'wp-overview' && <WpOverview site={site} onSaved={refreshSites} />}
           {active === 'wp-plugins' && <WpPlugins site={site} onSaved={refreshSites} />}
           {active === 'wp-themes' && <WpThemes site={site} onSaved={refreshSites} />}
           {active === 'logs' && <SiteLogs site={site} />}

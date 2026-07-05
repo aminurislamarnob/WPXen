@@ -562,9 +562,7 @@ export default function WpThemes({ site, onSaved }) {
                       <Loader size={14} className="animate-spin text-wp-blue" />
                     ) : (
                       <button
-                        onClick={() =>
-                          setMenuFor((m) => (m === t.name ? null : t.name))
-                        }
+                        onClick={() => setMenuFor((m) => (m === t.name ? null : t.name))}
                         disabled={isBusy}
                         className="p-1 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 disabled:opacity-50"
                       >

@@ -1,11 +1,5 @@
 import { useState, useEffect } from 'react';
-import {
-  FolderOpen,
-  CheckCircle,
-  AlertCircle,
-  Loader,
-  ChevronRight,
-} from 'lucide-react';
+import { FolderOpen, CheckCircle, AlertCircle, Loader, ChevronRight } from 'lucide-react';
 import { StepIndicator, ProgressLog } from './ui';
 
 const STEPS = ['Details', 'Directory', 'WordPress', 'Creating'];

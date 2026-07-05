@@ -47,7 +47,15 @@ export function SectionLabel({ children, right }) {
 
 // One row: [icon tile] label/sublabel ......... controls [chevron]
 // Rows after the first draw a hairline divider (via CSS sibling rule).
-export function Row({ icon, title, subtitle, children, onClick, chevron, className = '' }) {
+export function Row({
+  icon,
+  title,
+  subtitle,
+  children,
+  onClick,
+  chevron,
+  className = '',
+}) {
   const content = (
     <>
       {icon}

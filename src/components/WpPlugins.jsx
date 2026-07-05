@@ -174,8 +174,8 @@ function DeleteModal({ names, deleting, onConfirm, onClose }) {
           </div>
         </div>
         <p className="text-sm text-gray-700 mt-4 break-words">
-          Delete <span className="font-semibold">{names.join(', ')}</span>? The
-          plugin will be deactivated first.
+          Delete <span className="font-semibold">{names.join(', ')}</span>? The plugin
+          will be deactivated first.
         </p>
         <div className="flex justify-end gap-2 mt-5">
           <button onClick={onClose} disabled={deleting} className="btn-secondary">
@@ -433,12 +433,7 @@ export default function WpPlugins({ site, onSaved }) {
           </button>
           <button
             onClick={() =>
-              runAction(
-                'deactivate',
-                selectedNames,
-                '__bulk__',
-                'Plugins deactivated.'
-              )
+              runAction('deactivate', selectedNames, '__bulk__', 'Plugins deactivated.')
             }
             disabled={isBusy}
             className="btn-secondary text-xs"
@@ -575,9 +570,7 @@ export default function WpPlugins({ site, onSaved }) {
                       <Loader size={14} className="animate-spin text-wp-blue" />
                     ) : (
                       <button
-                        onClick={() =>
-                          setMenuFor((m) => (m === p.name ? null : p.name))
-                        }
+                        onClick={() => setMenuFor((m) => (m === p.name ? null : p.name))}
                         disabled={isBusy}
                         className="p-1 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 disabled:opacity-50"
                       >

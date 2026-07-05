@@ -135,7 +135,10 @@ export default function Settings({ onOpenWizard }) {
               onChange={(e) => setSettings((s) => ({ ...s, sitesDir: e.target.value }))}
               placeholder="~/Sites"
             />
-            <button onClick={handleSelectSitesDir} className="btn-secondary !px-2.5 !py-1.5">
+            <button
+              onClick={handleSelectSitesDir}
+              className="btn-secondary !px-2.5 !py-1.5"
+            >
               <FolderOpen size={13} />
             </button>
           </Row>
@@ -300,7 +303,11 @@ export default function Settings({ onOpenWizard }) {
                     className={`w-2 h-2 rounded-full flex-shrink-0 ${installed ? 'bg-wp-green' : 'bg-gray-300'}`}
                   />
                 }
-                title={<span className="font-mono text-xs">{name === 'wpCli' ? 'wp-cli' : name}</span>}
+                title={
+                  <span className="font-mono text-xs">
+                    {name === 'wpCli' ? 'wp-cli' : name}
+                  </span>
+                }
               >
                 <span
                   className={`text-xs font-medium ${

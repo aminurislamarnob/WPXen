@@ -104,11 +104,15 @@ function InstallCard({ onInstalled }) {
         Catch outgoing email with Mailpit
       </h2>
       <p className="text-sm text-gray-500 max-w-md mx-auto mb-5">
-        Mailpit captures every email your WordPress sites send — password
-        resets, form notifications, WooCommerce receipts — so nothing ever
-        leaves your machine. No plugin needed.
+        Mailpit captures every email your WordPress sites send — password resets, form
+        notifications, WooCommerce receipts — so nothing ever leaves your machine. No
+        plugin needed.
       </p>
-      <button onClick={handleInstall} disabled={installing} className="btn-primary text-sm">
+      <button
+        onClick={handleInstall}
+        disabled={installing}
+        className="btn-primary text-sm"
+      >
         {installing ? (
           <Loader size={13} className="animate-spin mr-1.5" />
         ) : (
@@ -528,11 +532,13 @@ export default function Mail({ refreshStatus }) {
           {/* Catch toggle */}
           <div className="settings-card flex items-center justify-between px-4 py-3 mb-4 flex-shrink-0">
             <div className="min-w-0 pr-4">
-              <p className="text-[13px] font-medium text-gray-900">Catch outgoing email</p>
+              <p className="text-[13px] font-medium text-gray-900">
+                Catch outgoing email
+              </p>
               <p className="text-xs text-gray-400 mt-0.5">
                 Routes PHP <span className="font-mono">mail()</span> — and therefore{' '}
-                <span className="font-mono">wp_mail()</span> — from every site into Mailpit.
-                No mail leaves your machine while this is on.
+                <span className="font-mono">wp_mail()</span> — from every site into
+                Mailpit. No mail leaves your machine while this is on.
               </p>
             </div>
             <Toggle
@@ -599,7 +605,9 @@ export default function Mail({ refreshStatus }) {
                     <div className="flex flex-col items-center justify-center gap-2 text-gray-300 py-16">
                       <Inbox size={26} />
                       <p className="text-sm">
-                        {search.trim() ? 'No messages match your search' : 'No mail captured yet'}
+                        {search.trim()
+                          ? 'No messages match your search'
+                          : 'No mail captured yet'}
                       </p>
                       {!search.trim() && status.catching && (
                         <p className="text-xs text-gray-300 px-6 text-center">
@@ -640,10 +648,15 @@ export default function Mail({ refreshStatus }) {
                           >
                             {m.Subject || '(no subject)'}
                             {m.Attachments > 0 && (
-                              <Paperclip size={10} className="inline ml-1 text-gray-300" />
+                              <Paperclip
+                                size={10}
+                                className="inline ml-1 text-gray-300"
+                              />
                             )}
                           </p>
-                          <p className="text-[11px] text-gray-300 truncate mt-0.5">{m.Snippet}</p>
+                          <p className="text-[11px] text-gray-300 truncate mt-0.5">
+                            {m.Snippet}
+                          </p>
                         </button>
                       ))}
                       {hasMore && (
@@ -664,7 +677,11 @@ export default function Mail({ refreshStatus }) {
                 </div>
 
                 {/* Viewer */}
-                <MessageViewer message={detail} loading={detailLoading} onDelete={handleDelete} />
+                <MessageViewer
+                  message={detail}
+                  loading={detailLoading}
+                  onDelete={handleDelete}
+                />
               </div>
             </div>
           )}

@@ -286,7 +286,10 @@ export default function SiteCard({
                 : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
             }`}
           >
-            <Icon size={12} className={`flex-shrink-0 ${spinning ? 'animate-spin' : ''}`} />
+            <Icon
+              size={12}
+              className={`flex-shrink-0 ${spinning ? 'animate-spin' : ''}`}
+            />
             {label}
           </button>
         ))}
@@ -318,8 +321,9 @@ export default function SiteCard({
           {cfInstalled === false ? (
             <div>
               <p className="text-xs text-gray-500 mb-2">
-                Sharing needs Cloudflare&apos;s <span className="font-mono">cloudflared</span>{' '}
-                tool. Install it once to expose sites over a public HTTPS URL.
+                Sharing needs Cloudflare&apos;s{' '}
+                <span className="font-mono">cloudflared</span> tool. Install it once to
+                expose sites over a public HTTPS URL.
               </p>
               <button
                 onClick={onInstallCloudflared}

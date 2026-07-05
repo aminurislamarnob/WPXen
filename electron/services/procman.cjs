@@ -125,7 +125,14 @@ function setState(entry, name, state, error = null) {
 function status(name) {
   const e = registry.get(name);
   if (!e) {
-    return { state: 'stopped', pid: null, meta: null, restarts: 0, lastExitCode: null, error: null };
+    return {
+      state: 'stopped',
+      pid: null,
+      meta: null,
+      restarts: 0,
+      lastExitCode: null,
+      error: null,
+    };
   }
   return {
     state: e.state,
@@ -275,10 +282,7 @@ function spawnChild(name, entry) {
       return;
     }
 
-    const backoff = Math.min(
-      1000 * 2 ** (entry.restartTimes.length - 1),
-      BACKOFF_CAP_MS
-    );
+    const backoff = Math.min(1000 * 2 ** (entry.restartTimes.length - 1), BACKOFF_CAP_MS);
     setState(entry, name, 'starting', null);
     entry.respawnTimer = setTimeout(async () => {
       entry.respawnTimer = null;

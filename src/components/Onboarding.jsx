@@ -203,7 +203,12 @@ export default function Onboarding({ deps, onComplete, onCreateFirstSite }) {
 
         {current === 'welcome' && (
           <div className="text-center">
-            <img src={logo} alt="WPHerd" className="h-9 w-auto mx-auto mb-5" draggable={false} />
+            <img
+              src={logo}
+              alt="WPHerd"
+              className="h-9 w-auto mx-auto mb-5"
+              draggable={false}
+            />
             <StepHeading title="Welcome to WPHerd">
               Let&apos;s get your Mac set up for local WordPress development — WPHerd
               installs and configures everything it needs via Homebrew.
@@ -228,8 +233,8 @@ export default function Onboarding({ deps, onComplete, onCreateFirstSite }) {
         {current === 'homebrew' && (
           <div className="text-center">
             <StepHero icon={Beaker} color="orange" title="Install Homebrew">
-              Homebrew is the package manager WPHerd uses. It installs in Terminal —
-              you may be asked for your password and to install Xcode tools.
+              Homebrew is the package manager WPHerd uses. It installs in Terminal — you
+              may be asked for your password and to install Xcode tools.
             </StepHero>
 
             {!brewLaunched ? (
@@ -277,8 +282,8 @@ export default function Onboarding({ deps, onComplete, onCreateFirstSite }) {
         {current === 'services' && (
           <div className="text-center">
             <StepHero icon={Download} color="blue" title="Install core services">
-              Installing nginx, PHP, MySQL, dnsmasq and WP-CLI via Homebrew. This can
-              take a few minutes.
+              Installing nginx, PHP, MySQL, dnsmasq and WP-CLI via Homebrew. This can take
+              a few minutes.
             </StepHero>
 
             <div className="bg-black/[0.03] dark:bg-white/[0.05] rounded-xl p-2 mb-4 divide-y divide-black/[0.04] dark:divide-white/[0.06]">
@@ -290,13 +295,18 @@ export default function Onboarding({ deps, onComplete, onCreateFirstSite }) {
                   {depState?.[k] ? (
                     <CheckCircle size={15} className="text-wp-green flex-shrink-0" />
                   ) : busy ? (
-                    <Loader size={14} className="text-gray-400 animate-spin flex-shrink-0" />
+                    <Loader
+                      size={14}
+                      className="text-gray-400 animate-spin flex-shrink-0"
+                    />
                   ) : (
                     <Circle size={14} className="text-gray-300 flex-shrink-0" />
                   )}
                   {CORE_LABELS[k]}
                   {depState?.[k] && (
-                    <span className="ml-auto text-[11px] text-wp-green font-medium">Ready</span>
+                    <span className="ml-auto text-[11px] text-wp-green font-medium">
+                      Ready
+                    </span>
                   )}
                 </div>
               ))}
@@ -385,7 +395,7 @@ export default function Onboarding({ deps, onComplete, onCreateFirstSite }) {
 
         {current === 'done' && (
           <div className="text-center">
-            <StepHero icon={PartyPopper} color="purple" title="You&apos;re all set!">
+            <StepHero icon={PartyPopper} color="purple" title="You're all set!">
               WPHerd is ready. Create your first WordPress site or head to the dashboard.
             </StepHero>
             <div className="space-y-2">

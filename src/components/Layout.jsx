@@ -123,7 +123,12 @@ export default function Layout() {
 
         {/* Footer — app logo */}
         <div className="flex items-center px-4 py-3">
-          <img src={logo} alt="WPHerd" className="h-5 w-auto object-contain" draggable={false} />
+          <img
+            src={logo}
+            alt="WPHerd"
+            className="h-5 w-auto object-contain"
+            draggable={false}
+          />
         </div>
       </aside>
 

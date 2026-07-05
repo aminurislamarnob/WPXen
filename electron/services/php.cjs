@@ -100,11 +100,7 @@ function buildFpmSpec(version) {
     bin,
     // Explicit --fpm-config: the unversioned `php` keg's compiled-in default
     // doesn't always match the etc/php/<version> layout brew services used.
-    args: [
-      '--nodaemonize',
-      '--fpm-config',
-      `${prefix}/etc/php/${version}/php-fpm.conf`,
-    ],
+    args: ['--nodaemonize', '--fpm-config', `${prefix}/etc/php/${version}/php-fpm.conf`],
     cwd: `${prefix}/var`,
     stopSignal: 'SIGQUIT', // graceful: workers finish in-flight requests
     stopTimeoutMs: 10_000,
@@ -379,8 +375,7 @@ const PHP_INI_SETTINGS = [
     key: 'upload_max_filesize',
     label: 'Max File Upload Size',
     unit: 'MB',
-    description:
-      'Maximum file size that PHP will accept as file uploads (in MB).',
+    description: 'Maximum file size that PHP will accept as file uploads (in MB).',
     default: 128,
     toDirectives: (v) => ({
       upload_max_filesize: `${v}M`,
@@ -455,8 +450,7 @@ const SITE_PHP_SETTINGS = [
     label: 'Max Input Time',
     unit: 'Seconds',
     default: 60,
-    description:
-      'Maximum time in seconds that a script is allowed to parse input data.',
+    description: 'Maximum time in seconds that a script is allowed to parse input data.',
     toDirectives: (v) => ({ max_input_time: `${v}` }),
   },
   {

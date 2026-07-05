@@ -1136,7 +1136,11 @@ function registerHandlers(win, storeInstance) {
       await setup.openHomebrewInstaller();
       return { success: true, command: setup.HOMEBREW_INSTALL_CMD };
     } catch (err) {
-      return { success: false, error: humanize(err), command: setup.HOMEBREW_INSTALL_CMD };
+      return {
+        success: false,
+        error: humanize(err),
+        command: setup.HOMEBREW_INSTALL_CMD,
+      };
     }
   });
 
