@@ -1167,7 +1167,7 @@ function registerHandlers(win, storeInstance) {
   // ─── OpCache ─────────────────────────────────────────────────────────
   ipcMain.handle('get-opcache-config', async () => {
     try {
-      return { success: true, ...opcache.getOpcacheConfig() };
+      return { success: true, ...(await opcache.getOpcacheConfig()) };
     } catch (err) {
       return { success: false, error: humanize(err) };
     }

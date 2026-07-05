@@ -1,11 +1,14 @@
 'use strict';
 
-const { execFileSync } = require('child_process');
+const { execFile, execFileSync } = require('child_process');
+const { promisify } = require('util');
 const fs = require('fs');
 const http = require('http');
 const https = require('https');
 const brew = require('./brew.cjs');
 const php = require('./php.cjs');
+
+const execFileAsync = promisify(execFile);
 
 // OpCache management. OpCache ships as a Zend extension bundled with every
 // Homebrew PHP (loaded by brew's own `ext-opcache.ini`) — we never touch that
@@ -240,22 +243,36 @@ function isOpcacheAvailable(version) {
   }
 }
 
+// Non-blocking variant: getOpcacheConfig runs one of these per installed version
+// on every PHP page load, so keep the `php -m` spawns off the main thread.
+async function isOpcacheAvailableAsync(version) {
+  const phpBin = php.getPhpBinPath(version);
+  if (!phpBin) return false;
+  try {
+    const { stdout } = await execFileAsync(phpBin, ['-m'], { timeout: 4000 });
+    return /^Zend OPcache$/im.test(stdout);
+  } catch {
+    return false;
+  }
+}
+
 // Config + availability for one version.
-function getOpcacheState(version) {
+async function getOpcacheState(version) {
   return {
     version,
-    available: isOpcacheAvailable(version),
+    available: await isOpcacheAvailableAsync(version),
     values: readOpcacheValues(version),
   };
 }
 
 // Aggregate config for every installed version, plus schema metadata and the
 // version FPM is currently running (the only one live stats can be read from).
-function getOpcacheConfig() {
+// The per-version availability probes run in parallel, off the main thread.
+async function getOpcacheConfig() {
   return {
     settings: getSettingsMeta(),
     runningVersion: php.getRunningFpmVersion(),
-    versions: brew.getInstalledPhpVersions().map((v) => getOpcacheState(v)),
+    versions: await Promise.all(brew.getInstalledPhpVersions().map((v) => getOpcacheState(v))),
   };
 }
 
@@ -277,7 +294,9 @@ function setOpcache(version, key, value) {
   values[key] = clean;
   writeOpcacheIni(version, values);
   php.reloadPhpFpmIfRunning(version);
-  return getOpcacheState(version);
+  // Return the persisted values synchronously (no re-probe of availability —
+  // the renderer re-fetches the full config after a save anyway).
+  return { version, available: isOpcacheAvailable(version), values };
 }
 
 function setOpcacheAll(key, value) {
@@ -332,9 +351,10 @@ async function getOpcacheLiveStats(version, sites = []) {
   if (php.getRunningFpmVersion() !== version) {
     return { available: false, reason: 'fpm-not-running' };
   }
-  const site = (sites || []).find(
-    (s) => s.phpVersion === version && s.path && fs.existsSync(s.path)
-  );
+  // Any site with a real docroot works: every WPHerd site executes on the
+  // single running FPM pool (all listen on 127.0.0.1:9000), so the probe
+  // reflects `version` regardless of a site's own pinned phpVersion.
+  const site = (sites || []).find((s) => s.path && fs.existsSync(s.path));
   if (!site) return { available: false, reason: 'no-site' };
 
   const probeName = `wpherd-opcache-probe-${Date.now()}.php`;
@@ -365,6 +385,7 @@ module.exports = {
   readOpcacheValues,
   writeOpcacheIni,
   isOpcacheAvailable,
+  isOpcacheAvailableAsync,
   getOpcacheState,
   getOpcacheConfig,
   setOpcache,

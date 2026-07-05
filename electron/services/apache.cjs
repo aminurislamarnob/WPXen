@@ -152,7 +152,6 @@ ${loadModuleLines(modulesDir)}
 
 ServerAdmin wpherd@localhost
 ${hasMime ? `TypesConfig "${mimeTypes}"` : ''}
-DefaultType text/plain
 
 ErrorLog "${logDir}/apache.error.log"
 <IfModule log_config_module>
