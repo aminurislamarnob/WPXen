@@ -355,6 +355,7 @@ module.exports = {
   getBrewPrefix,
   getBrewPath,
   isBrewInstalled,
+  tryWhich,
   execBrew,
   isPackageInstalled,
   isPackageInstalledAsync,

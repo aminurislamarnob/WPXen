@@ -160,7 +160,10 @@ export default function SiteCard({
     {
       icon: Terminal,
       label: 'Terminal',
-      onClick: () => window.electronAPI.openSiteInTerminal(site.path),
+      onClick: () =>
+        window.electronAPI.openSiteInTerminal(site.path, {
+          nodeVersion: site.nodeVersion,
+        }),
     },
     {
       icon: tunnelActive ? Loader : Share2,

@@ -117,6 +117,13 @@ app.whenReady().then(() => {
       },
       () => mysql.start(),
       () => (mailpit.isInstalled() ? mailpit.start() : null),
+      () => {
+        // Bring up Apache only when a site actually runs under it; nginx
+        // reverse-proxies those sites to it. Supervised, so it stops on quit.
+        const apache = require('./services/apache.cjs');
+        const hasApacheSite = store.get('sites', []).some((s) => s.webserver === 'apache');
+        return hasApacheSite && apache.isInstalled() ? apache.start() : null;
+      },
     ];
     for (const startService of starters) {
       try {

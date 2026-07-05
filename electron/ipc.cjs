@@ -24,7 +24,10 @@ function openExternalSafely(url) {
 const fs = require('fs');
 const brew = require('./services/brew.cjs');
 const nginx = require('./services/nginx.cjs');
+const apache = require('./services/apache.cjs');
 const phpService = require('./services/php.cjs');
+const opcache = require('./services/opcache.cjs');
+const devtools = require('./services/devtools.cjs');
 const mysql = require('./services/mysql.cjs');
 const dnsmasq = require('./services/dnsmasq.cjs');
 const wordpress = require('./services/wordpress.cjs');
@@ -291,6 +294,17 @@ function registerHandlers(win, storeInstance) {
       cloudflared.stopTunnel(id);
 
       wordpress.removeWordPressSite(site, opts);
+
+      // Clean up the site's Apache vhost (if any) and stop httpd when it was the
+      // last Apache-flagged site.
+      if (site.webserver === 'apache') {
+        try {
+          apache.removeSiteVhost(site.domain);
+          const otherApache = sites.some((s) => s.id !== id && s.webserver === 'apache');
+          if (otherApache) apache.reload();
+          else if (procman.isSupervised('apache')) await apache.stop();
+        } catch {}
+      }
 
       store.set(
         'sites',
@@ -922,7 +936,7 @@ function registerHandlers(win, storeInstance) {
     return { success: true };
   });
 
-  ipcMain.handle('open-in-terminal', (_, sitePath) => {
+  ipcMain.handle('open-in-terminal', (_, sitePath, opts = {}) => {
     // Build the AppleScript with execFile (no shell) and escape the path for
     // the AppleScript string literal; `quoted form of` then shell-escapes it
     // for `cd`. This keeps a path with spaces/quotes from injecting commands.
@@ -930,12 +944,24 @@ function registerHandlers(win, storeInstance) {
       return { success: false, error: 'Invalid path' };
     }
     const escaped = sitePath.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-    const script = [
-      'tell application "Terminal"',
-      '  activate',
-      `  do script "cd " & quoted form of "${escaped}"`,
-      'end tell',
-    ].join('\n');
+
+    // When the site pins a Node version, prepend its resolved bin dir to PATH so
+    // `node`/`npm` in this terminal are that version (nvm can't be sourced from
+    // here). quoted form of shell-escapes the bin dir; PATH='dir':$PATH appends.
+    let pathPrefix = '';
+    if (opts && opts.nodeVersion) {
+      const binDir = devtools.resolveNodeBinDir(opts.nodeVersion);
+      if (binDir && !/[\n\r\0]/.test(binDir)) {
+        const escBin = binDir.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+        pathPrefix = `export PATH=" & quoted form of "${escBin}" & ":$PATH; `;
+      }
+    }
+    const doScript = pathPrefix
+      ? `  do script "${pathPrefix}cd " & quoted form of "${escaped}"`
+      : `  do script "cd " & quoted form of "${escaped}"`;
+    const script = ['tell application "Terminal"', '  activate', doScript, 'end tell'].join(
+      '\n'
+    );
     execFile('osascript', ['-e', script], (err) => {
       if (err) shell.showItemInFolder(sitePath);
     });
@@ -1133,6 +1159,170 @@ function registerHandlers(win, storeInstance) {
     try {
       phpService.setPhpIniSettingAllVersions(key, value);
       return { success: true };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  // ─── OpCache ─────────────────────────────────────────────────────────
+  ipcMain.handle('get-opcache-config', async () => {
+    try {
+      return { success: true, ...(await opcache.getOpcacheConfig()) };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('set-opcache', async (_, version, key, value) => {
+    try {
+      const state = opcache.setOpcache(version, key, value);
+      return { success: true, state };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('set-opcache-all', async (_, key, value) => {
+    try {
+      opcache.setOpcacheAll(key, value);
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('get-opcache-live-stats', async (_, version) => {
+    try {
+      const stats = await opcache.getOpcacheLiveStats(version, store.get('sites', []));
+      return { success: true, stats };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  // ─── Dev Tools (Composer / Node) ─────────────────────────────────────
+  ipcMain.handle('get-composer-status', async () => {
+    try {
+      return { success: true, ...devtools.getComposerStatus() };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('install-composer', async (event) => {
+    try {
+      await devtools.installComposer((line) => {
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('composer-install-progress', { line });
+        }
+      });
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('run-composer', async (event, id, cmd) => {
+    try {
+      const site = findSite(id);
+      if (!site) return { success: false, error: 'Site not found' };
+      await devtools.runComposer(site, cmd, (line) => {
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('composer-run-progress', { id, line });
+        }
+      });
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('get-node-versions', async () => {
+    try {
+      return { success: true, ...devtools.getNodeVersions() };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('set-site-node-version', async (_, id, version) => {
+    try {
+      const sites = store.get('sites', []);
+      const idx = sites.findIndex((s) => s.id === id);
+      if (idx === -1) return { success: false, error: 'Site not found' };
+      const clean = version && String(version).trim() ? String(version).trim() : null;
+      const updated = { ...sites[idx], nodeVersion: clean };
+      sites[idx] = updated;
+      store.set('sites', sites);
+      return { success: true, site: updated };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  // ─── Webserver (nginx ⇄ Apache) ──────────────────────────────────────
+  ipcMain.handle('get-apache-status', async () => {
+    try {
+      return {
+        success: true,
+        installed: apache.isInstalled(),
+        running: apache.isRunning(),
+      };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('install-apache', async (event) => {
+    try {
+      await apache.installApache((line) => {
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('apache-install-progress', { line });
+        }
+      });
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('set-site-webserver', async (_, id, webserver) => {
+    try {
+      const sites = store.get('sites', []);
+      const idx = sites.findIndex((s) => s.id === id);
+      if (idx === -1) return { success: false, error: 'Site not found' };
+
+      const target = webserver === 'apache' ? 'apache' : 'nginx';
+      const updated = { ...sites[idx], webserver: target };
+
+      if (target === 'apache') {
+        if (!apache.isInstalled()) {
+          return {
+            success: false,
+            error: 'Apache (httpd) is not installed. Install it first.',
+          };
+        }
+        // Write the Apache vhost and bring httpd up (or reload it) before nginx
+        // starts proxying to it, so the first request doesn't 502.
+        apache.createSiteVhost(updated);
+        if (procman.isSupervised('apache')) apache.reload();
+        else await apache.start();
+      }
+
+      // Rewrite this site's nginx vhost for the new mode and reload nginx.
+      nginx.createSiteConfig(updated);
+      nginx.reload();
+
+      if (target === 'nginx') {
+        apache.removeSiteVhost(updated.domain);
+        const otherApache = sites.some((s, i) => i !== idx && s.webserver === 'apache');
+        if (otherApache) apache.reload();
+        else if (procman.isSupervised('apache')) await apache.stop();
+      }
+
+      sites[idx] = updated;
+      store.set('sites', sites);
+      return { success: true, site: updated };
     } catch (err) {
       return { success: false, error: humanize(err) };
     }
