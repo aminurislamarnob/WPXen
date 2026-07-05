@@ -67,10 +67,9 @@ async function isPackageInstalledAsync(name) {
 // symlink can be stale (e.g. php@8.4 -> Cellar/php/8.5.7 after an upgrade).
 function phpBinaryVersion(phpBin) {
   try {
-    const out = execSync(
-      `${phpBin} -r "echo PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;"`,
-      { stdio: ['ignore', 'pipe', 'pipe'] }
-    )
+    const out = execSync(`${phpBin} -r "echo PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;"`, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
       .toString()
       .trim();
     return /^\d+\.\d+$/.test(out) ? out : null;
@@ -108,9 +107,7 @@ function getInstalledPhpVersions() {
     }
   }
 
-  return [...versions].sort((a, b) =>
-    b.localeCompare(a, undefined, { numeric: true })
-  );
+  return [...versions].sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
 }
 
 // Resolves the Homebrew formula that actually provides `version`, or null if it

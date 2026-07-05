@@ -90,7 +90,7 @@ Settings). How it works, and what to do when adding UI:
   utilities need no `dark:` variants.
 - `dark:` variants ARE needed for literal colors: colored tint boxes and
   badges (use translucent tints, e.g. `bg-red-50 text-red-700
-  dark:bg-red-500/10 dark:text-red-400`), `hover:bg-black/5` →
+dark:bg-red-500/10 dark:text-red-400`), `hover:bg-black/5` →
   `dark:hover:bg-white/10`, and destructive hover states.
 - Modals and context menus use the `.panel` class (white in light,
   `#2c2c2e` in dark), never raw `bg-white`.

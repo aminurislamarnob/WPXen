@@ -69,7 +69,9 @@ function ServiceRow({ config, status, onAction, loadingAction }) {
         <span className="font-medium flex items-center gap-2">
           {config.name}
           <StatusBadge running={running} size="xs" />
-          <span className={`text-xs font-normal ${running ? 'text-wp-green' : 'text-gray-400'}`}>
+          <span
+            className={`text-xs font-normal ${running ? 'text-wp-green' : 'text-gray-400'}`}
+          >
             {running ? 'Running' : 'Stopped'}
           </span>
         </span>
@@ -98,7 +100,11 @@ function ServiceRow({ config, status, onAction, loadingAction }) {
         title="Restart"
         className="p-1.5 rounded-md hover:bg-black/5 dark:hover:bg-white/10 text-gray-400 disabled:opacity-30 transition-colors"
       >
-        {isLoading ? <Loader size={13} className="animate-spin" /> : <RotateCw size={13} />}
+        {isLoading ? (
+          <Loader size={13} className="animate-spin" />
+        ) : (
+          <RotateCw size={13} />
+        )}
       </button>
       {running ? (
         <button
@@ -265,10 +271,10 @@ export default function Services({ serviceStatus, refreshStatus }) {
         <div className="flex items-start gap-3 px-4 py-3 text-[13px] text-blue-700 dark:text-blue-300">
           <Info size={14} className="flex-shrink-0 mt-0.5" />
           <p className="text-xs">
-            nginx, PHP-FPM, MySQL, and Mailpit run as part of WPHerd — they stop when
-            the app quits and don&apos;t appear as background items in macOS. dnsmasq
-            runs as a system service so <span className="font-mono">*.test</span> DNS
-            keeps working when the app is closed. Install missing services with{' '}
+            nginx, PHP-FPM, MySQL, and Mailpit run as part of WPHerd — they stop when the
+            app quits and don&apos;t appear as background items in macOS. dnsmasq runs as
+            a system service so <span className="font-mono">*.test</span> DNS keeps
+            working when the app is closed. Install missing services with{' '}
             <span className="font-mono bg-blue-100 dark:bg-blue-500/20 px-1 rounded">
               brew install nginx php mysql dnsmasq
             </span>

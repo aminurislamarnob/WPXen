@@ -316,8 +316,9 @@ export default function SiteCard({
           {cfInstalled === false ? (
             <div>
               <p className="text-xs text-gray-500 mb-2">
-                Sharing needs Cloudflare&apos;s <span className="font-mono">cloudflared</span>{' '}
-                tool. Install it once to expose sites over a public HTTPS URL.
+                Sharing needs Cloudflare&apos;s{' '}
+                <span className="font-mono">cloudflared</span> tool. Install it once to
+                expose sites over a public HTTPS URL.
               </p>
               <button
                 onClick={onInstallCloudflared}

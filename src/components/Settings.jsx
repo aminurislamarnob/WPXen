@@ -16,9 +16,7 @@ import { Card, Row, SectionLabel, Toggle } from './ui';
 // mode: 'light' | 'dark' — 'system' overlays both diagonally.
 function ThemeThumb({ variant }) {
   const window = (dark) => (
-    <div
-      className={`absolute inset-0 flex ${dark ? 'bg-[#1e1e1e]' : 'bg-[#e8e7ea]'}`}
-    >
+    <div className={`absolute inset-0 flex ${dark ? 'bg-[#1e1e1e]' : 'bg-[#e8e7ea]'}`}>
       <div
         className={`w-[34%] p-1.5 space-y-1 ${dark ? 'bg-[#2c2c2e]' : 'bg-[#f6f5f7]'}`}
       >
@@ -199,10 +197,7 @@ export default function Settings() {
       <div>
         <SectionLabel>Appearance</SectionLabel>
         <Card>
-          <Row
-            title="Appearance"
-            subtitle="Auto matches your macOS appearance setting"
-          >
+          <Row title="Appearance" subtitle="Auto matches your macOS appearance setting">
             <AppearancePicker
               value={settings.appearance || 'system'}
               onChange={handleAppearanceChange}
@@ -226,7 +221,10 @@ export default function Settings() {
               onChange={(e) => setSettings((s) => ({ ...s, sitesDir: e.target.value }))}
               placeholder="~/Sites"
             />
-            <button onClick={handleSelectSitesDir} className="btn-secondary !px-2.5 !py-1.5">
+            <button
+              onClick={handleSelectSitesDir}
+              className="btn-secondary !px-2.5 !py-1.5"
+            >
               <FolderOpen size={13} />
             </button>
           </Row>
@@ -380,7 +378,11 @@ export default function Settings() {
                     className={`w-2 h-2 rounded-full flex-shrink-0 ${installed ? 'bg-wp-green' : 'bg-gray-300'}`}
                   />
                 }
-                title={<span className="font-mono text-xs">{name === 'wpCli' ? 'wp-cli' : name}</span>}
+                title={
+                  <span className="font-mono text-xs">
+                    {name === 'wpCli' ? 'wp-cli' : name}
+                  </span>
+                }
               >
                 <span
                   className={`text-xs font-medium ${

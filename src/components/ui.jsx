@@ -20,7 +20,15 @@ export function SectionLabel({ children, right }) {
 
 // One row: [icon tile] label/sublabel ......... controls [chevron]
 // Rows after the first draw a hairline divider (via CSS sibling rule).
-export function Row({ icon, title, subtitle, children, onClick, chevron, className = '' }) {
+export function Row({
+  icon,
+  title,
+  subtitle,
+  children,
+  onClick,
+  chevron,
+  className = '',
+}) {
   const content = (
     <>
       {icon}
@@ -58,7 +66,10 @@ const TILE_COLORS = {
 
 export function IconTile({ icon: Icon, color = 'blue', size = 26 }) {
   return (
-    <span className={`icon-tile ${TILE_COLORS[color] || TILE_COLORS.blue}`} style={{ width: size, height: size }}>
+    <span
+      className={`icon-tile ${TILE_COLORS[color] || TILE_COLORS.blue}`}
+      style={{ width: size, height: size }}
+    >
       <Icon size={Math.round(size * 0.58)} strokeWidth={2.2} />
     </span>
   );

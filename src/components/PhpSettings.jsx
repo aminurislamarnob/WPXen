@@ -61,9 +61,7 @@ function SettingGroup({ setting, versions, onSaveOne, onSaveAll }) {
           className="flex items-center gap-2 text-left"
         >
           {open ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
-          <span className="text-sm font-semibold text-gray-900">
-            {setting.label}
-          </span>
+          <span className="text-sm font-semibold text-gray-900">{setting.label}</span>
         </button>
         <SettingInput
           value={masterValue}

@@ -550,7 +550,9 @@ async function getWpOverview(sitePath) {
   });
 
   const updates = [
-    ...plugins.filter((p) => p.update === 'available').map((p) => toUpdateRow(p, 'plugin')),
+    ...plugins
+      .filter((p) => p.update === 'available')
+      .map((p) => toUpdateRow(p, 'plugin')),
     ...themes.filter((t) => t.update === 'available').map((t) => toUpdateRow(t, 'theme')),
   ];
 
@@ -730,9 +732,7 @@ async function setThemeAutoUpdate(sitePath, name, enabled) {
 // Installs a theme from the wordpress.org directory by slug.
 async function installTheme(sitePath, slug, activate = false) {
   if (typeof slug !== 'string' || !/^[a-z0-9-]+$/.test(slug)) {
-    throw new Error(
-      'Invalid theme slug. Use the wordpress.org slug, e.g. "astra".'
-    );
+    throw new Error('Invalid theme slug. Use the wordpress.org slug, e.g. "astra".');
   }
   const args = ['theme', 'install', slug];
   if (activate) args.push('--activate');
