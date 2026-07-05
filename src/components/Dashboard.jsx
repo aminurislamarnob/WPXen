@@ -7,6 +7,7 @@ import {
   Server,
   Database,
   Wifi,
+  Code2,
   Plus,
   ExternalLink,
   ArrowRight,
@@ -127,11 +128,11 @@ export default function Dashboard({ serviceStatus, sites, refreshStatus }) {
           <ShieldAlert size={16} className="text-amber-600 flex-shrink-0 mt-0.5" />
           <div className="flex-1 min-w-0">
             <p className="text-sm font-semibold text-amber-800">
-              Password required for services
+              Password required for DNS
             </p>
             <p className="text-xs text-amber-700 mt-0.5">
-              macOS will ask for your password every time a service starts or stops. Set
-              up passwordless permissions once to fix this.
+              macOS will ask for your password when the dnsmasq DNS resolver starts or
+              stops. Set up passwordless permissions once to fix this.
             </p>
           </div>
           <button
@@ -183,17 +184,7 @@ export default function Dashboard({ serviceStatus, sites, refreshStatus }) {
         />
         <ServiceCard
           name="PHP-FPM"
-          icon={({ size, className }) => (
-            <svg
-              viewBox="0 0 24 24"
-              width={size}
-              height={size}
-              className={className}
-              fill="currentColor"
-            >
-              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z" />
-            </svg>
-          )}
+          icon={Code2}
           running={php?.running}
           onStart={() => handleService('start', 'php')}
           onStop={() => handleService('stop', 'php')}

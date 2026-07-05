@@ -64,7 +64,11 @@ function writeConfig() {
     `$cfg['TempDir'] = ${phpStr(tmpDir)};`,
     '',
   ];
-  fs.writeFileSync(`${dir}/config.inc.php`, lines.filter((l) => l !== '').join('\n'), 'utf8');
+  fs.writeFileSync(
+    `${dir}/config.inc.php`,
+    lines.filter((l) => l !== '').join('\n'),
+    'utf8'
+  );
 }
 
 // Writes/refreshes the nginx vhost for phpmyadmin.test and reloads nginx.
@@ -84,25 +88,25 @@ function ensureVhost() {
 }
 
 // Makes sure the services phpMyAdmin depends on are up.
-function ensureServices() {
+async function ensureServices() {
   const active = brew.getActivePhpVersion();
   if (active && !php.isPhpFpmRunning(active)) {
     try {
-      php.startPhpFpm(active);
+      await php.startPhpFpm(active);
     } catch {}
   }
   if (!nginx.isRunning()) {
     try {
-      nginx.start();
+      await nginx.start();
     } catch {}
   }
 }
 
-function ensureReady() {
+async function ensureReady() {
   ensureInstalled();
   writeConfig();
   ensureVhost();
-  ensureServices();
+  await ensureServices();
 }
 
 function getUrl(dbName) {

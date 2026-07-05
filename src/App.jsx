@@ -6,6 +6,7 @@ import Sites from './components/Sites';
 import SiteDetail from './components/SiteDetail';
 import Services from './components/Services';
 import PHPVersions from './components/PHPVersions';
+import Mail from './components/Mail';
 import Settings from './components/Settings';
 import logo from './assets/logo.png';
 
@@ -15,6 +16,7 @@ export default function App() {
     php: { running: false, name: 'PHP-FPM', version: null },
     mysql: { running: false, name: 'MySQL' },
     dnsmasq: { running: false, name: 'dnsmasq' },
+    mailpit: { running: false, name: 'Mailpit', installed: false },
   });
   const [sites, setSites] = useState([]);
   const [deps, setDeps] = useState(null);
@@ -89,6 +91,7 @@ export default function App() {
           <Route path="sites/:id" element={<SiteDetail {...sharedProps} />} />
           <Route path="services" element={<Services {...sharedProps} />} />
           <Route path="php" element={<PHPVersions {...sharedProps} />} />
+          <Route path="mail" element={<Mail {...sharedProps} />} />
           <Route path="settings" element={<Settings {...sharedProps} />} />
         </Route>
       </Routes>

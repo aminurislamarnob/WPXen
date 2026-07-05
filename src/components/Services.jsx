@@ -3,6 +3,8 @@ import {
   Server,
   Database,
   Wifi,
+  Mail,
+  Code2,
   Play,
   Square,
   RotateCw,
@@ -26,14 +28,7 @@ const SERVICE_CONFIG = [
     id: 'php',
     name: 'PHP-FPM',
     description: 'PHP FastCGI Process Manager — processes PHP scripts',
-    icon: ({ size, className }) => (
-      <span
-        className={`text-base font-bold font-mono ${className}`}
-        style={{ fontSize: size }}
-      >
-        P
-      </span>
-    ),
+    icon: Code2,
     color: 'purple',
     brew: 'php',
   },
@@ -53,6 +48,16 @@ const SERVICE_CONFIG = [
     color: 'blue',
     brew: 'dnsmasq',
   },
+  {
+    id: 'mailpit',
+    name: 'Mailpit',
+    description: 'Email catcher — captures outgoing mail from your sites',
+    icon: Mail,
+    color: 'rose',
+    brew: 'mailpit',
+    // Optional add-on — only listed once installed (see the Mail page).
+    optional: true,
+  },
 ];
 
 const COLOR_MAP = {
@@ -60,12 +65,15 @@ const COLOR_MAP = {
   purple: { bg: 'bg-purple-50', icon: 'text-purple-600', ring: 'ring-purple-200' },
   orange: { bg: 'bg-orange-50', icon: 'text-orange-600', ring: 'ring-orange-200' },
   blue: { bg: 'bg-blue-50', icon: 'text-blue-600', ring: 'ring-blue-200' },
+  rose: { bg: 'bg-rose-50', icon: 'text-rose-500', ring: 'ring-rose-200' },
 };
 
-function ServiceRow({ config, running, onAction, loadingAction }) {
+function ServiceRow({ config, status, onAction, loadingAction }) {
   const colors = COLOR_MAP[config.color];
   const Icon = config.icon;
   const isLoading = loadingAction === config.id;
+  const running = status?.running ?? false;
+  const failed = status?.state === 'failed';
 
   return (
     <div className="bg-white rounded-xl border border-surface-border shadow-card p-5">
@@ -91,9 +99,26 @@ function ServiceRow({ config, running, onAction, loadingAction }) {
             </span>
           </div>
           <p className="text-xs text-gray-400">{config.description}</p>
-          <p className="text-xs text-gray-300 font-mono mt-1">
-            brew services {running ? 'stop' : 'start'} {config.brew}
-          </p>
+          {config.id === 'dnsmasq' ? (
+            <p className="text-xs text-gray-300 font-mono mt-1">
+              brew services {running ? 'stop' : 'start'} {config.brew}
+            </p>
+          ) : (
+            <p className="text-xs text-gray-300 mt-1">
+              Runs as part of WPHerd — stops when the app quits
+            </p>
+          )}
+          {failed && status?.error && (
+            <div className="flex items-center gap-2 mt-1.5">
+              <p className="text-xs text-red-600 truncate">{status.error}</p>
+              <button
+                onClick={() => window.electronAPI.openServiceLog(config.id)}
+                className="text-xs text-red-600 underline flex-shrink-0 hover:text-red-700"
+              >
+                View log
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Actions */}
@@ -177,7 +202,12 @@ export default function Services({ serviceStatus, refreshStatus }) {
     setMessage({ type: 'success', text: 'All services stopped' });
   }
 
-  const runningCount = SERVICE_CONFIG.filter(
+  // Optional services (Mailpit) appear only once installed.
+  const visibleServices = SERVICE_CONFIG.filter(
+    (s) => !s.optional || serviceStatus?.[s.id]?.installed
+  );
+
+  const runningCount = visibleServices.filter(
     (s) => serviceStatus?.[s.id]?.running
   ).length;
 
@@ -188,7 +218,7 @@ export default function Services({ serviceStatus, refreshStatus }) {
         <div>
           <h1 className="text-xl font-bold text-gray-900">Services</h1>
           <p className="text-sm text-gray-500 mt-0.5">
-            {runningCount} of {SERVICE_CONFIG.length} services running
+            {runningCount} of {visibleServices.length} services running
           </p>
         </div>
         <div className="flex gap-2">
@@ -206,7 +236,7 @@ export default function Services({ serviceStatus, refreshStatus }) {
           </button>
           <button
             onClick={handleStartAll}
-            disabled={globalLoading || runningCount === SERVICE_CONFIG.length}
+            disabled={globalLoading || runningCount === visibleServices.length}
             className="btn-primary text-sm"
           >
             {globalLoading ? (
@@ -235,11 +265,11 @@ export default function Services({ serviceStatus, refreshStatus }) {
 
       {/* Service rows */}
       <div className="space-y-3">
-        {SERVICE_CONFIG.map((config) => (
+        {visibleServices.map((config) => (
           <ServiceRow
             key={config.id}
             config={config}
-            running={serviceStatus?.[config.id]?.running ?? false}
+            status={serviceStatus?.[config.id]}
             onAction={handleAction}
             loadingAction={loadingAction}
           />
@@ -250,9 +280,12 @@ export default function Services({ serviceStatus, refreshStatus }) {
       <div className="mt-5 flex items-start gap-3 bg-blue-50 rounded-xl px-4 py-3 text-sm text-blue-700">
         <Info size={15} className="flex-shrink-0 mt-0.5" />
         <div>
-          <p className="font-medium">Homebrew services</p>
+          <p className="font-medium">App-managed services</p>
           <p className="text-xs text-blue-600 mt-0.5">
-            WPHerd manages services installed via Homebrew. Install missing services with{' '}
+            WPHerd runs nginx, PHP-FPM, MySQL, and Mailpit as part of the app — they stop
+            when it quits and don&apos;t appear as background items in macOS. Only dnsmasq
+            runs as a system service (DNS keeps working when the app is closed). Install
+            missing services with{' '}
             <span className="font-mono bg-blue-100 px-1 rounded">
               brew install nginx php mysql dnsmasq
             </span>

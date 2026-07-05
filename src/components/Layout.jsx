@@ -1,5 +1,13 @@
 import { NavLink, Outlet } from 'react-router-dom';
-import { LayoutDashboard, Globe, Server, Code2, Settings, Circle } from 'lucide-react';
+import {
+  LayoutDashboard,
+  Globe,
+  Server,
+  Code2,
+  Mail,
+  Settings,
+  Circle,
+} from 'lucide-react';
 import logo from '../assets/logo.png';
 
 const navItems = [
@@ -7,6 +15,7 @@ const navItems = [
   { to: '/sites', icon: Globe, label: 'Sites' },
   { to: '/services', icon: Server, label: 'Services' },
   { to: '/php', icon: Code2, label: 'PHP' },
+  { to: '/mail', icon: Mail, label: 'Mail' },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ];
 
@@ -72,12 +81,7 @@ export default function Layout({ serviceStatus }) {
             </span>
           </div>
           <div className="flex items-center gap-1.5 mt-2">
-            <img
-              src={logo}
-              alt="WPHerd"
-              className="h-4 w-auto"
-              draggable={false}
-            />
+            <img src={logo} alt="WPHerd" className="h-4 w-auto" draggable={false} />
             <span className="text-xs text-sidebar-text/50">v1.0</span>
           </div>
         </div>

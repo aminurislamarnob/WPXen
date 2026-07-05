@@ -1,14 +1,13 @@
-export function StatusBadge({ running, size = 'sm' }) {
-  const sizeClasses = {
-    xs: 'w-1.5 h-1.5',
-    sm: 'w-2 h-2',
-    md: 'w-2.5 h-2.5',
-  };
+import { Circle } from 'lucide-react';
 
+const SIZE_MAP = { xs: 6, sm: 8, md: 10 };
+
+export function StatusBadge({ running, size = 'sm' }) {
   return (
-    <span
-      className={`inline-block rounded-full flex-shrink-0 ${sizeClasses[size]} ${
-        running ? 'bg-wp-green status-dot-running' : 'bg-gray-300'
+    <Circle
+      size={SIZE_MAP[size]}
+      className={`fill-current flex-shrink-0 ${
+        running ? 'text-wp-green status-dot-running' : 'text-gray-300'
       }`}
     />
   );

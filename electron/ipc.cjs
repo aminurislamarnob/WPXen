@@ -29,6 +29,8 @@ const dnsmasq = require('./services/dnsmasq.cjs');
 const wordpress = require('./services/wordpress.cjs');
 const mkcert = require('./services/mkcert.cjs');
 const phpmyadmin = require('./services/phpmyadmin.cjs');
+const mailpit = require('./services/mailpit.cjs');
+const procman = require('./services/procman.cjs');
 const cloudflared = require('./services/cloudflared.cjs');
 const sudoers = require('./services/sudoers.cjs');
 const logs = require('./services/logs.cjs');
@@ -42,6 +44,7 @@ let serviceStatusCache = {
   php: { running: false, name: 'PHP-FPM', version: null },
   mysql: { running: false, name: 'MySQL' },
   dnsmasq: { running: false, name: 'dnsmasq' },
+  mailpit: { running: false, name: 'Mailpit', installed: false },
 };
 
 // Synchronous, instant — returns the last computed snapshot. Used by the tray
@@ -53,20 +56,48 @@ function getServiceStatus() {
 // Recomputes the snapshot using non-blocking async probes run in parallel, so
 // the main-thread event loop stays free (no macOS spinning-wait cursor).
 async function computeServiceStatus() {
-  const [nginxRunning, mysqlRunning, dnsmasqRunning, activePhp, phpRunning] =
-    await Promise.all([
-      nginx.isRunningAsync(),
-      mysql.isRunningAsync(),
-      dnsmasq.isRunningAsync(),
-      brew.getActivePhpVersionAsync(),
-      phpService.isPhpFpmRunningAsync(),
-    ]);
+  const [
+    nginxRunning,
+    mysqlRunning,
+    dnsmasqRunning,
+    activePhp,
+    phpRunning,
+    mailpitRunning,
+  ] = await Promise.all([
+    nginx.isRunningAsync(),
+    mysql.isRunningAsync(),
+    dnsmasq.isRunningAsync(),
+    brew.getActivePhpVersionAsync(),
+    phpService.isPhpFpmRunningAsync(),
+    mailpit.isRunningAsync(),
+  ]);
+
+  // Supervisor view of each converted service: whether WPHerd owns the
+  // process, its lifecycle state, and any crash-loop error for the UI. The
+  // probe-based `running` booleans above stay the source of truth (they also
+  // see instances we didn't spawn).
+  const procInfo = (name) => {
+    const s = procman.status(name);
+    return { managed: procman.isSupervised(name), state: s.state, error: s.error };
+  };
 
   serviceStatusCache = {
-    nginx: { running: nginxRunning, name: 'nginx' },
-    php: { running: phpRunning, name: 'PHP-FPM', version: activePhp },
-    mysql: { running: mysqlRunning, name: 'MySQL' },
+    nginx: { running: nginxRunning, name: 'nginx', ...procInfo('nginx') },
+    php: {
+      running: phpRunning,
+      name: 'PHP-FPM',
+      version: activePhp,
+      fpmVersion: phpService.getRunningFpmVersion(),
+      ...procInfo('php'),
+    },
+    mysql: { running: mysqlRunning, name: 'MySQL', ...procInfo('mysql') },
     dnsmasq: { running: dnsmasqRunning, name: 'dnsmasq' },
+    mailpit: {
+      running: mailpitRunning,
+      name: 'Mailpit',
+      installed: mailpit.isInstalled(),
+      ...procInfo('mailpit'),
+    },
   };
   return serviceStatusCache;
 }
@@ -112,6 +143,16 @@ function registerHandlers(win, storeInstance) {
   // Populate the status cache once at startup (non-blocking).
   refreshServiceStatus();
 
+  // Crashes/restarts of supervised children surface in the UI immediately
+  // instead of waiting for the next 5s poll tick.
+  procman.onStateChange(() => {
+    refreshServiceStatus().then(() => {
+      if (win && !win.isDestroyed() && win.webContents) {
+        win.webContents.send('service-status-update', getServiceStatus());
+      }
+    });
+  });
+
   // Heal per-site vhosts shortly after startup: regenerate each from the
   // current template and rewrite only the ones that differ (e.g. sites created
   // before client_max_body_size / PHP_VALUE support), then reload nginx once.
@@ -141,6 +182,17 @@ function registerHandlers(win, storeInstance) {
       }
     } catch {}
   }, 3000);
+
+  // Re-apply the Mailpit sendmail override shortly after startup so PHP
+  // versions installed since the toggle was enabled also route mail() into
+  // Mailpit. Idempotent — only rewrites/reloads when something differs.
+  setTimeout(() => {
+    try {
+      if (store.get('settings.mailCatch', false) && mailpit.isInstalled()) {
+        mailpit.setCatchEnabled(true);
+      }
+    } catch {}
+  }, 4000);
 
   // When the user returns to the app (e.g. after `brew install`-ing something
   // in a terminal), re-check dependencies and service status automatically —
@@ -638,10 +690,98 @@ function registerHandlers(win, storeInstance) {
       if (dbName != null && !/^[a-zA-Z0-9_]{1,64}$/.test(dbName)) {
         return { success: false, error: 'Invalid database name.' };
       }
-      phpmyadmin.ensureReady();
+      await phpmyadmin.ensureReady();
       const url = phpmyadmin.getUrl(dbName);
       openExternalSafely(url);
       return { success: true, url };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  // ─── Mailpit (email catching) ──────────────────────────────────────────
+
+  ipcMain.handle('get-mailpit-status', async () => {
+    const installed = mailpit.isInstalled();
+    return {
+      installed,
+      running: installed ? await mailpit.isRunningAsync() : false,
+      catching: !!store.get('settings.mailCatch', false),
+      url: mailpit.getUrl(),
+    };
+  });
+
+  ipcMain.handle('install-mailpit', async (event) => {
+    try {
+      await mailpit.install((line) => {
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('mailpit-install-progress', { line });
+        }
+      });
+      brew.invalidateDependencyCache();
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('set-mail-catching', async (_, enabled) => {
+    try {
+      mailpit.setCatchEnabled(!!enabled);
+      store.set('settings.mailCatch', !!enabled);
+      // Catching without the sink running would black-hole mail — bring it up.
+      if (enabled && !(await mailpit.isRunningAsync())) {
+        try {
+          await mailpit.start();
+        } catch {}
+      }
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('open-mailpit', async (_, messageId) => {
+    try {
+      const url = mailpit.getUrl(messageId);
+      openExternalSafely(url);
+      return { success: true, url };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('get-mail-messages', async (_, opts = {}) => {
+    try {
+      const data = await mailpit.listMessages(opts);
+      return { success: true, data };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('get-mail-message', async (_, id) => {
+    try {
+      const message = await mailpit.getMessage(id);
+      return { success: true, message };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('delete-mail-messages', async (_, ids) => {
+    try {
+      await mailpit.deleteMessages(ids);
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('mark-mail-read', async () => {
+    try {
+      await mailpit.markAllRead();
+      return { success: true };
     } catch (err) {
       return { success: false, error: humanize(err) };
     }
@@ -742,10 +882,17 @@ function registerHandlers(win, storeInstance) {
   ipcMain.handle('start-services', async () => {
     try {
       const activePhp = brew.getActivePhpVersion();
-      nginx.start();
-      if (activePhp) phpService.startPhpFpm(activePhp);
-      mysql.start();
+      await nginx.start();
+      if (activePhp) await phpService.startPhpFpm(activePhp);
+      await mysql.start();
       dnsmasq.start();
+      // Optional service — start it only when installed, and never let a
+      // Mailpit hiccup fail the whole "Start All".
+      if (mailpit.isInstalled()) {
+        try {
+          await mailpit.start();
+        } catch {}
+      }
       return { success: true };
     } catch (err) {
       return { success: false, error: humanize(err) };
@@ -754,10 +901,15 @@ function registerHandlers(win, storeInstance) {
 
   ipcMain.handle('stop-services', async () => {
     try {
-      nginx.stop();
-      phpService.stopAllPhpFpm();
-      mysql.stop();
+      await nginx.stop();
+      await phpService.stopAllPhpFpm();
+      await mysql.stop();
       dnsmasq.stop();
+      if (mailpit.isInstalled()) {
+        try {
+          await mailpit.stop();
+        } catch {}
+      }
       return { success: true };
     } catch (err) {
       return { success: false, error: humanize(err) };
@@ -768,18 +920,21 @@ function registerHandlers(win, storeInstance) {
     try {
       switch (name) {
         case 'nginx':
-          nginx.start();
+          await nginx.start();
           break;
         case 'php': {
           const activePhp = brew.getActivePhpVersion();
-          if (activePhp) phpService.startPhpFpm(activePhp);
+          if (activePhp) await phpService.startPhpFpm(activePhp);
           break;
         }
         case 'mysql':
-          mysql.start();
+          await mysql.start();
           break;
         case 'dnsmasq':
           dnsmasq.start();
+          break;
+        case 'mailpit':
+          await mailpit.start();
           break;
         default:
           return { success: false, error: `Unknown service: ${name}` };
@@ -794,16 +949,19 @@ function registerHandlers(win, storeInstance) {
     try {
       switch (name) {
         case 'nginx':
-          nginx.stop();
+          await nginx.stop();
           break;
         case 'php':
-          phpService.stopAllPhpFpm();
+          await phpService.stopAllPhpFpm();
           break;
         case 'mysql':
-          mysql.stop();
+          await mysql.stop();
           break;
         case 'dnsmasq':
           dnsmasq.stop();
+          break;
+        case 'mailpit':
+          await mailpit.stop();
           break;
         default:
           return { success: false, error: `Unknown service: ${name}` };
@@ -814,25 +972,46 @@ function registerHandlers(win, storeInstance) {
     }
   });
 
+  // Opens a supervised service's log file (written by procman) in the default
+  // viewer — surfaced in the UI when a service enters the 'failed' state.
+  ipcMain.handle('open-service-log', async (_, name) => {
+    try {
+      if (!['nginx', 'php', 'mysql', 'mailpit'].includes(name)) {
+        return { success: false, error: `Unknown service: ${name}` };
+      }
+      const logPath = procman.getLogPath(name);
+      if (!fs.existsSync(logPath)) {
+        return { success: false, error: 'No log has been written yet.' };
+      }
+      shell.openPath(logPath);
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
   ipcMain.handle('restart-service', async (_, name) => {
     try {
       switch (name) {
         case 'nginx':
-          nginx.restart();
+          await nginx.restart();
           break;
         case 'php': {
           const activePhp = brew.getActivePhpVersion();
           if (activePhp) {
-            phpService.stopPhpFpm(activePhp);
-            phpService.startPhpFpm(activePhp);
+            await phpService.stopPhpFpm(activePhp);
+            await phpService.startPhpFpm(activePhp);
           }
           break;
         }
         case 'mysql':
-          mysql.restart();
+          await mysql.restart();
           break;
         case 'dnsmasq':
           dnsmasq.restart();
+          break;
+        case 'mailpit':
+          await mailpit.restart();
           break;
         default:
           return { success: false, error: `Unknown service: ${name}` };
@@ -852,6 +1031,13 @@ function registerHandlers(win, storeInstance) {
   ipcMain.handle('switch-php-version', async (_, version) => {
     try {
       phpService.switchActivePhpVersion(version);
+      // If FPM is running another version, swap it to the new one — sites
+      // would otherwise silently keep executing on the old version (brew's
+      // KeepAlive used to mask that nothing restarted FPM here).
+      const running = phpService.getRunningFpmVersion();
+      if (running && running !== version) {
+        await phpService.startPhpFpm(version);
+      }
       return { success: true };
     } catch (err) {
       return { success: false, error: humanize(err) };
@@ -892,6 +1078,13 @@ function registerHandlers(win, storeInstance) {
         }
       };
       await phpService.installPhpVersion(version, progress);
+      // The new version's conf.d starts empty — re-apply the Mailpit sendmail
+      // override so its mail() is caught like the others.
+      try {
+        if (store.get('settings.mailCatch', false) && mailpit.isInstalled()) {
+          mailpit.setCatchEnabled(true);
+        }
+      } catch {}
       return { success: true };
     } catch (err) {
       return { success: false, error: humanize(err) };

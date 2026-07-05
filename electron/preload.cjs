@@ -7,8 +7,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getSites: () => ipcRenderer.invoke('get-sites'),
   addSite: (data) => ipcRenderer.invoke('add-site', data),
   removeSite: (id, opts) => ipcRenderer.invoke('remove-site', id, opts),
-  setSiteHttps: (id, enabled) =>
-    ipcRenderer.invoke('set-site-https', id, enabled),
+  setSiteHttps: (id, enabled) => ipcRenderer.invoke('set-site-https', id, enabled),
   openSiteInBrowser: (url) => ipcRenderer.invoke('open-in-browser', url),
   openSiteInFinder: (sitePath) => ipcRenderer.invoke('open-in-finder', sitePath),
   openSiteInTerminal: (sitePath) => ipcRenderer.invoke('open-in-terminal', sitePath),
@@ -29,8 +28,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // WordPress overview / updates
   getWpOverview: (id) => ipcRenderer.invoke('get-wp-overview', id),
   updateWpCore: (id) => ipcRenderer.invoke('update-wp-core', id),
-  updateWpItem: (id, type, name) =>
-    ipcRenderer.invoke('update-wp-item', id, type, name),
+  updateWpItem: (id, type, name) => ipcRenderer.invoke('update-wp-item', id, type, name),
   updateWpAll: (id) => ipcRenderer.invoke('update-wp-all', id),
 
   // Plugin management
@@ -56,6 +54,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
   clearSiteLog: (id, kind) => ipcRenderer.invoke('clear-site-log', id, kind),
   saveSiteLog: (id, kind) => ipcRenderer.invoke('save-site-log', id, kind),
 
+  // Mailpit (email catching)
+  getMailpitStatus: () => ipcRenderer.invoke('get-mailpit-status'),
+  installMailpit: () => ipcRenderer.invoke('install-mailpit'),
+  setMailCatching: (enabled) => ipcRenderer.invoke('set-mail-catching', enabled),
+  openMailpit: (messageId) => ipcRenderer.invoke('open-mailpit', messageId),
+  getMailMessages: (opts) => ipcRenderer.invoke('get-mail-messages', opts),
+  getMailMessage: (id) => ipcRenderer.invoke('get-mail-message', id),
+  deleteMailMessages: (ids) => ipcRenderer.invoke('delete-mail-messages', ids),
+  markMailRead: () => ipcRenderer.invoke('mark-mail-read'),
+
   // Share tunnels (Cloudflare)
   checkCloudflared: () => ipcRenderer.invoke('check-cloudflared'),
   installCloudflared: () => ipcRenderer.invoke('install-cloudflared'),
@@ -70,16 +78,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   startService: (name) => ipcRenderer.invoke('start-service', name),
   stopService: (name) => ipcRenderer.invoke('stop-service', name),
   restartService: (name) => ipcRenderer.invoke('restart-service', name),
+  openServiceLog: (name) => ipcRenderer.invoke('open-service-log', name),
 
   // PHP
   getPhpVersions: () => ipcRenderer.invoke('get-php-versions'),
   switchPhpVersion: (version) => ipcRenderer.invoke('switch-php-version', version),
-  getInstallablePhpVersions: () =>
-    ipcRenderer.invoke('get-installable-php-versions'),
-  installPhpVersion: (version) =>
-    ipcRenderer.invoke('install-php-version', version),
-  updatePhpVersion: (version) =>
-    ipcRenderer.invoke('update-php-version', version),
+  getInstallablePhpVersions: () => ipcRenderer.invoke('get-installable-php-versions'),
+  installPhpVersion: (version) => ipcRenderer.invoke('install-php-version', version),
+  updatePhpVersion: (version) => ipcRenderer.invoke('update-php-version', version),
   getPhpIniSettings: () => ipcRenderer.invoke('get-php-ini-settings'),
   setPhpIniSetting: (version, key, value) =>
     ipcRenderer.invoke('set-php-ini-setting', version, key, value),
@@ -115,6 +121,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       'notification',
       'tunnel-update',
       'cloudflared-install-progress',
+      'mailpit-install-progress',
     ];
     if (validChannels.includes(channel)) {
       ipcRenderer.on(channel, (_, data) => callback(data));
@@ -129,6 +136,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       'notification',
       'tunnel-update',
       'cloudflared-install-progress',
+      'mailpit-install-progress',
     ];
     if (validChannels.includes(channel)) {
       ipcRenderer.removeAllListeners(channel);
