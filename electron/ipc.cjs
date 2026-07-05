@@ -26,6 +26,7 @@ const brew = require('./services/brew.cjs');
 const nginx = require('./services/nginx.cjs');
 const phpService = require('./services/php.cjs');
 const opcache = require('./services/opcache.cjs');
+const devtools = require('./services/devtools.cjs');
 const mysql = require('./services/mysql.cjs');
 const dnsmasq = require('./services/dnsmasq.cjs');
 const wordpress = require('./services/wordpress.cjs');
@@ -923,7 +924,7 @@ function registerHandlers(win, storeInstance) {
     return { success: true };
   });
 
-  ipcMain.handle('open-in-terminal', (_, sitePath) => {
+  ipcMain.handle('open-in-terminal', (_, sitePath, opts = {}) => {
     // Build the AppleScript with execFile (no shell) and escape the path for
     // the AppleScript string literal; `quoted form of` then shell-escapes it
     // for `cd`. This keeps a path with spaces/quotes from injecting commands.
@@ -931,12 +932,24 @@ function registerHandlers(win, storeInstance) {
       return { success: false, error: 'Invalid path' };
     }
     const escaped = sitePath.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-    const script = [
-      'tell application "Terminal"',
-      '  activate',
-      `  do script "cd " & quoted form of "${escaped}"`,
-      'end tell',
-    ].join('\n');
+
+    // When the site pins a Node version, prepend its resolved bin dir to PATH so
+    // `node`/`npm` in this terminal are that version (nvm can't be sourced from
+    // here). quoted form of shell-escapes the bin dir; PATH='dir':$PATH appends.
+    let pathPrefix = '';
+    if (opts && opts.nodeVersion) {
+      const binDir = devtools.resolveNodeBinDir(opts.nodeVersion);
+      if (binDir && !/[\n\r\0]/.test(binDir)) {
+        const escBin = binDir.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+        pathPrefix = `export PATH=" & quoted form of "${escBin}" & ":$PATH; `;
+      }
+    }
+    const doScript = pathPrefix
+      ? `  do script "${pathPrefix}cd " & quoted form of "${escaped}"`
+      : `  do script "cd " & quoted form of "${escaped}"`;
+    const script = ['tell application "Terminal"', '  activate', doScript, 'end tell'].join(
+      '\n'
+    );
     execFile('osascript', ['-e', script], (err) => {
       if (err) shell.showItemInFolder(sitePath);
     });
@@ -1170,6 +1183,66 @@ function registerHandlers(win, storeInstance) {
     try {
       const stats = await opcache.getOpcacheLiveStats(version, store.get('sites', []));
       return { success: true, stats };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  // ─── Dev Tools (Composer / Node) ─────────────────────────────────────
+  ipcMain.handle('get-composer-status', async () => {
+    try {
+      return { success: true, ...devtools.getComposerStatus() };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('install-composer', async (event) => {
+    try {
+      await devtools.installComposer((line) => {
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('composer-install-progress', { line });
+        }
+      });
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('run-composer', async (event, id, cmd) => {
+    try {
+      const site = findSite(id);
+      if (!site) return { success: false, error: 'Site not found' };
+      await devtools.runComposer(site, cmd, (line) => {
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('composer-run-progress', { id, line });
+        }
+      });
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('get-node-versions', async () => {
+    try {
+      return { success: true, ...devtools.getNodeVersions() };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('set-site-node-version', async (_, id, version) => {
+    try {
+      const sites = store.get('sites', []);
+      const idx = sites.findIndex((s) => s.id === id);
+      if (idx === -1) return { success: false, error: 'Site not found' };
+      const clean = version && String(version).trim() ? String(version).trim() : null;
+      const updated = { ...sites[idx], nodeVersion: clean };
+      sites[idx] = updated;
+      store.set('sites', sites);
+      return { success: true, site: updated };
     } catch (err) {
       return { success: false, error: humanize(err) };
     }

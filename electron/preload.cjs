@@ -10,7 +10,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setSiteHttps: (id, enabled) => ipcRenderer.invoke('set-site-https', id, enabled),
   openSiteInBrowser: (url) => ipcRenderer.invoke('open-in-browser', url),
   openSiteInFinder: (sitePath) => ipcRenderer.invoke('open-in-finder', sitePath),
-  openSiteInTerminal: (sitePath) => ipcRenderer.invoke('open-in-terminal', sitePath),
+  openSiteInTerminal: (sitePath, opts) =>
+    ipcRenderer.invoke('open-in-terminal', sitePath, opts),
   openWpAdmin: (id) => ipcRenderer.invoke('open-wp-admin', id),
   openPhpMyAdmin: (dbName) => ipcRenderer.invoke('open-phpmyadmin', dbName),
 
@@ -104,6 +105,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getOpcacheLiveStats: (version) =>
     ipcRenderer.invoke('get-opcache-live-stats', version),
 
+  // Dev Tools (Composer / Node)
+  getComposerStatus: () => ipcRenderer.invoke('get-composer-status'),
+  installComposer: () => ipcRenderer.invoke('install-composer'),
+  runComposer: (id, cmd) => ipcRenderer.invoke('run-composer', id, cmd),
+  getNodeVersions: () => ipcRenderer.invoke('get-node-versions'),
+  setSiteNodeVersion: (id, version) =>
+    ipcRenderer.invoke('set-site-node-version', id, version),
+
   // Dependencies & Setup
   checkDependencies: () => ipcRenderer.invoke('check-dependencies'),
   setupDnsmasq: () => ipcRenderer.invoke('setup-dnsmasq'),
@@ -141,6 +150,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       'cloudflared-install-progress',
       'mailpit-install-progress',
       'core-deps-install-progress',
+      'composer-install-progress',
+      'composer-run-progress',
     ];
     if (validChannels.includes(channel)) {
       ipcRenderer.on(channel, (_, data) => callback(data));
@@ -157,6 +168,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       'cloudflared-install-progress',
       'mailpit-install-progress',
       'core-deps-install-progress',
+      'composer-install-progress',
+      'composer-run-progress',
     ];
     if (validChannels.includes(channel)) {
       ipcRenderer.removeAllListeners(channel);

@@ -24,6 +24,7 @@ import {
 import { Toggle } from './ui';
 import WpConfigManager from './WpConfigManager';
 import SitePhpSettings from './SitePhpSettings';
+import DevTools from './DevTools';
 import WpOverview from './WpOverview';
 import WpPlugins from './WpPlugins';
 import WpThemes from './WpThemes';
@@ -39,6 +40,7 @@ const NAV = [
     children: [
       { id: 'wpconfig', label: 'WP Config' },
       { id: 'php', label: 'PHP' },
+      { id: 'devtools', label: 'Dev Tools' },
     ],
   },
   {
@@ -194,7 +196,10 @@ function Overview({ site, onSaved }) {
     {
       icon: Terminal,
       label: 'Terminal',
-      onClick: () => window.electronAPI.openSiteInTerminal(site.path),
+      onClick: () =>
+        window.electronAPI.openSiteInTerminal(site.path, {
+          nodeVersion: site.nodeVersion,
+        }),
     },
     {
       icon: tunnel?.status === 'starting' ? Loader : Share2,
@@ -449,6 +454,7 @@ export default function SiteDetail({ sites, refreshSites }) {
           {active === 'overview' && <Overview site={site} onSaved={refreshSites} />}
           {active === 'wpconfig' && <WpConfigManager site={site} />}
           {active === 'php' && <SitePhpSettings site={site} onSaved={refreshSites} />}
+          {active === 'devtools' && <DevTools site={site} onSaved={refreshSites} />}
           {active === 'wp-overview' && <WpOverview site={site} onSaved={refreshSites} />}
           {active === 'wp-plugins' && <WpPlugins site={site} onSaved={refreshSites} />}
           {active === 'wp-themes' && <WpThemes site={site} onSaved={refreshSites} />}
