@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WPHerd — feature list</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.11.0/dist/tabler-icons.min.css" />
+  <style>
+    :root {
+      --bg: #f5f5f4; --surface: #ffffff; --surface-alt: #f0efec;
+      --text: #1c1c1a; --text-2: #52514e; --text-3: #898781; --border: #e2e1da;
+      --accent-bg: #e6f1fb; --accent-tx: #185fa5; --accent-bd: #85b7eb;
+      --ship-bg: #eaf3de; --ship-tx: #3b6d11; --ship-bd: #97c459;
+      --plan-bg: #faeeda; --plan-tx: #854f0b; --plan-bd: #ef9f27;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #1a1a19; --surface: #242423; --surface-alt: #2c2c2a;
+        --text: #f4f3ee; --text-2: #b4b2a9; --text-3: #888780; --border: #383835;
+        --accent-bg: #0c447c33; --accent-tx: #85b7eb; --accent-bd: #185fa5;
+        --ship-bg: #27500a33; --ship-tx: #97c459; --ship-bd: #3b6d11;
+        --plan-bg: #63380633; --plan-tx: #efab4e; --plan-bd: #854f0b;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--bg); color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.5; -webkit-font-smoothing: antialiased;
+    }
+    .wrap { max-width: 760px; margin: 0 auto; padding: 40px 24px 64px; }
+    .head { display: flex; align-items: center; gap: 14px; margin-bottom: 28px; }
+    .logo { width: 46px; height: 46px; border-radius: 12px; background: var(--accent-bg); color: var(--accent-tx); display: flex; align-items: center; justify-content: center; font-size: 24px; }
+    .head h1 { margin: 0; font-size: 22px; font-weight: 600; }
+    .head p { margin: 2px 0 0; font-size: 14px; color: var(--text-2); }
+    .kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 20px; }
+    .kpi { background: var(--surface-alt); border-radius: 10px; padding: 16px; }
+    .kpi span { display: block; font-size: 13px; color: var(--text-2); margin-bottom: 4px; }
+    .kpi strong { font-size: 26px; font-weight: 600; }
+    .legend { font-size: 12px; color: var(--text-3); margin: 0 0 20px; }
+    .filters { display: flex; gap: 8px; margin-bottom: 24px; }
+    .fbtn { font-size: 13px; padding: 7px 16px; border-radius: 8px; border: 1px solid var(--border); background: transparent; color: var(--text-2); cursor: pointer; font: inherit; }
+    .fbtn[aria-pressed="true"] { background: var(--accent-bg); border-color: var(--accent-bd); color: var(--accent-tx); }
+    .grp { margin-bottom: 28px; }
+    .grp-h { display: flex; align-items: baseline; gap: 8px; margin: 0 0 8px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+    .grp-t { font-size: 14px; font-weight: 600; }
+    .grp-s { font-size: 12px; color: var(--text-3); }
+    .frow { display: flex; align-items: flex-start; gap: 14px; padding: 13px 4px; border-bottom: 1px solid var(--border); }
+    .frow:last-child { border-bottom: none; }
+    .fic { flex-shrink: 0; width: 34px; height: 34px; border-radius: 9px; display: flex; align-items: center; justify-content: center; font-size: 19px; }
+    .fic.plan { background: var(--plan-bg); color: var(--plan-tx); }
+    .fic.ship { background: var(--ship-bg); color: var(--ship-tx); }
+    .fic.ai { background: var(--accent-bg); color: var(--accent-tx); }
+    .fbody { flex: 1; min-width: 0; }
+    .fname { font-size: 15px; font-weight: 600; margin: 0; }
+    .fdesc { font-size: 13px; color: var(--text-2); margin: 3px 0 7px; }
+    .fsrc { display: flex; flex-wrap: wrap; gap: 6px; }
+    .src { font-size: 11px; padding: 2px 9px; border-radius: 20px; border: 1px solid var(--border); color: var(--text-3); white-space: nowrap; }
+    .src.only { border-color: var(--ship-bd); background: var(--ship-bg); color: var(--ship-tx); }
+    .pill { flex-shrink: 0; font-size: 12px; padding: 4px 11px; border-radius: 20px; align-self: center; }
+    .pill.ship { background: var(--ship-bg); color: var(--ship-tx); }
+    .pill.plan { background: var(--plan-bg); color: var(--plan-tx); }
+    footer { margin-top: 40px; font-size: 12px; color: var(--text-3); }
+    footer a { color: var(--accent-tx); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="head">
+      <div class="logo"><i class="ti ti-server-bolt"></i></div>
+      <div>
+        <h1>WPHerd features</h1>
+        <p>Shipped today, plus a prioritized roadmap</p>
+      </div>
+    </div>
+
+    <div class="kpis">
+      <div class="kpi"><span>Shipped</span><strong>10</strong></div>
+      <div class="kpi"><span>Planned</span><strong>20</strong></div>
+      <div class="kpi"><span>Tiers</span><strong>6</strong></div>
+    </div>
+
+    <p class="legend">Tags show which app provides each feature. <span class="src only" style="font-size:11px;">WPHerd only</span> marks capabilities no competitor has.</p>
+
+    <div class="filters">
+      <button data-filter="all" class="fbtn" aria-pressed="true">All</button>
+      <button data-filter="shipped" class="fbtn" aria-pressed="false">Shipped</button>
+      <button data-filter="planned" class="fbtn" aria-pressed="false">Planned</button>
+    </div>
+
+    <div class="grp">
+      <div class="grp-h"><span class="grp-t">Shipped today</span><span class="grp-s">the baseline</span></div>
+      <div class="frow" data-status="shipped"><div class="fic ship"><i class="ti ti-adjustments"></i></div><div class="fbody"><p class="fname">Service orchestration</p><p class="fdesc">Supervised nginx, PHP-FPM, MySQL, dnsmasq with crash restart and status polling</p><div class="fsrc"><span class="src">Local</span><span class="src">Herd</span><span class="src">Studio</span></div></div><span class="pill ship">Shipped</span></div>
+      <div class="frow" data-status="shipped"><div class="fic ship"><i class="ti ti-brand-php"></i></div><div class="fbody"><p class="fname">Multiple PHP versions</p><p class="fdesc">Install, switch, per-site override, and php.ini editing</p><div class="fsrc"><span class="src">Local</span><span class="src">Herd</span><span class="src">Studio</span></div></div><span class="pill ship">Shipped</span></div>
+      <div class="frow" data-status="shipped"><div class="fic ship"><i class="ti ti-world-www"></i></div><div class="fbody"><p class="fname">Add and remove sites</p><p class="fdesc">Streamed multi-step .test site creation pipeline</p><div class="fsrc"><span class="src">Local</span><span class="src">Herd</span><span class="src">Studio</span></div></div><span class="pill ship">Shipped</span></div>
+      <div class="frow" data-status="shipped"><div class="fic ship"><i class="ti ti-plug"></i></div><div class="fbody"><p class="fname">WP-CLI management</p><p class="fdesc">Plugins, themes, wp-config editor, admin users</p><div class="fsrc"><span class="src">Local</span><span class="src">Studio</span></div></div><span class="pill ship">Shipped</span></div>
+      <div class="frow" data-status="shipped"><div class="fic ship"><i class="ti ti-mail"></i></div><div class="fbody"><p class="fname">Mail catching</p><p class="fdesc">Mailpit inbox, read, mark, delete, web UI</p><div class="fsrc"><span class="src">Local</span><span class="src">Herd (Pro)</span><span class="src">Studio</span></div></div><span class="pill ship">Shipped</span></div>
+      <div class="frow" data-status="shipped"><div class="fic ship"><i class="ti ti-cloud"></i></div><div class="fbody"><p class="fname">Public share tunnels</p><p class="fdesc">Cloudflare tunnels: install, start, stop, list</p><div class="fsrc"><span class="src">Local (Live Links)</span><span class="src">Herd (Expose)</span><span class="src">Studio (Preview)</span></div></div><span class="pill ship">Shipped</span></div>
+      <div class="frow" data-status="shipped"><div class="fic ship"><i class="ti ti-wand"></i></div><div class="fbody"><p class="fname">Magic login</p><p class="fdesc">One-click admin login into any site</p><div class="fsrc"><span class="src only">WPHerd only</span></div></div><span class="pill ship">Shipped</span></div>
+      <div class="frow" data-status="shipped"><div class="fic ship"><i class="ti ti-database"></i></div><div class="fbody"><p class="fname">phpMyAdmin and shortcuts</p><p class="fdesc">Open in browser, Finder, terminal; per-site HTTPS toggle</p><div class="fsrc"><span class="src">Local</span><span class="src">Studio</span></div></div><span class="pill ship">Shipped</span></div>
+      <div class="frow" data-status="shipped"><div class="fic ship"><i class="ti ti-file-text"></i></div><div class="fbody"><p class="fname">Per-site logs</p><p class="fdesc">View and clear individual site logs</p><div class="fsrc"><span class="src">Local</span><span class="src">Herd</span><span class="src">Studio</span></div></div><span class="pill ship">Shipped</span></div>
+      <div class="frow" data-status="shipped"><div class="fic ship"><i class="ti ti-network"></i></div><div class="fbody"><p class="fname">dnsmasq and resolver setup</p><p class="fdesc">/etc/resolver/test, sudoers, dependency checks, onboarding</p><div class="fsrc"><span class="src">Local</span><span class="src">Herd</span><span class="src">Studio</span></div></div><span class="pill ship">Shipped</span></div>
+    </div>
+
+    <div class="grp">
+      <div class="grp-h"><span class="grp-t">Tier 1 · High value, low friction</span><span class="grp-s">closes the gap vs Local</span></div>
+      <div class="frow" data-status="planned"><div class="fic plan"><i class="ti ti-bug"></i></div><div class="fbody"><p class="fname">Xdebug integration</p><p class="fdesc">Toggle per PHP version, auto-write config, one-click enable</p><div class="fsrc"><span class="src">Local</span><span class="src">Herd</span><span class="src">Studio</span></div></div><span class="pill plan">Planned</span></div>
+      <div class="frow" data-status="planned"><div class="fic plan"><i class="ti ti-link"></i></div><div class="fbody"><p class="fname">Change site URL</p><p class="fdesc">Rename domain with WP-CLI search-replace and vhost regen</p><div class="fsrc"><span class="src">Local</span><span class="src">Studio</span></div></div><span class="pill plan">Planned</span></div>
+      <div class="frow" data-status="planned"><div class="fic plan"><i class="ti ti-copy"></i></div><div class="fbody"><p class="fname">Clone site</p><p class="fdesc">Copy files, dump and restore DB, new config and vhost</p><div class="fsrc"><span class="src">Local</span></div></div><span class="pill plan">Planned</span></div>
+      <div class="frow" data-status="planned"><div class="fic plan"><i class="ti ti-package-export"></i></div><div class="fbody"><p class="fname">Export and import site</p><p class="fdesc">Portable archive; interop with .wpress migration format</p><div class="fsrc"><span class="src">Local</span><span class="src">Studio</span></div></div><span class="pill plan">Planned</span></div>
+      <div class="frow" data-status="planned"><div class="fic plan"><i class="ti ti-template"></i></div><div class="fbody"><p class="fname">Site blueprints</p><p class="fdesc">Save PHP, plugins, themes, content as reusable templates</p><div class="fsrc"><span class="src">Local</span><span class="src">Herd (herd.yml)</span><span class="src">Studio</span></div></div><span class="pill plan">Planned</span></div>
+      <div class="frow" data-status="planned"><div class="fic plan"><i class="ti ti-lock-check"></i></div><div class="fbody"><p class="fname">Certificate trust automation</p><p class="fdesc">One-click trust for self-signed certs in Keychain</p><div class="fsrc"><span class="src">Local</span><span class="src">Studio</span></div></div><span class="pill plan">Planned</span></div>
+    </div>
+
+    <div class="grp">
+      <div class="grp-h"><span class="grp-t">Tier 2 · Server and service depth</span><span class="grp-s">Herd-style breadth</span></div>
+      <div class="frow" data-status="planned"><div class="fic plan"><i class="ti ti-stack-2"></i></div><div class="fbody"><p class="fname">Additional services</p><p class="fdesc">Optional MariaDB, PostgreSQL, Redis, Memcached, Meilisearch</p><div class="fsrc"><span class="src">Herd (Pro)</span></div></div><span class="pill plan">Planned</span></div>
+      <div class="frow" data-status="planned"><div class="fic plan"><i class="ti ti-arrows-exchange"></i></div><div class="fbody"><p class="fname">nginx and Apache swap</p><p class="fdesc">Support both webservers per site</p><div class="fsrc"><span class="src">Local</span></div></div><span class="pill plan">Planned</span></div>
+      <div class="frow" data-status="planned"><div class="fic plan"><i class="ti ti-bolt"></i></div><div class="fbody"><p class="fname">OpCache controls</p><p class="fdesc">Toggle and surface status in PHP settings</p><div class="fsrc"><span class="src">Local</span><span class="src">Herd</span></div></div><span class="pill plan">Planned</span></div>
+      <div class="frow" data-status="planned"><div class="fic plan"><i class="ti ti-sitemap"></i></div><div class="fbody"><p class="fname">WordPress Multisite</p><p class="fdesc">Subdomain or subdirectory network setup at creation</p><div class="fsrc"><span class="src">Local</span></div></div><span class="pill plan">Planned</span></div>
+      <div class="frow" data-status="planned"><div class="fic plan"><i class="ti ti-brand-nodejs"></i></div><div class="fbody"><p class="fname">Composer and Node management</p><p class="fdesc">Per-site version switching for modern block dev</p><div class="fsrc"><span class="src">Herd</span></div></div><span class="pill plan">Planned</span></div>
+    </div>
+
+    <div class="grp">
+      <div class="grp-h"><span class="grp-t">Tier 3 · Sharing, backup, deployment</span></div>
+      <div class="frow" data-status="planned"><div class="fic plan"><i class="ti ti-share"></i></div><div class="fbody"><p class="fname">Persistent share links</p><p class="fdesc">Stable URLs, basic-auth, QR code for mobile testing</p><div class="fsrc"><span class="src">Local (Live Links)</span></div></div><span class="pill plan">Planned</span></div>
+      <div class="frow" data-status="planned"><div class="fic plan"><i class="ti ti-webhook"></i></div><div class="fbody"><p class="fname">Webhook testing helpers</p><p class="fdesc">Documented Stripe and PayPal endpoints over the tunnel</p><div class="fsrc"><span class="src">Local</span></div></div><span class="pill plan">Planned</span></div>
+      <div class="frow" data-status="planned"><div class="fic plan"><i class="ti ti-cloud-up"></i></div><div class="fbody"><p class="fname">Backups and cloud sync</p><p class="fdesc">Local snapshots plus SFTP, rsync, or Git deploy targets</p><div class="fsrc"><span class="src">Local (Cloud Backups)</span><span class="src">Herd (Forge)</span><span class="src">Studio (Sync)</span></div></div><span class="pill plan">Planned</span></div>
+    </div>
+
+    <div class="grp">
+      <div class="grp-h"><span class="grp-t">Tier 4 · Pre-launch and quality</span><span class="grp-s">Local's toolbox</span></div>
+      <div class="frow" data-status="planned"><div class="fic plan"><i class="ti ti-link-off"></i></div><div class="fbody"><p class="fname">Link checker</p><p class="fdesc">Crawl the local site for broken links</p><div class="fsrc"><span class="src">Local</span></div></div><span class="pill plan">Planned</span></div>
+      <div class="frow" data-status="planned"><div class="fic plan"><i class="ti ti-photo"></i></div><div class="fbody"><p class="fname">Image optimizer</p><p class="fdesc">Offline bulk image compression</p><div class="fsrc"><span class="src">Local</span></div></div><span class="pill plan">Planned</span></div>
+      <div class="frow" data-status="planned"><div class="fic plan"><i class="ti ti-refresh"></i></div><div class="fbody"><p class="fname">Live reload</p><p class="fdesc">Auto-refresh browser on file change</p><div class="fsrc"><span class="src">Local (Instant Reload)</span></div></div><span class="pill plan">Planned</span></div>
+      <div class="frow" data-status="planned"><div class="fic plan"><i class="ti ti-table"></i></div><div class="fbody"><p class="fname">Database GUI</p><p class="fdesc">Optional Adminer or built-in table browser</p><div class="fsrc"><span class="src">Local</span><span class="src">Studio</span></div></div><span class="pill plan">Planned</span></div>
+    </div>
+
+    <div class="grp">
+      <div class="grp-h"><span class="grp-t">Tier 5 · AI differentiation</span><span class="grp-s">Studio Code territory</span></div>
+      <div class="frow" data-status="planned"><div class="fic ai"><i class="ti ti-sparkles"></i></div><div class="fbody"><p class="fname">AI assistant panel</p><p class="fdesc">Conversational WP-CLI, file editing, screenshots, audits via Claude API</p><div class="fsrc"><span class="src">Studio (Studio Code)</span></div></div><span class="pill plan">Planned</span></div>
+    </div>
+
+    <div class="grp">
+      <div class="grp-h"><span class="grp-t">Tier 6 · Reach</span></div>
+      <div class="frow" data-status="planned"><div class="fic plan"><i class="ti ti-devices"></i></div><div class="fbody"><p class="fname">Cross-platform</p><p class="fdesc">Windows and Linux support beyond macOS</p><div class="fsrc"><span class="src">Local</span><span class="src">Herd</span><span class="src">Studio</span></div></div><span class="pill plan">Planned</span></div>
+    </div>
+
+    <footer>Compiled from Local (localwp.com), Laravel Herd (herd.laravel.com), and WordPress Studio (developer.wordpress.com/studio). See <a href="FEATURES.md">FEATURES.md</a> for the full write-up.</footer>
+  </div>
+
+  <script>
+    const btns = document.querySelectorAll('.fbtn');
+    const rows = document.querySelectorAll('.frow');
+    const groups = document.querySelectorAll('.grp');
+    btns.forEach(b => b.addEventListener('click', () => {
+      const f = b.dataset.filter;
+      btns.forEach(x => x.setAttribute('aria-pressed', x === b ? 'true' : 'false'));
+      rows.forEach(r => { r.style.display = (f === 'all' || r.dataset.status === f) ? 'flex' : 'none'; });
+      groups.forEach(g => {
+        const anyVisible = [...g.querySelectorAll('.frow')].some(r => r.style.display !== 'none');
+        g.style.display = anyVisible ? 'block' : 'none';
+      });
+    }));
+  </script>
+</body>
+</html>
