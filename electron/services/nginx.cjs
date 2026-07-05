@@ -7,6 +7,7 @@ const brew = require('./brew.cjs');
 const phpService = require('./php.cjs');
 const execAsync = require('./asyncExec.cjs');
 const procman = require('./procman.cjs');
+const apache = require('./apache.cjs');
 
 function getNginxConfDir() {
   const prefix = brew.getBrewPrefix();
@@ -266,6 +267,54 @@ function generateSiteConfig(site) {
   const phpValueParam = phpValue
     ? `\n        fastcgi_param PHP_VALUE "${phpValue}";`
     : '';
+
+  // When a site is flagged to run under Apache, nginx stays the front door
+  // (TLS + :80/:443) and reverse-proxies everything to the supervised httpd
+  // child on loopback; Apache serves the files and hands .php to php-fpm. The
+  // scheme is forwarded so the Apache vhost can restore is_ssl().
+  if (site.webserver === 'apache') {
+    const proxyBody = `    client_max_body_size ${bodyLimitMB}m;
+
+    access_log ${logDir}/${domain}.access.log;
+    error_log  ${logDir}/${domain}.error.log;
+
+    location / {
+        proxy_pass http://127.0.0.1:${apache.APACHE_HTTP_PORT};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 300;
+    }`;
+
+    if (useHttps) {
+      return `# WPHerd: ${name}
+server {
+    listen 80;
+    server_name ${serverNames};
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    server_name ${serverNames};
+
+    ssl_certificate ${certPath};
+    ssl_certificate_key ${keyPath};
+
+${proxyBody}
+}
+`;
+    }
+    return `# WPHerd: ${name}
+server {
+    listen 80;
+    server_name ${serverNames};
+
+${proxyBody}
+}
+`;
+  }
 
   // Shared per-site directives (root, logging, PHP handling) — reused by the
   // http and https server blocks so both behave identically.

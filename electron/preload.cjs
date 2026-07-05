@@ -113,6 +113,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setSiteNodeVersion: (id, version) =>
     ipcRenderer.invoke('set-site-node-version', id, version),
 
+  // Webserver (nginx / Apache)
+  getApacheStatus: () => ipcRenderer.invoke('get-apache-status'),
+  installApache: () => ipcRenderer.invoke('install-apache'),
+  setSiteWebserver: (id, webserver) =>
+    ipcRenderer.invoke('set-site-webserver', id, webserver),
+
   // Dependencies & Setup
   checkDependencies: () => ipcRenderer.invoke('check-dependencies'),
   setupDnsmasq: () => ipcRenderer.invoke('setup-dnsmasq'),
@@ -152,6 +158,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       'core-deps-install-progress',
       'composer-install-progress',
       'composer-run-progress',
+      'apache-install-progress',
     ];
     if (validChannels.includes(channel)) {
       ipcRenderer.on(channel, (_, data) => callback(data));
@@ -170,6 +177,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       'core-deps-install-progress',
       'composer-install-progress',
       'composer-run-progress',
+      'apache-install-progress',
     ];
     if (validChannels.includes(channel)) {
       ipcRenderer.removeAllListeners(channel);

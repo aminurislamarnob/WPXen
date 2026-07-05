@@ -1,17 +1,21 @@
 import { useState, useEffect, useRef } from 'react';
-import { Loader, Download, Play, RefreshCw, Package, Hexagon } from 'lucide-react';
+import { Loader, Download, Play, RefreshCw, Package, Hexagon, Server } from 'lucide-react';
 import { Card, Row, SectionLabel } from './ui';
 
-// Composer + Node per-site dev tooling (Tier 2 #11).
+// Composer + Node + webserver per-site dev tooling (Tier 2 #11 + #8).
 export default function DevTools({ site, onSaved }) {
   const [composer, setComposer] = useState(null);
   const [nodeData, setNodeData] = useState(null);
-  const [installing, setInstalling] = useState(false);
+  const [apacheStatus, setApacheStatus] = useState(null);
+  const [installing, setInstalling] = useState(false); // 'composer' | 'apache' | false
   const [running, setRunning] = useState(null); // 'install' | 'update' | null
+  const [switching, setSwitching] = useState(false);
   const [log, setLog] = useState([]);
   const [error, setError] = useState(null);
   const [nodeSaving, setNodeSaving] = useState(false);
   const logRef = useRef(null);
+
+  const webserver = site.webserver === 'apache' ? 'apache' : 'nginx';
 
   useEffect(() => {
     load();
@@ -20,9 +24,11 @@ export default function DevTools({ site, onSaved }) {
     const onRun = (data) => data?.id === site.id && data?.line && appendLog(data.line);
     window.electronAPI.on('composer-install-progress', onInstall);
     window.electronAPI.on('composer-run-progress', onRun);
+    window.electronAPI.on('apache-install-progress', onInstall);
     return () => {
       window.electronAPI.off('composer-install-progress');
       window.electronAPI.off('composer-run-progress');
+      window.electronAPI.off('apache-install-progress');
     };
   }, [site.id]);
 
@@ -35,22 +41,45 @@ export default function DevTools({ site, onSaved }) {
   }
 
   async function load() {
-    const [c, n] = await Promise.all([
+    const [c, n, a] = await Promise.all([
       window.electronAPI.getComposerStatus(),
       window.electronAPI.getNodeVersions(),
+      window.electronAPI.getApacheStatus(),
     ]);
     if (c.success) setComposer(c);
     if (n.success) setNodeData(n);
+    if (a.success) setApacheStatus(a);
   }
 
   async function handleInstallComposer() {
     setError(null);
     setLog([]);
-    setInstalling(true);
+    setInstalling('composer');
     const res = await window.electronAPI.installComposer();
     setInstalling(false);
     if (!res.success) setError(res.error);
     await load();
+  }
+
+  async function handleInstallApache() {
+    setError(null);
+    setLog([]);
+    setInstalling('apache');
+    const res = await window.electronAPI.installApache();
+    setInstalling(false);
+    if (!res.success) setError(res.error);
+    await load();
+  }
+
+  async function handleSetWebserver(target) {
+    if (target === webserver) return;
+    setError(null);
+    if (target === 'apache') setLog([]);
+    setSwitching(true);
+    const res = await window.electronAPI.setSiteWebserver(site.id, target);
+    setSwitching(false);
+    if (res.success) onSaved?.();
+    else setError(res.error);
   }
 
   async function handleRunComposer(cmd) {
@@ -70,7 +99,7 @@ export default function DevTools({ site, onSaved }) {
     else setError(res.error);
   }
 
-  const busy = installing || running != null;
+  const busy = installing !== false || running != null || switching;
 
   return (
     <div className="space-y-6">
@@ -79,6 +108,70 @@ export default function DevTools({ site, onSaved }) {
           {error}
         </div>
       )}
+
+      {/* Webserver */}
+      <div>
+        <SectionLabel>Webserver</SectionLabel>
+        <Card>
+          <Row
+            icon={<Server size={18} className="text-gray-500" />}
+            title="Webserver"
+            subtitle={
+              webserver === 'apache'
+                ? 'Apache — nginx proxies this site to httpd'
+                : 'nginx (default)'
+            }
+          >
+            <div className="flex items-center gap-2">
+              {switching && <Loader size={13} className="animate-spin text-gray-400" />}
+              <div className="inline-flex rounded-full bg-gray-100 dark:bg-white/10 p-0.5">
+                {['nginx', 'apache'].map((ws) => (
+                  <button
+                    key={ws}
+                    onClick={() => handleSetWebserver(ws)}
+                    disabled={busy}
+                    className={`px-3 py-1 rounded-full text-xs capitalize transition-colors ${
+                      webserver === ws
+                        ? 'bg-white dark:bg-white/15 text-gray-900 shadow-sm'
+                        : 'text-gray-500 hover:text-gray-800'
+                    }`}
+                  >
+                    {ws}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </Row>
+          {apacheStatus && !apacheStatus.installed && (
+            <div className="px-4 py-2.5 border-t border-gray-100 flex items-center justify-between gap-3">
+              <p className="text-xs text-gray-500">
+                Apache (httpd) is not installed.
+              </p>
+              <button
+                onClick={handleInstallApache}
+                disabled={busy}
+                className="btn-secondary text-xs min-w-[90px] justify-center"
+              >
+                {installing === 'apache' ? (
+                  <>
+                    <Loader size={11} className="animate-spin mr-1.5" />
+                    Installing…
+                  </>
+                ) : (
+                  <>
+                    <Download size={11} className="mr-1.5" />
+                    Install httpd
+                  </>
+                )}
+              </button>
+            </div>
+          )}
+        </Card>
+        <p className="text-[11px] text-gray-400 mt-1.5 px-1">
+          nginx stays the front door on ports 80/443. Apache-flagged sites are
+          reverse-proxied to a local httpd and served via mod_proxy_fcgi.
+        </p>
+      </div>
 
       {/* Composer */}
       <div>
@@ -103,7 +196,7 @@ export default function DevTools({ site, onSaved }) {
                 disabled={busy}
                 className="btn-secondary text-xs min-w-[90px] justify-center"
               >
-                {installing ? (
+                {installing === 'composer' ? (
                   <>
                     <Loader size={11} className="animate-spin mr-1.5" />
                     Installing…
