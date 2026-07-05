@@ -143,11 +143,7 @@ export default function SitePhpSettings({ site, onSaved }) {
               : 'bg-green-50 text-green-700'
           }`}
         >
-          {message.type === 'error' ? (
-            <AlertTriangle size={15} />
-          ) : (
-            <Check size={15} />
-          )}
+          {message.type === 'error' ? <AlertTriangle size={15} /> : <Check size={15} />}
           {message.text}
         </div>
       )}
@@ -210,11 +206,10 @@ export default function SitePhpSettings({ site, onSaved }) {
 
       {!loading && (
         <p className="text-xs text-gray-400 mt-3">
-          Fields show the global PHP configuration until you change them here. Only
-          values that differ from the global settings are saved as site overrides
-          (applied via <span className="font-mono">PHP_VALUE</span> in this
-          site&apos;s vhost) — set a field back to the global value to make it follow
-          the global settings again.
+          Fields show the global PHP configuration until you change them here. Only values
+          that differ from the global settings are saved as site overrides (applied via{' '}
+          <span className="font-mono">PHP_VALUE</span> in this site&apos;s vhost) — set a
+          field back to the global value to make it follow the global settings again.
         </p>
       )}
 

@@ -329,9 +329,7 @@ export default function PHPVersions() {
             <Code2 size={24} className="text-purple-500" />
           </div>
           <h3 className="text-sm font-bold text-gray-700">No PHP versions found</h3>
-          <p className="text-xs text-gray-400 mt-2">
-            Install one below to get started.
-          </p>
+          <p className="text-xs text-gray-400 mt-2">Install one below to get started.</p>
         </div>
       ) : (
         <div className="space-y-3">
@@ -354,9 +352,7 @@ export default function PHPVersions() {
         <div className="mt-8">
           <div className="flex items-center gap-2 mb-3">
             <Download size={16} className="text-gray-500" />
-            <h2 className="text-sm font-semibold text-gray-900">
-              Install PHP versions
-            </h2>
+            <h2 className="text-sm font-semibold text-gray-900">Install PHP versions</h2>
           </div>
           {notInstalled.length === 0 ? (
             installable.length > 0 && (
@@ -379,9 +375,9 @@ export default function PHPVersions() {
             </div>
           )}
           <p className="text-xs text-gray-400 mt-3">
-            Installs <span className="font-mono">php@&lt;version&gt;</span> via
-            Homebrew. This can take a few minutes. PHP 8.0 and 7.4 are EOL and
-            come from the <span className="font-mono">shivammathur/php</span> tap.
+            Installs <span className="font-mono">php@&lt;version&gt;</span> via Homebrew.
+            This can take a few minutes. PHP 8.0 and 7.4 are EOL and come from the{' '}
+            <span className="font-mono">shivammathur/php</span> tap.
           </p>
         </div>
       )}

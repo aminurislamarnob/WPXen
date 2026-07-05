@@ -260,8 +260,8 @@ export default function Settings() {
             granting passwordless{' '}
             <span className="font-mono bg-gray-100 px-1 rounded">sudo brew services</span>
             , used only for dnsmasq — the other services run inside WPHerd and need no
-            privileges. Requires your password <strong>once</strong> to set up, then
-            never again.
+            privileges. Requires your password <strong>once</strong> to set up, then never
+            again.
           </p>
 
           {sudoersMessage && (

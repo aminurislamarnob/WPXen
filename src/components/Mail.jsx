@@ -103,11 +103,15 @@ function InstallCard({ onInstalled }) {
         Catch outgoing email with Mailpit
       </h2>
       <p className="text-sm text-gray-500 max-w-md mx-auto mb-5">
-        Mailpit captures every email your WordPress sites send — password
-        resets, form notifications, WooCommerce receipts — so nothing ever
-        leaves your machine. No plugin needed.
+        Mailpit captures every email your WordPress sites send — password resets, form
+        notifications, WooCommerce receipts — so nothing ever leaves your machine. No
+        plugin needed.
       </p>
-      <button onClick={handleInstall} disabled={installing} className="btn-primary text-sm">
+      <button
+        onClick={handleInstall}
+        disabled={installing}
+        className="btn-primary text-sm"
+      >
         {installing ? (
           <Loader size={13} className="animate-spin mr-1.5" />
         ) : (
@@ -483,7 +487,9 @@ export default function Mail({ refreshStatus }) {
       {message && (
         <div
           className={`flex items-center gap-2 px-4 py-3 rounded-xl mb-4 text-sm animate-fade-in flex-shrink-0 ${
-            message.type === 'error' ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'
+            message.type === 'error'
+              ? 'bg-red-50 text-red-700'
+              : 'bg-green-50 text-green-700'
           }`}
         >
           {message.type === 'error' ? <XCircle size={15} /> : <CheckCircle size={15} />}
@@ -530,8 +536,8 @@ export default function Mail({ refreshStatus }) {
               <p className="text-sm font-medium text-gray-900">Catch outgoing email</p>
               <p className="text-xs text-gray-400 mt-0.5">
                 Routes PHP <span className="font-mono">mail()</span> — and therefore{' '}
-                <span className="font-mono">wp_mail()</span> — from every site into Mailpit.
-                No mail leaves your machine while this is on.
+                <span className="font-mono">wp_mail()</span> — from every site into
+                Mailpit. No mail leaves your machine while this is on.
               </p>
             </div>
             <button
@@ -607,7 +613,9 @@ export default function Mail({ refreshStatus }) {
                     <div className="flex flex-col items-center justify-center gap-2 text-gray-300 py-16">
                       <Inbox size={26} />
                       <p className="text-sm">
-                        {search.trim() ? 'No messages match your search' : 'No mail captured yet'}
+                        {search.trim()
+                          ? 'No messages match your search'
+                          : 'No mail captured yet'}
                       </p>
                       {!search.trim() && status.catching && (
                         <p className="text-xs text-gray-300 px-6 text-center">
@@ -648,10 +656,15 @@ export default function Mail({ refreshStatus }) {
                           >
                             {m.Subject || '(no subject)'}
                             {m.Attachments > 0 && (
-                              <Paperclip size={10} className="inline ml-1 text-gray-300" />
+                              <Paperclip
+                                size={10}
+                                className="inline ml-1 text-gray-300"
+                              />
                             )}
                           </p>
-                          <p className="text-[11px] text-gray-300 truncate mt-0.5">{m.Snippet}</p>
+                          <p className="text-[11px] text-gray-300 truncate mt-0.5">
+                            {m.Snippet}
+                          </p>
                         </button>
                       ))}
                       {hasMore && (
@@ -672,7 +685,11 @@ export default function Mail({ refreshStatus }) {
                 </div>
 
                 {/* Viewer */}
-                <MessageViewer message={detail} loading={detailLoading} onDelete={handleDelete} />
+                <MessageViewer
+                  message={detail}
+                  loading={detailLoading}
+                  onDelete={handleDelete}
+                />
               </div>
             </div>
           )}

@@ -282,10 +282,10 @@ export default function Services({ serviceStatus, refreshStatus }) {
         <div>
           <p className="font-medium">App-managed services</p>
           <p className="text-xs text-blue-600 mt-0.5">
-            WPHerd runs nginx, PHP-FPM, MySQL, and Mailpit as part of the app —
-            they stop when it quits and don&apos;t appear as background items in
-            macOS. Only dnsmasq runs as a system service (DNS keeps working when
-            the app is closed). Install missing services with{' '}
+            WPHerd runs nginx, PHP-FPM, MySQL, and Mailpit as part of the app — they stop
+            when it quits and don&apos;t appear as background items in macOS. Only dnsmasq
+            runs as a system service (DNS keeps working when the app is closed). Install
+            missing services with{' '}
             <span className="font-mono bg-blue-100 px-1 rounded">
               brew install nginx php mysql dnsmasq
             </span>

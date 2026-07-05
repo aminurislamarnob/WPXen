@@ -65,11 +65,9 @@ function generateCert(domain) {
 
   const certPath = `${dir}/${domain}.pem`;
   const keyPath = `${dir}/${domain}-key.pem`;
-  execFileSync(
-    mkcert,
-    ['-cert-file', certPath, '-key-file', keyPath, domain],
-    { stdio: 'pipe' }
-  );
+  execFileSync(mkcert, ['-cert-file', certPath, '-key-file', keyPath, domain], {
+    stdio: 'pipe',
+  });
   return { certPath, keyPath };
 }
 

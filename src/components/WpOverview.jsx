@@ -98,10 +98,7 @@ export default function WpOverview({ site, onSaved }) {
           title="Refresh"
           className="btn-secondary text-sm"
         >
-          <RefreshCw
-            size={14}
-            className={loading || refreshing ? 'animate-spin' : ''}
-          />
+          <RefreshCw size={14} className={loading || refreshing ? 'animate-spin' : ''} />
         </button>
       </div>
 
@@ -153,9 +150,7 @@ export default function WpOverview({ site, onSaved }) {
                   )}
                 </div>
                 <div className="min-w-0">
-                  <h3 className="text-sm font-semibold text-gray-900">
-                    WordPress Core
-                  </h3>
+                  <h3 className="text-sm font-semibold text-gray-900">WordPress Core</h3>
                   <p className="text-xs text-gray-500 mt-0.5">
                     {core.updateVersion
                       ? `Update available from ${core.version} to ${core.updateVersion}.`
@@ -220,9 +215,7 @@ export default function WpOverview({ site, onSaved }) {
           <div className="bg-white rounded-xl border border-surface-border shadow-card">
             <div className="flex items-center justify-between gap-3 p-5 pb-4">
               <div>
-                <h3 className="text-sm font-semibold text-gray-900">
-                  Available Updates
-                </h3>
+                <h3 className="text-sm font-semibold text-gray-900">Available Updates</h3>
                 <p className="text-xs text-gray-500 mt-0.5">
                   Review pending plugin and theme updates before applying them.
                 </p>
@@ -278,9 +271,7 @@ export default function WpOverview({ site, onSaved }) {
                     const key = `${u.type}:${u.name}`;
                     return (
                       <tr key={key} className="border-t border-gray-100">
-                        <td className="px-5 py-3 text-gray-900 font-medium">
-                          {u.title}
-                        </td>
+                        <td className="px-5 py-3 text-gray-900 font-medium">{u.title}</td>
                         <td className="px-3 py-3 text-gray-500 capitalize">{u.type}</td>
                         <td className="px-3 py-3 text-gray-500 font-mono text-xs">
                           {u.version}

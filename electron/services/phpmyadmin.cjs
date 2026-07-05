@@ -64,7 +64,11 @@ function writeConfig() {
     `$cfg['TempDir'] = ${phpStr(tmpDir)};`,
     '',
   ];
-  fs.writeFileSync(`${dir}/config.inc.php`, lines.filter((l) => l !== '').join('\n'), 'utf8');
+  fs.writeFileSync(
+    `${dir}/config.inc.php`,
+    lines.filter((l) => l !== '').join('\n'),
+    'utf8'
+  );
 }
 
 // Writes/refreshes the nginx vhost for phpmyadmin.test and reloads nginx.

@@ -81,12 +81,7 @@ export default function Layout({ serviceStatus }) {
             </span>
           </div>
           <div className="flex items-center gap-1.5 mt-2">
-            <img
-              src={logo}
-              alt="WPHerd"
-              className="h-4 w-auto"
-              draggable={false}
-            />
+            <img src={logo} alt="WPHerd" className="h-4 w-auto" draggable={false} />
             <span className="text-xs text-sidebar-text/50">v1.0</span>
           </div>
         </div>
