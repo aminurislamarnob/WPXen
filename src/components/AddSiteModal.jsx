@@ -328,7 +328,9 @@ export default function AddSiteModal({ onClose, onSiteAdded, phpVersions }) {
                     </button>
                     <button
                       onClick={() =>
-                        window.electronAPI.openWpAdmin(`http://${formData.domain}`)
+                        window.electronAPI.openSiteInBrowser(
+                          `http://${formData.domain}/wp-admin`
+                        )
                       }
                       className="btn-secondary"
                     >

@@ -2,6 +2,7 @@
 
 const { ipcMain, shell, dialog, app } = require('electron');
 const { execFile } = require('child_process');
+const crypto = require('crypto');
 const path = require('path');
 const os = require('os');
 
@@ -345,6 +346,76 @@ function registerHandlers(win, storeInstance) {
     } catch (err) {
       return { success: false, error: humanize(err) };
     }
+  });
+
+  // ─── One-Click Admin (magic login) ─────────────────────────────────────
+
+  // Lists the site's administrator accounts for the account picker.
+  ipcMain.handle('list-admin-users', async (_, id) => {
+    try {
+      const site = findSite(id);
+      if (!site) return { success: false, error: 'Site not found' };
+      const users = wordpress.listAdminUsers(site.path);
+      return { success: true, users };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  // Enables/disables one-click admin for a site and records the chosen user.
+  // The per-site secret lives outside the site record (so it's never shipped to
+  // the renderer via get-sites); the site record only carries the enabled flag
+  // and selected user id.
+  ipcMain.handle('set-one-click-admin', async (_, id, { enabled, userId } = {}) => {
+    try {
+      const sites = store.get('sites', []);
+      const idx = sites.findIndex((s) => s.id === id);
+      if (idx === -1) return { success: false, error: 'Site not found' };
+      const site = sites[idx];
+
+      let updated;
+      if (enabled) {
+        const uid = parseInt(userId, 10);
+        if (!Number.isInteger(uid) || uid <= 0) {
+          return { success: false, error: 'Select an administrator to log in as.' };
+        }
+        let secret = store.get(`magicLogin.${id}`, null);
+        if (!secret) {
+          secret = crypto.randomBytes(24).toString('hex');
+          store.set(`magicLogin.${id}`, secret);
+        }
+        wordpress.ensureMagicLoginMuPlugin(site.path, { userId: uid, secret });
+        updated = { ...site, oneClickAdmin: { enabled: true, userId: uid } };
+      } else {
+        wordpress.removeMagicLoginMuPlugin(site.path);
+        updated = {
+          ...site,
+          oneClickAdmin: { ...(site.oneClickAdmin || {}), enabled: false },
+        };
+      }
+
+      sites[idx] = updated;
+      store.set('sites', sites);
+      return { success: true, site: updated };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  // Opens wp-admin — via the magic-login URL when one-click admin is enabled,
+  // otherwise the plain /wp-admin. Kept in the main process so the secret is
+  // never handed to the renderer.
+  ipcMain.handle('open-wp-admin', (_, id) => {
+    const site = store.get('sites', []).find((s) => s.id === id);
+    if (!site) return { success: false, error: 'Site not found' };
+    const base = site.url.replace(/\/+$/, '');
+    let target = `${base}/wp-admin`;
+    if (site.oneClickAdmin?.enabled) {
+      const secret = store.get(`magicLogin.${id}`, null);
+      if (secret) target = `${base}/?wpherd_magic_login=${secret}`;
+    }
+    const ok = openExternalSafely(target);
+    return ok ? { success: true } : { success: false, error: 'Refused to open unsafe URL' };
   });
 
   // ─── Site config (WP Config Manager) ───────────────────────────────────

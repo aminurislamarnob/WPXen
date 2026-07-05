@@ -19,7 +19,9 @@ import {
   Copy,
   Check,
   X,
+  KeyRound,
 } from 'lucide-react';
+import { Toggle } from './ui';
 import WpConfigManager from './WpConfigManager';
 import SitePhpSettings from './SitePhpSettings';
 import WpOverview from './WpOverview';
@@ -52,11 +54,70 @@ const NAV = [
   { id: 'logs', label: 'Logs', icon: FileText },
 ];
 
-function Overview({ site }) {
+function Overview({ site, onSaved }) {
   const [pmaBusy, setPmaBusy] = useState(false);
   const [tunnel, setTunnel] = useState(null);
   const [copied, setCopied] = useState(false);
   const [actionError, setActionError] = useState(null);
+
+  // One-click admin (magic login)
+  const oca = site.oneClickAdmin || {};
+  const [ocaBusy, setOcaBusy] = useState(false);
+  const [ocaError, setOcaError] = useState(null);
+  const [adminUsers, setAdminUsers] = useState(null);
+  const [selectedUser, setSelectedUser] = useState(oca.userId || '');
+
+  // Load the admin-user list lazily the first time the panel needs it (when
+  // enabled, or when the user flips the toggle on).
+  async function loadAdminUsers() {
+    if (adminUsers) return adminUsers;
+    const res = await window.electronAPI.listAdminUsers(site.id);
+    if (!res?.success) {
+      setOcaError(res?.error || 'Could not load admin users.');
+      return null;
+    }
+    setAdminUsers(res.users);
+    if (!selectedUser && res.users[0]) setSelectedUser(res.users[0].id);
+    return res.users;
+  }
+
+  useEffect(() => {
+    if (oca.enabled) loadAdminUsers();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [site.id]);
+
+  async function persistOneClick(enabled, userId) {
+    setOcaBusy(true);
+    setOcaError(null);
+    const res = await window.electronAPI.setOneClickAdmin(site.id, { enabled, userId });
+    setOcaBusy(false);
+    if (!res?.success) {
+      setOcaError(res?.error || 'Failed to update one-click admin.');
+      return false;
+    }
+    onSaved?.();
+    return true;
+  }
+
+  async function handleToggleOneClick(next) {
+    if (next) {
+      const users = await loadAdminUsers();
+      if (!users || users.length === 0) {
+        setOcaError('This site has no administrator accounts.');
+        return;
+      }
+      const uid = selectedUser || users[0].id;
+      setSelectedUser(uid);
+      await persistOneClick(true, uid);
+    } else {
+      await persistOneClick(false);
+    }
+  }
+
+  async function handleChangeUser(uid) {
+    setSelectedUser(uid);
+    if (oca.enabled) await persistOneClick(true, uid);
+  }
 
   // Pick up any tunnel already running for this site and follow its state.
   useEffect(() => {
@@ -116,7 +177,7 @@ function Overview({ site }) {
     {
       icon: WordPressIcon,
       label: 'wp-admin',
-      onClick: () => window.electronAPI.openWpAdmin(site.url),
+      onClick: () => window.electronAPI.openWpAdmin(site.id),
     },
     {
       icon: pmaBusy ? Loader : HardDrive,
@@ -220,6 +281,52 @@ function Overview({ site }) {
         )}
       </div>
 
+      {/* One-click admin (magic login) */}
+      <div className="settings-card mb-4">
+        <div className="flex items-center gap-3 px-4 py-3">
+          <span className="icon-tile bg-[#5856d6] w-7 h-7 flex-shrink-0">
+            <KeyRound size={15} />
+          </span>
+          <div className="flex-1 min-w-0">
+            <p className="text-[13px] text-gray-900">Magic Login</p>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Log into wp-admin without a password. Local access only.
+            </p>
+          </div>
+          {ocaBusy ? (
+            <Loader size={14} className="animate-spin text-gray-400" />
+          ) : (
+            <Toggle
+              checked={!!oca.enabled}
+              onChange={handleToggleOneClick}
+              label="Magic Login"
+            />
+          )}
+        </div>
+        {oca.enabled && (
+          <div className="flex items-center gap-3 px-4 py-3 border-t border-surface-hairline animate-fade-in">
+            <span className="w-7 flex-shrink-0" />
+            <label className="text-[13px] text-gray-500 flex-1">Log in as</label>
+            <select
+              value={selectedUser}
+              onChange={(e) => handleChangeUser(Number(e.target.value))}
+              disabled={ocaBusy || !adminUsers}
+              className="form-input !w-52 !py-1 text-[13px]"
+            >
+              {!adminUsers && <option>Loading…</option>}
+              {(adminUsers || []).map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.name} ({u.login})
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+        {ocaError && (
+          <p className="px-4 pb-3 text-xs text-red-600 dark:text-red-400">{ocaError}</p>
+        )}
+      </div>
+
       <div className="settings-card divide-y divide-surface-hairline">
         {rows.map(({ icon: Icon, label, value }) => (
           <div key={label} className="flex items-center gap-4 px-4 py-3">
@@ -285,7 +392,7 @@ export default function SiteDetail({ sites, refreshSites }) {
               Visit Site
             </button>
             <button
-              onClick={() => window.electronAPI.openWpAdmin(site.url)}
+              onClick={() => window.electronAPI.openWpAdmin(site.id)}
               className="btn-secondary text-xs"
             >
               <Settings size={12} className="mr-1.5" />
@@ -339,7 +446,7 @@ export default function SiteDetail({ sites, refreshSites }) {
         </nav>
 
         <div className="flex-1 min-w-0 max-w-3xl">
-          {active === 'overview' && <Overview site={site} />}
+          {active === 'overview' && <Overview site={site} onSaved={refreshSites} />}
           {active === 'wpconfig' && <WpConfigManager site={site} />}
           {active === 'php' && <SitePhpSettings site={site} onSaved={refreshSites} />}
           {active === 'wp-overview' && <WpOverview site={site} onSaved={refreshSites} />}

@@ -11,8 +11,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openSiteInBrowser: (url) => ipcRenderer.invoke('open-in-browser', url),
   openSiteInFinder: (sitePath) => ipcRenderer.invoke('open-in-finder', sitePath),
   openSiteInTerminal: (sitePath) => ipcRenderer.invoke('open-in-terminal', sitePath),
-  openWpAdmin: (url) => ipcRenderer.invoke('open-in-browser', `${url}/wp-admin`),
+  openWpAdmin: (id) => ipcRenderer.invoke('open-wp-admin', id),
   openPhpMyAdmin: (dbName) => ipcRenderer.invoke('open-phpmyadmin', dbName),
+
+  // One-click admin (magic login)
+  listAdminUsers: (id) => ipcRenderer.invoke('list-admin-users', id),
+  setOneClickAdmin: (id, opts) => ipcRenderer.invoke('set-one-click-admin', id, opts),
 
   // Site config (WP Config Manager)
   getWpConfig: (id) => ipcRenderer.invoke('get-wp-config', id),

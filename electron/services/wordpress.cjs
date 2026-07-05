@@ -353,6 +353,100 @@ add_filter('option_siteurl', 'wpherd_tunnel_filter_url');
   }
 }
 
+// ─── One-Click Admin (magic login) ─────────────────────────────────────────
+//
+// Passwordless login to wp-admin as a chosen administrator, LocalWP-style. A
+// managed mu-plugin watches for a magic token on the request; when it matches
+// the per-site secret it sets the auth cookie for the selected user and
+// redirects into the dashboard. Local access only — it refuses to authenticate
+// over a public share tunnel (mirrors LocalWP's "won't work with Live Links").
+
+// Lists the site's administrator accounts for the account picker.
+function listAdminUsers(sitePath) {
+  const out = wp(
+    ['user', 'list', '--role=administrator', '--fields=ID,user_login,display_name', '--format=json'],
+    sitePath
+  );
+  let parsed;
+  try {
+    parsed = JSON.parse(out || '[]');
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+  return parsed.map((u) => ({
+    id: Number(u.ID),
+    login: u.user_login,
+    name: u.display_name || u.user_login,
+  }));
+}
+
+// Writes the managed magic-login mu-plugin, baking in the chosen user id and the
+// per-site secret. Idempotent — call again to switch users or rotate the secret.
+function ensureMagicLoginMuPlugin(sitePath, { userId, secret }) {
+  const muDir = path.join(sitePath, 'wp-content', 'mu-plugins');
+  const file = path.join(muDir, 'wpherd-magic-login.php');
+  const uid = parseInt(userId, 10);
+  if (!Number.isInteger(uid) || uid <= 0) {
+    throw new Error('A valid administrator must be selected.');
+  }
+  if (!/^[a-f0-9]{16,}$/i.test(String(secret || ''))) {
+    throw new Error('Invalid magic-login secret.');
+  }
+  const contents = `<?php
+/**
+ * Plugin Name: WPHerd One-Click Admin
+ * Description: Passwordless admin login for local development. Managed by WPHerd — local access only.
+ */
+if (!defined('ABSPATH')) {
+    exit;
+}
+
+add_action('init', function () {
+    if (empty($_GET['wpherd_magic_login']) || !is_string($_GET['wpherd_magic_login'])) {
+        return;
+    }
+    $secret  = '${secret}';
+    $user_id = ${uid};
+    // Local development only: never authenticate over a public share tunnel.
+    $host = isset($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : '';
+    if (substr($host, -18) === '.trycloudflare.com') {
+        return;
+    }
+    if (!hash_equals($secret, $_GET['wpherd_magic_login'])) {
+        return;
+    }
+    $user = get_user_by('id', $user_id);
+    if (!$user) {
+        return;
+    }
+    wp_set_current_user($user->ID, $user->user_login);
+    wp_set_auth_cookie($user->ID, true);
+    do_action('wp_login', $user->user_login, $user);
+    wp_safe_redirect(admin_url());
+    exit;
+}, 0);
+`;
+
+  if (!fs.existsSync(path.join(sitePath, 'wp-content'))) {
+    throw new Error('wp-content not found for this site.');
+  }
+  if (!fs.existsSync(muDir)) fs.mkdirSync(muDir, { recursive: true });
+  fs.writeFileSync(file, contents, 'utf8');
+  return true;
+}
+
+// Removes the managed magic-login mu-plugin (when the feature is turned off).
+function removeMagicLoginMuPlugin(sitePath) {
+  const file = path.join(sitePath, 'wp-content', 'mu-plugins', 'wpherd-magic-login.php');
+  try {
+    if (fs.existsSync(file)) fs.unlinkSync(file);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function getSiteWordPressVersion(sitePath) {
   try {
     return sanitizeWpVersion(wp(['core', 'version'], sitePath));
@@ -818,6 +912,9 @@ module.exports = {
   removeWordPressSite,
   setSiteUrl,
   ensureTunnelMuPlugin,
+  listAdminUsers,
+  ensureMagicLoginMuPlugin,
+  removeMagicLoginMuPlugin,
   getWpConfigSchema,
   getWpConfig,
   setWpConfig,

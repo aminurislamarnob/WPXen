@@ -143,7 +143,7 @@ export default function SiteCard({
     {
       icon: WordPressIcon,
       label: 'wp-admin',
-      onClick: () => window.electronAPI.openWpAdmin(site.url),
+      onClick: () => window.electronAPI.openWpAdmin(site.id),
     },
     {
       icon: pmaBusy ? Loader : HardDrive,
