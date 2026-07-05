@@ -1,6 +1,6 @@
 'use strict';
 
-const { execFileSync, execFile } = require('child_process');
+const { execFileSync, execFile, spawn } = require('child_process');
 const { promisify } = require('util');
 const fs = require('fs');
 const brew = require('./brew.cjs');
@@ -58,6 +58,20 @@ function getMysqladminBin() {
     if (fs.existsSync(c)) return c;
   }
   return 'mysqladmin';
+}
+
+function getMysqldumpBin() {
+  const prefix = brew.getBrewPrefix();
+  if (!prefix) return 'mysqldump';
+  const candidates = [
+    `${prefix}/bin/mariadb-dump`,
+    `${prefix}/bin/mysqldump`,
+    'mysqldump',
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c;
+  }
+  return 'mysqldump';
 }
 
 function getBrewServiceName() {
@@ -213,6 +227,86 @@ function listDatabases() {
   }
 }
 
+// Recent MariaDB dumps start with a `/*!999999\- enable the sandbox mode */`
+// line that the Oracle mysql client rejects outright. Given the first bytes of
+// a dump, returns the offset imports should start streaming from (0 when the
+// marker is absent). Pure — covered by vitest.
+function sqlImportStartOffset(headBuffer) {
+  const head = headBuffer.toString('utf8');
+  if (head.startsWith('/*!999999\\-')) {
+    const nl = head.indexOf('\n');
+    if (nl !== -1) return nl + 1;
+  }
+  return 0;
+}
+
+// Streams a full dump of one database to `outFile`. spawn (not execFile) —
+// dumps are piped straight to disk so multi-GB databases never buffer in
+// memory or trip maxBuffer.
+function dumpDatabase(dbName, outFile, { timeout = 600000 } = {}) {
+  assertSafeDbName(dbName);
+  return new Promise((resolve, reject) => {
+    const args = [
+      ...authArgs(),
+      '--single-transaction',
+      '--quick',
+      '--default-character-set=utf8mb4',
+      dbName,
+    ];
+    const child = spawn(getMysqldumpBin(), args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout,
+    });
+    const out = fs.createWriteStream(outFile);
+    let stderr = '';
+    child.stderr.on('data', (d) => {
+      stderr += d.toString();
+    });
+    child.stdout.pipe(out);
+    child.on('error', reject);
+    out.on('error', reject);
+    child.on('close', (code) => {
+      out.end(() => {
+        if (code === 0) resolve();
+        else reject(new Error(stderr.trim() || `mysqldump exited with code ${code}`));
+      });
+    });
+  });
+}
+
+// Streams a .sql file into an (existing) database, skipping the MariaDB
+// sandbox-mode marker line when present.
+async function importDatabase(dbName, sqlFile, { timeout = 600000 } = {}) {
+  assertSafeDbName(dbName);
+  const fd = fs.openSync(sqlFile, 'r');
+  let start = 0;
+  try {
+    const head = Buffer.alloc(512);
+    const read = fs.readSync(fd, head, 0, 512, 0);
+    start = sqlImportStartOffset(head.subarray(0, read));
+  } finally {
+    fs.closeSync(fd);
+  }
+  return new Promise((resolve, reject) => {
+    const child = spawn(getMysqlBin(), [...authArgs(), dbName], {
+      stdio: ['pipe', 'ignore', 'pipe'],
+      timeout,
+    });
+    let stderr = '';
+    child.stderr.on('data', (d) => {
+      stderr += d.toString();
+    });
+    const input = fs.createReadStream(sqlFile, { start });
+    input.on('error', reject);
+    input.pipe(child.stdin);
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(stderr.trim() || `mysql import exited with code ${code}`));
+    });
+  });
+}
+
 // Returns the Unix socket the server is listening on (via @@socket), or null.
 // Used so phpMyAdmin connects the same way the CLI does — matching the
 // 'user'@'localhost' grant rather than a TCP grant that may not exist.
@@ -246,6 +340,9 @@ module.exports = {
   dropDatabase,
   databaseExists,
   listDatabases,
+  dumpDatabase,
+  importDatabase,
+  sqlImportStartOffset,
   testConnection,
   getBrewServiceName,
   execQuery,

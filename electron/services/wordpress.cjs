@@ -908,6 +908,8 @@ module.exports = {
   getSitesDir,
   ensureSitesDir,
   getWpCliBin,
+  wp,
+  wpAsync,
   createWordPressSite,
   removeWordPressSite,
   setSiteUrl,

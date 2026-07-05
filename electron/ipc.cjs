@@ -28,6 +28,7 @@ const phpService = require('./services/php.cjs');
 const mysql = require('./services/mysql.cjs');
 const dnsmasq = require('./services/dnsmasq.cjs');
 const wordpress = require('./services/wordpress.cjs');
+const siteops = require('./services/siteops.cjs');
 const mkcert = require('./services/mkcert.cjs');
 const phpmyadmin = require('./services/phpmyadmin.cjs');
 const mailpit = require('./services/mailpit.cjs');
@@ -344,6 +345,128 @@ function registerHandlers(win, storeInstance) {
       store.set('sites', sites);
       return { success: true, site: updated };
     } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  // ─── Export / Import ─────────────────────────────────────────────────
+
+  ipcMain.handle('export-site', async (event, id) => {
+    try {
+      const site = store.get('sites', []).find((s) => s.id === id);
+      if (!site) return { success: false, error: 'Site not found' };
+      if (!mysql.isRunning()) {
+        return {
+          success: false,
+          error: 'MySQL is not running. Start it in the Services panel.',
+        };
+      }
+
+      const result = await dialog.showSaveDialog(mainWindow, {
+        defaultPath: path.join(
+          os.homedir(),
+          'Desktop',
+          `${wordpress.sanitizeDomain(site.name) || site.domain}-export.zip`
+        ),
+        filters: [{ name: 'Zip archive', extensions: ['zip'] }],
+      });
+      if (result.canceled || !result.filePath) {
+        return { success: true, canceled: true };
+      }
+
+      const progress = (data) => {
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('site-export-progress', data);
+        }
+      };
+      const { sizeBytes } = await siteops.exportSite(site, result.filePath, progress);
+      return { success: true, filePath: result.filePath, sizeBytes };
+    } catch (err) {
+      console.error('export-site error:', err);
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('select-import-file', async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      properties: ['openFile'],
+      filters: [{ name: 'Site archives', extensions: ['zip', 'wpress'] }],
+    });
+    return result.canceled ? null : result.filePaths[0];
+  });
+
+  ipcMain.handle('inspect-import-archive', async (_, archivePath) => {
+    try {
+      if (typeof archivePath !== 'string' || !path.isAbsolute(archivePath)) {
+        return { success: false, error: 'Invalid archive path.' };
+      }
+      const info = await siteops.inspectArchive(archivePath);
+      return { success: true, ...info };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('import-site', async (event, payload = {}) => {
+    try {
+      const { archivePath, ...target } = payload;
+      if (typeof archivePath !== 'string' || !fs.existsSync(archivePath)) {
+        return { success: false, error: 'The selected archive no longer exists.' };
+      }
+
+      // Same authoritative validation as add-site (admin fields don't apply —
+      // the imported database carries its own users).
+      const { valid, errors } = validation.validateSiteInput({
+        ...target,
+        adminUser: 'admin',
+        adminPassword: 'imported',
+        adminEmail: `admin@${target.domain}`,
+      });
+      if (!valid) return { success: false, error: errors.join(' ') };
+
+      const sites = store.get('sites', []);
+      if (sites.some((s) => s.domain === target.domain)) {
+        return { success: false, error: `Domain ${target.domain} already exists` };
+      }
+      if (sites.some((s) => s.dbName === target.dbName)) {
+        return { success: false, error: `Database ${target.dbName} already exists` };
+      }
+      if (mysql.databaseExists(target.dbName)) {
+        return {
+          success: false,
+          error: `A database named ${target.dbName} already exists in MySQL.`,
+        };
+      }
+      if (nginx.siteConfigExists(target.domain)) {
+        return {
+          success: false,
+          error: `An nginx config for ${target.domain} already exists.`,
+        };
+      }
+      if (fs.existsSync(path.join(target.path, 'wp-config.php'))) {
+        return {
+          success: false,
+          error: `${target.path} already contains a WordPress install.`,
+        };
+      }
+      if (!mysql.isRunning()) {
+        return {
+          success: false,
+          error: 'MySQL is not running. Start it in the Services panel.',
+        };
+      }
+
+      const progress = (data) => {
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('site-import-progress', data);
+        }
+      };
+      const site = await siteops.importSite(archivePath, target, progress);
+
+      store.set('sites', [...store.get('sites', []), site]);
+      return { success: true, site };
+    } catch (err) {
+      console.error('import-site error:', err);
       return { success: false, error: humanize(err) };
     }
   });

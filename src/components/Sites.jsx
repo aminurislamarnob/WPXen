@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react';
-import { Plus, Search, Globe, AlertTriangle, Loader } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { Plus, Search, Globe, AlertTriangle, Loader, Upload, Check } from 'lucide-react';
 import SiteCard from './SiteCard';
 import AddSiteModal from './AddSiteModal';
+import ImportSiteModal from './ImportSiteModal';
 
 function DeleteConfirmModal({ site, onConfirm, onClose }) {
   const [removeFiles, setRemoveFiles] = useState(false);
@@ -74,9 +75,15 @@ function DeleteConfirmModal({ site, onConfirm, onClose }) {
 
 export default function Sites({ sites, setSites, refreshSites }) {
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
   const [search, setSearch] = useState('');
   const [deletingSite, setDeletingSite] = useState(null);
   const [phpVersions, setPhpVersions] = useState([]);
+
+  // Export runs behind a save dialog + progress events; the banner reflects
+  // the active export (or its success/error) inline above the site list.
+  const [exportStatus, setExportStatus] = useState(null); // {state:'busy'|'done'|'error', site, message}
+  const exportBusyRef = useRef(false);
 
   // Share tunnels: cloudflared availability + per-site tunnel state, keyed by
   // site id. Lifted here so a single 'tunnel-update' subscription serves every
@@ -89,6 +96,41 @@ export default function Sites({ sites, setSites, refreshSites }) {
   useEffect(() => {
     window.electronAPI.getPhpVersions().then(setPhpVersions).catch(console.error);
   }, []);
+
+  useEffect(() => {
+    window.electronAPI.on('site-export-progress', ({ message }) => {
+      if (exportBusyRef.current) {
+        setExportStatus((prev) =>
+          prev?.state === 'busy' ? { ...prev, message } : prev
+        );
+      }
+    });
+    return () => window.electronAPI.off('site-export-progress');
+  }, []);
+
+  async function handleExport(site) {
+    if (exportBusyRef.current) return;
+    exportBusyRef.current = true;
+    setExportStatus({ state: 'busy', site, message: 'Preparing export…' });
+    const result = await window.electronAPI.exportSite(site.id);
+    exportBusyRef.current = false;
+    if (result.canceled) {
+      setExportStatus(null);
+    } else if (result.success) {
+      setExportStatus({
+        state: 'done',
+        site,
+        message: `Exported to ${result.filePath}`,
+      });
+      setTimeout(() => setExportStatus(null), 6000);
+    } else {
+      setExportStatus({
+        state: 'error',
+        site,
+        message: result.error || 'Export failed.',
+      });
+    }
+  }
 
   useEffect(() => {
     window.electronAPI
@@ -216,11 +258,50 @@ export default function Sites({ sites, setSites, refreshSites }) {
             {sites.length} WordPress site{sites.length !== 1 ? 's' : ''}
           </p>
         )}
-        <button onClick={() => setShowAddModal(true)} className="btn-primary">
-          <Plus size={12} strokeWidth={2.5} />
-          Add Site
-        </button>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <button onClick={() => setShowImportModal(true)} className="btn-secondary">
+            <Upload size={12} strokeWidth={2.5} />
+            Import Site
+          </button>
+          <button onClick={() => setShowAddModal(true)} className="btn-primary">
+            <Plus size={12} strokeWidth={2.5} />
+            Add Site
+          </button>
+        </div>
       </div>
+
+      {/* Export status banner */}
+      {exportStatus && (
+        <div
+          className={`flex items-center gap-2 rounded-xl px-4 py-2.5 mb-3 text-xs animate-fade-in ${
+            exportStatus.state === 'error'
+              ? 'bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400'
+              : exportStatus.state === 'done'
+                ? 'bg-green-50 text-green-700 dark:bg-green-500/10 dark:text-green-400'
+                : 'bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300'
+          }`}
+        >
+          {exportStatus.state === 'busy' ? (
+            <Loader size={13} className="animate-spin flex-shrink-0" />
+          ) : exportStatus.state === 'done' ? (
+            <Check size={13} className="flex-shrink-0" />
+          ) : (
+            <AlertTriangle size={13} className="flex-shrink-0" />
+          )}
+          <span className="min-w-0 truncate">
+            <span className="font-semibold">{exportStatus.site.name}:</span>{' '}
+            {exportStatus.message}
+          </span>
+          {exportStatus.state !== 'busy' && (
+            <button
+              onClick={() => setExportStatus(null)}
+              className="ml-auto flex-shrink-0 font-medium hover:underline"
+            >
+              Dismiss
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Sites grid */}
       {sites.length === 0 ? (
@@ -249,6 +330,7 @@ export default function Sites({ sites, setSites, refreshSites }) {
               key={site.id}
               site={site}
               onDelete={setDeletingSite}
+              onExport={handleExport}
               onToggleHttps={handleToggleHttps}
               tunnel={tunnels[site.id]}
               cfInstalled={cfInstalled}
@@ -271,6 +353,15 @@ export default function Sites({ sites, setSites, refreshSites }) {
             handleSiteAdded(site);
             setShowAddModal(false);
           }}
+        />
+      )}
+
+      {/* Import site modal */}
+      {showImportModal && (
+        <ImportSiteModal
+          phpVersions={phpVersions}
+          onClose={() => setShowImportModal(false)}
+          onSiteImported={handleSiteAdded}
         />
       )}
 
