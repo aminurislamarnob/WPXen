@@ -25,6 +25,7 @@ const fs = require('fs');
 const brew = require('./services/brew.cjs');
 const nginx = require('./services/nginx.cjs');
 const phpService = require('./services/php.cjs');
+const opcache = require('./services/opcache.cjs');
 const mysql = require('./services/mysql.cjs');
 const dnsmasq = require('./services/dnsmasq.cjs');
 const wordpress = require('./services/wordpress.cjs');
@@ -1133,6 +1134,42 @@ function registerHandlers(win, storeInstance) {
     try {
       phpService.setPhpIniSettingAllVersions(key, value);
       return { success: true };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  // ─── OpCache ─────────────────────────────────────────────────────────
+  ipcMain.handle('get-opcache-config', async () => {
+    try {
+      return { success: true, ...opcache.getOpcacheConfig() };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('set-opcache', async (_, version, key, value) => {
+    try {
+      const state = opcache.setOpcache(version, key, value);
+      return { success: true, state };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('set-opcache-all', async (_, key, value) => {
+    try {
+      opcache.setOpcacheAll(key, value);
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('get-opcache-live-stats', async (_, version) => {
+    try {
+      const stats = await opcache.getOpcacheLiveStats(version, store.get('sites', []));
+      return { success: true, stats };
     } catch (err) {
       return { success: false, error: humanize(err) };
     }

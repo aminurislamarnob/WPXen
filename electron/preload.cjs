@@ -96,6 +96,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setPhpIniSettingAll: (key, value) =>
     ipcRenderer.invoke('set-php-ini-setting-all', key, value),
 
+  // OpCache
+  getOpcacheConfig: () => ipcRenderer.invoke('get-opcache-config'),
+  setOpcache: (version, key, value) =>
+    ipcRenderer.invoke('set-opcache', version, key, value),
+  setOpcacheAll: (key, value) => ipcRenderer.invoke('set-opcache-all', key, value),
+  getOpcacheLiveStats: (version) =>
+    ipcRenderer.invoke('get-opcache-live-stats', version),
+
   // Dependencies & Setup
   checkDependencies: () => ipcRenderer.invoke('check-dependencies'),
   setupDnsmasq: () => ipcRenderer.invoke('setup-dnsmasq'),

@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { StatusBadge } from './StatusBadge';
 import PhpSettings from './PhpSettings';
+import OpCache from './OpCache';
 import { Card, Row, SectionLabel } from './ui';
 
 // Version-number tile (like System Settings colored tiles, but numeric).
@@ -322,6 +323,7 @@ export default function PHPVersions() {
       )}
 
       {!loading && <PhpSettings />}
+      {!loading && <OpCache />}
     </div>
   );
 }
