@@ -8,10 +8,11 @@ import {
   ArrowUpCircle,
   Sliders,
   RefreshCw,
+  Bug,
 } from 'lucide-react';
 import { StatusBadge } from './StatusBadge';
 import PhpSettings from './PhpSettings';
-import { Card, Row, SectionLabel } from './ui';
+import { Card, Row, SectionLabel, Toggle } from './ui';
 
 // Version-number tile (like System Settings colored tiles, but numeric).
 function VersionTile({ version, active }) {
@@ -26,7 +27,21 @@ function VersionTile({ version, active }) {
   );
 }
 
-function VersionRow({ version, onSwitch, switching, onUpdate, updating, logLine }) {
+function VersionRow({
+  version,
+  onSwitch,
+  switching,
+  onUpdate,
+  updating,
+  logLine,
+  xdebug,
+  xdebugInstalling,
+  xdebugBusy,
+  xdebugLogLine,
+  onInstallXdebug,
+  onToggleXdebug,
+  onSetXdebugMode,
+}) {
   const isLoading = switching === version.version;
   const isUpdating = updating === version.version;
 
@@ -80,6 +95,73 @@ function VersionRow({ version, onSwitch, switching, onUpdate, updating, logLine 
         <div className="px-4 py-2 bg-zinc-900">
           <p className="text-xs text-green-400 font-mono truncate" title={logLine}>
             {logLine || 'Starting…'}
+          </p>
+        </div>
+      )}
+
+      {/* Xdebug sub-row */}
+      {xdebug && (
+        <div className="flex items-center gap-3 px-4 py-2.5 border-t border-surface-hairline">
+          <span className="w-[30px] flex justify-center flex-shrink-0">
+            <Bug size={15} className="text-gray-400" />
+          </span>
+          <div className="flex-1 min-w-0">
+            <p className="text-[13px] text-gray-900">Xdebug</p>
+            <p className="text-xs text-gray-500 mt-0.5">
+              {xdebug.installed
+                ? `Listens on localhost:${xdebug.clientPort || 9003}`
+                : 'Step debugging & develop helpers'}
+            </p>
+          </div>
+          {!xdebug.installed ? (
+            <button
+              onClick={() => onInstallXdebug(version.version)}
+              disabled={xdebugInstalling}
+              className="btn-secondary text-xs min-w-[90px] justify-center"
+            >
+              {xdebugInstalling ? (
+                <>
+                  <Loader size={11} className="animate-spin mr-1.5" />
+                  Installing…
+                </>
+              ) : (
+                <>
+                  <Download size={11} className="mr-1.5" />
+                  Install
+                </>
+              )}
+            </button>
+          ) : (
+            <div className="flex items-center gap-2">
+              {xdebug.enabled && (
+                <select
+                  value={xdebug.mode}
+                  onChange={(e) => onSetXdebugMode(version.version, e.target.value)}
+                  disabled={xdebugBusy}
+                  className="form-input !w-auto !py-1 text-xs"
+                >
+                  <option value="debug">Debug</option>
+                  <option value="develop">Develop</option>
+                  <option value="debug,develop">Debug + Develop</option>
+                </select>
+              )}
+              {xdebugBusy ? (
+                <Loader size={14} className="animate-spin text-gray-400" />
+              ) : (
+                <Toggle
+                  checked={xdebug.enabled}
+                  onChange={(v) => onToggleXdebug(version.version, v)}
+                  label="Xdebug"
+                />
+              )}
+            </div>
+          )}
+        </div>
+      )}
+      {xdebugInstalling && (
+        <div className="px-4 py-2 bg-zinc-900">
+          <p className="text-xs text-green-400 font-mono truncate" title={xdebugLogLine}>
+            {xdebugLogLine || 'Starting…'}
           </p>
         </div>
       )}
@@ -139,13 +221,16 @@ export default function PHPVersions() {
   const [updating, setUpdating] = useState(null);
   const [logLine, setLogLine] = useState('');
   const [message, setMessage] = useState(null);
+  const [xdebugStates, setXdebugStates] = useState({});
+  const [xdebugInstalling, setXdebugInstalling] = useState(null);
+  const [xdebugBusy, setXdebugBusy] = useState(null);
 
   // Keep the version of the in-flight brew op available to the progress
   // listener without re-subscribing on every change.
   const busyRef = useRef(null);
   useEffect(() => {
-    busyRef.current = installing || updating;
-  }, [installing, updating]);
+    busyRef.current = installing || updating || xdebugInstalling;
+  }, [installing, updating, xdebugInstalling]);
 
   useEffect(() => {
     loadVersions();
@@ -178,7 +263,62 @@ export default function PHPVersions() {
     } else {
       console.error(installableResult.reason);
     }
+    loadXdebug();
     setLoading(false);
+  }
+
+  async function loadXdebug() {
+    try {
+      const r = await window.electronAPI.getXdebugStatus();
+      if (r?.success) {
+        const map = {};
+        for (const s of r.versions) map[s.version] = s;
+        setXdebugStates(map);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  async function handleInstallXdebug(version) {
+    setXdebugInstalling(version);
+    setLogLine('');
+    setMessage(null);
+    const result = await window.electronAPI.installXdebug(version);
+    if (result.success) {
+      setMessage({ type: 'success', text: `Xdebug installed for PHP ${version}.` });
+      setXdebugStates((prev) => ({ ...prev, [version]: result.state }));
+    } else {
+      setMessage({ type: 'error', text: result.error });
+    }
+    setXdebugInstalling(null);
+    setLogLine('');
+  }
+
+  async function handleToggleXdebug(version, enabled) {
+    setXdebugBusy(version);
+    const result = await window.electronAPI.setXdebug(version, { enabled });
+    if (result.success) {
+      setXdebugStates((prev) => ({ ...prev, [version]: result.state }));
+    } else {
+      setMessage({ type: 'error', text: result.error });
+    }
+    setXdebugBusy(null);
+  }
+
+  async function handleSetXdebugMode(version, mode) {
+    setXdebugBusy(version);
+    const current = xdebugStates[version];
+    const result = await window.electronAPI.setXdebug(version, {
+      enabled: current?.enabled ?? true,
+      mode,
+    });
+    if (result.success) {
+      setXdebugStates((prev) => ({ ...prev, [version]: result.state }));
+    } else {
+      setMessage({ type: 'error', text: result.error });
+    }
+    setXdebugBusy(null);
   }
 
   async function handleSwitch(version) {
@@ -291,6 +431,13 @@ export default function PHPVersions() {
                 onUpdate={handleUpdate}
                 updating={updating}
                 logLine={logLine}
+                xdebug={xdebugStates[v.version]}
+                xdebugInstalling={xdebugInstalling === v.version}
+                xdebugBusy={xdebugBusy === v.version}
+                xdebugLogLine={logLine}
+                onInstallXdebug={handleInstallXdebug}
+                onToggleXdebug={handleToggleXdebug}
+                onSetXdebugMode={handleSetXdebugMode}
               />
             ))}
           </Card>
