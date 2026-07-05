@@ -10,6 +10,7 @@ import {
   ShieldAlert,
   ShieldOff,
   Wand2,
+  Lock,
 } from 'lucide-react';
 import { Card, Row, SectionLabel, Toggle, Button } from './ui';
 
@@ -31,6 +32,7 @@ export default function Settings({ onOpenWizard }) {
   const [sudoers, setSudoers] = useState(null);
   const [sudoersLoading, setSudoersLoading] = useState(false);
   const [sudoersMessage, setSudoersMessage] = useState(null);
+  const [caStatus, setCaStatus] = useState(null);
 
   useEffect(() => {
     Promise.all([
@@ -44,6 +46,7 @@ export default function Settings({ onOpenWizard }) {
       setDeps(d);
       setSudoers(sud);
     });
+    window.electronAPI.getCaStatus().then(setCaStatus).catch(() => {});
   }, []);
 
   // Main process re-checks dependencies whenever the app regains focus (e.g.
@@ -256,6 +259,31 @@ export default function Settings({ onOpenWizard }) {
               ) : null}
               Set Up…
             </button>
+          </Row>
+          <Row
+            icon={
+              caStatus?.trusted ? (
+                <Lock size={18} className="text-wp-green flex-shrink-0" />
+              ) : (
+                <Lock size={18} className="text-gray-400 flex-shrink-0" />
+              )
+            }
+            title="Local HTTPS Certificate Authority"
+            subtitle={
+              caStatus?.trusted
+                ? 'Trusted — sites you switch to HTTPS get browser-trusted certificates.'
+                : 'Not installed yet. Enabling HTTPS on any site sets it up automatically.'
+            }
+          >
+            <span
+              className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${
+                caStatus?.trusted
+                  ? 'bg-green-50 text-green-700 dark:bg-green-500/10 dark:text-green-400'
+                  : 'bg-gray-100 text-gray-500 dark:bg-white/10 dark:text-gray-400'
+              }`}
+            >
+              {caStatus?.trusted ? 'Trusted' : 'Not installed'}
+            </span>
           </Row>
         </Card>
         <p className="text-[11px] text-gray-400 mt-1.5 px-1">

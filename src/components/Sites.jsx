@@ -3,6 +3,7 @@ import { Plus, Search, Globe, AlertTriangle, Loader, Upload, Check } from 'lucid
 import SiteCard from './SiteCard';
 import AddSiteModal from './AddSiteModal';
 import ImportSiteModal from './ImportSiteModal';
+import CloneSiteModal from './CloneSiteModal';
 
 function DeleteConfirmModal({ site, onConfirm, onClose }) {
   const [removeFiles, setRemoveFiles] = useState(false);
@@ -76,6 +77,7 @@ function DeleteConfirmModal({ site, onConfirm, onClose }) {
 export default function Sites({ sites, setSites, refreshSites }) {
   const [showAddModal, setShowAddModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
+  const [cloningSite, setCloningSite] = useState(null);
   const [search, setSearch] = useState('');
   const [deletingSite, setDeletingSite] = useState(null);
   const [phpVersions, setPhpVersions] = useState([]);
@@ -331,6 +333,7 @@ export default function Sites({ sites, setSites, refreshSites }) {
               site={site}
               onDelete={setDeletingSite}
               onExport={handleExport}
+              onClone={setCloningSite}
               onToggleHttps={handleToggleHttps}
               tunnel={tunnels[site.id]}
               cfInstalled={cfInstalled}
@@ -362,6 +365,16 @@ export default function Sites({ sites, setSites, refreshSites }) {
           phpVersions={phpVersions}
           onClose={() => setShowImportModal(false)}
           onSiteImported={handleSiteAdded}
+        />
+      )}
+
+      {/* Clone site modal */}
+      {cloningSite && (
+        <CloneSiteModal
+          source={cloningSite}
+          phpVersions={phpVersions}
+          onClose={() => setCloningSite(null)}
+          onCloned={handleSiteAdded}
         />
       )}
 

@@ -20,8 +20,10 @@ import {
   Check,
   X,
   KeyRound,
+  Pencil,
 } from 'lucide-react';
 import { Toggle } from './ui';
+import ChangeUrlModal from './ChangeUrlModal';
 import WpConfigManager from './WpConfigManager';
 import SitePhpSettings from './SitePhpSettings';
 import WpOverview from './WpOverview';
@@ -64,6 +66,7 @@ function Overview({ site, onSaved }) {
   const oca = site.oneClickAdmin || {};
   const [ocaBusy, setOcaBusy] = useState(false);
   const [ocaError, setOcaError] = useState(null);
+  const [changingUrl, setChangingUrl] = useState(false);
   const [adminUsers, setAdminUsers] = useState(null);
   const [selectedUser, setSelectedUser] = useState(oca.userId || '');
 
@@ -334,12 +337,35 @@ function Overview({ site, onSaved }) {
               <Icon size={13} />
               {label}
             </span>
-            <span className="text-[13px] text-gray-900 font-mono truncate" title={value}>
+            <span
+              className="text-[13px] text-gray-900 font-mono truncate flex-1"
+              title={value}
+            >
               {value}
             </span>
+            {label === 'Domain' && (
+              <button
+                onClick={() => setChangingUrl(true)}
+                className="flex items-center gap-1.5 text-xs text-wp-blue hover:underline flex-shrink-0"
+              >
+                <Pencil size={12} />
+                Change
+              </button>
+            )}
           </div>
         ))}
       </div>
+
+      {changingUrl && (
+        <ChangeUrlModal
+          site={site}
+          onClose={() => setChangingUrl(false)}
+          onChanged={() => {
+            setChangingUrl(false);
+            onSaved?.();
+          }}
+        />
+      )}
     </div>
   );
 }

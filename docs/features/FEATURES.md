@@ -83,8 +83,9 @@ benchmarking) and a **Reference** link to that solution's documentation.
    content) as a reusable template for one-click new sites.
    — *Provided by: Local, Herd (`herd.yml`), Studio*
    — Reference: [Local — blueprints](https://localwp.com/help-docs/local-features/how-to-use-blueprints/) · [Herd — herd.yml](https://herd.laravel.com/docs/macos/sites/herd-yaml)
-6. **HTTPS certificate trust automation** — one-click "trust certificate in Keychain" for
-   the self-signed certs we already generate.
+6. **HTTPS certificate trust automation** — ✅ **Shipped.** Enabling HTTPS on a site runs
+   mkcert's locally-trusted CA (`mkcert -install`, added to the Keychain) and mints a
+   browser-trusted per-site cert; Settings shows a read-only CA-trust status row.
    — *Provided by: Local, Studio*
    — Reference: [Local — SSL & trust](https://localwp.com/help-docs/getting-started/ssl-in-local/)
 

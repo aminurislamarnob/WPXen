@@ -16,6 +16,8 @@ const VALID_EVENT_CHANNELS = [
   'core-deps-install-progress',
   'site-export-progress',
   'site-import-progress',
+  'site-clone-progress',
+  'site-changeurl-progress',
 ];
 
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -36,6 +38,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   inspectImportArchive: (archivePath) =>
     ipcRenderer.invoke('inspect-import-archive', archivePath),
   importSite: (payload) => ipcRenderer.invoke('import-site', payload),
+  cloneSite: (id, target) => ipcRenderer.invoke('clone-site', id, target),
+  changeSiteUrl: (id, newDomain) =>
+    ipcRenderer.invoke('change-site-url', id, newDomain),
+  getCaStatus: () => ipcRenderer.invoke('get-ca-status'),
 
   // One-click admin (magic login)
   listAdminUsers: (id) => ipcRenderer.invoke('list-admin-users', id),

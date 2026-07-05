@@ -19,10 +19,11 @@ import {
   X,
   SlidersHorizontal,
   Archive,
+  CopyPlus,
 } from 'lucide-react';
 import { WordPressIcon } from './icons';
 
-function ContextMenu({ site, onDelete, onManage, onExport, onClose }) {
+function ContextMenu({ site, onDelete, onManage, onExport, onClone, onClose }) {
   return (
     <div
       className="absolute right-0 top-8 z-50 panel-menu rounded-xl shadow-card-hover border border-gray-100 py-1 w-48 animate-fade-in"
@@ -62,6 +63,16 @@ function ContextMenu({ site, onDelete, onManage, onExport, onClose }) {
       <div className="border-t border-gray-100 my-1" />
       <button
         onClick={() => {
+          onClone(site);
+          onClose();
+        }}
+        className="flex w-full items-center gap-2.5 px-3 py-2 text-xs text-gray-700 hover:bg-gray-50"
+      >
+        <CopyPlus size={13} />
+        Clone…
+      </button>
+      <button
+        onClick={() => {
           onExport(site);
           onClose();
         }}
@@ -89,6 +100,7 @@ export default function SiteCard({
   site,
   onDelete,
   onExport,
+  onClone,
   onToggleHttps,
   tunnel,
   cfInstalled,
@@ -276,6 +288,7 @@ export default function SiteCard({
               onDelete={onDelete}
               onManage={openDetail}
               onExport={onExport}
+              onClone={onClone}
               onClose={() => setMenuOpen(false)}
             />
           )}

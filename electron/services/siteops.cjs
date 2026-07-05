@@ -8,6 +8,7 @@ const nginx = require('./nginx.cjs');
 const wordpress = require('./wordpress.cjs');
 const archive = require('./archive.cjs');
 const wpress = require('./wpress.cjs');
+const mkcert = require('./mkcert.cjs');
 const { DOMAIN_RE } = require('./validation.cjs');
 
 // Shared engine behind Export, Import, Clone, and Blueprints. Every entry
@@ -503,6 +504,187 @@ async function importSite(archivePath, target, onProgress) {
   }
 }
 
+// ─── Shared helpers ──────────────────────────────────────────────────────
+
+// Rewrites every occurrence of `//oldHost` to `//newHost` across all tables
+// (guids left alone — WordPress keys post lookups on them). No-op when the
+// hosts match.
+async function searchReplaceHost(sitePath, oldHost, newHost) {
+  if (!oldHost || oldHost === newHost) return;
+  await wordpress.wpAsync(
+    [
+      'search-replace',
+      `//${oldHost}`,
+      `//${newHost}`,
+      '--all-tables',
+      '--skip-columns=guid',
+    ],
+    sitePath,
+    { timeout: LONG_TIMEOUT }
+  );
+}
+
+// Mints a trusted local cert for `domain`, ensuring mkcert + the local CA are
+// in place first. Returns { certPath, keyPath }.
+function mintCert(domain) {
+  mkcert.ensureInstalled();
+  mkcert.ensureCA();
+  return mkcert.generateCert(domain);
+}
+
+// ─── Clone ───────────────────────────────────────────────────────────────
+
+// Duplicates `source` into a brand-new site at `target` ({name, domain, path,
+// phpVersion, dbName} — pre-validated by the IPC handler). The source site is
+// never touched. The clone does NOT inherit the magic-login secret or the
+// one-click-admin / alias settings (those are per-site). Rolls back anything
+// it created on failure.
+async function cloneSite(source, target, onProgress) {
+  const progress = onProgress || (() => {});
+  if (!fs.existsSync(source.path)) {
+    throw new Error(`Source site directory not found: ${source.path}`);
+  }
+  const ledger = { dirCreated: false, dbCreated: false, vhostWritten: false };
+  const staging = makeTmpDir();
+  try {
+    progress({ step: 'files', message: 'Copying site files...' });
+    fs.cpSync(source.path, target.path, {
+      recursive: true,
+      errorOnExist: true,
+      force: false,
+      verbatimSymlinks: true,
+    });
+    ledger.dirCreated = true;
+
+    progress({ step: 'database', message: 'Copying database...' });
+    const dumpFile = path.join(staging, 'clone.sql');
+    await mysql.dumpDatabase(source.dbName, dumpFile);
+    mysql.createDatabase(target.dbName);
+    ledger.dbCreated = true;
+    await mysql.importDatabase(target.dbName, dumpFile);
+
+    progress({ step: 'config', message: 'Configuring WordPress...' });
+    await wordpress.wpAsync(['config', 'set', 'DB_NAME', target.dbName], target.path);
+    // Don't leak the source's magic-login secret into the clone.
+    wordpress.removeMagicLoginMuPlugin(target.path);
+
+    progress({ step: 'urls', message: 'Updating site URLs...' });
+    await searchReplaceHost(target.path, source.domain, target.domain);
+
+    const https = !!source.https;
+    let certPath, keyPath;
+    if (https) {
+      progress({ step: 'cert', message: 'Creating HTTPS certificate...' });
+      ({ certPath, keyPath } = mintCert(target.domain));
+    }
+    const newUrl = `${https ? 'https' : 'http'}://${target.domain}`;
+
+    progress({ step: 'nginx', message: 'Configuring nginx...' });
+    const site = {
+      id: wordpress.generateId(),
+      name: target.name,
+      domain: target.domain,
+      path: target.path,
+      phpVersion: target.phpVersion,
+      dbName: target.dbName,
+      adminUser: source.adminUser || 'admin',
+      adminEmail: source.adminEmail || `admin@${target.domain}`,
+      wpVersion: source.wpVersion || 'unknown',
+      https,
+      ...(https ? { certPath, keyPath } : {}),
+      url: newUrl,
+      createdAt: new Date().toISOString(),
+    };
+    nginx.createSiteConfig(site);
+    ledger.vhostWritten = true;
+    try {
+      nginx.reload();
+    } catch {}
+    try {
+      wordpress.setSiteUrl(target.path, newUrl);
+    } catch {}
+
+    progress({ step: 'done', message: 'Clone complete!' });
+    return site;
+  } catch (err) {
+    if (ledger.vhostWritten) {
+      try {
+        nginx.removeSiteConfig(target.domain);
+        nginx.reload();
+      } catch {}
+    }
+    if (ledger.dbCreated) {
+      try {
+        mysql.dropDatabase(target.dbName);
+      } catch {}
+    }
+    if (ledger.dirCreated) {
+      try {
+        fs.rmSync(target.path, { recursive: true, force: true });
+      } catch {}
+    }
+    throw err;
+  } finally {
+    fs.rmSync(staging, { recursive: true, force: true });
+  }
+}
+
+// ─── Change URL ──────────────────────────────────────────────────────────
+
+// Renames a site's domain in place. Ordered so the site is never unreachable:
+// mint the cert, write the NEW vhost first, rewrite the database, then remove
+// the old vhost and cert last. id / dbName / path are unchanged. Returns the
+// fields the store needs to merge: { domain, url, certPath, keyPath }.
+async function changeSiteUrl(site, newDomain, onProgress) {
+  const progress = onProgress || (() => {});
+  const oldDomain = site.domain;
+  const https = !!site.https;
+  const newUrl = `${https ? 'https' : 'http'}://${newDomain}`;
+
+  let certPath, keyPath;
+  if (https) {
+    progress({ step: 'cert', message: 'Creating HTTPS certificate...' });
+    ({ certPath, keyPath } = mintCert(newDomain));
+  }
+
+  // New vhost goes live before we touch the database so the new domain
+  // resolves the moment DNS (dnsmasq wildcard *.test) points at it.
+  progress({ step: 'nginx', message: 'Writing new nginx config...' });
+  const updated = {
+    ...site,
+    domain: newDomain,
+    url: newUrl,
+    ...(https ? { certPath, keyPath } : {}),
+  };
+  nginx.createSiteConfig(updated);
+  try {
+    nginx.reload();
+  } catch {}
+
+  progress({ step: 'urls', message: 'Updating database URLs...' });
+  await searchReplaceHost(site.path, oldDomain, newDomain);
+  try {
+    wordpress.setSiteUrl(site.path, newUrl);
+  } catch {}
+
+  // Old vhost + cert removed last, best-effort.
+  progress({ step: 'cleanup', message: 'Removing old configuration...' });
+  if (newDomain !== oldDomain) {
+    try {
+      nginx.removeSiteConfig(oldDomain);
+      nginx.reload();
+    } catch {}
+    if (https) {
+      try {
+        mkcert.removeCert(oldDomain);
+      } catch {}
+    }
+  }
+
+  progress({ step: 'done', message: 'URL changed!' });
+  return { domain: newDomain, url: newUrl, certPath, keyPath };
+}
+
 module.exports = {
   MANIFEST_NAME,
   buildManifest,
@@ -513,4 +695,6 @@ module.exports = {
   inspectArchive,
   exportSite,
   importSite,
+  cloneSite,
+  changeSiteUrl,
 };

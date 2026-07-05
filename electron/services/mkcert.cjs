@@ -71,6 +71,30 @@ function generateCert(domain) {
   return { certPath, keyPath };
 }
 
+// Absolute path to mkcert's CA directory (holds rootCA.pem / rootCA-key.pem),
+// or null if mkcert isn't installed.
+function getCaRoot() {
+  const mkcert = getMkcertPath();
+  if (!mkcert) return null;
+  try {
+    const out = execFileSync(mkcert, ['-CAROOT'], {
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    return out.toString().trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+// Read-only status for the Settings CA row: is mkcert present, and has its
+// local root CA been generated (and therefore installed into the trust store)?
+function getCaStatus() {
+  if (!isInstalled()) return { installed: false, trusted: false, caRoot: null };
+  const caRoot = getCaRoot();
+  const trusted = !!(caRoot && fs.existsSync(`${caRoot}/rootCA.pem`));
+  return { installed: true, trusted, caRoot };
+}
+
 function removeCert(domain) {
   const dir = getCertDir();
   if (!dir) return;
@@ -89,4 +113,6 @@ module.exports = {
   ensureCA,
   generateCert,
   removeCert,
+  getCaRoot,
+  getCaStatus,
 };

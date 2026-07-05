@@ -471,6 +471,121 @@ function registerHandlers(win, storeInstance) {
     }
   });
 
+  // ─── Clone / Change URL / CA status ──────────────────────────────────
+
+  ipcMain.handle('clone-site', async (event, id, target = {}) => {
+    try {
+      const source = store.get('sites', []).find((s) => s.id === id);
+      if (!source) return { success: false, error: 'Source site not found' };
+      if (!mysql.isRunning()) {
+        return {
+          success: false,
+          error: 'MySQL is not running. Start it in the Services panel.',
+        };
+      }
+
+      // Same authoritative validation + uniqueness checks as import.
+      const { valid, errors } = validation.validateSiteInput({
+        ...target,
+        adminUser: 'admin',
+        adminPassword: 'cloned',
+        adminEmail: `admin@${target.domain}`,
+      });
+      if (!valid) return { success: false, error: errors.join(' ') };
+
+      const sites = store.get('sites', []);
+      if (sites.some((s) => s.domain === target.domain)) {
+        return { success: false, error: `Domain ${target.domain} already exists` };
+      }
+      if (sites.some((s) => s.dbName === target.dbName)) {
+        return { success: false, error: `Database ${target.dbName} already exists` };
+      }
+      if (mysql.databaseExists(target.dbName)) {
+        return {
+          success: false,
+          error: `A database named ${target.dbName} already exists in MySQL.`,
+        };
+      }
+      if (nginx.siteConfigExists(target.domain)) {
+        return {
+          success: false,
+          error: `An nginx config for ${target.domain} already exists.`,
+        };
+      }
+      if (fs.existsSync(target.path) && fs.readdirSync(target.path).length > 0) {
+        return { success: false, error: `${target.path} already exists and is not empty.` };
+      }
+
+      const progress = (data) => {
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('site-clone-progress', data);
+        }
+      };
+      const site = await siteops.cloneSite(source, target, progress);
+
+      store.set('sites', [...store.get('sites', []), site]);
+      return { success: true, site };
+    } catch (err) {
+      console.error('clone-site error:', err);
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('change-site-url', async (event, id, newDomain) => {
+    try {
+      const sites = store.get('sites', []);
+      const idx = sites.findIndex((s) => s.id === id);
+      if (idx === -1) return { success: false, error: 'Site not found' };
+      const site = sites[idx];
+
+      if (typeof newDomain !== 'string' || !validation.DOMAIN_RE.test(newDomain)) {
+        return { success: false, error: 'Please enter a valid domain (e.g. mysite.test).' };
+      }
+      if (newDomain === site.domain) {
+        return { success: false, error: 'That is already the site’s domain.' };
+      }
+      if (sites.some((s) => s.id !== id && s.domain === newDomain)) {
+        return { success: false, error: `Domain ${newDomain} already exists` };
+      }
+      if (nginx.siteConfigExists(newDomain)) {
+        return { success: false, error: `An nginx config for ${newDomain} already exists.` };
+      }
+      if (!mysql.isRunning()) {
+        return {
+          success: false,
+          error: 'MySQL is not running. Start it in the Services panel.',
+        };
+      }
+
+      // Drop any live tunnel first — its server_name alias points at the old
+      // domain and would be orphaned by the rename.
+      cloudflared.stopTunnel(id);
+
+      const progress = (data) => {
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('site-changeurl-progress', data);
+        }
+      };
+      const patch = await siteops.changeSiteUrl(site, newDomain, progress);
+
+      const updated = { ...site, ...patch };
+      sites[idx] = updated;
+      store.set('sites', sites);
+      return { success: true, site: updated };
+    } catch (err) {
+      console.error('change-site-url error:', err);
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('get-ca-status', async () => {
+    try {
+      return { success: true, ...mkcert.getCaStatus() };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
   // ─── One-Click Admin (magic login) ─────────────────────────────────────
 
   // Lists the site's administrator accounts for the account picker.
