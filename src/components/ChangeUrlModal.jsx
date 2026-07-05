@@ -80,8 +80,8 @@ export default function ChangeUrlModal({ site, onClose, onChanged }) {
                 <AlertTriangle size={14} className="flex-shrink-0 mt-0.5" />
                 <span>
                   This runs a database search-and-replace across all tables and rewrites
-                  the site URL. Any active share tunnel will be stopped. Consider exporting
-                  a backup first.
+                  the site URL. Any active share tunnel will be stopped. Consider
+                  exporting a backup first.
                 </span>
               </div>
             </div>

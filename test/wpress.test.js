@@ -4,7 +4,12 @@ import wpress from '../electron/services/wpress.cjs';
 const { HEADER_SIZE } = wpress;
 
 // Builds a syntactically valid .wpress header block.
-function makeHeader({ name = 'file.php', size = '123', mtime = '1700000000', dir = 'plugins/demo' } = {}) {
+function makeHeader({
+  name = 'file.php',
+  size = '123',
+  mtime = '1700000000',
+  dir = 'plugins/demo',
+} = {}) {
   const buf = Buffer.alloc(HEADER_SIZE);
   buf.write(name, 0, 'utf8');
   buf.write(String(size), 255, 'utf8');
@@ -16,7 +21,12 @@ function makeHeader({ name = 'file.php', size = '123', mtime = '1700000000', dir
 describe('parseWpressHeader', () => {
   it('parses a normal header', () => {
     const h = wpress.parseWpressHeader(makeHeader());
-    expect(h).toEqual({ name: 'file.php', size: 123, mtime: 1700000000, dir: 'plugins/demo' });
+    expect(h).toEqual({
+      name: 'file.php',
+      size: 123,
+      mtime: 1700000000,
+      dir: 'plugins/demo',
+    });
   });
 
   it('returns null for the EOF block (all NULs)', () => {
@@ -24,7 +34,9 @@ describe('parseWpressHeader', () => {
   });
 
   it('throws on a truncated buffer', () => {
-    expect(() => wpress.parseWpressHeader(Buffer.alloc(100))).toThrow(/could not be parsed/);
+    expect(() => wpress.parseWpressHeader(Buffer.alloc(100))).toThrow(
+      /could not be parsed/
+    );
   });
 
   it('throws on a non-numeric size', () => {

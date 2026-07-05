@@ -40,7 +40,11 @@ describe('buildManifest / validateManifest', () => {
 
   it('rejects a future format version', () => {
     expect(() =>
-      siteops.validateManifest({ format: 'wpherd-site', formatVersion: 2, domain: 'a.test' })
+      siteops.validateManifest({
+        format: 'wpherd-site',
+        formatVersion: 2,
+        domain: 'a.test',
+      })
     ).toThrow(/format version/);
   });
 
@@ -89,13 +93,17 @@ describe('detectImportKind', () => {
   });
 
   it('does not match a nested manifest path', () => {
-    expect(siteops.detectImportKind('.zip', ['files/wpherd-manifest.json'])).toBe('generic');
+    expect(siteops.detectImportKind('.zip', ['files/wpherd-manifest.json'])).toBe(
+      'generic'
+    );
   });
 });
 
 describe('detectTablePrefix', () => {
   it('finds a custom prefix from CREATE TABLE options', () => {
-    expect(siteops.detectTablePrefix('CREATE TABLE `xyz9_options` (\n  id int')).toBe('xyz9_');
+    expect(siteops.detectTablePrefix('CREATE TABLE `xyz9_options` (\n  id int')).toBe(
+      'xyz9_'
+    );
   });
 
   it('finds the prefix from posts/users tables too', () => {

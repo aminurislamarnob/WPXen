@@ -208,11 +208,12 @@ export default function ImportSiteModal({ onClose, onSiteImported, phpVersions }
                       <FileArchive size={10} />
                       {KIND_LABELS[info.kind] || info.kind}
                     </span>
-                    {info.manifest?.wpVersion && info.manifest.wpVersion !== 'unknown' && (
-                      <span className="inline-flex items-center px-2 py-0.5 bg-gray-100 text-gray-500 rounded-full text-xs font-medium">
-                        WP {info.manifest.wpVersion}
-                      </span>
-                    )}
+                    {info.manifest?.wpVersion &&
+                      info.manifest.wpVersion !== 'unknown' && (
+                        <span className="inline-flex items-center px-2 py-0.5 bg-gray-100 text-gray-500 rounded-full text-xs font-medium">
+                          WP {info.manifest.wpVersion}
+                        </span>
+                      )}
                     {info.manifest?.phpVersion && (
                       <span className="inline-flex items-center px-2 py-0.5 bg-purple-50 text-purple-700 dark:bg-purple-500/15 dark:text-purple-300 rounded-full text-xs font-medium">
                         PHP {info.manifest.phpVersion}

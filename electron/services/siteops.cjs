@@ -121,7 +121,9 @@ function isMultisiteDump(sqlHead) {
 
 // Sniffs the WordPress table prefix from the head of a SQL dump.
 function detectTablePrefix(sqlHead) {
-  const m = sqlHead.match(/CREATE TABLE `?([a-zA-Z0-9_]+?)(?:options|posts|users)`?[\s(]/);
+  const m = sqlHead.match(
+    /CREATE TABLE `?([a-zA-Z0-9_]+?)(?:options|posts|users)`?[\s(]/
+  );
   return m ? m[1] : null;
 }
 

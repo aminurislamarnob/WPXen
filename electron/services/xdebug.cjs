@@ -21,14 +21,7 @@ const CLIENT_PORT = 9003;
 
 // Modes Xdebug understands. WPHerd surfaces the common three (debug, develop,
 // and both) but tolerates any comma-list of these tokens.
-const VALID_MODE_TOKENS = [
-  'debug',
-  'develop',
-  'coverage',
-  'profile',
-  'trace',
-  'gcstats',
-];
+const VALID_MODE_TOKENS = ['debug', 'develop', 'coverage', 'profile', 'trace', 'gcstats'];
 
 // Normalizes a mode string to a deduped, whitelisted comma-list, defaulting to
 // 'debug'. Pure — covered by vitest.
@@ -139,10 +132,7 @@ async function installXdebug(version, onProgress) {
     throw new Error(`PHP ${version} is not installed`);
   }
   await ensureXdebugTapTrusted(onProgress);
-  await php.runBrewStreaming(
-    ['install', `${XDEBUG_TAP}/xdebug@${version}`],
-    onProgress
-  );
+  await php.runBrewStreaming(['install', `${XDEBUG_TAP}/xdebug@${version}`], onProgress);
   writeXdebugIni(version, { enabled: true, mode: 'debug' });
   php.reloadPhpFpmIfRunning(version);
   return { installed: true };

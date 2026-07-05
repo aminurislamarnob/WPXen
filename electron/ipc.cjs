@@ -515,7 +515,10 @@ function registerHandlers(win, storeInstance) {
         };
       }
       if (fs.existsSync(target.path) && fs.readdirSync(target.path).length > 0) {
-        return { success: false, error: `${target.path} already exists and is not empty.` };
+        return {
+          success: false,
+          error: `${target.path} already exists and is not empty.`,
+        };
       }
 
       const progress = (data) => {
@@ -541,7 +544,10 @@ function registerHandlers(win, storeInstance) {
       const site = sites[idx];
 
       if (typeof newDomain !== 'string' || !validation.DOMAIN_RE.test(newDomain)) {
-        return { success: false, error: 'Please enter a valid domain (e.g. mysite.test).' };
+        return {
+          success: false,
+          error: 'Please enter a valid domain (e.g. mysite.test).',
+        };
       }
       if (newDomain === site.domain) {
         return { success: false, error: 'That is already the site’s domain.' };
@@ -550,7 +556,10 @@ function registerHandlers(win, storeInstance) {
         return { success: false, error: `Domain ${newDomain} already exists` };
       }
       if (nginx.siteConfigExists(newDomain)) {
-        return { success: false, error: `An nginx config for ${newDomain} already exists.` };
+        return {
+          success: false,
+          error: `An nginx config for ${newDomain} already exists.`,
+        };
       }
       if (!mysql.isRunning()) {
         return {
@@ -771,7 +780,9 @@ function registerHandlers(win, storeInstance) {
       if (secret) target = `${base}/?wpherd_magic_login=${secret}`;
     }
     const ok = openExternalSafely(target);
-    return ok ? { success: true } : { success: false, error: 'Refused to open unsafe URL' };
+    return ok
+      ? { success: true }
+      : { success: false, error: 'Refused to open unsafe URL' };
   });
 
   // ─── Site config (WP Config Manager) ───────────────────────────────────

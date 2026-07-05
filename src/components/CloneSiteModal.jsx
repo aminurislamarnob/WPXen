@@ -157,9 +157,7 @@ export default function CloneSiteModal({ source, phpVersions, onClose, onCloned 
                     type="text"
                     className="form-input flex-1"
                     value={formData.path}
-                    onChange={(e) =>
-                      setFormData((p) => ({ ...p, path: e.target.value }))
-                    }
+                    onChange={(e) => setFormData((p) => ({ ...p, path: e.target.value }))}
                   />
                   <button
                     onClick={handleSelectFolder}

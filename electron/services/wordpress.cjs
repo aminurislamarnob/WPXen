@@ -364,7 +364,13 @@ add_filter('option_siteurl', 'wpherd_tunnel_filter_url');
 // Lists the site's administrator accounts for the account picker.
 function listAdminUsers(sitePath) {
   const out = wp(
-    ['user', 'list', '--role=administrator', '--fields=ID,user_login,display_name', '--format=json'],
+    [
+      'user',
+      'list',
+      '--role=administrator',
+      '--fields=ID,user_login,display_name',
+      '--format=json',
+    ],
     sitePath
   );
   let parsed;

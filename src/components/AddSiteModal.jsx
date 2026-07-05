@@ -165,9 +165,7 @@ export default function AddSiteModal({
         </div>
 
         <div className={`px-6 pt-4 ${step === creatingStep ? 'pb-6' : ''}`}>
-          {step < creatingStep && (
-            <StepIndicator current={step} steps={formSteps} />
-          )}
+          {step < creatingStep && <StepIndicator current={step} steps={formSteps} />}
 
           {/* Step 0: Site details */}
           {step === 0 && (
@@ -270,8 +268,8 @@ export default function AddSiteModal({
               {isBlueprint && (
                 <div className="bg-blue-50 dark:bg-blue-500/10 rounded-xl px-4 py-3 text-xs text-blue-700 dark:text-blue-300">
                   This site will be created from the{' '}
-                  <span className="font-semibold">{blueprint.name}</span> blueprint —
-                  its files, database, and users are restored as-is.
+                  <span className="font-semibold">{blueprint.name}</span> blueprint — its
+                  files, database, and users are restored as-is.
                 </div>
               )}
             </div>
@@ -446,7 +444,9 @@ export default function AddSiteModal({
                       className="animate-spin text-wp-blue flex-shrink-0"
                     />
                     <p className="text-sm font-medium text-gray-700">
-                      {isBlueprint ? 'Creating site from blueprint…' : 'Creating WordPress site…'}
+                      {isBlueprint
+                        ? 'Creating site from blueprint…'
+                        : 'Creating WordPress site…'}
                     </p>
                   </div>
                   <ProgressLog messages={progressMessages} className="mt-4" />

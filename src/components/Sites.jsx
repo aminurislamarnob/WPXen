@@ -116,9 +116,7 @@ export default function Sites({ sites, setSites, refreshSites }) {
   useEffect(() => {
     window.electronAPI.on('site-export-progress', ({ message }) => {
       if (exportBusyRef.current) {
-        setExportStatus((prev) =>
-          prev?.state === 'busy' ? { ...prev, message } : prev
-        );
+        setExportStatus((prev) => (prev?.state === 'busy' ? { ...prev, message } : prev));
       }
     });
     return () => window.electronAPI.off('site-export-progress');

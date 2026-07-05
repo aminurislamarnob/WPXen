@@ -92,7 +92,8 @@ export default function SaveBlueprintModal({ site, onClose, onSaved }) {
                   </div>
                   <h3 className="text-base font-bold text-gray-900">Blueprint Saved!</h3>
                   <p className="text-sm text-gray-500 mt-1 mb-4">
-                    Create sites from it via <span className="font-medium">Add Site</span>.
+                    Create sites from it via <span className="font-medium">Add Site</span>
+                    .
                   </p>
                   <button onClick={onClose} className="btn-primary">
                     Done

@@ -13,14 +13,12 @@ describe('assertSafeEntries', () => {
     ).toBe(true);
   });
 
-  it.each([
-    ['../evil.php'],
-    ['files/../../evil.php'],
-    ['a/../../b'],
-    ['..'],
-  ])('rejects traversal entry %j', (entry) => {
-    expect(() => archive.assertSafeEntries([entry])).toThrow(/traversal/);
-  });
+  it.each([['../evil.php'], ['files/../../evil.php'], ['a/../../b'], ['..']])(
+    'rejects traversal entry %j',
+    (entry) => {
+      expect(() => archive.assertSafeEntries([entry])).toThrow(/traversal/);
+    }
+  );
 
   it.each([['/etc/passwd'], ['/tmp/x'], ['C:/Windows/evil'], ['C:\\evil']])(
     'rejects absolute entry %j',

@@ -40,8 +40,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('inspect-import-archive', archivePath),
   importSite: (payload) => ipcRenderer.invoke('import-site', payload),
   cloneSite: (id, target) => ipcRenderer.invoke('clone-site', id, target),
-  changeSiteUrl: (id, newDomain) =>
-    ipcRenderer.invoke('change-site-url', id, newDomain),
+  changeSiteUrl: (id, newDomain) => ipcRenderer.invoke('change-site-url', id, newDomain),
   getCaStatus: () => ipcRenderer.invoke('get-ca-status'),
 
   // Blueprints

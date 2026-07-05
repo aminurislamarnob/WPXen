@@ -62,7 +62,10 @@ export default function Settings({ onOpenWizard }) {
       setDeps(d);
       setSudoers(sud);
     });
-    window.electronAPI.getCaStatus().then(setCaStatus).catch(() => {});
+    window.electronAPI
+      .getCaStatus()
+      .then(setCaStatus)
+      .catch(() => {});
     refreshBlueprints();
   }, []);
 
@@ -378,9 +381,9 @@ export default function Settings({ onOpenWizard }) {
           )}
         </Card>
         <p className="text-[11px] text-gray-400 mt-1.5 px-1">
-          Blueprints are full snapshots (files + database) stored in WPHerd’s data
-          folder. Create a site from one via <span className="font-medium">Add Site →
-          From Blueprint</span>.
+          Blueprints are full snapshots (files + database) stored in WPHerd’s data folder.
+          Create a site from one via{' '}
+          <span className="font-medium">Add Site → From Blueprint</span>.
         </p>
       </div>
 
