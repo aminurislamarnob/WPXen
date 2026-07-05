@@ -101,6 +101,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   checkDependencies: () => ipcRenderer.invoke('check-dependencies'),
   setupDnsmasq: () => ipcRenderer.invoke('setup-dnsmasq'),
 
+  // First-run onboarding
+  installCoreDeps: () => ipcRenderer.invoke('install-core-deps'),
+  openHomebrewInstaller: () => ipcRenderer.invoke('open-homebrew-installer'),
+  getOnboardingState: () => ipcRenderer.invoke('get-onboarding-state'),
+  setOnboardingComplete: () => ipcRenderer.invoke('set-onboarding-complete'),
+
   // Sudoers / Permissions
   checkSudoers: () => ipcRenderer.invoke('check-sudoers'),
   installSudoers: () => ipcRenderer.invoke('install-sudoers'),
@@ -127,6 +133,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       'tunnel-update',
       'cloudflared-install-progress',
       'mailpit-install-progress',
+      'core-deps-install-progress',
     ];
     if (validChannels.includes(channel)) {
       ipcRenderer.on(channel, (_, data) => callback(data));
@@ -142,6 +149,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       'tunnel-update',
       'cloudflared-install-progress',
       'mailpit-install-progress',
+      'core-deps-install-progress',
     ];
     if (validChannels.includes(channel)) {
       ipcRenderer.removeAllListeners(channel);

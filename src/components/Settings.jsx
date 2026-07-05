@@ -9,10 +9,11 @@ import {
   ShieldCheck,
   ShieldAlert,
   ShieldOff,
+  Wand2,
 } from 'lucide-react';
-import { Card, Row, SectionLabel, Toggle } from './ui';
+import { Card, Row, SectionLabel, Toggle, Button } from './ui';
 
-export default function Settings() {
+export default function Settings({ onOpenWizard }) {
   const [settings, setSettings] = useState({
     sitesDir: '',
     defaultPhpVersion: '',
@@ -277,7 +278,18 @@ export default function Settings() {
 
       {/* Dependencies */}
       <div>
-        <SectionLabel>Dependencies</SectionLabel>
+        <SectionLabel
+          right={
+            onOpenWizard && (
+              <Button variant="secondary" onClick={onOpenWizard}>
+                <Wand2 size={12} strokeWidth={2.5} />
+                Run setup wizard
+              </Button>
+            )
+          }
+        >
+          Dependencies
+        </SectionLabel>
         <Card>
           {deps &&
             Object.entries(deps).map(([name, installed]) => (

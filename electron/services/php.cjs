@@ -717,6 +717,7 @@ module.exports = {
   getInstallablePhpVersions,
   installPhpVersion,
   updatePhpVersion,
+  runBrewStreaming,
   switchActivePhpVersion,
   getBrewServiceName,
   getPhpIniSettings,

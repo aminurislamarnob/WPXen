@@ -1,66 +1,14 @@
 import { useState, useEffect } from 'react';
 import {
   FolderOpen,
-  Check,
   CheckCircle,
   AlertCircle,
   Loader,
   ChevronRight,
 } from 'lucide-react';
+import { StepIndicator, ProgressLog } from './ui';
 
 const STEPS = ['Details', 'Directory', 'WordPress', 'Creating'];
-
-function StepIndicator({ current, steps }) {
-  return (
-    <div className="flex items-center gap-1.5 mb-6">
-      {steps.map((step, i) => (
-        <div key={step} className="flex items-center">
-          <div
-            className={`flex items-center justify-center w-[22px] h-[22px] rounded-full text-[11px] font-semibold transition-all ${
-              i < current
-                ? 'bg-wp-green text-white'
-                : i === current
-                  ? 'bg-accent text-white'
-                  : 'bg-black/[0.06] text-gray-400 dark:bg-white/10'
-            }`}
-          >
-            {i < current ? <Check size={12} strokeWidth={3} /> : i + 1}
-          </div>
-          {i < steps.length - 1 && (
-            <div
-              className={`w-7 h-[3px] mx-1 rounded-full ${
-                i < current ? 'bg-wp-green' : 'bg-black/[0.06] dark:bg-white/10'
-              }`}
-            />
-          )}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function ProgressLog({ messages }) {
-  return (
-    <div className="mt-4 bg-zinc-900 rounded-xl p-4 h-40 overflow-y-auto font-mono text-xs">
-      {messages.map((msg, i) => (
-        <div
-          key={i}
-          className={`flex items-start gap-2 ${i === messages.length - 1 ? 'text-white' : 'text-zinc-400'}`}
-        >
-          {i === messages.length - 1 ? (
-            <Loader
-              size={11}
-              className="animate-spin mt-0.5 flex-shrink-0 text-wp-blue-light"
-            />
-          ) : (
-            <CheckCircle size={11} className="mt-0.5 flex-shrink-0 text-wp-green" />
-          )}
-          <span>{msg}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
 
 export default function AddSiteModal({ onClose, onSiteAdded, phpVersions }) {
   const [step, setStep] = useState(0);
@@ -408,7 +356,7 @@ export default function AddSiteModal({ onClose, onSiteAdded, phpVersions }) {
                       Creating WordPress site…
                     </p>
                   </div>
-                  <ProgressLog messages={progressMessages} />
+                  <ProgressLog messages={progressMessages} className="mt-4" />
                 </div>
               )}
             </div>
