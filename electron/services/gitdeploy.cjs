@@ -118,17 +118,13 @@ async function initRepo(sitePath, { includeUploads = false } = {}) {
 function setUploadsIgnored(sitePath, ignored) {
   const ignoreFile = path.join(sitePath, '.gitignore');
   if (!fs.existsSync(ignoreFile)) return;
-  const lines = fs.readFileSync(ignoreFile, 'utf8').split('\n');
+  let lines = fs.readFileSync(ignoreFile, 'utf8').split('\n');
+  while (lines.length && lines[lines.length - 1] === '') lines.pop();
   const has = lines.includes('wp-content/uploads/');
-  if (ignored && !has) {
-    lines.push('wp-content/uploads/');
-    fs.writeFileSync(ignoreFile, lines.filter((l, i) => l || i < lines.length - 1).join('\n') + '\n');
-  } else if (!ignored && has) {
-    fs.writeFileSync(
-      ignoreFile,
-      lines.filter((l) => l !== 'wp-content/uploads/').join('\n')
-    );
-  }
+  if (ignored && !has) lines.push('wp-content/uploads/');
+  else if (!ignored && has) lines = lines.filter((l) => l !== 'wp-content/uploads/');
+  else return;
+  fs.writeFileSync(ignoreFile, lines.join('\n') + '\n');
 }
 
 async function getStatus(sitePath) {
