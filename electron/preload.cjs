@@ -75,6 +75,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   startTunnel: (id) => ipcRenderer.invoke('start-tunnel', id),
   stopTunnel: (id) => ipcRenderer.invoke('stop-tunnel', id),
   setShareSettings: (id, settings) => ipcRenderer.invoke('set-share-settings', id, settings),
+  getCfAccount: () => ipcRenderer.invoke('get-cf-account'),
+  cfLogin: () => ipcRenderer.invoke('cf-login'),
 
   // Services
   getServiceStatus: () => ipcRenderer.invoke('get-service-status'),
@@ -132,6 +134,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       'notification',
       'tunnel-update',
       'cloudflared-install-progress',
+      'cf-login-progress',
       'mailpit-install-progress',
       'core-deps-install-progress',
     ];
@@ -148,6 +151,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       'notification',
       'tunnel-update',
       'cloudflared-install-progress',
+      'cf-login-progress',
       'mailpit-install-progress',
       'core-deps-install-progress',
     ];

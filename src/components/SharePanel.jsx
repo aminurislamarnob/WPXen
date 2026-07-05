@@ -41,6 +41,15 @@ export default function SharePanel({
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
 
+  // Stable-hostname (named tunnel) options. Requires a one-time Cloudflare
+  // account login; the account state is probed lazily when options open.
+  const [mode, setMode] = useState(share.mode || 'quick');
+  const [hostname, setHostname] = useState(share.hostname || '');
+  const [autoStart, setAutoStart] = useState(!!share.autoStart);
+  const [cfLoggedIn, setCfLoggedIn] = useState(null);
+  const [loginBusy, setLoginBusy] = useState(false);
+  const [loginLog, setLoginLog] = useState('');
+
   const tunnelActive =
     tunnel && (tunnel.status === 'starting' || tunnel.status === 'running');
 
@@ -51,13 +60,41 @@ export default function SharePanel({
     setTimeout(() => setCopied(false), 1500);
   }
 
+  function handleToggleOptions() {
+    setOptionsOpen((v) => !v);
+    if (cfLoggedIn === null) {
+      window.electronAPI
+        .getCfAccount()
+        .then((r) => setCfLoggedIn(!!r.loggedIn))
+        .catch(() => setCfLoggedIn(false));
+    }
+  }
+
+  async function handleCfLogin() {
+    setLoginBusy(true);
+    setLoginLog('');
+    setSaveError(null);
+    // Subscribe only for the duration of the login so unmounting another
+    // panel's off() can't orphan a long-lived listener.
+    window.electronAPI.on('cf-login-progress', (d) => d && setLoginLog(d.line));
+    const res = await window.electronAPI.cfLogin();
+    window.electronAPI.off('cf-login-progress');
+    setLoginBusy(false);
+    setLoginLog('');
+    if (res?.success) setCfLoggedIn(true);
+    else setSaveError(res?.error || 'Cloudflare login failed.');
+  }
+
   async function handleSaveOptions() {
     setSaving(true);
     setSaveError(null);
     const res = await window.electronAPI.setShareSettings(site.id, {
+      mode,
       authEnabled,
       authUser: authUser.trim(),
       ...(password ? { password } : {}),
+      hostname: hostname.trim(),
+      autoStart,
     });
     setSaving(false);
     if (!res?.success) {
@@ -71,7 +108,7 @@ export default function SharePanel({
   const options = (
     <div className="mt-2">
       <button
-        onClick={() => setOptionsOpen((v) => !v)}
+        onClick={handleToggleOptions}
         className="inline-flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700"
       >
         <ChevronRight
@@ -83,6 +120,74 @@ export default function SharePanel({
       </button>
       {optionsOpen && (
         <div className="mt-2 space-y-2 animate-fade-in">
+          {/* URL mode: free random quick tunnel vs stable hostname */}
+          <div className="flex items-center gap-2">
+            <span className="flex-1 text-xs text-gray-600">Share URL</span>
+            <select
+              value={mode}
+              onChange={(e) => setMode(e.target.value)}
+              className="form-input !w-44 !py-1 text-xs"
+            >
+              <option value="quick">Random (no account)</option>
+              <option value="named">Stable hostname</option>
+            </select>
+          </div>
+          {mode === 'named' && (
+            <div className="space-y-2">
+              {cfLoggedIn === false && (
+                <div>
+                  <p className="text-xs text-gray-500 mb-1.5">
+                    Stable hostnames run on your own Cloudflare-managed domain.
+                    Connect your account once to enable them.
+                  </p>
+                  <button
+                    onClick={handleCfLogin}
+                    disabled={loginBusy}
+                    className="btn-secondary text-xs justify-center w-full"
+                  >
+                    {loginBusy ? (
+                      <>
+                        <Loader size={12} className="animate-spin mr-1.5" />
+                        Waiting for browser login…
+                      </>
+                    ) : (
+                      'Connect Cloudflare account'
+                    )}
+                  </button>
+                  {loginBusy && loginLog && (
+                    <div className="mt-1.5 px-3 py-2 bg-zinc-900 rounded-lg">
+                      <p
+                        className="text-xs text-green-400 font-mono truncate"
+                        title={loginLog}
+                      >
+                        {loginLog}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+              <input
+                type="text"
+                value={hostname}
+                onChange={(e) => setHostname(e.target.value)}
+                placeholder="staging.example.com"
+                className="form-input !py-1 text-xs w-full"
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
+              />
+              <div className="flex items-center gap-2">
+                <span className="flex-1 text-xs text-gray-600">
+                  Restore this share when WPHerd launches
+                </span>
+                <Toggle
+                  checked={autoStart}
+                  onChange={setAutoStart}
+                  label="Auto-start share"
+                />
+              </div>
+            </div>
+          )}
           <div className="flex items-center gap-2">
             <span className="flex-1 text-xs text-gray-600">Password protection</span>
             <Toggle
@@ -204,13 +309,20 @@ export default function SharePanel({
           </div>
           <div className="mt-2 flex items-start gap-3">
             <ShareQR url={tunnel.url} />
-            <p className="text-xs text-gray-400 pt-1">
-              Scan to open on your phone.
-              <br />
-              {tunnel.authEnabled
-                ? 'Visitors need the share username and password.'
-                : "Anyone with this link can reach your local site while it's open."}
-            </p>
+            <div className="pt-1">
+              {tunnel.mode === 'named' && (
+                <span className="inline-flex items-center px-2 py-0.5 mb-1 bg-green-50 text-green-700 dark:bg-green-500/10 dark:text-green-400 rounded-full text-xs font-medium">
+                  Stable URL
+                </span>
+              )}
+              <p className="text-xs text-gray-400">
+                Scan to open on your phone.
+                <br />
+                {tunnel.authEnabled
+                  ? 'Visitors need the share username and password.'
+                  : "Anyone with this link can reach your local site while it's open."}
+              </p>
+            </div>
           </div>
           {options}
         </div>
@@ -235,8 +347,18 @@ export default function SharePanel({
       ) : (
         <div>
           <p className="text-xs text-gray-500 mb-2">
-            Expose <span className="font-mono">{site.domain}</span> over a temporary
-            public HTTPS URL powered by Cloudflare.
+            {share.mode === 'named' && share.hostname ? (
+              <>
+                Expose <span className="font-mono">{site.domain}</span> at{' '}
+                <span className="font-mono">https://{share.hostname}</span> via your
+                Cloudflare tunnel.
+              </>
+            ) : (
+              <>
+                Expose <span className="font-mono">{site.domain}</span> over a temporary
+                public HTTPS URL powered by Cloudflare.
+              </>
+            )}
           </p>
           <button
             onClick={() => onStartTunnel(site)}

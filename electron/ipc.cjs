@@ -292,6 +292,15 @@ function registerHandlers(win, storeInstance) {
       cloudflared.stopTunnel(id);
       htpasswd.removeHtpasswdFile(site.domain);
 
+      // Delete the site's named tunnel from the Cloudflare account, if any.
+      // Best-effort: the DNS CNAME can't be removed via cloudflared, and a
+      // failure here must not block site removal.
+      if (site.share?.tunnelId) {
+        cloudflared.deleteNamedTunnel(site.share.tunnelId).catch((err) => {
+          console.error('delete named tunnel:', err.message);
+        });
+      }
+
       wordpress.removeWordPressSite(site, opts);
 
       store.set(
@@ -899,7 +908,45 @@ function registerHandlers(win, storeInstance) {
       // Attach the htpasswd path when basic-auth is enabled so the tunnel
       // alias server block gets auth_basic (see nginx.generateSiteConfig).
       const tunnel = await cloudflared.startTunnel(htpasswd.attachShareAuth(site), broadcast);
+
+      // A named tunnel mints its UUID on first start — persist it so restarts
+      // (and site removal) can reuse/delete the same Cloudflare tunnel.
+      if (tunnel?.mode === 'named' && tunnel.tunnelId) {
+        const fresh = store.get('sites', []);
+        const idx = fresh.findIndex((s) => s.id === id);
+        if (idx !== -1 && fresh[idx].share?.tunnelId !== tunnel.tunnelId) {
+          fresh[idx] = {
+            ...fresh[idx],
+            share: {
+              ...fresh[idx].share,
+              tunnelId: tunnel.tunnelId,
+              tunnelName: tunnel.tunnelName,
+            },
+          };
+          store.set('sites', fresh);
+        }
+      }
+
       return { success: true, tunnel };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  // ─── Cloudflare account (named tunnels / stable hostnames) ─────────────
+
+  ipcMain.handle('get-cf-account', () => {
+    return { loggedIn: cloudflared.isLoggedIn() };
+  });
+
+  ipcMain.handle('cf-login', async (event) => {
+    try {
+      await cloudflared.login((line) => {
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('cf-login-progress', { line });
+        }
+      });
+      return { success: true };
     } catch (err) {
       return { success: false, error: humanize(err) };
     }
@@ -986,6 +1033,14 @@ function registerHandlers(win, storeInstance) {
       const updated = { ...site, share };
       sites[idx] = updated;
       store.set('sites', sites);
+
+      // Switching share mode invalidates a live tunnel — stop it so the next
+      // start uses the new mode. (The named tunnel stays registered in the
+      // Cloudflare account for reuse; it's only deleted on site removal.)
+      if (mode !== (prev.mode || 'quick')) {
+        cloudflared.stopTunnel(id);
+        return { success: true, share };
+      }
 
       // A live tunnel picks the change up immediately: rewrite its alias vhost
       // with/without the auth file and reload nginx.
