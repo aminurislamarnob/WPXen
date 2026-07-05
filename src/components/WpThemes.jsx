@@ -42,14 +42,14 @@ function Toggle({ checked, onChange, disabled }) {
 function StatusBadgeTheme({ status }) {
   if (status === 'active') {
     return (
-      <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-green-50 text-wp-green">
+      <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-green-50 text-wp-green dark:bg-green-500/15">
         Active
       </span>
     );
   }
   if (status === 'parent') {
     return (
-      <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-wp-blue">
+      <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-wp-blue dark:bg-blue-500/15">
         Parent
       </span>
     );
@@ -65,7 +65,7 @@ function RowMenu({ theme, busy, onAction, onClose }) {
   const deletable = theme.status !== 'active' && theme.status !== 'parent';
   return (
     <div
-      className="absolute right-0 top-7 z-30 bg-white rounded-xl shadow-card-hover border border-gray-100 py-1 w-44 animate-fade-in"
+      className="absolute right-0 top-7 z-30 panel rounded-xl shadow-card-hover border border-gray-100 py-1 w-44 animate-fade-in"
       onMouseLeave={onClose}
     >
       {theme.status !== 'active' && (
@@ -94,7 +94,7 @@ function RowMenu({ theme, busy, onAction, onClose }) {
           <button
             onClick={() => onAction('confirm-delete', theme.name)}
             disabled={busy}
-            className="flex w-full items-center gap-2.5 px-3 py-2 text-xs text-red-600 hover:bg-red-50 disabled:opacity-50"
+            className="flex w-full items-center gap-2.5 px-3 py-2 text-xs text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-500/10 disabled:opacity-50"
           >
             <Trash2 size={13} />
             Delete…
@@ -119,7 +119,7 @@ function InstallModal({ onInstall, installing, onClose }) {
       className="modal-overlay animate-fade-in"
       onClick={(e) => e.target === e.currentTarget && !installing && onClose()}
     >
-      <div className="bg-white rounded-2xl shadow-window w-[26rem] animate-slide-in p-6">
+      <div className="panel rounded-2xl shadow-window w-[26rem] animate-slide-in p-6">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-base font-bold text-gray-900">Add New Theme</h3>
           <button
@@ -191,10 +191,10 @@ function DeleteModal({ names, deleting, onConfirm, onClose }) {
       className="modal-overlay animate-fade-in"
       onClick={(e) => e.target === e.currentTarget && !deleting && onClose()}
     >
-      <div className="bg-white rounded-2xl shadow-window w-96 animate-slide-in p-6">
+      <div className="panel rounded-2xl shadow-window w-96 animate-slide-in p-6">
         <div className="flex items-center gap-3 mb-4">
-          <div className="w-10 h-10 rounded-xl bg-red-100 flex items-center justify-center">
-            <AlertTriangle size={20} className="text-red-600" />
+          <div className="w-10 h-10 rounded-xl bg-red-100 dark:bg-red-500/15 flex items-center justify-center">
+            <AlertTriangle size={20} className="text-red-600 dark:text-red-400" />
           </div>
           <div>
             <h3 className="text-base font-bold text-gray-900">
@@ -422,8 +422,8 @@ export default function WpThemes({ site, onSaved }) {
         <div
           className={`flex items-center gap-2 px-4 py-3 rounded-xl mb-4 text-sm ${
             message.type === 'error'
-              ? 'bg-red-50 text-red-700'
-              : 'bg-green-50 text-green-700'
+              ? 'bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400'
+              : 'bg-green-50 text-green-700 dark:bg-green-500/10 dark:text-green-400'
           }`}
         >
           {message.type === 'error' ? (
@@ -488,14 +488,14 @@ export default function WpThemes({ site, onSaved }) {
           <Loader size={22} className="animate-spin text-wp-blue" />
         </div>
       ) : error ? (
-        <div className="bg-red-50 text-red-700 rounded-xl px-4 py-3 text-sm">
+        <div className="bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400 rounded-xl px-4 py-3 text-sm">
           <p>{error}</p>
           <button onClick={() => load(true)} className="btn-secondary text-xs mt-3">
             Try again
           </button>
         </div>
       ) : (
-        <div className="bg-white rounded-xl border border-surface-border shadow-card">
+        <div className="settings-card">
           {/* Table head */}
           <div className="flex items-center gap-3 px-5 py-2.5 bg-gray-50 rounded-t-xl text-xs text-gray-500 uppercase tracking-wide">
             <input
@@ -531,7 +531,7 @@ export default function WpThemes({ site, onSaved }) {
                     className="w-4 h-4 rounded border-gray-300 text-wp-blue"
                   />
 
-                  <div className="w-9 h-9 rounded-lg bg-green-50 text-wp-green flex items-center justify-center text-sm font-bold flex-shrink-0">
+                  <div className="w-9 h-9 rounded-lg bg-green-50 text-wp-green dark:bg-green-500/15 flex items-center justify-center text-sm font-bold flex-shrink-0">
                     {t.title.charAt(0).toUpperCase()}
                   </div>
 
@@ -541,7 +541,7 @@ export default function WpThemes({ site, onSaved }) {
                         {t.title}
                       </h4>
                       {t.updateAvailable && (
-                        <span className="flex-shrink-0 flex items-center gap-1 px-2 py-0.5 bg-amber-100 text-amber-700 rounded-full text-[10px] font-medium">
+                        <span className="flex-shrink-0 flex items-center gap-1 px-2 py-0.5 bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300 rounded-full text-[10px] font-medium">
                           <ArrowUpCircle size={10} />
                           {t.updateVersion || 'update'}
                         </span>

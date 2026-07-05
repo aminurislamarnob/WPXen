@@ -104,6 +104,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Settings
   getSettings: () => ipcRenderer.invoke('get-settings'),
   saveSettings: (settings) => ipcRenderer.invoke('save-settings', settings),
+  setAppearance: (value) => ipcRenderer.invoke('set-appearance', value),
 
   // File dialogs
   selectFolder: () => ipcRenderer.invoke('select-folder'),

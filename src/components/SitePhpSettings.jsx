@@ -139,8 +139,8 @@ export default function SitePhpSettings({ site, onSaved }) {
         <div
           className={`flex items-center gap-2 px-4 py-3 rounded-xl mb-4 text-sm ${
             message.type === 'error'
-              ? 'bg-red-50 text-red-700'
-              : 'bg-green-50 text-green-700'
+              ? 'bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400'
+              : 'bg-green-50 text-green-700 dark:bg-green-500/10 dark:text-green-400'
           }`}
         >
           {message.type === 'error' ? <AlertTriangle size={15} /> : <Check size={15} />}
@@ -153,7 +153,7 @@ export default function SitePhpSettings({ site, onSaved }) {
           <Loader size={22} className="animate-spin text-wp-blue" />
         </div>
       ) : (
-        <div className="bg-white rounded-xl border border-surface-border shadow-card p-5 space-y-5">
+        <div className="settings-card p-5 space-y-5">
           {/* PHP Version */}
           <div>
             <label className="block text-sm font-semibold text-gray-900 mb-1.5">

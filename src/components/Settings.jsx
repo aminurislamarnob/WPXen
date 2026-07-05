@@ -10,6 +10,73 @@ import {
   ShieldAlert,
   ShieldOff,
 } from 'lucide-react';
+import { Card, Row, SectionLabel, Toggle } from './ui';
+
+// Mini window preview for the Appearance picker, like macOS System Settings.
+// mode: 'light' | 'dark' — 'system' overlays both diagonally.
+function ThemeThumb({ variant }) {
+  const window = (dark) => (
+    <div className={`absolute inset-0 flex ${dark ? 'bg-[#1e1e1e]' : 'bg-[#e8e7ea]'}`}>
+      <div
+        className={`w-[34%] p-1.5 space-y-1 ${dark ? 'bg-[#2c2c2e]' : 'bg-[#f6f5f7]'}`}
+      >
+        <div className="h-1 rounded-full bg-accent" />
+        <div className={`h-1 rounded-full ${dark ? 'bg-white/20' : 'bg-black/15'}`} />
+        <div className={`h-1 rounded-full ${dark ? 'bg-white/20' : 'bg-black/15'}`} />
+      </div>
+      <div className="flex-1 p-1.5 space-y-1">
+        <div className={`h-2 rounded-sm ${dark ? 'bg-[#3a3a3c]' : 'bg-white'}`} />
+        <div className={`h-2 rounded-sm ${dark ? 'bg-[#3a3a3c]' : 'bg-white'}`} />
+      </div>
+    </div>
+  );
+  return (
+    <div className="relative w-[76px] h-[52px] rounded-md overflow-hidden">
+      {window(variant === 'dark')}
+      {variant === 'system' && (
+        <div
+          className="absolute inset-0"
+          style={{ clipPath: 'polygon(55% 0, 100% 0, 100% 100%, 30% 100%)' }}
+        >
+          {window(true)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const APPEARANCE_OPTIONS = [
+  { id: 'system', label: 'Auto' },
+  { id: 'light', label: 'Light' },
+  { id: 'dark', label: 'Dark' },
+];
+
+function AppearancePicker({ value, onChange }) {
+  return (
+    <div className="flex items-center gap-5">
+      {APPEARANCE_OPTIONS.map((opt) => (
+        <button key={opt.id} onClick={() => onChange(opt.id)} className="group">
+          <span
+            className={`block rounded-lg p-0.5 ring-2 transition-all ${
+              value === opt.id
+                ? 'ring-accent'
+                : 'ring-transparent group-hover:ring-gray-300'
+            }`}
+          >
+            <ThemeThumb variant={opt.id} />
+          </span>
+          <span
+            className={`block text-center text-xs mt-1.5 ${
+              value === opt.id ? 'font-semibold text-gray-900' : 'text-gray-500'
+            }`}
+          >
+            {opt.label}
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+}
 
 export default function Settings() {
   const [settings, setSettings] = useState({
@@ -19,6 +86,7 @@ export default function Settings() {
     dbUser: 'root',
     dbPassword: '',
     brewPrefix: '',
+    appearance: 'system',
   });
   const [sysInfo, setSysInfo] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -101,6 +169,13 @@ export default function Settings() {
     if (folder) setSettings((s) => ({ ...s, sitesDir: folder }));
   }
 
+  // Applies instantly (nativeTheme in the main process flips the whole app),
+  // no Save needed — like the macOS Appearance pane.
+  async function handleAppearanceChange(value) {
+    setSettings((s) => ({ ...s, appearance: value }));
+    await window.electronAPI.setAppearance(value);
+  }
+
   async function handleSetupDns() {
     setDnsSetupLoading(true);
     setDnsMessage(null);
@@ -117,249 +192,198 @@ export default function Settings() {
   }
 
   return (
-    <div className="p-6 max-w-2xl animate-fade-in space-y-6">
+    <div className="px-6 pb-6 max-w-2xl mx-auto animate-fade-in space-y-6">
+      {/* Appearance */}
       <div>
-        <h1 className="text-xl font-bold text-gray-900">Settings</h1>
-        <p className="text-sm text-gray-500 mt-0.5">Configure WPHerd preferences</p>
+        <SectionLabel>Appearance</SectionLabel>
+        <Card>
+          <Row title="Appearance" subtitle="Auto matches your macOS appearance setting">
+            <AppearancePicker
+              value={settings.appearance || 'system'}
+              onChange={handleAppearanceChange}
+            />
+          </Row>
+        </Card>
       </div>
 
       {/* General */}
-      <section className="bg-white rounded-xl border border-surface-border shadow-card">
-        <div className="px-5 py-4 border-b border-gray-100">
-          <h2 className="text-sm font-semibold text-gray-800">General</h2>
-        </div>
-        <div className="p-5 space-y-4">
-          <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1.5">
-              Default Sites Directory
-            </label>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                className="form-input flex-1 font-mono text-xs"
-                value={settings.sitesDir}
-                onChange={(e) => setSettings((s) => ({ ...s, sitesDir: e.target.value }))}
-                placeholder="~/Sites"
-              />
-              <button onClick={handleSelectSitesDir} className="btn-secondary px-3">
-                <FolderOpen size={15} />
-              </button>
-            </div>
-            <p className="text-xs text-gray-400 mt-1">
-              New WordPress sites will be created here
-            </p>
-          </div>
-
-          <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1.5">
-              Default PHP Version
-            </label>
+      <div>
+        <SectionLabel>General</SectionLabel>
+        <Card>
+          <Row
+            title="Default Sites Directory"
+            subtitle="New WordPress sites will be created here"
+          >
             <input
               type="text"
-              className="form-input font-mono text-xs"
+              className="form-input font-mono !text-xs !w-56"
+              value={settings.sitesDir}
+              onChange={(e) => setSettings((s) => ({ ...s, sitesDir: e.target.value }))}
+              placeholder="~/Sites"
+            />
+            <button
+              onClick={handleSelectSitesDir}
+              className="btn-secondary !px-2.5 !py-1.5"
+            >
+              <FolderOpen size={13} />
+            </button>
+          </Row>
+          <Row title="Default PHP Version">
+            <input
+              type="text"
+              className="form-input font-mono !text-xs !w-24 text-center"
               value={settings.defaultPhpVersion || ''}
               onChange={(e) =>
                 setSettings((s) => ({ ...s, defaultPhpVersion: e.target.value }))
               }
               placeholder="8.2"
             />
-          </div>
-
-          <label className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-gray-700">Start at Login</p>
-              <p className="text-xs text-gray-400">
-                Launch WPHerd when you log into macOS
-              </p>
-            </div>
-            <div
-              onClick={() =>
-                setSettings((s) => ({ ...s, startAtLogin: !s.startAtLogin }))
-              }
-              className={`relative w-10 h-6 rounded-full cursor-pointer transition-colors ${
-                settings.startAtLogin ? 'bg-wp-blue' : 'bg-gray-200'
-              }`}
-            >
-              <span
-                className={`absolute top-1 w-4 h-4 rounded-full bg-white shadow transition-transform ${
-                  settings.startAtLogin ? 'translate-x-5' : 'translate-x-1'
-                }`}
-              />
-            </div>
-          </label>
-        </div>
-      </section>
+          </Row>
+          <Row title="Start at Login" subtitle="Launch WPHerd when you log into macOS">
+            <Toggle
+              checked={!!settings.startAtLogin}
+              onChange={(v) => setSettings((s) => ({ ...s, startAtLogin: v }))}
+              label="Start at Login"
+            />
+          </Row>
+        </Card>
+      </div>
 
       {/* Database */}
-      <section className="bg-white rounded-xl border border-surface-border shadow-card">
-        <div className="px-5 py-4 border-b border-gray-100">
-          <h2 className="text-sm font-semibold text-gray-800">Database</h2>
-        </div>
-        <div className="p-5 space-y-4">
-          <p className="text-xs text-gray-400">
-            Credentials WPHerd uses to create databases and configure WordPress. Leave the
-            password blank for a passwordless root.
-          </p>
-          <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1.5">
-              MySQL User
-            </label>
+      <div>
+        <SectionLabel>Database</SectionLabel>
+        <Card>
+          <Row
+            title="MySQL User"
+            subtitle="Used to create databases and configure WordPress"
+          >
             <input
               type="text"
-              className="form-input font-mono text-xs"
+              className="form-input font-mono !text-xs !w-40"
               value={settings.dbUser || ''}
               onChange={(e) => setSettings((s) => ({ ...s, dbUser: e.target.value }))}
               placeholder="root"
             />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1.5">
-              MySQL Password
-            </label>
+          </Row>
+          <Row title="MySQL Password" subtitle="Leave blank for a passwordless root">
             <input
               type="password"
-              className="form-input font-mono text-xs"
+              className="form-input font-mono !text-xs !w-40"
               value={settings.dbPassword || ''}
               onChange={(e) => setSettings((s) => ({ ...s, dbPassword: e.target.value }))}
               placeholder="(none)"
             />
-          </div>
-        </div>
-      </section>
+          </Row>
+        </Card>
+      </div>
 
-      {/* Permissions (sudoers) */}
-      <section
-        className={`rounded-xl border shadow-card ${sudoers?.configured ? 'bg-white border-surface-border' : 'bg-amber-50 border-amber-200'}`}
-      >
-        <div className="px-5 py-4 border-b border-black/5">
-          <div className="flex items-center gap-2">
-            {sudoers?.configured ? (
-              <ShieldCheck size={15} className="text-wp-green" />
-            ) : (
-              <ShieldAlert size={15} className="text-amber-600" />
-            )}
-            <h2 className="text-sm font-semibold text-gray-800">Permissions</h2>
-            <span
-              className={`ml-auto text-xs font-medium px-2 py-0.5 rounded-full ${sudoers?.configured ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}
-            >
-              {sudoers?.configured ? 'Configured' : 'Not set up'}
-            </span>
-          </div>
-        </div>
-        <div className="p-5">
-          <p className="text-sm text-gray-600 mb-2">
-            {sudoers?.configured
-              ? 'WPHerd can manage the dnsmasq DNS resolver silently — no password prompts.'
-              : 'Without this, macOS will ask for your password when the dnsmasq DNS resolver starts or stops.'}
-          </p>
-          <p className="text-xs text-gray-400 mb-4">
-            Installs{' '}
-            <span className="font-mono bg-gray-100 px-1 rounded">
-              /etc/sudoers.d/wpherd
-            </span>{' '}
-            granting passwordless{' '}
-            <span className="font-mono bg-gray-100 px-1 rounded">sudo brew services</span>
-            , used only for dnsmasq — the other services run inside WPHerd and need no
-            privileges. Requires your password <strong>once</strong> to set up, then never
-            again.
-          </p>
-
-          {sudoersMessage && (
-            <div
-              className={`flex items-start gap-2 px-3 py-2.5 rounded-lg mb-4 text-sm ${sudoersMessage.type === 'error' ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'}`}
-            >
-              <CheckCircle size={14} className="flex-shrink-0 mt-0.5" />
-              {sudoersMessage.text}
-            </div>
-          )}
-
-          <div className="flex gap-2">
+      {/* Permissions (sudoers) + DNS */}
+      <div>
+        <SectionLabel>DNS &amp; Permissions</SectionLabel>
+        <Card>
+          <Row
+            icon={
+              sudoers?.configured ? (
+                <ShieldCheck size={18} className="text-wp-green flex-shrink-0" />
+              ) : (
+                <ShieldAlert
+                  size={18}
+                  className="text-amber-600 dark:text-amber-400 flex-shrink-0"
+                />
+              )
+            }
+            title="Passwordless DNS Control"
+            subtitle={
+              sudoers?.configured
+                ? 'WPHerd manages the dnsmasq resolver silently — no password prompts.'
+                : 'Without this, macOS asks for your password when dnsmasq starts or stops.'
+            }
+          >
             {!sudoers?.configured ? (
               <button
                 onClick={handleInstallSudoers}
                 disabled={sudoersLoading}
-                className="btn-primary text-sm"
+                className="btn-secondary text-xs"
               >
                 {sudoersLoading ? (
-                  <Loader size={13} className="animate-spin mr-1.5" />
+                  <Loader size={12} className="animate-spin mr-1.5" />
                 ) : (
-                  <ShieldCheck size={13} className="mr-1.5" />
+                  <ShieldCheck size={12} className="mr-1.5" />
                 )}
-                Setup Passwordless Services
+                Set Up…
               </button>
             ) : (
               <button
                 onClick={handleUninstallSudoers}
                 disabled={sudoersLoading}
-                className="btn-ghost text-xs text-gray-400 hover:text-red-600"
+                className="btn-ghost text-xs text-gray-400 hover:text-red-600 dark:hover:text-red-400"
               >
                 {sudoersLoading ? (
                   <Loader size={12} className="animate-spin mr-1.5" />
                 ) : (
                   <ShieldOff size={12} className="mr-1.5" />
                 )}
-                Remove Permissions
+                Remove
               </button>
             )}
-          </div>
-        </div>
-      </section>
-
-      {/* DNS / dnsmasq setup */}
-      <section className="bg-white rounded-xl border border-surface-border shadow-card">
-        <div className="px-5 py-4 border-b border-gray-100">
-          <h2 className="text-sm font-semibold text-gray-800">DNS Configuration</h2>
-        </div>
-        <div className="p-5">
-          <p className="text-sm text-gray-600 mb-4">
-            Configure dnsmasq to resolve{' '}
-            <span className="font-mono text-wp-blue">*.test</span> domains to localhost.
-            This requires administrator privileges.
-          </p>
-          {dnsMessage && (
+          </Row>
+          <Row
+            icon={<Wifi size={18} className="text-gray-400 flex-shrink-0" />}
+            title="*.test DNS Resolution"
+            subtitle="Route *.test domains to localhost via dnsmasq (admin privileges required)"
+          >
+            <button
+              onClick={handleSetupDns}
+              disabled={dnsSetupLoading}
+              className="btn-secondary text-xs"
+            >
+              {dnsSetupLoading ? (
+                <Loader size={12} className="animate-spin mr-1.5" />
+              ) : null}
+              Set Up…
+            </button>
+          </Row>
+        </Card>
+        <p className="text-[11px] text-gray-400 mt-1.5 px-1">
+          Installs <span className="font-mono">/etc/sudoers.d/wpherd</span> granting
+          passwordless <span className="font-mono">sudo brew services</span>, used only
+          for dnsmasq — the other services run inside WPHerd and need no privileges.
+        </p>
+        {(sudoersMessage || dnsMessage) &&
+          [sudoersMessage, dnsMessage].filter(Boolean).map((m, i) => (
             <div
-              className={`flex items-start gap-2 px-3 py-2.5 rounded-lg mb-4 text-sm ${
-                dnsMessage.type === 'error'
-                  ? 'bg-red-50 text-red-700'
-                  : 'bg-green-50 text-green-700'
+              key={i}
+              className={`flex items-start gap-2 px-3 py-2.5 rounded-lg mt-2 text-[13px] ${
+                m.type === 'error'
+                  ? 'bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400'
+                  : 'bg-green-50 text-green-700 dark:bg-green-500/10 dark:text-green-400'
               }`}
             >
               <CheckCircle size={14} className="flex-shrink-0 mt-0.5" />
-              {dnsMessage.text}
+              {m.text}
             </div>
-          )}
-          <button
-            onClick={handleSetupDns}
-            disabled={dnsSetupLoading}
-            className="btn-secondary text-sm"
-          >
-            {dnsSetupLoading ? (
-              <Loader size={13} className="animate-spin mr-1.5" />
-            ) : (
-              <Wifi size={13} className="mr-1.5" />
-            )}
-            Setup *.test DNS
-          </button>
-        </div>
-      </section>
+          ))}
+      </div>
 
       {/* Dependencies */}
-      <section className="bg-white rounded-xl border border-surface-border shadow-card">
-        <div className="px-5 py-4 border-b border-gray-100">
-          <h2 className="text-sm font-semibold text-gray-800">Dependencies</h2>
-        </div>
-        <div className="p-5 space-y-2">
+      <div>
+        <SectionLabel>Dependencies</SectionLabel>
+        <Card>
           {deps &&
             Object.entries(deps).map(([name, installed]) => (
-              <div key={name} className="flex items-center justify-between py-1.5">
-                <div className="flex items-center gap-2">
+              <Row
+                key={name}
+                icon={
                   <span
-                    className={`w-2 h-2 rounded-full ${installed ? 'bg-wp-green' : 'bg-gray-300'}`}
+                    className={`w-2 h-2 rounded-full flex-shrink-0 ${installed ? 'bg-wp-green' : 'bg-gray-300'}`}
                   />
-                  <span className="text-sm text-gray-700 capitalize font-mono text-xs">
+                }
+                title={
+                  <span className="font-mono text-xs">
                     {name === 'wpCli' ? 'wp-cli' : name}
                   </span>
-                </div>
+                }
+              >
                 <span
                   className={`text-xs font-medium ${
                     installed ? 'text-wp-green' : 'text-gray-400'
@@ -367,34 +391,30 @@ export default function Settings() {
                 >
                   {installed ? 'Installed' : 'Not found'}
                 </span>
-              </div>
+              </Row>
             ))}
-        </div>
+        </Card>
         {deps && !deps.brew && (
-          <div className="px-5 pb-4">
-            <div className="flex items-start gap-2 bg-orange-50 rounded-lg px-3 py-2.5 text-xs text-orange-700">
-              <Info size={13} className="flex-shrink-0 mt-0.5" />
-              <span>
-                Install Homebrew first:{' '}
-                <button
-                  onClick={() => window.electronAPI.openSiteInBrowser('https://brew.sh')}
-                  className="underline"
-                >
-                  brew.sh
-                </button>
-              </span>
-            </div>
+          <div className="flex items-start gap-2 bg-orange-50 dark:bg-orange-500/10 rounded-lg px-3 py-2.5 mt-2 text-xs text-orange-700 dark:text-orange-300">
+            <Info size={13} className="flex-shrink-0 mt-0.5" />
+            <span>
+              Install Homebrew first:{' '}
+              <button
+                onClick={() => window.electronAPI.openSiteInBrowser('https://brew.sh')}
+                className="underline"
+              >
+                brew.sh
+              </button>
+            </span>
           </div>
         )}
-      </section>
+      </div>
 
       {/* System info */}
       {sysInfo && (
-        <section className="bg-white rounded-xl border border-surface-border shadow-card">
-          <div className="px-5 py-4 border-b border-gray-100">
-            <h2 className="text-sm font-semibold text-gray-800">System Info</h2>
-          </div>
-          <div className="p-5 space-y-2 font-mono text-xs text-gray-500">
+        <div>
+          <SectionLabel>About</SectionLabel>
+          <Card>
             {[
               ['Platform', `${sysInfo.platform} (${sysInfo.arch})`],
               ['Homebrew Prefix', sysInfo.brewPrefix || 'Not detected'],
@@ -402,32 +422,31 @@ export default function Settings() {
               ['Electron', sysInfo.electronVersion],
               ['Node.js', sysInfo.nodeVersion],
             ].map(([label, value]) => (
-              <div key={label} className="flex items-center justify-between">
-                <span className="text-gray-400">{label}</span>
-                <span className="text-gray-700">{value}</span>
-              </div>
+              <Row key={label} title={<span className="text-gray-500">{label}</span>}>
+                <span className="font-mono text-xs text-gray-700">{value}</span>
+              </Row>
             ))}
-          </div>
-        </section>
+          </Card>
+        </div>
       )}
 
       {/* Save button */}
-      <div className="flex justify-end pb-4">
-        <button onClick={handleSave} disabled={saving} className="btn-primary text-sm">
+      <div className="flex justify-end">
+        <button onClick={handleSave} disabled={saving} className="btn-primary">
           {saved ? (
             <>
-              <CheckCircle size={14} className="mr-1.5" />
+              <CheckCircle size={13} className="mr-1.5" />
               Saved!
             </>
           ) : saving ? (
             <>
-              <Loader size={14} className="animate-spin mr-1.5" />
+              <Loader size={13} className="animate-spin mr-1.5" />
               Saving…
             </>
           ) : (
             <>
-              <Save size={14} className="mr-1.5" />
-              Save Settings
+              <Save size={13} className="mr-1.5" />
+              Save
             </>
           )}
         </button>

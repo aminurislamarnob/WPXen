@@ -10,123 +10,79 @@ import {
 } from 'lucide-react';
 import { StatusBadge } from './StatusBadge';
 import PhpSettings from './PhpSettings';
+import { Card, Row, SectionLabel } from './ui';
 
-function VersionCard({ version, onSwitch, switching, onUpdate, updating, logLine }) {
+// Version-number tile (like System Settings colored tiles, but numeric).
+function VersionTile({ version, active }) {
+  return (
+    <span
+      className={`icon-tile w-[30px] h-[30px] font-mono text-[11px] font-bold ${
+        active ? 'bg-accent' : 'bg-[#af52de]'
+      }`}
+    >
+      {version}
+    </span>
+  );
+}
+
+function VersionRow({ version, onSwitch, switching, onUpdate, updating, logLine }) {
   const isLoading = switching === version.version;
   const isUpdating = updating === version.version;
 
   return (
-    <div
-      className={`bg-white rounded-xl border shadow-card p-5 transition-all duration-200 ${
-        version.active
-          ? 'border-wp-blue ring-2 ring-wp-blue/20'
-          : 'border-surface-border hover:shadow-card-hover'
-      }`}
-    >
-      <div className="flex items-start justify-between">
-        <div className="flex items-center gap-3">
-          <div
-            className={`w-11 h-11 rounded-xl flex items-center justify-center font-mono text-sm font-bold ${
-              version.active ? 'bg-wp-blue text-white' : 'bg-purple-50 text-purple-700'
-            }`}
+    <>
+      <Row
+        icon={<VersionTile version={version.version} active={version.active} />}
+        title={
+          <span className="font-medium flex items-center gap-2">
+            PHP {version.version}
+            {version.active && (
+              <span className="flex items-center gap-1 px-1.5 py-px bg-accent/10 text-accent rounded-full text-[10px] font-medium">
+                <Star size={9} fill="currentColor" />
+                Active
+              </span>
+            )}
+          </span>
+        }
+        subtitle={`${version.fullVersion}${version.socketPath ? ` · ${version.socketPath}` : ''}`}
+      >
+        <span className="flex items-center gap-1.5 text-xs text-gray-500">
+          <StatusBadge running={version.running} size="xs" />
+          FPM {version.running ? 'on' : 'off'}
+        </span>
+        {version.outdated && (
+          <button
+            onClick={() => onUpdate(version.version)}
+            disabled={isLoading || isUpdating}
+            className="btn-secondary !px-2.5 !py-1 text-xs"
           >
-            {version.version}
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h3 className="text-sm font-semibold text-gray-900">
-                PHP {version.version}
-              </h3>
-              {version.active && (
-                <span className="flex items-center gap-1 px-2 py-0.5 bg-wp-blue/10 text-wp-blue rounded-full text-xs font-medium">
-                  <Star size={10} fill="currentColor" />
-                  Active
-                </span>
-              )}
-              {version.outdated && (
-                <span className="flex items-center gap-1 px-2 py-0.5 bg-amber-100 text-amber-700 rounded-full text-xs font-medium">
-                  <ArrowUpCircle size={10} />
-                  Update available
-                </span>
-              )}
-            </div>
-            <p className="text-xs text-gray-400 mt-0.5">
-              Full version: {version.fullVersion}
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1.5 text-xs">
-            <StatusBadge running={version.running} />
-            <span className={version.running ? 'text-wp-green' : 'text-gray-400'}>
-              FPM {version.running ? 'on' : 'off'}
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {/* Socket path */}
-      {version.socketPath && (
-        <div className="mt-3 px-3 py-2 bg-gray-50 rounded-lg">
-          <p
-            className="text-xs text-gray-400 font-mono truncate"
-            title={version.socketPath}
+            {isUpdating ? (
+              <Loader size={11} className="animate-spin mr-1" />
+            ) : (
+              <ArrowUpCircle size={11} className="mr-1" />
+            )}
+            Update
+          </button>
+        )}
+        {!version.active && (
+          <button
+            onClick={() => onSwitch(version.version)}
+            disabled={isLoading || isUpdating}
+            className="btn-secondary !px-2.5 !py-1 text-xs"
           >
-            {version.socketPath}
-          </p>
-        </div>
-      )}
-
-      {/* Actions */}
-      {(!version.active || version.outdated) && (
-        <div className="mt-4 flex gap-2">
-          {!version.active && (
-            <button
-              onClick={() => onSwitch(version.version)}
-              disabled={isLoading || isUpdating}
-              className="btn-secondary flex-1 text-xs justify-center"
-            >
-              {isLoading ? (
-                <>
-                  <Loader size={12} className="animate-spin mr-1.5" />
-                  Switching…
-                </>
-              ) : (
-                'Set as Active'
-              )}
-            </button>
-          )}
-          {version.outdated && (
-            <button
-              onClick={() => onUpdate(version.version)}
-              disabled={isLoading || isUpdating}
-              className="btn-secondary flex-1 text-xs justify-center"
-            >
-              {isUpdating ? (
-                <>
-                  <Loader size={12} className="animate-spin mr-1.5" />
-                  Updating…
-                </>
-              ) : (
-                <>
-                  <ArrowUpCircle size={12} className="mr-1.5" />
-                  Update
-                </>
-              )}
-            </button>
-          )}
-        </div>
-      )}
-
+            {isLoading ? <Loader size={11} className="animate-spin mr-1" /> : null}
+            Set Active
+          </button>
+        )}
+      </Row>
       {isUpdating && (
-        <div className="mt-3 px-3 py-2 bg-gray-900 rounded-lg">
+        <div className="px-4 py-2 bg-zinc-900">
           <p className="text-xs text-green-400 font-mono truncate" title={logLine}>
             {logLine || 'Starting…'}
           </p>
         </div>
       )}
-    </div>
+    </>
   );
 }
 
@@ -134,44 +90,42 @@ function InstallRow({ version, onInstall, installing, logLine, disabled }) {
   const isInstalling = installing === version;
 
   return (
-    <div className="bg-white rounded-xl border border-surface-border shadow-card p-4">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-lg bg-purple-50 text-purple-700 flex items-center justify-center font-mono text-xs font-bold">
+    <>
+      <Row
+        icon={
+          <span className="icon-tile w-[30px] h-[30px] bg-gray-300 text-gray-600 font-mono text-[11px] font-bold">
             {version}
-          </div>
-          <div>
-            <h4 className="text-sm font-semibold text-gray-900">PHP {version}</h4>
-            <p className="text-xs text-gray-400 font-mono">php@{version}</p>
-          </div>
-        </div>
+          </span>
+        }
+        title={`PHP ${version}`}
+        subtitle={`php@${version}`}
+      >
         <button
           onClick={() => onInstall(version)}
           disabled={disabled}
-          className="btn-secondary text-xs justify-center min-w-[110px]"
+          className="btn-secondary !px-2.5 !py-1 text-xs min-w-[90px] justify-center"
         >
           {isInstalling ? (
             <>
-              <Loader size={12} className="animate-spin mr-1.5" />
+              <Loader size={11} className="animate-spin mr-1" />
               Installing…
             </>
           ) : (
             <>
-              <Download size={12} className="mr-1.5" />
+              <Download size={11} className="mr-1" />
               Install
             </>
           )}
         </button>
-      </div>
-
+      </Row>
       {isInstalling && (
-        <div className="mt-3 px-3 py-2 bg-gray-900 rounded-lg">
+        <div className="px-4 py-2 bg-zinc-900">
           <p className="text-xs text-green-400 font-mono truncate" title={logLine}>
             {logLine || 'Starting…'}
           </p>
         </div>
       )}
-    </div>
+    </>
   );
 }
 
@@ -282,99 +236,81 @@ export default function PHPVersions() {
   }
 
   return (
-    <div className="p-6 max-w-3xl animate-fade-in">
-      <div className="flex items-center justify-between mb-5">
-        <div>
-          <h1 className="text-xl font-bold text-gray-900">PHP Versions</h1>
-          <p className="text-sm text-gray-500 mt-0.5">Manage installed PHP versions</p>
-        </div>
-        <div className="flex items-stretch gap-2">
-          <button
-            onClick={scrollToSettings}
-            title="PHP configuration"
-            className="btn-secondary text-sm px-2.5 py-0"
-          >
-            <Sliders size={15} />
-          </button>
-          <button
-            onClick={loadVersions}
-            disabled={busy}
-            className="btn-secondary text-sm"
-          >
-            Refresh
-          </button>
-        </div>
+    <div className="px-6 pb-6 max-w-2xl mx-auto animate-fade-in">
+      <div className="flex items-center justify-end gap-2 mb-4">
+        <button
+          onClick={scrollToSettings}
+          title="PHP configuration"
+          className="btn-secondary !px-2.5 text-xs"
+        >
+          <Sliders size={13} />
+        </button>
+        <button onClick={loadVersions} disabled={busy} className="btn-secondary text-xs">
+          Refresh
+        </button>
       </div>
 
       {message && (
         <div
-          className={`flex items-center gap-2 px-4 py-3 rounded-xl mb-4 text-sm animate-fade-in ${
+          className={`flex items-center gap-2 px-4 py-3 rounded-[10px] mb-4 text-[13px] animate-fade-in ${
             message.type === 'error'
-              ? 'bg-red-50 text-red-700'
-              : 'bg-green-50 text-green-700'
+              ? 'bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400'
+              : 'bg-green-50 text-green-700 dark:bg-green-500/10 dark:text-green-400'
           }`}
         >
-          <CheckCircle size={15} />
+          <CheckCircle size={14} />
           {message.text}
         </div>
       )}
 
       {loading ? (
         <div className="flex items-center justify-center py-16">
-          <Loader size={22} className="animate-spin text-wp-blue" />
+          <Loader size={22} className="animate-spin text-accent" />
         </div>
       ) : versions.length === 0 ? (
-        <div className="text-center py-12">
-          <div className="w-14 h-14 rounded-xl bg-purple-50 flex items-center justify-center mx-auto mb-3">
-            <Code2 size={24} className="text-purple-500" />
+        <Card className="px-6 py-10 text-center">
+          <div className="w-12 h-12 rounded-xl bg-purple-50 dark:bg-purple-500/15 flex items-center justify-center mx-auto mb-3">
+            <Code2 size={22} className="text-purple-500 dark:text-purple-300" />
           </div>
-          <h3 className="text-sm font-bold text-gray-700">No PHP versions found</h3>
-          <p className="text-xs text-gray-400 mt-2">Install one below to get started.</p>
-        </div>
+          <h3 className="text-[13px] font-bold text-gray-700">No PHP versions found</h3>
+          <p className="text-xs text-gray-400 mt-1">Install one below to get started.</p>
+        </Card>
       ) : (
-        <div className="space-y-3">
-          {versions.map((v) => (
-            <VersionCard
-              key={v.version}
-              version={v}
-              onSwitch={handleSwitch}
-              switching={switching}
-              onUpdate={handleUpdate}
-              updating={updating}
-              logLine={logLine}
-            />
-          ))}
-        </div>
+        <>
+          <SectionLabel>Installed Versions</SectionLabel>
+          <Card>
+            {versions.map((v) => (
+              <VersionRow
+                key={v.version}
+                version={v}
+                onSwitch={handleSwitch}
+                switching={switching}
+                onUpdate={handleUpdate}
+                updating={updating}
+                logLine={logLine}
+              />
+            ))}
+          </Card>
+        </>
       )}
 
       {/* Install more PHP versions */}
-      {!loading && (
-        <div className="mt-8">
-          <div className="flex items-center gap-2 mb-3">
-            <Download size={16} className="text-gray-500" />
-            <h2 className="text-sm font-semibold text-gray-900">Install PHP versions</h2>
-          </div>
-          {notInstalled.length === 0 ? (
-            installable.length > 0 && (
-              <p className="text-xs text-gray-400">
-                All available PHP versions are installed.
-              </p>
-            )
-          ) : (
-            <div className="space-y-3">
-              {notInstalled.map((v) => (
-                <InstallRow
-                  key={v.version}
-                  version={v.version}
-                  onInstall={handleInstall}
-                  installing={installing}
-                  logLine={logLine}
-                  disabled={busy}
-                />
-              ))}
-            </div>
-          )}
-          <p className="text-xs text-gray-400 mt-3">
+      {!loading && notInstalled.length > 0 && (
+        <div className="mt-6">
+          <SectionLabel>Available to Install</SectionLabel>
+          <Card>
+            {notInstalled.map((v) => (
+              <InstallRow
+                key={v.version}
+                version={v.version}
+                onInstall={handleInstall}
+                installing={installing}
+                logLine={logLine}
+                disabled={busy}
+              />
+            ))}
+          </Card>
+          <p className="text-[11px] text-gray-400 mt-1.5 px-1">
             Installs <span className="font-mono">php@&lt;version&gt;</span> via Homebrew.
             This can take a few minutes. PHP 8.0 and 7.4 are EOL and come from the{' '}
             <span className="font-mono">shivammathur/php</span> tap.

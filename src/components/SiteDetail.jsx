@@ -154,10 +154,10 @@ function Overview({ site }) {
 
   return (
     <div>
-      <h2 className="text-lg font-bold text-gray-900 mb-5">Overview</h2>
+      <h2 className="text-[15px] font-bold text-gray-900 mb-4">Overview</h2>
 
       {/* Quick actions */}
-      <div className="bg-white rounded-xl border border-surface-border shadow-card p-3 mb-4">
+      <div className="settings-card p-3 mb-4">
         <div className="grid grid-cols-3 gap-1.5">
           {actions.map(({ icon: Icon, label, onClick, spinning, disabled, active }) => (
             <button
@@ -201,28 +201,32 @@ function Overview({ site }) {
             <button
               onClick={handleStopTunnel}
               title="Stop sharing"
-              className="p-1.5 rounded-lg text-red-500 hover:bg-red-50"
+              className="p-1.5 rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10"
             >
               <X size={13} />
             </button>
           </div>
         )}
         {tunnel?.status === 'error' && (
-          <p className="mt-2 px-2.5 text-xs text-red-600">
+          <p className="mt-2 px-2.5 text-xs text-red-600 dark:text-red-400">
             {tunnel.error || 'Failed to start the tunnel.'}
           </p>
         )}
-        {actionError && <p className="mt-2 px-2.5 text-xs text-red-600">{actionError}</p>}
+        {actionError && (
+          <p className="mt-2 px-2.5 text-xs text-red-600 dark:text-red-400">
+            {actionError}
+          </p>
+        )}
       </div>
 
-      <div className="bg-white rounded-xl border border-surface-border shadow-card divide-y divide-gray-100">
+      <div className="settings-card divide-y divide-surface-hairline">
         {rows.map(({ icon: Icon, label, value }) => (
-          <div key={label} className="flex items-center gap-4 px-5 py-3.5">
-            <span className="flex items-center gap-2 w-36 flex-shrink-0 text-sm text-gray-500">
-              <Icon size={14} />
+          <div key={label} className="flex items-center gap-4 px-4 py-3">
+            <span className="flex items-center gap-2 w-32 flex-shrink-0 text-[13px] text-gray-500">
+              <Icon size={13} />
               {label}
             </span>
-            <span className="text-sm text-gray-900 font-mono truncate" title={value}>
+            <span className="text-[13px] text-gray-900 font-mono truncate" title={value}>
               {value}
             </span>
           </div>
@@ -253,32 +257,37 @@ export default function SiteDetail({ sites, refreshSites }) {
 
   return (
     <div className="animate-fade-in">
-      {/* Detail header */}
-      <div className="sticky top-0 z-10 bg-surface/80 backdrop-macos border-b border-surface-border px-6 py-4">
+      {/* Detail header — System Settings back chevron + title */}
+      <div className="sticky top-0 z-10 bg-surface/80 backdrop-macos border-b border-surface-border px-4 py-2.5">
         <div className="flex items-center justify-between gap-4">
-          <button
-            onClick={() => navigate('/sites')}
-            className="flex items-center gap-2 min-w-0 text-left"
-          >
-            <ChevronLeft size={18} className="text-wp-blue flex-shrink-0" />
-            <span className="text-lg font-bold text-wp-blue">Back</span>
-            <span className="text-lg font-bold text-gray-900 truncate">
-              — {site.domain}
+          <div className="flex items-center gap-1 min-w-0">
+            <button
+              onClick={() => navigate('/sites')}
+              title="Back to Sites"
+              className="p-1.5 rounded-lg hover:bg-black/5 dark:hover:bg-white/10 text-gray-500 flex-shrink-0"
+            >
+              <ChevronLeft size={17} />
+            </button>
+            <span className="text-[15px] font-bold text-gray-900 truncate">
+              {site.name}
             </span>
-          </button>
+            <span className="text-[13px] text-gray-400 truncate ml-1.5">
+              {site.domain}
+            </span>
+          </div>
           <div className="flex items-center gap-2 flex-shrink-0">
             <button
               onClick={() => window.electronAPI.openSiteInBrowser(site.url)}
-              className="btn-secondary text-sm"
+              className="btn-secondary text-xs"
             >
-              <ExternalLink size={14} className="mr-1.5" />
+              <ExternalLink size={12} className="mr-1.5" />
               Visit Site
             </button>
             <button
               onClick={() => window.electronAPI.openWpAdmin(site.url)}
-              className="btn-secondary text-sm"
+              className="btn-secondary text-xs"
             >
-              <Settings size={14} className="mr-1.5" />
+              <Settings size={12} className="mr-1.5" />
               WP Admin
             </button>
           </div>
@@ -300,10 +309,10 @@ export default function SiteDetail({ sites, refreshSites }) {
                     <button
                       key={child.id}
                       onClick={() => setActive(child.id)}
-                      className={`w-full text-left pl-9 pr-3 py-2 rounded-lg text-sm transition-colors ${
+                      className={`w-full text-left pl-9 pr-3 py-1.5 rounded-md text-[13px] transition-colors ${
                         active === child.id
-                          ? 'bg-wp-blue/10 text-wp-blue font-medium'
-                          : 'text-gray-600 hover:bg-gray-100'
+                          ? 'bg-accent text-white font-medium'
+                          : 'text-gray-600 hover:bg-black/5 dark:hover:bg-white/10'
                       }`}
                     >
                       {child.label}
@@ -315,13 +324,13 @@ export default function SiteDetail({ sites, refreshSites }) {
               <button
                 key={item.id}
                 onClick={() => setActive(item.id)}
-                className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors ${
+                className={`w-full flex items-center gap-2.5 px-3 py-1.5 rounded-md text-[13px] transition-colors ${
                   active === item.id
-                    ? 'bg-wp-blue/10 text-wp-blue font-medium'
-                    : 'text-gray-600 hover:bg-gray-100'
+                    ? 'bg-accent text-white font-medium'
+                    : 'text-gray-600 hover:bg-black/5 dark:hover:bg-white/10'
                 }`}
               >
-                <item.icon size={15} />
+                <item.icon size={14} />
                 {item.label}
               </button>
             )

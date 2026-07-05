@@ -141,8 +141,8 @@ export default function SiteLogs({ site }) {
         <div
           className={`flex items-center gap-2 px-4 py-3 rounded-xl mb-4 text-sm ${
             message.type === 'error'
-              ? 'bg-red-50 text-red-700'
-              : 'bg-green-50 text-green-700'
+              ? 'bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400'
+              : 'bg-green-50 text-green-700 dark:bg-green-500/10 dark:text-green-400'
           }`}
         >
           {message.type === 'error' ? (
@@ -174,13 +174,13 @@ export default function SiteLogs({ site }) {
       {/* Viewer */}
       <div className="relative">
         {loading && (
-          <div className="absolute inset-0 z-10 flex items-center justify-center bg-gray-900/60 rounded-xl">
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/60 rounded-xl">
             <Loader size={22} className="animate-spin text-white" />
           </div>
         )}
         <pre
           ref={viewerRef}
-          className="w-full h-[26rem] overflow-auto font-mono text-xs leading-relaxed p-4 rounded-xl bg-gray-900 text-gray-100 whitespace-pre-wrap break-words select-text"
+          className="w-full h-[26rem] overflow-auto font-mono text-xs leading-relaxed p-4 rounded-xl bg-zinc-900 text-zinc-100 whitespace-pre-wrap break-words select-text"
         >
           {placeholder ?? log.content}
         </pre>

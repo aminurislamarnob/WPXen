@@ -20,11 +20,12 @@ import {
   X,
   SlidersHorizontal,
 } from 'lucide-react';
+import { Toggle } from './ui';
 
 function ContextMenu({ site, onDelete, onManage, onClose }) {
   return (
     <div
-      className="absolute right-0 top-8 z-50 bg-white rounded-xl shadow-card-hover border border-gray-100 py-1 w-48 animate-fade-in"
+      className="absolute right-0 top-8 z-50 panel rounded-xl shadow-card-hover border border-gray-100 py-1 w-48 animate-fade-in"
       onMouseLeave={onClose}
     >
       <button
@@ -64,7 +65,7 @@ function ContextMenu({ site, onDelete, onManage, onClose }) {
           onDelete(site);
           onClose();
         }}
-        className="flex w-full items-center gap-2.5 px-3 py-2 text-xs text-red-600 hover:bg-red-50"
+        className="flex w-full items-center gap-2.5 px-3 py-2 text-xs text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-500/10"
       >
         <Trash2 size={13} />
         Remove Site…
@@ -172,7 +173,7 @@ export default function SiteCard({
   ];
 
   return (
-    <div className="site-card bg-white rounded-xl border border-surface-border shadow-card group">
+    <div className="site-card settings-card group">
       {/* Card header */}
       <div className="p-4 pb-3">
         <div className="flex items-start justify-between">
@@ -180,7 +181,7 @@ export default function SiteCard({
             <button
               onClick={openDetail}
               title="Manage site"
-              className="w-10 h-10 rounded-xl bg-wp-blue flex items-center justify-center flex-shrink-0 hover:bg-wp-blue-dark transition-colors"
+              className="icon-tile w-9 h-9 bg-[#30b0c7] hover:brightness-95 transition-all flex-shrink-0"
             >
               <span className="text-white text-sm font-bold">
                 {site.name.charAt(0).toUpperCase()}
@@ -225,11 +226,11 @@ export default function SiteCard({
 
         {/* Tags */}
         <div className="flex flex-wrap gap-1.5 mt-3">
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-purple-50 text-purple-700 rounded-full text-xs font-medium">
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-purple-50 text-purple-700 dark:bg-purple-500/15 dark:text-purple-300 rounded-full text-xs font-medium">
             PHP {site.phpVersion}
           </span>
           {site.wpVersion && (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-50 text-blue-700 rounded-full text-xs font-medium">
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-50 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300 rounded-full text-xs font-medium">
               WP {site.wpVersion}
             </span>
           )}
@@ -250,24 +251,16 @@ export default function SiteCard({
             HTTPS
             {httpsBusy && <Loader size={11} className="animate-spin text-gray-400" />}
           </span>
-          <button
-            role="switch"
-            aria-checked={!!site.https}
-            onClick={handleToggleHttps}
+          <Toggle
+            checked={!!site.https}
+            onChange={handleToggleHttps}
             disabled={httpsBusy}
-            title={site.https ? 'Disable HTTPS' : 'Enable HTTPS'}
-            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-              site.https ? 'bg-wp-green' : 'bg-gray-300'
-            } ${httpsBusy ? 'opacity-50' : ''}`}
-          >
-            <span
-              className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
-                site.https ? 'translate-x-4' : 'translate-x-0.5'
-              }`}
-            />
-          </button>
+            label={site.https ? 'Disable HTTPS' : 'Enable HTTPS'}
+          />
         </div>
-        {httpsError && <p className="mt-1.5 text-xs text-red-600">{httpsError}</p>}
+        {httpsError && (
+          <p className="mt-1.5 text-xs text-red-600 dark:text-red-400">{httpsError}</p>
+        )}
       </div>
 
       {/* Path */}
@@ -345,7 +338,7 @@ export default function SiteCard({
                 )}
               </button>
               {cfInstalling && cfLog && (
-                <div className="mt-2 px-3 py-2 bg-gray-900 rounded-lg">
+                <div className="mt-2 px-3 py-2 bg-zinc-900 rounded-lg">
                   <p className="text-xs text-green-400 font-mono truncate" title={cfLog}>
                     {cfLog}
                   </p>
@@ -376,7 +369,7 @@ export default function SiteCard({
                 <button
                   onClick={() => onStopTunnel(site)}
                   title="Stop sharing"
-                  className="p-1.5 rounded-lg text-red-500 hover:bg-red-50"
+                  className="p-1.5 rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10"
                 >
                   <X size={13} />
                 </button>
@@ -392,7 +385,7 @@ export default function SiteCard({
             </div>
           ) : tunnel?.status === 'error' ? (
             <div>
-              <p className="text-xs text-red-600 mb-2">
+              <p className="text-xs text-red-600 dark:text-red-400 mb-2">
                 {tunnel.error || 'Failed to start the tunnel.'}
               </p>
               <button

@@ -18,11 +18,11 @@ function DeleteConfirmModal({ site, onConfirm, onClose }) {
       className="modal-overlay animate-fade-in"
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
-      <div className="bg-white rounded-2xl shadow-window w-96 animate-slide-in">
+      <div className="panel rounded-2xl shadow-window w-96 animate-slide-in">
         <div className="p-6">
           <div className="flex items-center gap-3 mb-4">
-            <div className="w-10 h-10 rounded-xl bg-red-100 flex items-center justify-center">
-              <AlertTriangle size={20} className="text-red-600" />
+            <div className="w-10 h-10 rounded-xl bg-red-100 dark:bg-red-500/15 flex items-center justify-center">
+              <AlertTriangle size={20} className="text-red-600 dark:text-red-400" />
             </div>
             <div>
               <h3 className="text-base font-bold text-gray-900">Remove Site</h3>
@@ -199,37 +199,33 @@ export default function Sites({ sites, setSites, refreshSites }) {
   }
 
   return (
-    <div className="p-6 max-w-5xl animate-fade-in">
+    <div className="px-6 pb-6 max-w-4xl mx-auto animate-fade-in">
       {/* Header */}
-      <div className="flex items-center justify-between mb-5">
-        <div>
-          <h1 className="text-xl font-bold text-gray-900">Sites</h1>
-          <p className="text-sm text-gray-500 mt-0.5">
+      <div className="flex items-center justify-between mb-4 gap-3">
+        {sites.length > 0 ? (
+          <div className="relative flex-1 max-w-xs">
+            <Search
+              size={13}
+              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400"
+            />
+            <input
+              type="text"
+              placeholder="Search sites…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="form-input !pl-8"
+            />
+          </div>
+        ) : (
+          <p className="text-xs text-gray-500">
             {sites.length} WordPress site{sites.length !== 1 ? 's' : ''}
           </p>
-        </div>
-        <button onClick={() => setShowAddModal(true)} className="btn-primary text-sm">
-          <Plus size={15} className="mr-1.5" />
+        )}
+        <button onClick={() => setShowAddModal(true)} className="btn-primary text-xs">
+          <Plus size={13} className="mr-1.5" />
           Add Site
         </button>
       </div>
-
-      {/* Search */}
-      {sites.length > 0 && (
-        <div className="relative mb-5">
-          <Search
-            size={15}
-            className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
-          />
-          <input
-            type="text"
-            placeholder="Search sites…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="form-input pl-9"
-          />
-        </div>
-      )}
 
       {/* Sites grid */}
       {sites.length === 0 ? (

@@ -16,6 +16,7 @@ import {
   FileText,
   Code2,
 } from 'lucide-react';
+import { Toggle } from './ui';
 
 const PAGE_SIZE = 50;
 
@@ -95,8 +96,8 @@ function InstallCard({ onInstalled }) {
   }
 
   return (
-    <div className="bg-white rounded-xl border border-surface-border shadow-card p-8 text-center">
-      <div className="w-14 h-14 rounded-2xl bg-rose-50 flex items-center justify-center mx-auto mb-4">
+    <div className="settings-card p-8 text-center">
+      <div className="w-14 h-14 rounded-2xl bg-rose-50 dark:bg-rose-500/10 flex items-center justify-center mx-auto mb-4">
         <MailIcon size={26} className="text-rose-500" />
       </div>
       <h2 className="text-base font-semibold text-gray-900 mb-1">
@@ -122,14 +123,14 @@ function InstallCard({ onInstalled }) {
       <p className="text-xs text-gray-300 font-mono mt-3">brew install mailpit</p>
 
       {error && (
-        <div className="flex items-center justify-center gap-2 mt-4 text-sm text-red-600">
+        <div className="flex items-center justify-center gap-2 mt-4 text-sm text-red-600 dark:text-red-400">
           <XCircle size={14} /> {error}
         </div>
       )}
       {lines.length > 0 && (
         <div
           ref={logRef}
-          className="mt-4 bg-gray-900 rounded-lg text-left text-xs text-gray-300 font-mono p-3 max-h-40 overflow-y-auto"
+          className="mt-4 bg-zinc-900 rounded-lg text-left text-xs text-zinc-300 font-mono p-3 max-h-40 overflow-y-auto"
         >
           {lines.map((line, i) => (
             <div key={i}>{line}</div>
@@ -187,7 +188,7 @@ function MessageViewer({ message, loading, onDelete }) {
             <button
               onClick={() => onDelete(message.ID)}
               title="Delete message"
-              className="p-2 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-600 transition-colors"
+              className="p-2 rounded-lg hover:bg-red-50 dark:hover:bg-red-500/10 text-gray-400 hover:text-red-600 dark:hover:text-red-400 transition-colors"
             >
               <Trash2 size={14} />
             </button>
@@ -233,7 +234,7 @@ function MessageViewer({ message, loading, onDelete }) {
               onClick={() => setView('html')}
               className={`inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md transition-colors ${
                 view === 'html'
-                  ? 'bg-gray-900 text-white'
+                  ? 'bg-accent text-white'
                   : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
               }`}
             >
@@ -243,7 +244,7 @@ function MessageViewer({ message, loading, onDelete }) {
               onClick={() => setView('text')}
               className={`inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md transition-colors ${
                 view === 'text'
-                  ? 'bg-gray-900 text-white'
+                  ? 'bg-accent text-white'
                   : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
               }`}
             >
@@ -253,8 +254,9 @@ function MessageViewer({ message, loading, onDelete }) {
         )}
       </div>
 
-      {/* Body */}
-      <div className="flex-1 min-h-0 bg-white">
+      {/* Body — the iframe area stays white: most emails assume a light
+          background and would be unreadable on a dark one. */}
+      <div className={`flex-1 min-h-0 ${view === 'html' && hasHtml ? 'bg-white' : ''}`}>
         {view === 'html' && hasHtml ? (
           // sandbox="" disables scripts/forms in the email; srcDoc keeps it
           // fully local (remote images are additionally blocked by the CSP).
@@ -458,26 +460,23 @@ export default function Mail({ refreshStatus }) {
   const hasMore = messages.length < (search.trim() ? matchTotal : total);
 
   return (
-    <div className="p-6 h-full flex flex-col animate-fade-in">
+    <div className="px-6 pb-6 h-full flex flex-col animate-fade-in">
       {/* Header */}
       <div className="flex items-center justify-between mb-4 flex-shrink-0">
-        <div>
-          <h1 className="text-xl font-bold text-gray-900">Mail</h1>
-          <p className="text-sm text-gray-500 mt-0.5">
-            {status.installed
-              ? `${total} message${total === 1 ? '' : 's'} captured${
-                  unread > 0 ? ` · ${unread} unread` : ''
-                }`
-              : 'Capture outgoing email from your sites'}
-          </p>
-        </div>
+        <p className="text-xs text-gray-500">
+          {status.installed
+            ? `${total} message${total === 1 ? '' : 's'} captured${
+                unread > 0 ? ` · ${unread} unread` : ''
+              }`
+            : 'Capture outgoing email from your sites'}
+        </p>
         {status.installed && (
           <button
             onClick={() => window.electronAPI.openMailpit()}
-            className="btn-secondary text-sm"
+            className="btn-secondary text-xs"
             title="Open the full Mailpit web UI"
           >
-            <ExternalLink size={13} className="mr-1.5" />
+            <ExternalLink size={12} className="mr-1.5" />
             Open Mailpit UI
           </button>
         )}
@@ -488,8 +487,8 @@ export default function Mail({ refreshStatus }) {
         <div
           className={`flex items-center gap-2 px-4 py-3 rounded-xl mb-4 text-sm animate-fade-in flex-shrink-0 ${
             message.type === 'error'
-              ? 'bg-red-50 text-red-700'
-              : 'bg-green-50 text-green-700'
+              ? 'bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400'
+              : 'bg-green-50 text-green-700 dark:bg-green-500/10 dark:text-green-400'
           }`}
         >
           {message.type === 'error' ? <XCircle size={15} /> : <CheckCircle size={15} />}
@@ -511,14 +510,14 @@ export default function Mail({ refreshStatus }) {
         <>
           {/* Not running banner */}
           {!status.running && (
-            <div className="flex items-center justify-between bg-amber-50 rounded-xl px-4 py-3 mb-4 flex-shrink-0">
-              <p className="text-sm text-amber-700">
+            <div className="flex items-center justify-between bg-amber-50 dark:bg-amber-500/10 rounded-xl px-4 py-3 mb-4 flex-shrink-0">
+              <p className="text-sm text-amber-700 dark:text-amber-300">
                 Mailpit is installed but not running — start it to view and capture mail.
               </p>
               <button
                 onClick={handleStart}
                 disabled={busy === 'start'}
-                className="service-toggle bg-green-50 text-green-700 hover:bg-green-100 flex-shrink-0"
+                className="service-toggle bg-green-50 text-green-700 hover:bg-green-100 dark:bg-green-500/15 dark:text-green-300 dark:hover:bg-green-500/25 flex-shrink-0"
               >
                 {busy === 'start' ? (
                   <Loader size={11} className="animate-spin mr-1.5 inline" />
@@ -531,35 +530,28 @@ export default function Mail({ refreshStatus }) {
           )}
 
           {/* Catch toggle */}
-          <div className="flex items-center justify-between bg-white rounded-xl border border-surface-border shadow-card px-4 py-3 mb-4 flex-shrink-0">
+          <div className="settings-card flex items-center justify-between px-4 py-3 mb-4 flex-shrink-0">
             <div className="min-w-0 pr-4">
-              <p className="text-sm font-medium text-gray-900">Catch outgoing email</p>
+              <p className="text-[13px] font-medium text-gray-900">
+                Catch outgoing email
+              </p>
               <p className="text-xs text-gray-400 mt-0.5">
                 Routes PHP <span className="font-mono">mail()</span> — and therefore{' '}
                 <span className="font-mono">wp_mail()</span> — from every site into
                 Mailpit. No mail leaves your machine while this is on.
               </p>
             </div>
-            <button
-              onClick={handleToggleCatching}
+            <Toggle
+              checked={!!status.catching}
+              onChange={handleToggleCatching}
               disabled={busy === 'toggle'}
-              role="switch"
-              aria-checked={status.catching}
-              className={`relative w-10 h-6 rounded-full transition-colors flex-shrink-0 ${
-                status.catching ? 'bg-wp-green' : 'bg-gray-200'
-              } ${busy === 'toggle' ? 'opacity-50' : ''}`}
-            >
-              <span
-                className={`absolute left-0 top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${
-                  status.catching ? 'translate-x-[18px]' : 'translate-x-0.5'
-                }`}
-              />
-            </button>
+              label="Catch outgoing email"
+            />
           </div>
 
           {/* Inbox */}
           {status.running && (
-            <div className="flex-1 min-h-0 flex flex-col bg-white rounded-xl border border-surface-border shadow-card overflow-hidden">
+            <div className="flex-1 min-h-0 flex flex-col settings-card">
               {/* Toolbar */}
               <div className="flex items-center gap-2 px-4 py-3 border-b border-surface-border flex-shrink-0">
                 <div className="relative flex-1 max-w-xs">
@@ -595,7 +587,7 @@ export default function Mail({ refreshStatus }) {
                   onClick={handleDeleteAll}
                   disabled={busy === 'delete-all' || total === 0}
                   title="Delete all messages"
-                  className="p-2 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-600 disabled:opacity-30 transition-colors"
+                  className="p-2 rounded-lg hover:bg-red-50 dark:hover:bg-red-500/10 text-gray-400 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-30 transition-colors"
                 >
                   {busy === 'delete-all' ? (
                     <Loader size={14} className="animate-spin" />

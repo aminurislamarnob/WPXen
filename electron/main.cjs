@@ -66,8 +66,25 @@ app.whenReady().then(() => {
   // Initialize store
   store = new JsonStore('wpherd-data');
 
+  // Apply the saved appearance before the window exists so the initial
+  // backgroundColor and the renderer's prefers-color-scheme are right from
+  // the first paint. 'system' (Auto) is nativeTheme's default.
+  const appearance = store.get('settings.appearance', 'system');
+  if (appearance === 'light' || appearance === 'dark') {
+    nativeTheme.themeSource = appearance;
+  }
+
   // Create main window
   const win = createWindow();
+
+  // Keep the native window background in sync when the appearance changes
+  // (either via Settings or macOS switching in Auto mode), so resize flashes
+  // match the renderer theme.
+  nativeTheme.on('updated', () => {
+    mainWindow?.setBackgroundColor(
+      nativeTheme.shouldUseDarkColors ? '#1e1e1e' : '#f0f0f1'
+    );
+  });
 
   // Register IPC handlers
   registerHandlers(win, store);

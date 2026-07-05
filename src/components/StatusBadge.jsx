@@ -17,7 +17,9 @@ export function ServicePill({ name, running }) {
   return (
     <span
       className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${
-        running ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-500'
+        running
+          ? 'bg-green-100 text-green-800 dark:bg-green-500/15 dark:text-green-300'
+          : 'bg-gray-100 text-gray-500'
       }`}
     >
       <StatusBadge running={running} size="xs" />
