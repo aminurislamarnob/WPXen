@@ -298,6 +298,11 @@ async function importDatabase(dbName, sqlFile, { timeout = 600000 } = {}) {
     });
     const input = fs.createReadStream(sqlFile, { start });
     input.on('error', reject);
+    // If the client rejects the dump partway through it exits and closes stdin
+    // while we're still writing; the resulting EPIPE would otherwise be an
+    // unhandled 'error' that crashes the main process. Swallow it — the real
+    // failure surfaces via the non-zero exit code + stderr below.
+    child.stdin.on('error', () => {});
     input.pipe(child.stdin);
     child.on('error', reject);
     child.on('close', (code) => {

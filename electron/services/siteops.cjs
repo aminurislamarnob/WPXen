@@ -103,6 +103,22 @@ function urlHost(value) {
   }
 }
 
+// True when a SQL dump looks like a WordPress multisite network. We require at
+// least TWO of the multisite-only tables (each anchored to a `<prefix>_` table
+// boundary) so a single-site plugin table that merely ends in one of these
+// words — e.g. `wp_user_blogs` — can't trip the guard on its own. Pure —
+// covered by vitest.
+function isMultisiteDump(sqlHead) {
+  const re =
+    /CREATE TABLE `?[a-z0-9_]*_(blogs|blogmeta|site|sitemeta|blog_versions|signups|registration_log)`?[\s(]/gi;
+  const found = new Set();
+  let m;
+  while ((m = re.exec(sqlHead)) !== null) {
+    found.add(m[1].toLowerCase());
+  }
+  return found.size >= 2;
+}
+
 // Sniffs the WordPress table prefix from the head of a SQL dump.
 function detectTablePrefix(sqlHead) {
   const m = sqlHead.match(/CREATE TABLE `?([a-zA-Z0-9_]+?)(?:options|posts|users)`?[\s(]/);
@@ -317,13 +333,10 @@ async function importSite(archivePath, target, onProgress) {
     }
 
     // Multisite guard — WPHerd vhosts and tooling are single-site only.
-    if (sqlFile) {
-      const head = readSqlHead(sqlFile);
-      if (/CREATE TABLE `?(?:[a-zA-Z0-9_]+?)blogs`?[\s(]/.test(head)) {
-        throw new Error(
-          'This archive contains a multisite network, which WPHerd does not support yet.'
-        );
-      }
+    if (sqlFile && isMultisiteDump(readSqlHead(sqlFile))) {
+      throw new Error(
+        'This archive contains a multisite network, which WPHerd does not support yet.'
+      );
     }
 
     progress({ step: 'files', message: 'Placing site files...' });
@@ -691,6 +704,7 @@ module.exports = {
   validateManifest,
   detectImportKind,
   detectTablePrefix,
+  isMultisiteDump,
   urlHost,
   inspectArchive,
   exportSite,

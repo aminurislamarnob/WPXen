@@ -108,6 +108,37 @@ describe('detectTablePrefix', () => {
   });
 });
 
+describe('isMultisiteDump', () => {
+  it('flags a real multisite dump (blogs + sitemeta + site)', () => {
+    const head = [
+      'CREATE TABLE `wp_blogs` (',
+      'CREATE TABLE `wp_site` (',
+      'CREATE TABLE `wp_sitemeta` (',
+      'CREATE TABLE `wp_options` (',
+    ].join('\n');
+    expect(siteops.isMultisiteDump(head)).toBe(true);
+  });
+
+  it('does not flag a single-site dump whose plugin table ends in "blogs"', () => {
+    const head = [
+      'CREATE TABLE `wp_options` (',
+      'CREATE TABLE `wp_userblogs` (',
+      'CREATE TABLE `wp_user_blogs` (',
+      'CREATE TABLE `wp_posts` (',
+    ].join('\n');
+    expect(siteops.isMultisiteDump(head)).toBe(false);
+  });
+
+  it('requires two distinct multisite tables (one is not enough)', () => {
+    expect(siteops.isMultisiteDump('CREATE TABLE `wp_blogs` (')).toBe(false);
+  });
+
+  it('works with custom prefixes and unquoted names', () => {
+    const head = 'CREATE TABLE my_blogs (\nCREATE TABLE my_sitemeta (';
+    expect(siteops.isMultisiteDump(head)).toBe(true);
+  });
+});
+
 describe('urlHost', () => {
   it('extracts the host from full URLs', () => {
     expect(siteops.urlHost('https://example.com/blog')).toBe('example.com');
