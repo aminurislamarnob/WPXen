@@ -26,6 +26,7 @@ import WpOverview from './WpOverview';
 import WpPlugins from './WpPlugins';
 import WpThemes from './WpThemes';
 import SiteLogs from './SiteLogs';
+import { WordPressIcon } from './icons';
 
 const NAV = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard },
@@ -113,7 +114,7 @@ function Overview({ site }) {
       onClick: () => window.electronAPI.openSiteInBrowser(site.url),
     },
     {
-      icon: Settings,
+      icon: WordPressIcon,
       label: 'wp-admin',
       onClick: () => window.electronAPI.openWpAdmin(site.url),
     },
@@ -247,7 +248,7 @@ export default function SiteDetail({ sites, refreshSites }) {
     return (
       <div className="p-6">
         <button onClick={() => navigate('/sites')} className="btn-secondary text-sm mb-4">
-          <ChevronLeft size={15} className="mr-1" />
+          <ChevronLeft size={15} className="mr-1.5" />
           Back to Sites
         </button>
         <p className="text-sm text-gray-500">Site not found.</p>

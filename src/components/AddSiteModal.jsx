@@ -1,65 +1,8 @@
 import { useState, useEffect } from 'react';
-import {
-  X,
-  FolderOpen,
-  Check,
-  CheckCircle,
-  AlertCircle,
-  Loader,
-  ChevronRight,
-} from 'lucide-react';
+import { FolderOpen, CheckCircle, AlertCircle, Loader, ChevronRight } from 'lucide-react';
+import { StepIndicator, ProgressLog } from './ui';
 
 const STEPS = ['Details', 'Directory', 'WordPress', 'Creating'];
-
-function StepIndicator({ current, steps }) {
-  return (
-    <div className="flex items-center gap-1 mb-6">
-      {steps.map((step, i) => (
-        <div key={step} className="flex items-center">
-          <div
-            className={`flex items-center justify-center w-6 h-6 rounded-full text-xs font-semibold transition-all ${
-              i < current
-                ? 'bg-wp-green text-white'
-                : i === current
-                  ? 'bg-wp-blue text-white'
-                  : 'bg-gray-200 text-gray-400'
-            }`}
-          >
-            {i < current ? <Check size={13} strokeWidth={3} /> : i + 1}
-          </div>
-          {i < steps.length - 1 && (
-            <div
-              className={`w-8 h-0.5 mx-1 ${i < current ? 'bg-wp-green' : 'bg-gray-200'}`}
-            />
-          )}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function ProgressLog({ messages }) {
-  return (
-    <div className="mt-4 bg-zinc-900 rounded-lg p-4 h-40 overflow-y-auto font-mono text-xs">
-      {messages.map((msg, i) => (
-        <div
-          key={i}
-          className={`flex items-start gap-2 ${i === messages.length - 1 ? 'text-white' : 'text-zinc-400'}`}
-        >
-          {i === messages.length - 1 ? (
-            <Loader
-              size={11}
-              className="animate-spin mt-0.5 flex-shrink-0 text-wp-blue-light"
-            />
-          ) : (
-            <CheckCircle size={11} className="mt-0.5 flex-shrink-0 text-wp-green" />
-          )}
-          <span>{msg}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
 
 export default function AddSiteModal({ onClose, onSiteAdded, phpVersions }) {
   const [step, setStep] = useState(0);
@@ -172,29 +115,21 @@ export default function AddSiteModal({ onClose, onSiteAdded, phpVersions }) {
       className="modal-overlay animate-fade-in"
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
-      <div className="panel rounded-2xl shadow-window w-[520px] max-h-[90vh] overflow-hidden animate-slide-in">
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-          <div>
-            <h2 className="text-base font-bold text-gray-900">Add WordPress Site</h2>
-            <p className="text-xs text-gray-400 mt-0.5">
-              Set up a new local WordPress site
-            </p>
-          </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400"
-          >
-            <X size={16} />
-          </button>
+      <div className="sheet w-[540px] max-h-[90vh] overflow-hidden animate-slide-in">
+        {/* Header — title + description block, no close chip (macOS sheet) */}
+        <div className="px-6 pt-6">
+          <h2 className="text-[15px] font-bold text-gray-900">Add WordPress Site</h2>
+          <p className="text-[13px] text-gray-500 mt-0.5">
+            Set up a new local WordPress site
+          </p>
         </div>
 
-        <div className="p-6">
+        <div className={`px-6 pt-4 ${step === 3 ? 'pb-6' : ''}`}>
           {step < 3 && <StepIndicator current={step} steps={STEPS.slice(0, 3)} />}
 
           {/* Step 0: Site details */}
           {step === 0 && (
-            <div className="space-y-4 animate-fade-in">
+            <div className="sheet-well space-y-4 animate-fade-in">
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1.5">
                   Site Name
@@ -247,7 +182,7 @@ export default function AddSiteModal({ onClose, onSiteAdded, phpVersions }) {
 
           {/* Step 1: Directory */}
           {step === 1 && (
-            <div className="space-y-4 animate-fade-in">
+            <div className="sheet-well space-y-4 animate-fade-in">
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1.5">
                   Site Directory
@@ -262,9 +197,11 @@ export default function AddSiteModal({ onClose, onSiteAdded, phpVersions }) {
                   />
                   <button
                     onClick={handleSelectFolder}
-                    className="btn-secondary px-3 flex-shrink-0"
+                    title="Choose folder"
+                    aria-label="Choose folder"
+                    className="btn-secondary !px-0 w-8 flex-shrink-0"
                   >
-                    <FolderOpen size={15} />
+                    <FolderOpen size={14} />
                   </button>
                 </div>
                 <p className="text-xs text-gray-400 mt-1">
@@ -299,7 +236,7 @@ export default function AddSiteModal({ onClose, onSiteAdded, phpVersions }) {
 
           {/* Step 2: WordPress/Admin settings */}
           {step === 2 && (
-            <div className="space-y-4 animate-fade-in">
+            <div className="sheet-well space-y-4 animate-fade-in">
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1.5">
                   Database Name
@@ -352,7 +289,7 @@ export default function AddSiteModal({ onClose, onSiteAdded, phpVersions }) {
                   }
                 />
               </div>
-              <div className="bg-blue-50 dark:bg-blue-500/10 rounded-lg px-4 py-3 text-xs text-blue-700 dark:text-blue-300">
+              <div className="bg-blue-50 dark:bg-blue-500/10 rounded-xl px-4 py-3 text-xs text-blue-700 dark:text-blue-300">
                 WordPress will be installed at{' '}
                 <span className="font-semibold font-mono">{formData.domain}</span> with
                 the credentials above.
@@ -362,7 +299,7 @@ export default function AddSiteModal({ onClose, onSiteAdded, phpVersions }) {
 
           {/* Step 3: Creating */}
           {step === 3 && (
-            <div className="animate-fade-in">
+            <div className="sheet-well animate-fade-in">
               {done ? (
                 <div className="text-center py-4">
                   <div className="w-14 h-14 rounded-full bg-green-100 dark:bg-green-500/15 flex items-center justify-center mx-auto mb-3">
@@ -385,7 +322,7 @@ export default function AddSiteModal({ onClose, onSiteAdded, phpVersions }) {
                       onClick={() =>
                         window.electronAPI.openSiteInBrowser(`http://${formData.domain}`)
                       }
-                      className="btn-primary text-sm"
+                      className="btn-primary"
                     >
                       Open Site
                     </button>
@@ -393,11 +330,11 @@ export default function AddSiteModal({ onClose, onSiteAdded, phpVersions }) {
                       onClick={() =>
                         window.electronAPI.openWpAdmin(`http://${formData.domain}`)
                       }
-                      className="btn-secondary text-sm"
+                      className="btn-secondary"
                     >
                       wp-admin
                     </button>
-                    <button onClick={onClose} className="btn-ghost text-sm">
+                    <button onClick={onClose} className="btn-ghost">
                       Done
                     </button>
                   </div>
@@ -413,7 +350,7 @@ export default function AddSiteModal({ onClose, onSiteAdded, phpVersions }) {
                       Creating WordPress site…
                     </p>
                   </div>
-                  <ProgressLog messages={progressMessages} />
+                  <ProgressLog messages={progressMessages} className="mt-4" />
                 </div>
               )}
             </div>
@@ -421,25 +358,25 @@ export default function AddSiteModal({ onClose, onSiteAdded, phpVersions }) {
 
           {/* Error */}
           {error && (
-            <div className="mt-4 flex items-start gap-2 bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400 rounded-lg px-4 py-3 text-sm">
+            <div className="mt-4 flex items-start gap-2 bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400 rounded-xl px-4 py-3 text-sm">
               <AlertCircle size={16} className="flex-shrink-0 mt-0.5" />
               <span>{error}</span>
             </div>
           )}
         </div>
 
-        {/* Footer */}
+        {/* Footer — buttons bottom-right like macOS sheets */}
         {step < 3 && (
-          <div className="flex justify-between px-6 pb-5">
+          <div className="flex justify-end gap-2 px-6 pt-4 pb-6">
             <button
               onClick={() => (step === 0 ? onClose() : setStep((s) => s - 1))}
-              className="btn-secondary text-sm"
+              className="btn-secondary"
             >
               {step === 0 ? 'Cancel' : 'Back'}
             </button>
-            <button onClick={handleNext} className="btn-primary text-sm">
+            <button onClick={handleNext} className="btn-primary">
               {step === 2 ? 'Create Site' : 'Continue'}
-              {step < 2 && <ChevronRight size={14} className="ml-1" />}
+              {step < 2 && <ChevronRight size={13} strokeWidth={2.5} />}
             </button>
           </div>
         )}

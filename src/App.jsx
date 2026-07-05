@@ -8,7 +8,12 @@ import Services from './components/Services';
 import PHPVersions from './components/PHPVersions';
 import Mail from './components/Mail';
 import Settings from './components/Settings';
+import Onboarding from './components/Onboarding';
 import logo from './assets/logo.png';
+
+// Core dependencies without which the app can't run — used to gate onboarding.
+const coreMissing = (d) =>
+  !d || !d.brew || !d.nginx || !d.php || !d.mysql || !d.dnsmasq || !d.wpCli;
 
 export default function App() {
   const [serviceStatus, setServiceStatus] = useState({
@@ -21,19 +26,24 @@ export default function App() {
   const [sites, setSites] = useState([]);
   const [deps, setDeps] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [showOnboarding, setShowOnboarding] = useState(false);
 
   // Initial load
   useEffect(() => {
     async function init() {
       try {
-        const [status, siteList, dependencies] = await Promise.all([
+        const [status, siteList, dependencies, onboarding] = await Promise.all([
           window.electronAPI.getServiceStatus(),
           window.electronAPI.getSites(),
           window.electronAPI.checkDependencies(),
+          window.electronAPI.getOnboardingState(),
         ]);
         setServiceStatus(status);
         setSites(siteList);
         setDeps(dependencies);
+        // Show the first-run wizard until the core deps exist AND the user has
+        // finished onboarding at least once.
+        setShowOnboarding(coreMissing(dependencies) || !onboarding?.complete);
       } catch (err) {
         console.error('Init error:', err);
       } finally {
@@ -61,14 +71,35 @@ export default function App() {
     setServiceStatus(status);
   };
 
+  const refreshDeps = async () => {
+    const dependencies = await window.electronAPI.checkDependencies();
+    setDeps(dependencies);
+    return dependencies;
+  };
+
   if (loading) {
     return (
-      <div className="h-screen flex items-center justify-center bg-surface">
+      <div className="h-screen flex items-center justify-center bg-surface/60">
         <div className="flex flex-col items-center gap-4">
           <img src={logo} alt="WPHerd" className="h-9 w-auto" draggable={false} />
           <p className="text-sm text-gray-500">Starting WPHerd…</p>
         </div>
       </div>
+    );
+  }
+
+  if (showOnboarding) {
+    return (
+      <Onboarding
+        deps={deps}
+        onComplete={() => {
+          setShowOnboarding(false);
+          refreshDeps();
+        }}
+        onCreateFirstSite={() => {
+          window.location.hash = '#/sites';
+        }}
+      />
     );
   }
 
@@ -79,12 +110,13 @@ export default function App() {
     refreshSites,
     refreshStatus,
     deps,
+    onOpenWizard: () => setShowOnboarding(true),
   };
 
   return (
     <HashRouter>
       <Routes>
-        <Route path="/" element={<Layout serviceStatus={serviceStatus} />}>
+        <Route path="/" element={<Layout />}>
           <Route index element={<Navigate to="/dashboard" replace />} />
           <Route path="dashboard" element={<Dashboard {...sharedProps} />} />
           <Route path="sites" element={<Sites {...sharedProps} />} />

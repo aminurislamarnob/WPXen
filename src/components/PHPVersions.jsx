@@ -7,6 +7,7 @@ import {
   Download,
   ArrowUpCircle,
   Sliders,
+  RefreshCw,
 } from 'lucide-react';
 import { StatusBadge } from './StatusBadge';
 import PhpSettings from './PhpSettings';
@@ -54,12 +55,12 @@ function VersionRow({ version, onSwitch, switching, onUpdate, updating, logLine 
           <button
             onClick={() => onUpdate(version.version)}
             disabled={isLoading || isUpdating}
-            className="btn-secondary !px-2.5 !py-1 text-xs"
+            className="btn-secondary text-xs"
           >
             {isUpdating ? (
-              <Loader size={11} className="animate-spin mr-1" />
+              <Loader size={11} className="animate-spin mr-1.5" />
             ) : (
-              <ArrowUpCircle size={11} className="mr-1" />
+              <ArrowUpCircle size={11} className="mr-1.5" />
             )}
             Update
           </button>
@@ -68,9 +69,9 @@ function VersionRow({ version, onSwitch, switching, onUpdate, updating, logLine 
           <button
             onClick={() => onSwitch(version.version)}
             disabled={isLoading || isUpdating}
-            className="btn-secondary !px-2.5 !py-1 text-xs"
+            className="btn-secondary text-xs"
           >
-            {isLoading ? <Loader size={11} className="animate-spin mr-1" /> : null}
+            {isLoading ? <Loader size={11} className="animate-spin mr-1.5" /> : null}
             Set Active
           </button>
         )}
@@ -103,16 +104,16 @@ function InstallRow({ version, onInstall, installing, logLine, disabled }) {
         <button
           onClick={() => onInstall(version)}
           disabled={disabled}
-          className="btn-secondary !px-2.5 !py-1 text-xs min-w-[90px] justify-center"
+          className="btn-secondary text-xs min-w-[90px] justify-center"
         >
           {isInstalling ? (
             <>
-              <Loader size={11} className="animate-spin mr-1" />
+              <Loader size={11} className="animate-spin mr-1.5" />
               Installing…
             </>
           ) : (
             <>
-              <Download size={11} className="mr-1" />
+              <Download size={11} className="mr-1.5" />
               Install
             </>
           )}
@@ -236,16 +237,18 @@ export default function PHPVersions() {
   }
 
   return (
-    <div className="px-6 pb-6 max-w-2xl mx-auto animate-fade-in">
+    <div className="px-6 pb-6 max-w-[735px] mx-auto animate-fade-in">
       <div className="flex items-center justify-end gap-2 mb-4">
         <button
           onClick={scrollToSettings}
           title="PHP configuration"
-          className="btn-secondary !px-2.5 text-xs"
+          className="btn-secondary"
         >
-          <Sliders size={13} />
+          <Sliders size={14} />
+          Configuration
         </button>
-        <button onClick={loadVersions} disabled={busy} className="btn-secondary text-xs">
+        <button onClick={loadVersions} disabled={busy} className="btn-secondary">
+          <RefreshCw size={12} strokeWidth={2.5} className={busy ? 'animate-spin' : ''} />
           Refresh
         </button>
       </div>

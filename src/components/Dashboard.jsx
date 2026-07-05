@@ -67,7 +67,7 @@ export default function Dashboard({ serviceStatus, sites, refreshStatus }) {
   const recentSites = sites.slice(0, 5);
 
   return (
-    <div className="px-6 pb-6 max-w-2xl mx-auto animate-fade-in">
+    <div className="px-6 pb-6 max-w-[735px] mx-auto animate-fade-in">
       {/* Permissions banner */}
       {!sudoersConfigured && (
         <Card className="mb-4 !bg-amber-50 dark:!bg-amber-500/10">
@@ -102,17 +102,17 @@ export default function Dashboard({ serviceStatus, sites, refreshStatus }) {
             <button
               onClick={handleStopAll}
               disabled={actionLoading || totalRunning === 0}
-              className="btn-secondary !px-2.5 !py-1 text-xs"
+              className="btn-secondary gap-1.5"
             >
-              <Square size={10} className="mr-1" />
+              <Square size={12} strokeWidth={2.5} />
               Stop All
             </button>
             <button
               onClick={handleStartAll}
               disabled={actionLoading || totalRunning === visibleServices.length}
-              className="btn-primary !px-2.5 !py-1 text-xs"
+              className="btn-primary gap-1.5"
             >
-              <Play size={10} className="mr-1" />
+              <Play size={12} strokeWidth={2.5} fill="currentColor" />
               Start All
             </button>
           </div>
@@ -141,7 +141,7 @@ export default function Dashboard({ serviceStatus, sites, refreshStatus }) {
               <button
                 onClick={() => handleService(running ? 'stop' : 'start', svc.id)}
                 disabled={actionLoading}
-                className="btn-secondary !px-2.5 !py-1 text-xs w-16"
+                className="btn-secondary w-[72px]"
               >
                 {running ? 'Stop' : 'Start'}
               </button>
@@ -173,8 +173,8 @@ export default function Dashboard({ serviceStatus, sites, refreshStatus }) {
             <p className="text-xs text-gray-400 mt-1 mb-4">
               Create your first local WordPress site to get started
             </p>
-            <button onClick={() => navigate('/sites')} className="btn-primary text-xs">
-              <Plus size={12} className="mr-1.5" />
+            <button onClick={() => navigate('/sites')} className="btn-primary">
+              <Plus size={12} strokeWidth={2.5} />
               Add Site
             </button>
           </div>

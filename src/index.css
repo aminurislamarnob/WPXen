@@ -35,6 +35,11 @@
 
   --shadow-card: 0 0 0 0.5px rgba(0, 0, 0, 0.08), 0 1px 2px 0 rgba(0, 0, 0, 0.04);
   --shadow-card-hover: 0 0 0 0.5px rgba(0, 0, 0, 0.1), 0 2px 6px 0 rgba(0, 0, 0, 0.08);
+
+  /* Liquid Glass (macOS 26): hairline edge, specular top highlight, lift */
+  --glass-border: rgba(255, 255, 255, 0.55);
+  --glass-highlight: inset 0 1px 0 0 rgba(255, 255, 255, 0.6);
+  --shadow-glass: 0 4px 14px rgba(0, 0, 0, 0.06);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -66,6 +71,10 @@
     --shadow-card: 0 0 0 0.5px rgba(255, 255, 255, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.3);
     --shadow-card-hover:
       0 0 0 0.5px rgba(255, 255, 255, 0.14), 0 2px 6px 0 rgba(0, 0, 0, 0.4);
+
+    --glass-border: rgba(255, 255, 255, 0.09);
+    --glass-highlight: inset 0 1px 0 0 rgba(255, 255, 255, 0.07);
+    --shadow-glass: 0 4px 14px rgba(0, 0, 0, 0.22);
   }
 }
 
@@ -148,6 +157,13 @@ body {
   @apply transition-all duration-200;
 }
 
+/* Override .settings-card's overflow-hidden (needs higher specificity since
+   .settings-card is defined later) so the actions dropdown can escape the
+   card bounds instead of being clipped. */
+.site-card.settings-card {
+  overflow: visible;
+}
+
 .site-card:hover {
   @apply shadow-card-hover -translate-y-0.5;
 }
@@ -163,6 +179,20 @@ body {
   -webkit-backdrop-filter: blur(20px) saturate(180%);
 }
 
+/* ── Liquid Glass (macOS 26) primitives ───────────────────────────────────
+   The window itself is transparent over an NSVisualEffectView (see
+   main.cjs), so these surfaces are translucent tints + blur over the real
+   desktop, with a hairline edge and a specular top highlight. */
+.glass {
+  background: rgb(var(--surface-card) / 0.55);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  box-shadow:
+    var(--glass-highlight),
+    inset 0 0 0 0.5px var(--glass-border),
+    var(--shadow-glass);
+}
+
 /* Input focus ring */
 input:focus,
 select:focus,
@@ -170,32 +200,42 @@ textarea:focus {
   @apply outline-none ring-2 ring-wp-blue ring-opacity-30 border-wp-blue;
 }
 
-/* Buttons — macOS System Settings style: small, rounded-md, subtle borders */
+/* Buttons — macOS 26 style: comfortable capsules, glassy secondary.
+   Shared shape + sizing here (gap for icon+label, roomy padding, a min-height
+   so every variant lines up), color per variant below. */
 .btn {
-  @apply inline-flex items-center justify-center rounded-md font-medium transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed;
+  @apply inline-flex items-center justify-center gap-1.5 rounded-full font-medium transition-all duration-150 px-3.5 py-1.5 text-[12px] leading-none min-h-[32px] disabled:opacity-50 disabled:cursor-not-allowed;
 }
 
 .btn-primary {
-  @apply btn bg-accent text-white hover:bg-accent-hover active:brightness-90 px-3.5 py-1.5 text-[13px];
+  @apply btn bg-accent text-white hover:bg-accent-hover active:brightness-90;
 }
 
 .btn-secondary {
-  @apply btn bg-white text-gray-800 shadow-card hover:bg-gray-50 active:bg-gray-100 px-3.5 py-1.5 text-[13px] dark:bg-[#57575c] dark:hover:bg-[#626268] dark:active:bg-[#4c4c50];
+  @apply btn text-gray-800 shadow-card backdrop-blur-md bg-white/60 hover:bg-white/85 active:bg-white/95 dark:bg-white/10 dark:hover:bg-white/[0.16] dark:active:bg-white/20;
 }
 
 .btn-danger {
-  @apply btn bg-wp-red text-white hover:brightness-95 active:brightness-90 px-3.5 py-1.5 text-[13px];
+  @apply btn bg-wp-red text-white hover:brightness-95 active:brightness-90;
 }
 
 .btn-ghost {
-  @apply btn text-gray-600 hover:bg-black/5 active:bg-black/10 dark:hover:bg-white/10 dark:active:bg-white/15 px-3 py-1.5 text-[13px];
+  @apply btn text-gray-600 hover:bg-black/5 active:bg-black/10 dark:hover:bg-white/10 dark:active:bg-white/15;
 }
 
 /* ── macOS System Settings primitives ──────────────────────────────────── */
 
-/* Grouped card: the rounded container holding hairline-divided rows */
+/* Grouped card: the rounded container holding hairline-divided rows.
+   Liquid Glass: translucent tint + blur, larger continuous radius. */
 .settings-card {
-  @apply bg-surface-card rounded-[10px] shadow-card overflow-hidden;
+  @apply rounded-2xl overflow-hidden;
+  background: rgb(var(--surface-card) / 0.55);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  /* Flat like System Settings cards: hairline + highlight, no drop shadow */
+  box-shadow:
+    var(--glass-highlight),
+    inset 0 0 0 0.5px var(--glass-border);
 }
 
 /* One row inside a settings-card */
@@ -227,18 +267,59 @@ textarea:focus {
    leading icon) win over the base padding here. */
 @layer components {
   .form-input {
-    @apply w-full px-3 py-1.5 border border-gray-300/80 rounded-md text-[13px] text-gray-900 bg-white placeholder-gray-400 transition-colors duration-150 dark:bg-[#333338] dark:border-white/10;
+    @apply w-full px-3 py-1.5 border border-gray-300/60 rounded-[10px] text-[13px] text-gray-900 bg-white/60 placeholder-gray-400 transition-colors duration-150 dark:bg-white/[0.08] dark:border-white/10;
   }
 }
 
-/* Modal overlay */
+/* Modal overlay — macOS sheets dim the window without blurring it */
 .modal-overlay {
   @apply fixed inset-0 z-50 flex items-center justify-center;
-  background: rgba(0, 0, 0, 0.5);
-  backdrop-filter: blur(4px);
+  background: rgba(0, 0, 0, 0.32);
 }
 
-/* Modal / popover panel surface (dialogs, context menus) */
+/* ── Dialog sheet (macOS System Settings style) ───────────────────────────
+   Near-opaque rounded sheet with a title/description block top-left, form
+   content recessed in a .sheet-well, and buttons bottom-right. Radius and
+   shadow live here so every dialog matches. */
+.sheet {
+  @apply rounded-[26px];
+  background: rgb(var(--surface-card) / 0.98);
+  backdrop-filter: blur(30px) saturate(180%);
+  -webkit-backdrop-filter: blur(30px) saturate(180%);
+  box-shadow:
+    var(--glass-highlight),
+    inset 0 0 0 0.5px var(--glass-border),
+    0 0 0 0.5px rgba(0, 0, 0, 0.12),
+    0 24px 70px rgba(0, 0, 0, 0.35);
+}
+
+/* Recessed content area inside a sheet (the inner gray panel in
+   System Settings sheets like "Arrange Displays") */
+.sheet-well {
+  @apply rounded-2xl p-4;
+  background: rgba(0, 0, 0, 0.03);
+  box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.06);
+}
+
+@media (prefers-color-scheme: dark) {
+  .sheet-well {
+    background: rgba(255, 255, 255, 0.045);
+    box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.07);
+  }
+}
+
+/* Modal / popover panel surface (dialogs, context menus) — frosted glass.
+   Call sites keep their own radius/shadow classes. */
 .panel {
-  @apply bg-white dark:bg-[#2c2c2e];
+  background: rgb(var(--surface-card) / 0.75);
+  backdrop-filter: blur(30px) saturate(180%);
+  -webkit-backdrop-filter: blur(30px) saturate(180%);
+}
+
+/* Popover menus overlap sharp text on the same card, where 0.75 opacity lets
+   it bleed through — use a near-opaque frosted background instead. */
+.panel-menu {
+  background: rgb(var(--surface-card) / 0.97);
+  backdrop-filter: blur(30px) saturate(180%);
+  -webkit-backdrop-filter: blur(30px) saturate(180%);
 }

@@ -18,23 +18,22 @@ function DeleteConfirmModal({ site, onConfirm, onClose }) {
       className="modal-overlay animate-fade-in"
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
-      <div className="panel rounded-2xl shadow-window w-96 animate-slide-in">
+      <div className="sheet w-[420px] animate-slide-in">
         <div className="p-6">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="w-10 h-10 rounded-xl bg-red-100 dark:bg-red-500/15 flex items-center justify-center">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-red-100 dark:bg-red-500/15 flex items-center justify-center flex-shrink-0">
               <AlertTriangle size={20} className="text-red-600 dark:text-red-400" />
             </div>
             <div>
-              <h3 className="text-base font-bold text-gray-900">Remove Site</h3>
-              <p className="text-xs text-gray-500">This cannot be undone</p>
+              <h3 className="text-[15px] font-bold text-gray-900">Remove Site</h3>
+              <p className="text-[13px] text-gray-500 mt-0.5">
+                Remove <span className="font-semibold">{site.name}</span> ({site.domain})?
+                This cannot be undone.
+              </p>
             </div>
           </div>
 
-          <p className="text-sm text-gray-700 mb-4">
-            Remove <span className="font-semibold">{site.name}</span> ({site.domain})?
-          </p>
-
-          <div className="space-y-2 mb-5">
+          <div className="sheet-well space-y-2.5 mt-4">
             <label className="flex items-center gap-2.5 cursor-pointer">
               <input
                 type="checkbox"
@@ -58,16 +57,12 @@ function DeleteConfirmModal({ site, onConfirm, onClose }) {
             </label>
           </div>
 
-          <div className="flex gap-2">
-            <button onClick={onClose} className="btn-secondary flex-1 text-sm">
+          <div className="flex justify-end gap-2 mt-5">
+            <button onClick={onClose} className="btn-secondary">
               Cancel
             </button>
-            <button
-              onClick={handleConfirm}
-              disabled={loading}
-              className="btn-danger flex-1 text-sm"
-            >
-              {loading ? <Loader size={14} className="animate-spin mr-2" /> : null}
+            <button onClick={handleConfirm} disabled={loading} className="btn-danger">
+              {loading ? <Loader size={12} className="animate-spin" /> : null}
               Remove Site
             </button>
           </div>
@@ -199,7 +194,7 @@ export default function Sites({ sites, setSites, refreshSites }) {
   }
 
   return (
-    <div className="px-6 pb-6 max-w-4xl mx-auto animate-fade-in">
+    <div className="px-6 pb-6 max-w-[735px] mx-auto animate-fade-in">
       {/* Header */}
       <div className="flex items-center justify-between mb-4 gap-3">
         {sites.length > 0 ? (
@@ -221,8 +216,8 @@ export default function Sites({ sites, setSites, refreshSites }) {
             {sites.length} WordPress site{sites.length !== 1 ? 's' : ''}
           </p>
         )}
-        <button onClick={() => setShowAddModal(true)} className="btn-primary text-xs">
-          <Plus size={13} className="mr-1.5" />
+        <button onClick={() => setShowAddModal(true)} className="btn-primary">
+          <Plus size={12} strokeWidth={2.5} />
           Add Site
         </button>
       </div>
@@ -239,7 +234,7 @@ export default function Sites({ sites, setSites, refreshSites }) {
             minutes.
           </p>
           <button onClick={() => setShowAddModal(true)} className="btn-primary">
-            <Plus size={15} className="mr-2" />
+            <Plus size={15} className="mr-1.5" />
             Add Your First Site
           </button>
         </div>
@@ -248,7 +243,7 @@ export default function Sites({ sites, setSites, refreshSites }) {
           <p className="text-sm text-gray-400">No sites match &quot;{search}&quot;</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="space-y-3">
           {filtered.map((site) => (
             <SiteCard
               key={site.id}

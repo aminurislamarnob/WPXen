@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, nativeTheme } = require('electron');
+const { app, BrowserWindow } = require('electron');
 const path = require('path');
 
 const JsonStore = require('./store.cjs');
@@ -17,14 +17,17 @@ app.dock?.hide();
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 1100,
+    width: 940,
     height: 720,
-    minWidth: 860,
+    minWidth: 780,
     minHeight: 580,
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 16, y: 18 },
-    backgroundColor: nativeTheme.shouldUseDarkColors ? '#1e1e1e' : '#f0f0f1',
-    vibrancy: 'under-window',
+    // Fully transparent over the vibrancy material — the renderer paints
+    // translucent "Liquid Glass" surfaces on top, so the desktop shows
+    // through the whole window like macOS 26 native apps.
+    backgroundColor: '#00000000',
+    vibrancy: 'sidebar',
     visualEffectState: 'active',
     show: false,
     webPreferences: {
@@ -66,25 +69,12 @@ app.whenReady().then(() => {
   // Initialize store
   store = new JsonStore('wpherd-data');
 
-  // Apply the saved appearance before the window exists so the initial
-  // backgroundColor and the renderer's prefers-color-scheme are right from
-  // the first paint. 'system' (Auto) is nativeTheme's default.
-  const appearance = store.get('settings.appearance', 'system');
-  if (appearance === 'light' || appearance === 'dark') {
-    nativeTheme.themeSource = appearance;
-  }
+  // Light/dark follows the macOS system appearance: nativeTheme defaults to
+  // 'system', which drives the renderer's prefers-color-scheme, and the
+  // vibrancy material adapts by itself — nothing to configure.
 
   // Create main window
   const win = createWindow();
-
-  // Keep the native window background in sync when the appearance changes
-  // (either via Settings or macOS switching in Auto mode), so resize flashes
-  // match the renderer theme.
-  nativeTheme.on('updated', () => {
-    mainWindow?.setBackgroundColor(
-      nativeTheme.shouldUseDarkColors ? '#1e1e1e' : '#f0f0f1'
-    );
-  });
 
   // Register IPC handlers
   registerHandlers(win, store);

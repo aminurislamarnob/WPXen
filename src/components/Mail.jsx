@@ -473,10 +473,10 @@ export default function Mail({ refreshStatus }) {
         {status.installed && (
           <button
             onClick={() => window.electronAPI.openMailpit()}
-            className="btn-secondary text-xs"
+            className="btn-secondary"
             title="Open the full Mailpit web UI"
           >
-            <ExternalLink size={12} className="mr-1.5" />
+            <ExternalLink size={12} strokeWidth={2.5} />
             Open Mailpit UI
           </button>
         )}

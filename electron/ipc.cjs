@@ -1,6 +1,6 @@
 'use strict';
 
-const { ipcMain, shell, dialog, app, nativeTheme } = require('electron');
+const { ipcMain, shell, dialog, app } = require('electron');
 const { execFile } = require('child_process');
 const path = require('path');
 const os = require('os');
@@ -33,6 +33,7 @@ const mailpit = require('./services/mailpit.cjs');
 const procman = require('./services/procman.cjs');
 const cloudflared = require('./services/cloudflared.cjs');
 const sudoers = require('./services/sudoers.cjs');
+const setup = require('./services/setup.cjs');
 const logs = require('./services/logs.cjs');
 const validation = require('./services/validation.cjs');
 const { humanize } = require('./services/errors.cjs');
@@ -1113,6 +1114,45 @@ function registerHandlers(win, storeInstance) {
     return brew.checkAllDependenciesAsync(force);
   });
 
+  // ─── First-run onboarding ─────────────────────────────────────────────
+
+  ipcMain.handle('install-core-deps', async (event) => {
+    try {
+      await setup.installCoreDeps((line) => {
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('core-deps-install-progress', { line });
+        }
+      });
+      // Push fresh deps to the wizard immediately — bypass the focus rate limit.
+      await refreshDependencies(win, { minIntervalMs: 0 });
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('open-homebrew-installer', async () => {
+    try {
+      await setup.openHomebrewInstaller();
+      return { success: true, command: setup.HOMEBREW_INSTALL_CMD };
+    } catch (err) {
+      return {
+        success: false,
+        error: humanize(err),
+        command: setup.HOMEBREW_INSTALL_CMD,
+      };
+    }
+  });
+
+  ipcMain.handle('get-onboarding-state', () => {
+    return { complete: store.get('settings.onboardingComplete', false) };
+  });
+
+  ipcMain.handle('set-onboarding-complete', () => {
+    store.set('settings.onboardingComplete', true);
+    return { success: true };
+  });
+
   // ─── Sudoers / Permissions ────────────────────────────────────────────
 
   ipcMain.handle('check-sudoers', () => {
@@ -1160,19 +1200,7 @@ function registerHandlers(win, storeInstance) {
       dbUser: store.get('settings.dbUser', 'root'),
       dbPassword: store.get('settings.dbPassword', ''),
       brewPrefix: brew.getBrewPrefix() || 'Not detected',
-      appearance: store.get('settings.appearance', 'system'),
     };
-  });
-
-  // Appearance (Auto / Light / Dark). Applies instantly: nativeTheme drives
-  // the renderer's prefers-color-scheme, which Tailwind's dark: variants use.
-  ipcMain.handle('set-appearance', (_, value) => {
-    if (!['system', 'light', 'dark'].includes(value)) {
-      return { success: false, error: 'Invalid appearance value.' };
-    }
-    store.set('settings.appearance', value);
-    nativeTheme.themeSource = value;
-    return { success: true };
   });
 
   ipcMain.handle('save-settings', async (_, settings) => {
