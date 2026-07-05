@@ -18,10 +18,12 @@ import {
   Loader,
   KeyRound,
   Archive,
+  GitBranch,
 } from 'lucide-react';
 import { Toggle } from './ui';
 import SharePanel from './SharePanel';
 import SiteBackups from './SiteBackups';
+import SiteGitDeploy from './SiteGitDeploy';
 import WpConfigManager from './WpConfigManager';
 import SitePhpSettings from './SitePhpSettings';
 import WpOverview from './WpOverview';
@@ -52,6 +54,7 @@ const NAV = [
     ],
   },
   { id: 'backups', label: 'Backups', icon: Archive },
+  { id: 'deploy', label: 'Deploy', icon: GitBranch },
   { id: 'logs', label: 'Logs', icon: FileText },
 ];
 
@@ -459,6 +462,7 @@ export default function SiteDetail({ sites, refreshSites }) {
           {active === 'wp-plugins' && <WpPlugins site={site} onSaved={refreshSites} />}
           {active === 'wp-themes' && <WpThemes site={site} onSaved={refreshSites} />}
           {active === 'backups' && <SiteBackups site={site} />}
+          {active === 'deploy' && <SiteGitDeploy site={site} />}
           {active === 'logs' && <SiteLogs site={site} />}
         </div>
       </div>

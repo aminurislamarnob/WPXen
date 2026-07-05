@@ -85,6 +85,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   deleteBackup: (id, timestamp) => ipcRenderer.invoke('delete-backup', id, timestamp),
   revealBackup: (id, timestamp) => ipcRenderer.invoke('reveal-backup', id, timestamp),
 
+  // Git deploy
+  gitStatus: (id) => ipcRenderer.invoke('git-status', id),
+  gitInit: (id, opts) => ipcRenderer.invoke('git-init', id, opts),
+  gitSetRemote: (id, url) => ipcRenderer.invoke('git-set-remote', id, url),
+  gitSetDeploySettings: (id, settings) =>
+    ipcRenderer.invoke('git-set-deploy-settings', id, settings),
+  gitDeploy: (id, message) => ipcRenderer.invoke('git-deploy', id, message),
+
   // Services
   getServiceStatus: () => ipcRenderer.invoke('get-service-status'),
   startServices: () => ipcRenderer.invoke('start-services'),
@@ -143,6 +151,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       'cloudflared-install-progress',
       'cf-login-progress',
       'backup-progress',
+      'git-deploy-progress',
       'mailpit-install-progress',
       'core-deps-install-progress',
     ];
@@ -161,6 +170,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       'cloudflared-install-progress',
       'cf-login-progress',
       'backup-progress',
+      'git-deploy-progress',
       'mailpit-install-progress',
       'core-deps-install-progress',
     ];

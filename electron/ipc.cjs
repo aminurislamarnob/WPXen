@@ -35,6 +35,7 @@ const procman = require('./services/procman.cjs');
 const cloudflared = require('./services/cloudflared.cjs');
 const htpasswd = require('./services/htpasswd.cjs');
 const backups = require('./services/backups.cjs');
+const gitdeploy = require('./services/gitdeploy.cjs');
 const sudoers = require('./services/sudoers.cjs');
 const setup = require('./services/setup.cjs');
 const logs = require('./services/logs.cjs');
@@ -1124,6 +1125,111 @@ function registerHandlers(win, storeInstance) {
     try {
       shell.showItemInFolder(backups.getBackupManifestPath(id, timestamp));
       return { success: true };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  // ─── Git deploy ────────────────────────────────────────────────────────
+
+  ipcMain.handle('git-status', async (_, id) => {
+    try {
+      const site = findSite(id);
+      if (!site) return { success: false, error: 'Site not found' };
+      const status = await gitdeploy.getStatus(site.path);
+      return {
+        success: true,
+        status,
+        gitInstalled: !!gitdeploy.getGitBin(),
+        settings: site.gitDeploy || {
+          remoteUrl: null,
+          branch: 'main',
+          includeUploads: false,
+          includeDbDump: false,
+        },
+      };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('git-init', async (_, id, opts = {}) => {
+    try {
+      const site = findSite(id);
+      if (!site) return { success: false, error: 'Site not found' };
+      await gitdeploy.initRepo(site.path, { includeUploads: !!opts.includeUploads });
+      return { success: true, status: await gitdeploy.getStatus(site.path) };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('git-set-remote', async (_, id, url) => {
+    try {
+      const site = findSite(id);
+      if (!site) return { success: false, error: 'Site not found' };
+      await gitdeploy.setRemote(site.path, url);
+      // Mirror the remote into the persisted deploy settings.
+      const sites = store.get('sites', []);
+      const idx = sites.findIndex((s) => s.id === id);
+      if (idx !== -1) {
+        sites[idx] = {
+          ...sites[idx],
+          gitDeploy: { ...(sites[idx].gitDeploy || {}), remoteUrl: url.trim() },
+        };
+        store.set('sites', sites);
+      }
+      return { success: true, status: await gitdeploy.getStatus(site.path) };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('git-set-deploy-settings', async (_, id, payload = {}) => {
+    try {
+      const sites = store.get('sites', []);
+      const idx = sites.findIndex((s) => s.id === id);
+      if (idx === -1) return { success: false, error: 'Site not found' };
+      const site = sites[idx];
+      const prev = site.gitDeploy || {};
+
+      const branch = String(payload.branch ?? prev.branch ?? 'main').trim() || 'main';
+      if (!/^[A-Za-z0-9._/-]{1,100}$/.test(branch) || branch.startsWith('-')) {
+        return { success: false, error: 'Invalid branch name.' };
+      }
+      const gitDeploy = {
+        remoteUrl: prev.remoteUrl || null,
+        branch,
+        includeUploads:
+          payload.includeUploads != null ? !!payload.includeUploads : !!prev.includeUploads,
+        includeDbDump:
+          payload.includeDbDump != null ? !!payload.includeDbDump : !!prev.includeDbDump,
+      };
+
+      // Keep the repo's .gitignore uploads rule in sync with the toggle.
+      if (gitDeploy.includeUploads !== !!prev.includeUploads) {
+        gitdeploy.setUploadsIgnored(site.path, !gitDeploy.includeUploads);
+      }
+
+      sites[idx] = { ...site, gitDeploy };
+      store.set('sites', sites);
+      return { success: true, settings: gitDeploy };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('git-deploy', async (event, id, message) => {
+    try {
+      const site = findSite(id);
+      if (!site) return { success: false, error: 'Site not found' };
+      const onLine = (line) => {
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('git-deploy-progress', { siteId: id, line });
+        }
+      };
+      const status = await gitdeploy.deploy(site, message, onLine);
+      return { success: true, status };
     } catch (err) {
       return { success: false, error: humanize(err) };
     }
