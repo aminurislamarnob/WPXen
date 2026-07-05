@@ -33,6 +33,7 @@ const phpmyadmin = require('./services/phpmyadmin.cjs');
 const mailpit = require('./services/mailpit.cjs');
 const procman = require('./services/procman.cjs');
 const cloudflared = require('./services/cloudflared.cjs');
+const htpasswd = require('./services/htpasswd.cjs');
 const sudoers = require('./services/sudoers.cjs');
 const setup = require('./services/setup.cjs');
 const logs = require('./services/logs.cjs');
@@ -289,6 +290,7 @@ function registerHandlers(win, storeInstance) {
 
       // Tear down any live share tunnel before removing the vhost/files.
       cloudflared.stopTunnel(id);
+      htpasswd.removeHtpasswdFile(site.domain);
 
       wordpress.removeWordPressSite(site, opts);
 
@@ -894,7 +896,9 @@ function registerHandlers(win, storeInstance) {
         }
       };
 
-      const tunnel = await cloudflared.startTunnel(site, broadcast);
+      // Attach the htpasswd path when basic-auth is enabled so the tunnel
+      // alias server block gets auth_basic (see nginx.generateSiteConfig).
+      const tunnel = await cloudflared.startTunnel(htpasswd.attachShareAuth(site), broadcast);
       return { success: true, tunnel };
     } catch (err) {
       return { success: false, error: humanize(err) };
@@ -905,6 +909,96 @@ function registerHandlers(win, storeInstance) {
     try {
       cloudflared.stopTunnel(id);
       return { success: true };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  // Persists per-site share settings (mode, basic-auth, auto-start, hostname).
+  // The password is write-only: it becomes an apr1 hash in an htpasswd file on
+  // disk and is never stored in the JSON store or echoed back to the renderer.
+  ipcMain.handle('set-share-settings', async (_, id, payload = {}) => {
+    try {
+      const sites = store.get('sites', []);
+      const idx = sites.findIndex((s) => s.id === id);
+      if (idx === -1) return { success: false, error: 'Site not found' };
+      const site = sites[idx];
+      const prev = site.share || {};
+
+      const mode = payload.mode != null ? String(payload.mode) : prev.mode || 'quick';
+      if (!['quick', 'named'].includes(mode)) {
+        return { success: false, error: 'Invalid share mode.' };
+      }
+
+      const authEnabled =
+        payload.authEnabled != null ? !!payload.authEnabled : !!prev.authEnabled;
+      const authUser = String(payload.authUser ?? prev.authUser ?? 'guest').trim();
+      const password = payload.password != null ? String(payload.password) : '';
+
+      if (authEnabled) {
+        if (!htpasswd.isValidAuthUser(authUser)) {
+          return {
+            success: false,
+            error: 'Username may only contain letters, digits, ".", "_" and "-".',
+          };
+        }
+        // A new password (or changed username) rewrites the htpasswd file; with
+        // no password we keep the existing file — but one must exist.
+        if (password) {
+          htpasswd.writeHtpasswdFile(site.domain, authUser, password);
+        } else if (!htpasswd.hasHtpasswdFile(site.domain) || authUser !== prev.authUser) {
+          return { success: false, error: 'Set a password to enable protection.' };
+        }
+      } else {
+        htpasswd.removeHtpasswdFile(site.domain);
+      }
+
+      // Stable-hostname (named tunnel) settings.
+      let hostname = prev.hostname || null;
+      if (payload.hostname != null) {
+        hostname = String(payload.hostname).trim().toLowerCase() || null;
+        if (
+          hostname &&
+          (!/^[a-z0-9.-]+$/.test(hostname) || !hostname.includes('.') || hostname.length > 253)
+        ) {
+          return { success: false, error: 'Enter a valid hostname (e.g. staging.example.com).' };
+        }
+      }
+      if (mode === 'named' && !hostname) {
+        return { success: false, error: 'A stable share needs a hostname on your Cloudflare domain.' };
+      }
+
+      const autoStart =
+        payload.autoStart != null ? !!payload.autoStart : !!prev.autoStart;
+
+      const share = {
+        mode,
+        authEnabled,
+        authUser,
+        // Auto-start only makes sense for named tunnels — a quick tunnel would
+        // come back on a different random URL every launch.
+        autoStart: mode === 'named' && autoStart,
+        hostname,
+        tunnelName: prev.tunnelName || null,
+        tunnelId: prev.tunnelId || null,
+      };
+
+      const updated = { ...site, share };
+      sites[idx] = updated;
+      store.set('sites', sites);
+
+      // A live tunnel picks the change up immediately: rewrite its alias vhost
+      // with/without the auth file and reload nginx.
+      try {
+        const refreshed = cloudflared.refreshTunnel(id, htpasswd.attachShareAuth(updated));
+        if (refreshed && mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents) {
+          mainWindow.webContents.send('tunnel-update', refreshed);
+        }
+      } catch (err) {
+        return { success: true, share, warning: humanize(err) };
+      }
+
+      return { success: true, share };
     } catch (err) {
       return { success: false, error: humanize(err) };
     }

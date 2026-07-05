@@ -74,6 +74,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getTunnels: () => ipcRenderer.invoke('get-tunnels'),
   startTunnel: (id) => ipcRenderer.invoke('start-tunnel', id),
   stopTunnel: (id) => ipcRenderer.invoke('stop-tunnel', id),
+  setShareSettings: (id, settings) => ipcRenderer.invoke('set-share-settings', id, settings),
 
   // Services
   getServiceStatus: () => ipcRenderer.invoke('get-service-status'),

@@ -127,6 +127,26 @@ app.whenReady().then(() => {
         console.error('auto-start:', err.message);
       }
     }
+
+    // Restore persistent shares once nginx is up. Only named tunnels opt into
+    // autoStart (a quick tunnel would come back on a new random URL anyway).
+    const cloudflared = require('./services/cloudflared.cjs');
+    const htpasswd = require('./services/htpasswd.cjs');
+    const broadcast = (tunnel) => {
+      if (win && !win.isDestroyed() && win.webContents) {
+        win.webContents.send('tunnel-update', tunnel);
+      }
+    };
+    for (const site of store.get('sites', [])) {
+      if (!site.share?.autoStart) continue;
+      try {
+        await cloudflared.startTunnel(htpasswd.attachShareAuth(site), broadcast);
+      } catch (err) {
+        // A failed share restore must not block the app; the user can restart
+        // it from the share panel.
+        console.error('share auto-start:', err.message);
+      }
+    }
   })();
 
   // macOS: Re-create window if activated with no windows

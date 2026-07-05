@@ -16,12 +16,10 @@ import {
   HardDrive,
   Share2,
   Loader,
-  Copy,
-  Check,
-  X,
   KeyRound,
 } from 'lucide-react';
 import { Toggle } from './ui';
+import SharePanel from './SharePanel';
 import WpConfigManager from './WpConfigManager';
 import SitePhpSettings from './SitePhpSettings';
 import WpOverview from './WpOverview';
@@ -57,7 +55,10 @@ const NAV = [
 function Overview({ site, onSaved }) {
   const [pmaBusy, setPmaBusy] = useState(false);
   const [tunnel, setTunnel] = useState(null);
-  const [copied, setCopied] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [cfInstalled, setCfInstalled] = useState(null);
+  const [cfInstalling, setCfInstalling] = useState(false);
+  const [cfLog, setCfLog] = useState('');
   const [actionError, setActionError] = useState(null);
 
   // One-click admin (magic login)
@@ -122,6 +123,11 @@ function Overview({ site, onSaved }) {
   // Pick up any tunnel already running for this site and follow its state.
   useEffect(() => {
     window.electronAPI
+      .checkCloudflared()
+      .then((r) => setCfInstalled(!!r.installed))
+      .catch(() => setCfInstalled(false));
+
+    window.electronAPI
       .getTunnels()
       .then((list) => setTunnel((list || []).find((t) => t.siteId === site.id) || null))
       .catch(() => {});
@@ -130,8 +136,13 @@ function Overview({ site, onSaved }) {
       if (!t || t.siteId !== site.id) return;
       setTunnel(t.status === 'stopped' ? null : t);
     };
+    const onInstallLog = (data) => data && setCfLog(data.line);
     window.electronAPI.on('tunnel-update', onTunnel);
-    return () => window.electronAPI.off('tunnel-update');
+    window.electronAPI.on('cloudflared-install-progress', onInstallLog);
+    return () => {
+      window.electronAPI.off('tunnel-update');
+      window.electronAPI.off('cloudflared-install-progress');
+    };
   }, [site.id]);
 
   async function handlePhpMyAdmin() {
@@ -142,14 +153,18 @@ function Overview({ site, onSaved }) {
     setPmaBusy(false);
   }
 
-  async function handleExpose() {
-    if (tunnel) return; // already starting/running — panel below has the controls
+  function handleExpose() {
+    // Reveal/toggle the share panel; the panel's Start button spins up the tunnel.
+    if (tunnel) setShareOpen(true);
+    else setShareOpen((v) => !v);
+  }
+
+  async function handleStartTunnel() {
     setActionError(null);
     setTunnel({ siteId: site.id, status: 'starting' });
     const result = await window.electronAPI.startTunnel(site.id);
     if (!result.success) {
-      setTunnel(null);
-      setActionError(result.error);
+      setTunnel({ siteId: site.id, status: 'error', error: result.error });
     }
   }
 
@@ -158,11 +173,14 @@ function Overview({ site, onSaved }) {
     setTunnel(null);
   }
 
-  function copyTunnelUrl() {
-    if (!tunnel?.url) return;
-    navigator.clipboard.writeText(tunnel.url);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+  async function handleInstallCloudflared() {
+    setCfInstalling(true);
+    setCfLog('');
+    const result = await window.electronAPI.installCloudflared();
+    setCfInstalling(false);
+    setCfLog('');
+    if (result.success) setCfInstalled(true);
+    return result;
   }
 
   const tunnelActive =
@@ -239,40 +257,25 @@ function Overview({ site, onSaved }) {
           ))}
         </div>
 
-        {/* Live tunnel state */}
-        {tunnel?.status === 'running' && (
-          <div className="mt-2 px-2.5 py-2 bg-gray-50 rounded-lg flex items-center gap-1.5 animate-fade-in">
-            <button
-              onClick={() => window.electronAPI.openSiteInBrowser(tunnel.url)}
-              className="flex-1 min-w-0 text-left text-xs text-wp-blue font-mono truncate hover:underline"
-              title={tunnel.url}
-            >
-              {tunnel.url}
-            </button>
-            <button
-              onClick={copyTunnelUrl}
-              title="Copy URL"
-              className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-200"
-            >
-              {copied ? (
-                <Check size={13} className="text-wp-green" />
-              ) : (
-                <Copy size={13} />
-              )}
-            </button>
-            <button
-              onClick={handleStopTunnel}
-              title="Stop sharing"
-              className="p-1.5 rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10"
-            >
-              <X size={13} />
-            </button>
+        {/* Share tunnel panel */}
+        {(shareOpen || tunnel) && (
+          <div className="mt-2 px-2.5 py-2 bg-gray-50 rounded-lg animate-fade-in">
+            <SharePanel
+              site={site}
+              tunnel={tunnel}
+              cfInstalled={cfInstalled}
+              cfInstalling={cfInstalling}
+              cfLog={cfLog}
+              onStartTunnel={handleStartTunnel}
+              onStopTunnel={handleStopTunnel}
+              onInstallCloudflared={handleInstallCloudflared}
+              onSaved={onSaved}
+              onClose={() => {
+                setShareOpen(false);
+                if (tunnel?.status === 'error') setTunnel(null);
+              }}
+            />
           </div>
-        )}
-        {tunnel?.status === 'error' && (
-          <p className="mt-2 px-2.5 text-xs text-red-600 dark:text-red-400">
-            {tunnel.error || 'Failed to start the tunnel.'}
-          </p>
         )}
         {actionError && (
           <p className="mt-2 px-2.5 text-xs text-red-600 dark:text-red-400">

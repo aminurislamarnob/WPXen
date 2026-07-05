@@ -257,6 +257,7 @@ export default function Sites({ sites, setSites, refreshSites }) {
               onStartTunnel={handleStartTunnel}
               onStopTunnel={handleStopTunnel}
               onInstallCloudflared={handleInstallCloudflared}
+              onShareSaved={refreshSites}
             />
           ))}
         </div>

@@ -90,6 +90,7 @@ function snapshot(t) {
     status: t.status,
     url: t.url || null,
     error: t.error || null,
+    authEnabled: !!t.authEnabled,
   };
 }
 
@@ -151,6 +152,20 @@ function clearNginxAlias(site) {
   }
 }
 
+// Re-applies a live tunnel's nginx alias with the site's current settings —
+// used when share options (e.g. basic-auth) change mid-tunnel. The caller
+// passes the fresh site object, with `shareAuthFile` attached when auth is on.
+// Returns the updated snapshot, or null when no tunnel with a URL is live.
+function refreshTunnel(siteId, site) {
+  const record = tunnels.get(siteId);
+  if (!record || !record.url) return null;
+  const host = record.url.replace(/^https:\/\//, '');
+  addNginxAlias(site, host);
+  record.site = site;
+  record.authEnabled = !!(site.share && site.share.authEnabled);
+  return snapshot(record);
+}
+
 // Starts a Cloudflare quick tunnel for a site. `onUpdate(snapshot)` is invoked
 // whenever the tunnel's state changes (url captured, error, exit). Resolves with
 // the running snapshot once the public URL is captured, or rejects on failure.
@@ -193,6 +208,7 @@ function startTunnel(site, onUpdate = () => {}) {
       status: 'starting',
       url: null,
       error: null,
+      authEnabled: !!(site.share && site.share.authEnabled),
       proc,
       site,
       settled: false,
@@ -328,4 +344,5 @@ module.exports = {
   stopAll,
   getTunnel,
   getAllTunnels,
+  refreshTunnel,
 };
