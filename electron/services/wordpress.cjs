@@ -311,17 +311,31 @@ if (!defined('ABSPATH')) {
 }
 
 /**
+ * True when the current request arrived on a Cloudflare quick-tunnel share host.
+ */
+function wpherd_is_tunnel_request() {
+    return !empty($_SERVER['HTTP_HOST'])
+        && substr($_SERVER['HTTP_HOST'], -18) === '.trycloudflare.com';
+}
+
+// Cloudflare terminates TLS at the edge and forwards to the local origin over
+// plain HTTP, so WordPress sees is_ssl() === false while home/siteurl are https
+// (below). That scheme mismatch makes wp-admin / wp-login redirect http->https
+// endlessly (ERR_TOO_MANY_REDIRECTS). Mark tunnel requests as HTTPS — matching
+// the edge — so is_ssl() agrees with the https site URL and the loop is gone.
+// This runs at mu-plugin load, before any admin auth/SSL redirect check.
+if (wpherd_is_tunnel_request()) {
+    $_SERVER['HTTPS'] = 'on';
+}
+
+/**
  * When the request host is a Cloudflare quick-tunnel domain, override the
  * home/siteurl so all generated links point at the public tunnel URL.
  */
 function wpherd_tunnel_filter_url($value) {
-    if (empty($_SERVER['HTTP_HOST'])) {
-        return $value;
-    }
-    $host = $_SERVER['HTTP_HOST'];
-    if (substr($host, -18) === '.trycloudflare.com') {
+    if (wpherd_is_tunnel_request()) {
         // Cloudflare quick tunnels are always served over https at the edge.
-        return 'https://' . $host;
+        return 'https://' . $_SERVER['HTTP_HOST'];
     }
     return $value;
 }

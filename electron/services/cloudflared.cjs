@@ -2,6 +2,7 @@
 
 const { spawn, execSync } = require('child_process');
 const fs = require('fs');
+const dns = require('dns').promises;
 const brew = require('./brew.cjs');
 const nginx = require('./nginx.cjs');
 const wordpress = require('./wordpress.cjs');
@@ -100,6 +101,37 @@ function getAllTunnels() {
   return [...tunnels.values()].map(snapshot);
 }
 
+// Polls DNS until the fresh quick-tunnel host is publicly resolvable.
+//
+// Cloudflare hands out a brand-new random *.trycloudflare.com subdomain on every
+// start. It takes a few seconds to propagate to public resolvers (8.8.8.8 etc).
+// If the user opens the URL in that window, the lookup returns NXDOMAIN and macOS
+// mDNSResponder *negative-caches* it — so the URL then looks permanently dead
+// ("ERR_NAME_NOT_RESOLVED") for the whole negative-TTL even after DNS goes live.
+//
+// We use dns.resolve4 (c-ares, querying the configured nameservers directly)
+// rather than dns.lookup (getaddrinfo) on purpose: resolve4 bypasses the OS
+// resolver cache, so our polling never itself poisons that cache. Once this
+// succeeds the record exists upstream, so the browser's first lookup resolves
+// positively. Best-effort: resolves false on timeout and the caller proceeds
+// anyway (the URL will start working once DNS catches up).
+function waitForDnsReady(host, { timeoutMs = 30000, intervalMs = 1000 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  return new Promise((resolve) => {
+    const attempt = async () => {
+      try {
+        const addrs = await dns.resolve4(host);
+        if (addrs && addrs.length) return resolve(true);
+      } catch {
+        // not resolvable yet
+      }
+      if (Date.now() >= deadline) return resolve(false);
+      setTimeout(attempt, intervalMs);
+    };
+    attempt();
+  });
+}
+
 // Adds the given public host to the site's nginx vhost server_name so requests
 // arriving on the tunnel host route to this site, then reloads nginx.
 function addNginxAlias(site, host) {
@@ -176,13 +208,12 @@ function startTunnel(site, onUpdate = () => {}) {
     const onData = (buf) => {
       const text = buf.toString();
       tail = (tail + text).slice(-4000);
-      if (record.status === 'starting') {
+      if (record.status === 'starting' && !record.url) {
         const m = text.match(urlRe);
         if (m) {
           const url = m[0];
           const host = url.replace(/^https:\/\//, '');
           record.url = url;
-          record.status = 'running';
           try {
             addNginxAlias(site, host);
           } catch (err) {
@@ -198,11 +229,15 @@ function startTunnel(site, onUpdate = () => {}) {
             } catch {}
             return;
           }
-          onUpdate(snapshot(record));
-          if (!record.settled) {
+          // Hold in 'starting' until the fresh subdomain actually resolves, so we
+          // never surface a URL that the browser would negative-cache as NXDOMAIN.
+          waitForDnsReady(host).then(() => {
+            if (record.settled || record.status === 'stopped') return;
+            record.status = 'running';
+            onUpdate(snapshot(record));
             record.settled = true;
             resolve(snapshot(record));
-          }
+          });
         }
       }
     };
@@ -244,9 +279,11 @@ function startTunnel(site, onUpdate = () => {}) {
       }
     });
 
-    // Safety net: if no URL appears within 30s, treat it as a failure.
+    // Safety net: if cloudflared never prints a URL within 30s, treat it as a
+    // failure. Once a URL is captured we're in the DNS-readiness wait (bounded
+    // separately in waitForDnsReady), so don't kill the tunnel for that.
     const timer = setTimeout(() => {
-      if (record.status === 'starting' && !record.settled) {
+      if (record.status === 'starting' && !record.url && !record.settled) {
         record.error = 'Timed out waiting for the tunnel URL.';
         try {
           proc.kill();
