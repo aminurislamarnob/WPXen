@@ -29,6 +29,7 @@ const mysql = require('./services/mysql.cjs');
 const dnsmasq = require('./services/dnsmasq.cjs');
 const wordpress = require('./services/wordpress.cjs');
 const siteops = require('./services/siteops.cjs');
+const blueprints = require('./services/blueprints.cjs');
 const mkcert = require('./services/mkcert.cjs');
 const phpmyadmin = require('./services/phpmyadmin.cjs');
 const mailpit = require('./services/mailpit.cjs');
@@ -582,6 +583,122 @@ function registerHandlers(win, storeInstance) {
     try {
       return { success: true, ...mkcert.getCaStatus() };
     } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  // ─── Blueprints ──────────────────────────────────────────────────────
+
+  ipcMain.handle('get-blueprints', async () => {
+    try {
+      return { success: true, blueprints: blueprints.listBlueprints(store) };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('save-blueprint', async (event, id, opts = {}) => {
+    try {
+      const site = store.get('sites', []).find((s) => s.id === id);
+      if (!site) return { success: false, error: 'Site not found' };
+      if (!mysql.isRunning()) {
+        return {
+          success: false,
+          error: 'MySQL is not running. Start it in the Services panel.',
+        };
+      }
+      const progress = (data) => {
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('blueprint-save-progress', data);
+        }
+      };
+      const blueprint = await blueprints.saveBlueprint(
+        store,
+        { site, name: opts.name, description: opts.description },
+        progress
+      );
+      return { success: true, blueprint };
+    } catch (err) {
+      console.error('save-blueprint error:', err);
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('delete-blueprint', async (_, id) => {
+    try {
+      blueprints.deleteBlueprint(store, id);
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('create-site-from-blueprint', async (event, payload = {}) => {
+    try {
+      const { blueprintId, ...target } = payload;
+      const bp = blueprints.listBlueprints(store).find((b) => b.id === blueprintId);
+      if (!bp) return { success: false, error: 'That blueprint no longer exists.' };
+
+      // Same authoritative validation + uniqueness checks as import (the
+      // blueprint's database carries its own users, so admin fields are stubs).
+      const { valid, errors } = validation.validateSiteInput({
+        ...target,
+        adminUser: 'admin',
+        adminPassword: 'blueprint',
+        adminEmail: `admin@${target.domain}`,
+      });
+      if (!valid) return { success: false, error: errors.join(' ') };
+
+      const sites = store.get('sites', []);
+      if (sites.some((s) => s.domain === target.domain)) {
+        return { success: false, error: `Domain ${target.domain} already exists` };
+      }
+      if (sites.some((s) => s.dbName === target.dbName)) {
+        return { success: false, error: `Database ${target.dbName} already exists` };
+      }
+      if (mysql.databaseExists(target.dbName)) {
+        return {
+          success: false,
+          error: `A database named ${target.dbName} already exists in MySQL.`,
+        };
+      }
+      if (nginx.siteConfigExists(target.domain)) {
+        return {
+          success: false,
+          error: `An nginx config for ${target.domain} already exists.`,
+        };
+      }
+      if (fs.existsSync(path.join(target.path, 'wp-config.php'))) {
+        return {
+          success: false,
+          error: `${target.path} already contains a WordPress install.`,
+        };
+      }
+      if (!mysql.isRunning()) {
+        return {
+          success: false,
+          error: 'MySQL is not running. Start it in the Services panel.',
+        };
+      }
+
+      // Reuse the add-site progress channel so AddSiteModal's existing listener
+      // shows blueprint progress unchanged.
+      const progress = (data) => {
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('site-create-progress', data);
+        }
+      };
+      const site = await blueprints.createSiteFromBlueprint(
+        store,
+        blueprintId,
+        target,
+        progress
+      );
+
+      store.set('sites', [...store.get('sites', []), site]);
+      return { success: true, site };
+    } catch (err) {
+      console.error('create-site-from-blueprint error:', err);
       return { success: false, error: humanize(err) };
     }
   });

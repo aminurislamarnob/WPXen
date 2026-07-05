@@ -18,6 +18,7 @@ const VALID_EVENT_CHANNELS = [
   'site-import-progress',
   'site-clone-progress',
   'site-changeurl-progress',
+  'blueprint-save-progress',
 ];
 
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -42,6 +43,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   changeSiteUrl: (id, newDomain) =>
     ipcRenderer.invoke('change-site-url', id, newDomain),
   getCaStatus: () => ipcRenderer.invoke('get-ca-status'),
+
+  // Blueprints
+  getBlueprints: () => ipcRenderer.invoke('get-blueprints'),
+  saveBlueprint: (id, opts) => ipcRenderer.invoke('save-blueprint', id, opts),
+  deleteBlueprint: (id) => ipcRenderer.invoke('delete-blueprint', id),
+  createSiteFromBlueprint: (payload) =>
+    ipcRenderer.invoke('create-site-from-blueprint', payload),
 
   // One-click admin (magic login)
   listAdminUsers: (id) => ipcRenderer.invoke('list-admin-users', id),

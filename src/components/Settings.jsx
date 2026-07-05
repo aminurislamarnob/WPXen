@@ -11,8 +11,22 @@ import {
   ShieldOff,
   Wand2,
   Lock,
+  Layers,
+  Trash2,
 } from 'lucide-react';
 import { Card, Row, SectionLabel, Toggle, Button } from './ui';
+
+function formatBytes(bytes) {
+  if (!bytes || bytes < 1024) return `${bytes || 0} B`;
+  const units = ['KB', 'MB', 'GB'];
+  let value = bytes / 1024;
+  let i = 0;
+  while (value >= 1024 && i < units.length - 1) {
+    value /= 1024;
+    i += 1;
+  }
+  return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[i]}`;
+}
 
 export default function Settings({ onOpenWizard }) {
   const [settings, setSettings] = useState({
@@ -33,6 +47,8 @@ export default function Settings({ onOpenWizard }) {
   const [sudoersLoading, setSudoersLoading] = useState(false);
   const [sudoersMessage, setSudoersMessage] = useState(null);
   const [caStatus, setCaStatus] = useState(null);
+  const [blueprints, setBlueprints] = useState([]);
+  const [deletingBlueprint, setDeletingBlueprint] = useState(null);
 
   useEffect(() => {
     Promise.all([
@@ -47,7 +63,22 @@ export default function Settings({ onOpenWizard }) {
       setSudoers(sud);
     });
     window.electronAPI.getCaStatus().then(setCaStatus).catch(() => {});
+    refreshBlueprints();
   }, []);
+
+  function refreshBlueprints() {
+    window.electronAPI
+      .getBlueprints()
+      .then((r) => setBlueprints(r.success ? r.blueprints : []))
+      .catch(() => setBlueprints([]));
+  }
+
+  async function handleDeleteBlueprint(id) {
+    setDeletingBlueprint(id);
+    await window.electronAPI.deleteBlueprint(id);
+    setDeletingBlueprint(null);
+    refreshBlueprints();
+  }
 
   // Main process re-checks dependencies whenever the app regains focus (e.g.
   // after installing something via Homebrew), so the list stays current
@@ -305,6 +336,52 @@ export default function Settings({ onOpenWizard }) {
               {m.text}
             </div>
           ))}
+      </div>
+
+      {/* Blueprints */}
+      <div>
+        <SectionLabel>Site Blueprints</SectionLabel>
+        <Card>
+          {blueprints.length === 0 ? (
+            <div className="flex items-center gap-3 px-4 py-5 text-[13px] text-gray-500">
+              <Layers size={18} className="text-gray-400 flex-shrink-0" />
+              <span>
+                No blueprints yet. Save one from a site’s menu (
+                <span className="font-medium">Save as Blueprint…</span>) to create new
+                sites from it.
+              </span>
+            </div>
+          ) : (
+            blueprints.map((bp) => (
+              <Row
+                key={bp.id}
+                icon={<Layers size={18} className="text-wp-blue flex-shrink-0" />}
+                title={bp.name}
+                subtitle={`${bp.sourceSiteName ? `From ${bp.sourceSiteName} · ` : ''}PHP ${bp.phpVersion} · ${formatBytes(bp.sizeBytes)}${
+                  bp.description ? ` · ${bp.description}` : ''
+                }`}
+              >
+                <button
+                  onClick={() => handleDeleteBlueprint(bp.id)}
+                  disabled={deletingBlueprint === bp.id}
+                  title="Delete blueprint"
+                  className="btn-ghost text-xs text-gray-400 hover:text-red-600 dark:hover:text-red-400"
+                >
+                  {deletingBlueprint === bp.id ? (
+                    <Loader size={12} className="animate-spin" />
+                  ) : (
+                    <Trash2 size={12} />
+                  )}
+                </button>
+              </Row>
+            ))
+          )}
+        </Card>
+        <p className="text-[11px] text-gray-400 mt-1.5 px-1">
+          Blueprints are full snapshots (files + database) stored in WPHerd’s data
+          folder. Create a site from one via <span className="font-medium">Add Site →
+          From Blueprint</span>.
+        </p>
       </div>
 
       {/* Dependencies */}

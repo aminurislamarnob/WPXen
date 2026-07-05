@@ -4,6 +4,7 @@ import SiteCard from './SiteCard';
 import AddSiteModal from './AddSiteModal';
 import ImportSiteModal from './ImportSiteModal';
 import CloneSiteModal from './CloneSiteModal';
+import SaveBlueprintModal from './SaveBlueprintModal';
 
 function DeleteConfirmModal({ site, onConfirm, onClose }) {
   const [removeFiles, setRemoveFiles] = useState(false);
@@ -78,6 +79,8 @@ export default function Sites({ sites, setSites, refreshSites }) {
   const [showAddModal, setShowAddModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const [cloningSite, setCloningSite] = useState(null);
+  const [blueprintSite, setBlueprintSite] = useState(null);
+  const [blueprints, setBlueprints] = useState([]);
   const [search, setSearch] = useState('');
   const [deletingSite, setDeletingSite] = useState(null);
   const [phpVersions, setPhpVersions] = useState([]);
@@ -97,6 +100,17 @@ export default function Sites({ sites, setSites, refreshSites }) {
 
   useEffect(() => {
     window.electronAPI.getPhpVersions().then(setPhpVersions).catch(console.error);
+  }, []);
+
+  function refreshBlueprints() {
+    window.electronAPI
+      .getBlueprints()
+      .then((r) => setBlueprints(r.success ? r.blueprints : []))
+      .catch(() => setBlueprints([]));
+  }
+
+  useEffect(() => {
+    refreshBlueprints();
   }, []);
 
   useEffect(() => {
@@ -334,6 +348,7 @@ export default function Sites({ sites, setSites, refreshSites }) {
               onDelete={setDeletingSite}
               onExport={handleExport}
               onClone={setCloningSite}
+              onSaveBlueprint={setBlueprintSite}
               onToggleHttps={handleToggleHttps}
               tunnel={tunnels[site.id]}
               cfInstalled={cfInstalled}
@@ -351,6 +366,7 @@ export default function Sites({ sites, setSites, refreshSites }) {
       {showAddModal && (
         <AddSiteModal
           phpVersions={phpVersions}
+          blueprints={blueprints}
           onClose={() => setShowAddModal(false)}
           onSiteAdded={(site) => {
             handleSiteAdded(site);
@@ -375,6 +391,15 @@ export default function Sites({ sites, setSites, refreshSites }) {
           phpVersions={phpVersions}
           onClose={() => setCloningSite(null)}
           onCloned={handleSiteAdded}
+        />
+      )}
+
+      {/* Save as blueprint modal */}
+      {blueprintSite && (
+        <SaveBlueprintModal
+          site={blueprintSite}
+          onClose={() => setBlueprintSite(null)}
+          onSaved={refreshBlueprints}
         />
       )}
 

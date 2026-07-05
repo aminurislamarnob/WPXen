@@ -2,10 +2,25 @@ import { useState, useEffect } from 'react';
 import { FolderOpen, CheckCircle, AlertCircle, Loader, ChevronRight } from 'lucide-react';
 import { StepIndicator, ProgressLog } from './ui';
 
-const STEPS = ['Details', 'Directory', 'WordPress', 'Creating'];
-
-export default function AddSiteModal({ onClose, onSiteAdded, phpVersions }) {
+export default function AddSiteModal({
+  onClose,
+  onSiteAdded,
+  phpVersions,
+  blueprints = [],
+}) {
   const [step, setStep] = useState(0);
+  // Source: a blank WordPress install, or a saved blueprint's id.
+  const [source, setSource] = useState('blank');
+  const blueprint = source === 'blank' ? null : blueprints.find((b) => b.id === source);
+  const isBlueprint = !!blueprint;
+  // Blueprint sites carry their own users, so the admin-credentials step is
+  // skipped: [Details, Directory, Creating] vs [Details, Directory, WordPress,
+  // Creating].
+  const formSteps = isBlueprint
+    ? ['Details', 'Directory']
+    : ['Details', 'Directory', 'WordPress'];
+  const creatingStep = formSteps.length;
+
   const [formData, setFormData] = useState({
     name: '',
     domain: '',
@@ -21,6 +36,16 @@ export default function AddSiteModal({ onClose, onSiteAdded, phpVersions }) {
   const [, setCreating] = useState(false);
   const [progressMessages, setProgressMessages] = useState([]);
   const [done, setDone] = useState(false);
+
+  function chooseSource(next) {
+    setSource(next);
+    setError('');
+    // Match the blueprint's PHP version when one is available.
+    const bp = next === 'blank' ? null : blueprints.find((b) => b.id === next);
+    if (bp?.phpVersion && phpVersions?.some((v) => v.version === bp.phpVersion)) {
+      setFormData((prev) => ({ ...prev, phpVersion: bp.phpVersion }));
+    }
+  }
 
   useEffect(() => {
     // Listen for progress events from main process
@@ -85,18 +110,33 @@ export default function AddSiteModal({ onClose, onSiteAdded, phpVersions }) {
         setError('Site directory is required');
         return;
       }
-      setStep(2);
+      // Blueprint installs have no admin step — go straight to creating.
+      if (isBlueprint) await handleCreate();
+      else setStep(2);
     } else if (step === 2) {
       await handleCreate();
     }
   }
 
   async function handleCreate() {
-    setStep(3);
+    setStep(creatingStep);
     setCreating(true);
-    setProgressMessages(['Starting WordPress installation...']);
+    setProgressMessages([
+      isBlueprint
+        ? 'Creating site from blueprint…'
+        : 'Starting WordPress installation...',
+    ]);
 
-    const result = await window.electronAPI.addSite(formData);
+    const result = isBlueprint
+      ? await window.electronAPI.createSiteFromBlueprint({
+          blueprintId: blueprint.id,
+          name: formData.name,
+          domain: formData.domain,
+          path: formData.path,
+          phpVersion: formData.phpVersion,
+          dbName: formData.dbName,
+        })
+      : await window.electronAPI.addSite(formData);
 
     setCreating(false);
 
@@ -106,7 +146,7 @@ export default function AddSiteModal({ onClose, onSiteAdded, phpVersions }) {
       onSiteAdded(result.site);
     } else {
       setError(result.error || 'Failed to create site');
-      setStep(2);
+      setStep(isBlueprint ? 1 : 2);
     }
   }
 
@@ -124,12 +164,58 @@ export default function AddSiteModal({ onClose, onSiteAdded, phpVersions }) {
           </p>
         </div>
 
-        <div className={`px-6 pt-4 ${step === 3 ? 'pb-6' : ''}`}>
-          {step < 3 && <StepIndicator current={step} steps={STEPS.slice(0, 3)} />}
+        <div className={`px-6 pt-4 ${step === creatingStep ? 'pb-6' : ''}`}>
+          {step < creatingStep && (
+            <StepIndicator current={step} steps={formSteps} />
+          )}
 
           {/* Step 0: Site details */}
           {step === 0 && (
             <div className="sheet-well space-y-4 animate-fade-in">
+              {blueprints.length > 0 && (
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1.5">
+                    Start From
+                  </label>
+                  <div className="flex gap-1 p-0.5 bg-gray-100 dark:bg-white/5 rounded-lg">
+                    <button
+                      onClick={() => chooseSource('blank')}
+                      className={`flex-1 text-xs font-medium py-1.5 rounded-md transition-colors ${
+                        source === 'blank'
+                          ? 'bg-surface shadow-sm text-gray-900'
+                          : 'text-gray-500 hover:text-gray-700'
+                      }`}
+                    >
+                      Blank WordPress
+                    </button>
+                    <button
+                      onClick={() =>
+                        chooseSource(isBlueprint ? source : blueprints[0].id)
+                      }
+                      className={`flex-1 text-xs font-medium py-1.5 rounded-md transition-colors ${
+                        isBlueprint
+                          ? 'bg-surface shadow-sm text-gray-900'
+                          : 'text-gray-500 hover:text-gray-700'
+                      }`}
+                    >
+                      From Blueprint
+                    </button>
+                  </div>
+                  {isBlueprint && (
+                    <select
+                      className="form-input mt-2"
+                      value={source}
+                      onChange={(e) => chooseSource(e.target.value)}
+                    >
+                      {blueprints.map((b) => (
+                        <option key={b.id} value={b.id}>
+                          {b.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+              )}
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1.5">
                   Site Name
@@ -165,18 +251,29 @@ export default function AddSiteModal({ onClose, onSiteAdded, phpVersions }) {
                   </span>
                 </p>
               </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1.5">
-                  Site Title
-                </label>
-                <input
-                  type="text"
-                  className="form-input"
-                  placeholder="My WordPress Site"
-                  value={formData.title}
-                  onChange={(e) => setFormData((p) => ({ ...p, title: e.target.value }))}
-                />
-              </div>
+              {!isBlueprint && (
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1.5">
+                    Site Title
+                  </label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="My WordPress Site"
+                    value={formData.title}
+                    onChange={(e) =>
+                      setFormData((p) => ({ ...p, title: e.target.value }))
+                    }
+                  />
+                </div>
+              )}
+              {isBlueprint && (
+                <div className="bg-blue-50 dark:bg-blue-500/10 rounded-xl px-4 py-3 text-xs text-blue-700 dark:text-blue-300">
+                  This site will be created from the{' '}
+                  <span className="font-semibold">{blueprint.name}</span> blueprint —
+                  its files, database, and users are restored as-is.
+                </div>
+              )}
             </div>
           )}
 
@@ -234,8 +331,8 @@ export default function AddSiteModal({ onClose, onSiteAdded, phpVersions }) {
             </div>
           )}
 
-          {/* Step 2: WordPress/Admin settings */}
-          {step === 2 && (
+          {/* Step 2: WordPress/Admin settings (blank installs only) */}
+          {step === 2 && !isBlueprint && (
             <div className="sheet-well space-y-4 animate-fade-in">
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1.5">
@@ -297,8 +394,8 @@ export default function AddSiteModal({ onClose, onSiteAdded, phpVersions }) {
             </div>
           )}
 
-          {/* Step 3: Creating */}
-          {step === 3 && (
+          {/* Final step: Creating */}
+          {step === creatingStep && (
             <div className="sheet-well animate-fade-in">
               {done ? (
                 <div className="text-center py-4">
@@ -349,7 +446,7 @@ export default function AddSiteModal({ onClose, onSiteAdded, phpVersions }) {
                       className="animate-spin text-wp-blue flex-shrink-0"
                     />
                     <p className="text-sm font-medium text-gray-700">
-                      Creating WordPress site…
+                      {isBlueprint ? 'Creating site from blueprint…' : 'Creating WordPress site…'}
                     </p>
                   </div>
                   <ProgressLog messages={progressMessages} className="mt-4" />
@@ -368,7 +465,7 @@ export default function AddSiteModal({ onClose, onSiteAdded, phpVersions }) {
         </div>
 
         {/* Footer — buttons bottom-right like macOS sheets */}
-        {step < 3 && (
+        {step < creatingStep && (
           <div className="flex justify-end gap-2 px-6 pt-4 pb-6">
             <button
               onClick={() => (step === 0 ? onClose() : setStep((s) => s - 1))}
@@ -377,8 +474,8 @@ export default function AddSiteModal({ onClose, onSiteAdded, phpVersions }) {
               {step === 0 ? 'Cancel' : 'Back'}
             </button>
             <button onClick={handleNext} className="btn-primary">
-              {step === 2 ? 'Create Site' : 'Continue'}
-              {step < 2 && <ChevronRight size={13} strokeWidth={2.5} />}
+              {step === creatingStep - 1 ? 'Create Site' : 'Continue'}
+              {step < creatingStep - 1 && <ChevronRight size={13} strokeWidth={2.5} />}
             </button>
           </div>
         )}
