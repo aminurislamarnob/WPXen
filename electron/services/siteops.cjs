@@ -458,6 +458,21 @@ async function importSite(archivePath, target, onProgress) {
       wordpress.setSiteUrl(target.path, newUrl);
     } catch {}
 
+    // .wpress exports blank active_plugins/template/stylesheet in the DB and
+    // rely on AI1WM's own importer to re-apply them from package.json. We import
+    // the DB directly, so replicate that final step — otherwise every plugin and
+    // the theme come back deactivated.
+    if (zipKind === 'wpress') {
+      progress({ step: 'activate', message: 'Restoring active plugins & theme...' });
+      let pkg = null;
+      try {
+        pkg = JSON.parse(fs.readFileSync(path.join(tmp, 'package.json'), 'utf8'));
+      } catch {}
+      try {
+        wordpress.restoreWpressActiveState(target.path, pkg);
+      } catch {}
+    }
+
     // nginx vhost
     progress({ step: 'nginx', message: 'Configuring nginx...' });
     nginx.createSiteConfig({

@@ -293,6 +293,58 @@ function setSiteUrl(sitePath, url) {
   wp(['option', 'update', 'siteurl', url], sitePath);
 }
 
+// From a .wpress package.json Plugins list, keep only the plugin basenames
+// whose file actually exists on disk — mirrors AI1WM's ai1wm_activate_plugins,
+// which skips entries that fail validate_plugin(). `exists` is injected so this
+// stays pure and unit-testable. Returns a de-duplicated array.
+function selectExistingPlugins(plugins, exists) {
+  if (!Array.isArray(plugins)) return [];
+  const seen = new Set();
+  const out = [];
+  for (const p of plugins) {
+    if (typeof p === 'string' && p && !seen.has(p) && exists(p)) {
+      seen.add(p);
+      out.push(p);
+    }
+  }
+  return out;
+}
+
+// All-in-One WP Migration blanks active_plugins/template/stylesheet in its DB
+// export (so nothing fatals mid-restore) and re-applies them from package.json
+// in its own importer. WPHerd imports the DB directly, so without this step
+// every plugin and the site theme come back deactivated. Replicates AI1WM's
+// final activation — direct option writes, filtered to entries whose files are
+// present (matching ai1wm_activate_plugins/template/stylesheet).
+function restoreWpressActiveState(sitePath, pkg) {
+  if (!pkg || typeof pkg !== 'object') return;
+
+  // Theme: only point template/stylesheet at a theme that's actually present.
+  const themesDir = path.join(sitePath, 'wp-content', 'themes');
+  for (const [option, value] of [
+    ['template', pkg.Template],
+    ['stylesheet', pkg.Stylesheet],
+  ]) {
+    if (value && fs.existsSync(path.join(themesDir, value))) {
+      try {
+        wp(['option', 'update', option, value], sitePath);
+      } catch {}
+    }
+  }
+
+  // Plugins: rebuild active_plugins from the basenames whose files exist.
+  const pluginsDir = path.join(sitePath, 'wp-content', 'plugins');
+  const active = selectExistingPlugins(pkg.Plugins, (p) =>
+    fs.existsSync(path.join(pluginsDir, p))
+  );
+  try {
+    wp(
+      ['option', 'update', 'active_plugins', JSON.stringify(active), '--format=json'],
+      sitePath
+    );
+  } catch {}
+}
+
 // Drops a must-use plugin that makes WordPress emit URLs for whatever host the
 // request actually arrived on when that host is a *.trycloudflare.com share
 // domain. Without it, WP would generate `http://<site>.test` links that break
@@ -919,6 +971,8 @@ module.exports = {
   createWordPressSite,
   removeWordPressSite,
   setSiteUrl,
+  selectExistingPlugins,
+  restoreWpressActiveState,
   ensureTunnelMuPlugin,
   listAdminUsers,
   ensureMagicLoginMuPlugin,
