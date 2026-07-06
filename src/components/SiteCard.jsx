@@ -14,12 +14,10 @@ import {
   Loader,
   HardDrive,
   Share2,
-  Check,
-  Download,
-  X,
   SlidersHorizontal,
 } from 'lucide-react';
 import { WordPressIcon } from './icons';
+import SharePanel from './SharePanel';
 
 function ContextMenu({ site, onDelete, onManage, onClose }) {
   return (
@@ -84,6 +82,7 @@ export default function SiteCard({
   onStartTunnel,
   onStopTunnel,
   onInstallCloudflared,
+  onShareSaved,
 }) {
   const navigate = useNavigate();
   const openDetail = () => navigate(`/sites/${site.id}`);
@@ -95,7 +94,6 @@ export default function SiteCard({
   const [pmaBusy, setPmaBusy] = useState(false);
 
   const [shareOpen, setShareOpen] = useState(false);
-  const [copied, setCopied] = useState(false);
 
   const tunnelActive =
     tunnel && (tunnel.status === 'starting' || tunnel.status === 'running');
@@ -105,13 +103,6 @@ export default function SiteCard({
     // If a tunnel is already live, just reveal the panel; otherwise toggle it.
     if (tunnel) setShareOpen(true);
     else setShareOpen((v) => !v);
-  }
-
-  function copyTunnelUrl() {
-    if (!tunnel?.url) return;
-    navigator.clipboard.writeText(tunnel.url);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
   }
 
   async function handleToggleHttps() {
@@ -298,125 +289,21 @@ export default function SiteCard({
       {/* Share tunnel panel */}
       {panelOpen && (
         <div className="px-4 py-3 border-t border-gray-100 bg-gray-50/60 rounded-b-2xl animate-fade-in">
-          <div className="flex items-center justify-between mb-2">
-            <span className="flex items-center gap-1.5 text-xs font-semibold text-gray-700">
-              <Share2 size={12} />
-              Public share tunnel
-            </span>
-            {!tunnelActive && (
-              <button
-                onClick={() => {
-                  setShareOpen(false);
-                  if (tunnel?.status === 'error') onStopTunnel(site);
-                }}
-                className="text-gray-400 hover:text-gray-600"
-                title="Close"
-              >
-                <X size={13} />
-              </button>
-            )}
-          </div>
-
-          {/* cloudflared not installed yet */}
-          {cfInstalled === false ? (
-            <div>
-              <p className="text-xs text-gray-500 mb-2">
-                Sharing needs Cloudflare&apos;s{' '}
-                <span className="font-mono">cloudflared</span> tool. Install it once to
-                expose sites over a public HTTPS URL.
-              </p>
-              <button
-                onClick={onInstallCloudflared}
-                disabled={cfInstalling}
-                className="btn-secondary text-xs justify-center w-full"
-              >
-                {cfInstalling ? (
-                  <>
-                    <Loader size={12} className="animate-spin mr-1.5" />
-                    Installing…
-                  </>
-                ) : (
-                  <>
-                    <Download size={12} className="mr-1.5" />
-                    Install cloudflared
-                  </>
-                )}
-              </button>
-              {cfInstalling && cfLog && (
-                <div className="mt-2 px-3 py-2 bg-zinc-900 rounded-lg">
-                  <p className="text-xs text-green-400 font-mono truncate" title={cfLog}>
-                    {cfLog}
-                  </p>
-                </div>
-              )}
-            </div>
-          ) : tunnel?.status === 'running' ? (
-            <div>
-              <div className="flex items-center gap-1.5">
-                <button
-                  onClick={() => window.electronAPI.openSiteInBrowser(tunnel.url)}
-                  className="flex-1 min-w-0 text-left text-xs text-wp-blue font-mono truncate hover:underline"
-                  title={tunnel.url}
-                >
-                  {tunnel.url}
-                </button>
-                <button
-                  onClick={copyTunnelUrl}
-                  title="Copy URL"
-                  className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-200"
-                >
-                  {copied ? (
-                    <Check size={13} className="text-wp-green" />
-                  ) : (
-                    <Copy size={13} />
-                  )}
-                </button>
-                <button
-                  onClick={() => onStopTunnel(site)}
-                  title="Stop sharing"
-                  className="p-1.5 rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10"
-                >
-                  <X size={13} />
-                </button>
-              </div>
-              <p className="mt-1.5 text-xs text-gray-400">
-                Anyone with this link can reach your local site while it&apos;s open.
-              </p>
-            </div>
-          ) : tunnel?.status === 'starting' ? (
-            <div className="flex items-center gap-2 text-xs text-gray-500">
-              <Loader size={13} className="animate-spin" />
-              Creating public URL…
-            </div>
-          ) : tunnel?.status === 'error' ? (
-            <div>
-              <p className="text-xs text-red-600 dark:text-red-400 mb-2">
-                {tunnel.error || 'Failed to start the tunnel.'}
-              </p>
-              <button
-                onClick={() => onStartTunnel(site)}
-                className="btn-secondary text-xs justify-center w-full"
-              >
-                <Share2 size={12} className="mr-1.5" />
-                Try again
-              </button>
-            </div>
-          ) : (
-            <div>
-              <p className="text-xs text-gray-500 mb-2">
-                Expose <span className="font-mono">{site.domain}</span> over a temporary
-                public HTTPS URL powered by Cloudflare.
-              </p>
-              <button
-                onClick={() => onStartTunnel(site)}
-                disabled={cfInstalled === null}
-                className="btn-secondary text-xs justify-center w-full"
-              >
-                <Share2 size={12} className="mr-1.5" />
-                Start
-              </button>
-            </div>
-          )}
+          <SharePanel
+            site={site}
+            tunnel={tunnel}
+            cfInstalled={cfInstalled}
+            cfInstalling={cfInstalling}
+            cfLog={cfLog}
+            onStartTunnel={onStartTunnel}
+            onStopTunnel={onStopTunnel}
+            onInstallCloudflared={onInstallCloudflared}
+            onSaved={onShareSaved}
+            onClose={() => {
+              setShareOpen(false);
+              if (tunnel?.status === 'error') onStopTunnel(site);
+            }}
+          />
         </div>
       )}
     </div>

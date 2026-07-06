@@ -74,6 +74,25 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getTunnels: () => ipcRenderer.invoke('get-tunnels'),
   startTunnel: (id) => ipcRenderer.invoke('start-tunnel', id),
   stopTunnel: (id) => ipcRenderer.invoke('stop-tunnel', id),
+  setShareSettings: (id, settings) =>
+    ipcRenderer.invoke('set-share-settings', id, settings),
+  getCfAccount: () => ipcRenderer.invoke('get-cf-account'),
+  cfLogin: () => ipcRenderer.invoke('cf-login'),
+
+  // Backups (local snapshots)
+  listBackups: (id) => ipcRenderer.invoke('list-backups', id),
+  createBackup: (id) => ipcRenderer.invoke('create-backup', id),
+  restoreBackup: (id, timestamp) => ipcRenderer.invoke('restore-backup', id, timestamp),
+  deleteBackup: (id, timestamp) => ipcRenderer.invoke('delete-backup', id, timestamp),
+  revealBackup: (id, timestamp) => ipcRenderer.invoke('reveal-backup', id, timestamp),
+
+  // Git deploy
+  gitStatus: (id) => ipcRenderer.invoke('git-status', id),
+  gitInit: (id, opts) => ipcRenderer.invoke('git-init', id, opts),
+  gitSetRemote: (id, url) => ipcRenderer.invoke('git-set-remote', id, url),
+  gitSetDeploySettings: (id, settings) =>
+    ipcRenderer.invoke('git-set-deploy-settings', id, settings),
+  gitDeploy: (id, message) => ipcRenderer.invoke('git-deploy', id, message),
 
   // Services
   getServiceStatus: () => ipcRenderer.invoke('get-service-status'),
@@ -131,6 +150,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
       'notification',
       'tunnel-update',
       'cloudflared-install-progress',
+      'cf-login-progress',
+      'backup-progress',
+      'git-deploy-progress',
       'mailpit-install-progress',
       'core-deps-install-progress',
     ];
@@ -147,6 +169,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
       'notification',
       'tunnel-update',
       'cloudflared-install-progress',
+      'cf-login-progress',
+      'backup-progress',
+      'git-deploy-progress',
       'mailpit-install-progress',
       'core-deps-install-progress',
     ];

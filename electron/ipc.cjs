@@ -33,6 +33,9 @@ const phpmyadmin = require('./services/phpmyadmin.cjs');
 const mailpit = require('./services/mailpit.cjs');
 const procman = require('./services/procman.cjs');
 const cloudflared = require('./services/cloudflared.cjs');
+const htpasswd = require('./services/htpasswd.cjs');
+const backups = require('./services/backups.cjs');
+const gitdeploy = require('./services/gitdeploy.cjs');
 const sudoers = require('./services/sudoers.cjs');
 const setup = require('./services/setup.cjs');
 const logs = require('./services/logs.cjs');
@@ -289,6 +292,16 @@ function registerHandlers(win, storeInstance) {
 
       // Tear down any live share tunnel before removing the vhost/files.
       cloudflared.stopTunnel(id);
+      htpasswd.removeHtpasswdFile(site.domain);
+
+      // Delete the site's named tunnel from the Cloudflare account, if any.
+      // Best-effort: the DNS CNAME can't be removed via cloudflared, and a
+      // failure here must not block site removal.
+      if (site.share?.tunnelId) {
+        cloudflared.deleteNamedTunnel(site.share.tunnelId).catch((err) => {
+          console.error('delete named tunnel:', err.message);
+        });
+      }
 
       wordpress.removeWordPressSite(site, opts);
 
@@ -415,7 +428,9 @@ function registerHandlers(win, storeInstance) {
       if (secret) target = `${base}/?wpherd_magic_login=${secret}`;
     }
     const ok = openExternalSafely(target);
-    return ok ? { success: true } : { success: false, error: 'Refused to open unsafe URL' };
+    return ok
+      ? { success: true }
+      : { success: false, error: 'Refused to open unsafe URL' };
   });
 
   // ─── Site config (WP Config Manager) ───────────────────────────────────
@@ -894,8 +909,51 @@ function registerHandlers(win, storeInstance) {
         }
       };
 
-      const tunnel = await cloudflared.startTunnel(site, broadcast);
+      // Attach the htpasswd path when basic-auth is enabled so the tunnel
+      // alias server block gets auth_basic (see nginx.generateSiteConfig).
+      const tunnel = await cloudflared.startTunnel(
+        htpasswd.attachShareAuth(site),
+        broadcast
+      );
+
+      // A named tunnel mints its UUID on first start — persist it so restarts
+      // (and site removal) can reuse/delete the same Cloudflare tunnel.
+      if (tunnel?.mode === 'named' && tunnel.tunnelId) {
+        const fresh = store.get('sites', []);
+        const idx = fresh.findIndex((s) => s.id === id);
+        if (idx !== -1 && fresh[idx].share?.tunnelId !== tunnel.tunnelId) {
+          fresh[idx] = {
+            ...fresh[idx],
+            share: {
+              ...fresh[idx].share,
+              tunnelId: tunnel.tunnelId,
+              tunnelName: tunnel.tunnelName,
+            },
+          };
+          store.set('sites', fresh);
+        }
+      }
+
       return { success: true, tunnel };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  // ─── Cloudflare account (named tunnels / stable hostnames) ─────────────
+
+  ipcMain.handle('get-cf-account', () => {
+    return { loggedIn: cloudflared.isLoggedIn() };
+  });
+
+  ipcMain.handle('cf-login', async (event) => {
+    try {
+      await cloudflared.login((line) => {
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('cf-login-progress', { line });
+        }
+      });
+      return { success: true };
     } catch (err) {
       return { success: false, error: humanize(err) };
     }
@@ -910,11 +968,303 @@ function registerHandlers(win, storeInstance) {
     }
   });
 
+  // Persists per-site share settings (mode, basic-auth, auto-start, hostname).
+  // The password is write-only: it becomes an apr1 hash in an htpasswd file on
+  // disk and is never stored in the JSON store or echoed back to the renderer.
+  ipcMain.handle('set-share-settings', async (_, id, payload = {}) => {
+    try {
+      const sites = store.get('sites', []);
+      const idx = sites.findIndex((s) => s.id === id);
+      if (idx === -1) return { success: false, error: 'Site not found' };
+      const site = sites[idx];
+      const prev = site.share || {};
+
+      const mode = payload.mode != null ? String(payload.mode) : prev.mode || 'quick';
+      if (!['quick', 'named'].includes(mode)) {
+        return { success: false, error: 'Invalid share mode.' };
+      }
+
+      const authEnabled =
+        payload.authEnabled != null ? !!payload.authEnabled : !!prev.authEnabled;
+      const authUser = String(payload.authUser ?? prev.authUser ?? 'guest').trim();
+      const password = payload.password != null ? String(payload.password) : '';
+
+      // Validate everything BEFORE any side effect (htpasswd file writes, store
+      // commit), so a later validation failure can't leave the on-disk auth
+      // state diverged from the persisted share record.
+      if (authEnabled && !htpasswd.isValidAuthUser(authUser)) {
+        return {
+          success: false,
+          error: 'Username may only contain letters, digits, ".", "_" and "-".',
+        };
+      }
+      // Whether we'll (re)write the htpasswd file: a new password, or a changed
+      // username with a password. With auth on and no password, an existing
+      // file must already be present.
+      const writeAuth = authEnabled && !!password;
+      if (authEnabled && !writeAuth) {
+        if (!htpasswd.hasHtpasswdFile(site.domain) || authUser !== prev.authUser) {
+          return { success: false, error: 'Set a password to enable protection.' };
+        }
+      }
+
+      // Stable-hostname (named tunnel) settings.
+      let hostname = prev.hostname || null;
+      if (payload.hostname != null) {
+        hostname = String(payload.hostname).trim().toLowerCase() || null;
+        if (
+          hostname &&
+          (!/^[a-z0-9.-]+$/.test(hostname) ||
+            !hostname.includes('.') ||
+            hostname.length > 253)
+        ) {
+          return {
+            success: false,
+            error: 'Enter a valid hostname (e.g. staging.example.com).',
+          };
+        }
+      }
+      if (mode === 'named' && !hostname) {
+        return {
+          success: false,
+          error: 'A stable share needs a hostname on your Cloudflare domain.',
+        };
+      }
+
+      const autoStart =
+        payload.autoStart != null ? !!payload.autoStart : !!prev.autoStart;
+
+      // All input validated — now apply side effects. The password is
+      // write-only: it becomes an apr1 hash on disk, never stored in JSON.
+      if (writeAuth) {
+        htpasswd.writeHtpasswdFile(site.domain, authUser, password);
+      } else if (!authEnabled) {
+        htpasswd.removeHtpasswdFile(site.domain);
+      }
+
+      const share = {
+        mode,
+        authEnabled,
+        authUser,
+        // Auto-start only makes sense for named tunnels — a quick tunnel would
+        // come back on a different random URL every launch.
+        autoStart: mode === 'named' && autoStart,
+        hostname,
+        tunnelName: prev.tunnelName || null,
+        tunnelId: prev.tunnelId || null,
+      };
+
+      const updated = { ...site, share };
+      sites[idx] = updated;
+      store.set('sites', sites);
+
+      // Switching share mode invalidates a live tunnel — stop it so the next
+      // start uses the new mode. (The named tunnel stays registered in the
+      // Cloudflare account for reuse; it's only deleted on site removal.)
+      if (mode !== (prev.mode || 'quick')) {
+        cloudflared.stopTunnel(id);
+        return { success: true, share };
+      }
+
+      // A live tunnel picks the change up immediately: rewrite its alias vhost
+      // with/without the auth file and reload nginx.
+      try {
+        const refreshed = cloudflared.refreshTunnel(
+          id,
+          htpasswd.attachShareAuth(updated)
+        );
+        if (
+          refreshed &&
+          mainWindow &&
+          !mainWindow.isDestroyed() &&
+          mainWindow.webContents
+        ) {
+          mainWindow.webContents.send('tunnel-update', refreshed);
+        }
+      } catch (err) {
+        return { success: true, share, warning: humanize(err) };
+      }
+
+      return { success: true, share };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
   ipcMain.handle('open-in-browser', (_, url) => {
     const ok = openExternalSafely(url);
     return ok
       ? { success: true }
       : { success: false, error: 'Refused to open unsafe URL' };
+  });
+
+  // ─── Backups (local snapshots) ─────────────────────────────────────────
+
+  ipcMain.handle('list-backups', async (_, id) => {
+    try {
+      const site = findSite(id);
+      if (!site) return { success: false, error: 'Site not found' };
+      return { success: true, backups: backups.listBackups(id) };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('create-backup', async (event, id) => {
+    try {
+      const site = findSite(id);
+      if (!site) return { success: false, error: 'Site not found' };
+      const progress = (data) => {
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('backup-progress', { siteId: id, ...data });
+        }
+      };
+      const result = await backups.createBackup(site, progress);
+      return { success: true, ...result };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('restore-backup', async (event, id, timestamp) => {
+    try {
+      const site = findSite(id);
+      if (!site) return { success: false, error: 'Site not found' };
+      const progress = (data) => {
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('backup-progress', { siteId: id, ...data });
+        }
+      };
+      const result = await backups.restoreBackup(site, timestamp, progress);
+      return { success: true, ...result };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('delete-backup', async (_, id, timestamp) => {
+    try {
+      backups.deleteBackup(id, timestamp);
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('reveal-backup', async (_, id, timestamp) => {
+    try {
+      shell.showItemInFolder(backups.getBackupManifestPath(id, timestamp));
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  // ─── Git deploy ────────────────────────────────────────────────────────
+
+  ipcMain.handle('git-status', async (_, id) => {
+    try {
+      const site = findSite(id);
+      if (!site) return { success: false, error: 'Site not found' };
+      const status = await gitdeploy.getStatus(site.path);
+      return {
+        success: true,
+        status,
+        gitInstalled: !!gitdeploy.getGitBin(),
+        settings: site.gitDeploy || {
+          remoteUrl: null,
+          branch: 'main',
+          includeUploads: false,
+          includeDbDump: false,
+        },
+      };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('git-init', async (_, id, opts = {}) => {
+    try {
+      const site = findSite(id);
+      if (!site) return { success: false, error: 'Site not found' };
+      await gitdeploy.initRepo(site.path, { includeUploads: !!opts.includeUploads });
+      return { success: true, status: await gitdeploy.getStatus(site.path) };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('git-set-remote', async (_, id, url) => {
+    try {
+      const site = findSite(id);
+      if (!site) return { success: false, error: 'Site not found' };
+      await gitdeploy.setRemote(site.path, url);
+      // Mirror the remote into the persisted deploy settings.
+      const sites = store.get('sites', []);
+      const idx = sites.findIndex((s) => s.id === id);
+      if (idx !== -1) {
+        sites[idx] = {
+          ...sites[idx],
+          gitDeploy: { ...(sites[idx].gitDeploy || {}), remoteUrl: url.trim() },
+        };
+        store.set('sites', sites);
+      }
+      return { success: true, status: await gitdeploy.getStatus(site.path) };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('git-set-deploy-settings', async (_, id, payload = {}) => {
+    try {
+      const sites = store.get('sites', []);
+      const idx = sites.findIndex((s) => s.id === id);
+      if (idx === -1) return { success: false, error: 'Site not found' };
+      const site = sites[idx];
+      const prev = site.gitDeploy || {};
+
+      const branch = String(payload.branch ?? prev.branch ?? 'main').trim() || 'main';
+      if (!/^[A-Za-z0-9._/-]{1,100}$/.test(branch) || branch.startsWith('-')) {
+        return { success: false, error: 'Invalid branch name.' };
+      }
+      const gitDeploy = {
+        remoteUrl: prev.remoteUrl || null,
+        branch,
+        includeUploads:
+          payload.includeUploads != null
+            ? !!payload.includeUploads
+            : !!prev.includeUploads,
+        includeDbDump:
+          payload.includeDbDump != null ? !!payload.includeDbDump : !!prev.includeDbDump,
+      };
+
+      // Keep the repo's .gitignore uploads rule in sync with the toggle.
+      if (gitDeploy.includeUploads !== !!prev.includeUploads) {
+        gitdeploy.setUploadsIgnored(site.path, !gitDeploy.includeUploads);
+      }
+
+      sites[idx] = { ...site, gitDeploy };
+      store.set('sites', sites);
+      return { success: true, settings: gitDeploy };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('git-deploy', async (event, id, message) => {
+    try {
+      const site = findSite(id);
+      if (!site) return { success: false, error: 'Site not found' };
+      const onLine = (line) => {
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('git-deploy-progress', { siteId: id, line });
+        }
+      };
+      const status = await gitdeploy.deploy(site, message, onLine);
+      return { success: true, status };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
   });
 
   ipcMain.handle('open-in-finder', (_, sitePath) => {

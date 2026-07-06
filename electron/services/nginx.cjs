@@ -226,8 +226,18 @@ function generateSiteConfig(site) {
     }
   }
 
+  // Optional htpasswd file protecting the tunnel alias hosts (basic-auth on
+  // shares). When set, the aliases move into their own server block carrying
+  // auth_basic, so the local .test domain stays password-free.
+  const shareAuthFile = site.shareAuthFile || null;
+  if (shareAuthFile && /[\n\r\0;{}"]/.test(shareAuthFile)) {
+    throw new Error('Unsafe htpasswd path for nginx config');
+  }
+  const splitAliases = !!(shareAuthFile && aliases.length);
+
   // Space-separated list for the `server_name` directive.
-  const serverNames = [domain, ...aliases].join(' ');
+  const serverNames = splitAliases ? domain : [domain, ...aliases].join(' ');
+  const aliasNames = aliases.join(' ');
   if (/[\n\r\0;{}]/.test(sitePath)) {
     throw new Error(`Unsafe site path for nginx config: ${sitePath}`);
   }
@@ -315,12 +325,35 @@ function generateSiteConfig(site) {
         deny all;
     }`;
 
+  // Basic-auth directives prepended to the alias server block when a share is
+  // password-protected. Never applied to the primary .test server block.
+  const authDirectives = `    auth_basic "WPHerd Share";
+    auth_basic_user_file ${shareAuthFile};
+
+`;
+
   if (useHttps) {
-    // Redirect plain http to https, and serve the site over TLS on 443.
+    // Redirect plain http to https, and serve the site over TLS on 443. The
+    // redirect block carries no content, so it can keep every hostname even
+    // when the aliases are split out for basic-auth.
+    const redirectNames = [domain, ...aliases].join(' ');
+    const aliasBlock = splitAliases
+      ? `
+server {
+    listen 443 ssl;
+    server_name ${aliasNames};
+
+    ssl_certificate ${certPath};
+    ssl_certificate_key ${keyPath};
+
+${authDirectives}${body}
+}
+`
+      : '';
     return `# WPHerd: ${name}
 server {
     listen 80;
-    server_name ${serverNames};
+    server_name ${redirectNames};
     return 301 https://$host$request_uri;
 }
 
@@ -333,9 +366,19 @@ server {
 
 ${body}
 }
-`;
+${aliasBlock}`;
   }
 
+  const aliasBlock = splitAliases
+    ? `
+server {
+    listen 80;
+    server_name ${aliasNames};
+
+${authDirectives}${body}
+}
+`
+    : '';
   return `# WPHerd: ${name}
 server {
     listen 80;
@@ -343,7 +386,7 @@ server {
 
 ${body}
 }
-`;
+${aliasBlock}`;
 }
 
 function createSiteConfig(site) {
