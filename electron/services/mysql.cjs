@@ -357,11 +357,25 @@ async function importDatabase(dbName, sqlFile, { timeout = 600000 } = {}) {
     fs.closeSync(fd);
   }
   return new Promise((resolve, reject) => {
-    const child = spawn(getMysqlBin(), [...authArgs(), dbName], {
-      stdio: ['pipe', 'ignore', 'pipe'],
-      timeout,
-      env: authEnv(),
-    });
+    // Dumps from older/looser servers (and WordPress/WooCommerce schemas like
+    // ActionScheduler) carry `datetime DEFAULT '0000-00-00 00:00:00'` columns
+    // that a modern server's default strict sql_mode (NO_ZERO_DATE + STRICT_*)
+    // rejects with ERROR 1067. These dumps don't set sql_mode themselves, so
+    // relaxing it on connect — before the first CREATE TABLE — lets them import
+    // unchanged. --init-command runs once per connection at connect time.
+    const child = spawn(
+      getMysqlBin(),
+      [
+        ...authArgs(),
+        `--init-command=SET SESSION sql_mode='NO_AUTO_VALUE_ON_ZERO'`,
+        dbName,
+      ],
+      {
+        stdio: ['pipe', 'ignore', 'pipe'],
+        timeout,
+        env: authEnv(),
+      }
+    );
     let stderr = '';
     child.stderr.on('data', (d) => {
       stderr += d.toString();
