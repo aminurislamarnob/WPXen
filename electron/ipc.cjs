@@ -30,7 +30,6 @@ const dnsmasq = require('./services/dnsmasq.cjs');
 const wordpress = require('./services/wordpress.cjs');
 const siteops = require('./services/siteops.cjs');
 const blueprints = require('./services/blueprints.cjs');
-const xdebug = require('./services/xdebug.cjs');
 const mkcert = require('./services/mkcert.cjs');
 const phpmyadmin = require('./services/phpmyadmin.cjs');
 const mailpit = require('./services/mailpit.cjs');
@@ -1507,41 +1506,6 @@ function registerHandlers(win, storeInstance) {
 
   ipcMain.handle('get-installable-php-versions', async () => {
     return phpService.getInstallablePhpVersions();
-  });
-
-  // ─── Xdebug ──────────────────────────────────────────────────────────
-
-  ipcMain.handle('get-xdebug-status', async () => {
-    try {
-      return { success: true, versions: xdebug.getAllXdebugStates() };
-    } catch (err) {
-      return { success: false, error: humanize(err) };
-    }
-  });
-
-  ipcMain.handle('install-xdebug', async (event, version) => {
-    try {
-      // Reuse the PHP install streaming channel so PHPVersions' existing log
-      // listener renders Xdebug's brew output unchanged.
-      const progress = (line) => {
-        if (!event.sender.isDestroyed()) {
-          event.sender.send('php-install-progress', { version, line });
-        }
-      };
-      await xdebug.installXdebug(version, progress);
-      return { success: true, state: xdebug.getXdebugState(version) };
-    } catch (err) {
-      return { success: false, error: humanize(err) };
-    }
-  });
-
-  ipcMain.handle('set-xdebug', async (_, version, opts) => {
-    try {
-      const state = xdebug.setXdebug(version, opts || {});
-      return { success: true, state };
-    } catch (err) {
-      return { success: false, error: humanize(err) };
-    }
   });
 
   ipcMain.handle('install-php-version', async (event, version) => {

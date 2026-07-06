@@ -50,11 +50,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   createSiteFromBlueprint: (payload) =>
     ipcRenderer.invoke('create-site-from-blueprint', payload),
 
-  // Xdebug
-  getXdebugStatus: () => ipcRenderer.invoke('get-xdebug-status'),
-  installXdebug: (version) => ipcRenderer.invoke('install-xdebug', version),
-  setXdebug: (version, opts) => ipcRenderer.invoke('set-xdebug', version, opts),
-
   // One-click admin (magic login)
   listAdminUsers: (id) => ipcRenderer.invoke('list-admin-users', id),
   setOneClickAdmin: (id, opts) => ipcRenderer.invoke('set-one-click-admin', id, opts),

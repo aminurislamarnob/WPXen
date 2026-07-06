@@ -63,10 +63,8 @@ benchmarking) and a **Reference** link to that solution's documentation.
 
 ### Tier 1 — High-value, low-friction (fits current architecture directly)
 
-1. **Xdebug integration** — ✅ **Shipped.** Per-PHP-version install (from the
-   `shivammathur/extensions` tap) plus enable/disable toggle and mode select
-   (`debug` / `develop`) written to a managed `zz-wpherd-xdebug.ini`; listens on
-   `localhost:9003`. See `xdebug.cjs` + `PHPVersions`.
+1. **Xdebug integration** — toggle Xdebug per PHP version, auto-write config, one-click
+   enable/disable. Fits `php.cjs` + `SitePhpSettings`.
    — _Provided by: Local, Herd, Studio_
    — Reference: [Local — Xdebug](https://localwp.com/help-docs/advanced/using-xdebug-within-local/) · [Studio — Xdebug](https://developer.wordpress.com/docs/developer-tools/studio/xdebug/)
 2. **Change site URL** — ✅ **Shipped.** Rename a site's domain with WP-CLI
