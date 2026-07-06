@@ -133,8 +133,8 @@ export default function SiteBackups({ site }) {
       </div>
 
       <p className="text-xs text-gray-500 mb-4">
-        Snapshots capture the full site directory and database. They live in
-        WPHerd&apos;s data folder, outside the site, and can be restored at any time.
+        Snapshots capture the full site directory and database. They live in WPHerd&apos;s
+        data folder, outside the site, and can be restored at any time.
       </p>
 
       {busy && progressMessages.length > 0 && (
@@ -166,9 +166,8 @@ export default function SiteBackups({ site }) {
               <div className="flex-1 min-w-0">
                 <p className="text-[13px] text-gray-900">{formatDate(b.createdAt)}</p>
                 <p className="text-xs text-gray-500 mt-0.5">
-                  {b.wpVersion ? `WP ${b.wpVersion}` : 'WP —'} · PHP{' '}
-                  {b.phpVersion || '—'} ·{' '}
-                  {formatBytes((b.filesBytes || 0) + (b.dbBytes || 0))}
+                  {b.wpVersion ? `WP ${b.wpVersion}` : 'WP —'} · PHP {b.phpVersion || '—'}{' '}
+                  · {formatBytes((b.filesBytes || 0) + (b.dbBytes || 0))}
                 </p>
               </div>
               <button

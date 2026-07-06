@@ -428,7 +428,9 @@ function registerHandlers(win, storeInstance) {
       if (secret) target = `${base}/?wpherd_magic_login=${secret}`;
     }
     const ok = openExternalSafely(target);
-    return ok ? { success: true } : { success: false, error: 'Refused to open unsafe URL' };
+    return ok
+      ? { success: true }
+      : { success: false, error: 'Refused to open unsafe URL' };
   });
 
   // ─── Site config (WP Config Manager) ───────────────────────────────────
@@ -909,7 +911,10 @@ function registerHandlers(win, storeInstance) {
 
       // Attach the htpasswd path when basic-auth is enabled so the tunnel
       // alias server block gets auth_basic (see nginx.generateSiteConfig).
-      const tunnel = await cloudflared.startTunnel(htpasswd.attachShareAuth(site), broadcast);
+      const tunnel = await cloudflared.startTunnel(
+        htpasswd.attachShareAuth(site),
+        broadcast
+      );
 
       // A named tunnel mints its UUID on first start — persist it so restarts
       // (and site removal) can reuse/delete the same Cloudflare tunnel.
@@ -1009,13 +1014,21 @@ function registerHandlers(win, storeInstance) {
         hostname = String(payload.hostname).trim().toLowerCase() || null;
         if (
           hostname &&
-          (!/^[a-z0-9.-]+$/.test(hostname) || !hostname.includes('.') || hostname.length > 253)
+          (!/^[a-z0-9.-]+$/.test(hostname) ||
+            !hostname.includes('.') ||
+            hostname.length > 253)
         ) {
-          return { success: false, error: 'Enter a valid hostname (e.g. staging.example.com).' };
+          return {
+            success: false,
+            error: 'Enter a valid hostname (e.g. staging.example.com).',
+          };
         }
       }
       if (mode === 'named' && !hostname) {
-        return { success: false, error: 'A stable share needs a hostname on your Cloudflare domain.' };
+        return {
+          success: false,
+          error: 'A stable share needs a hostname on your Cloudflare domain.',
+        };
       }
 
       const autoStart =
@@ -1056,8 +1069,16 @@ function registerHandlers(win, storeInstance) {
       // A live tunnel picks the change up immediately: rewrite its alias vhost
       // with/without the auth file and reload nginx.
       try {
-        const refreshed = cloudflared.refreshTunnel(id, htpasswd.attachShareAuth(updated));
-        if (refreshed && mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents) {
+        const refreshed = cloudflared.refreshTunnel(
+          id,
+          htpasswd.attachShareAuth(updated)
+        );
+        if (
+          refreshed &&
+          mainWindow &&
+          !mainWindow.isDestroyed() &&
+          mainWindow.webContents
+        ) {
           mainWindow.webContents.send('tunnel-update', refreshed);
         }
       } catch (err) {
@@ -1210,7 +1231,9 @@ function registerHandlers(win, storeInstance) {
         remoteUrl: prev.remoteUrl || null,
         branch,
         includeUploads:
-          payload.includeUploads != null ? !!payload.includeUploads : !!prev.includeUploads,
+          payload.includeUploads != null
+            ? !!payload.includeUploads
+            : !!prev.includeUploads,
         includeDbDump:
           payload.includeDbDump != null ? !!payload.includeDbDump : !!prev.includeDbDump,
       };

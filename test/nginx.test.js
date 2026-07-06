@@ -17,7 +17,10 @@ describe('generateSiteConfig share basic-auth', () => {
 
   it('is unchanged by shareAuthFile when there are no aliases', () => {
     const plain = generateSiteConfig(SITE);
-    const withAuth = generateSiteConfig({ ...SITE, shareAuthFile: '/etc/nginx/x.htpasswd' });
+    const withAuth = generateSiteConfig({
+      ...SITE,
+      shareAuthFile: '/etc/nginx/x.htpasswd',
+    });
     expect(withAuth).toBe(plain);
   });
 

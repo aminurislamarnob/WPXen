@@ -42,9 +42,7 @@ function formatTimestamp(date = new Date()) {
 
 // Returns the timestamp when the dir name is a valid backup id, else null.
 function parseBackupDirName(name) {
-  return typeof name === 'string' && /^\d{4}-\d{2}-\d{2}-\d{6}$/.test(name)
-    ? name
-    : null;
+  return typeof name === 'string' && /^\d{4}-\d{2}-\d{2}-\d{6}$/.test(name) ? name : null;
 }
 
 function buildTarCreateArgs(sitePath, outFile) {
@@ -159,10 +157,7 @@ async function createBackup(site, onProgress = () => {}) {
     });
     // Written last: a manifest on disk means every artifact before it is
     // complete. Crash-interrupted dirs (no manifest) are swept by listBackups.
-    fs.writeFileSync(
-      path.join(dir, 'manifest.json'),
-      JSON.stringify(manifest, null, 2)
-    );
+    fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify(manifest, null, 2));
 
     onProgress({ step: 'done', message: 'Backup complete.' });
     return { timestamp, manifest };

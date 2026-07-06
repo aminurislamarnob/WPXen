@@ -110,7 +110,11 @@ function getHtpasswdDir() {
 // Domain doubles as the filename — validated like nginx.cjs validates it so a
 // tampered store value can't traverse out of the htpasswd dir.
 function getHtpasswdPath(domain) {
-  if (typeof domain !== 'string' || !/^[a-z0-9.-]+$/.test(domain) || domain.includes('..')) {
+  if (
+    typeof domain !== 'string' ||
+    !/^[a-z0-9.-]+$/.test(domain) ||
+    domain.includes('..')
+  ) {
     throw new Error(`Unsafe domain for htpasswd file: ${domain}`);
   }
   return path.join(getHtpasswdDir(), `${domain}.htpasswd`);

@@ -137,8 +137,8 @@ export default function SharePanel({
               {cfLoggedIn === false && (
                 <div>
                   <p className="text-xs text-gray-500 mb-1.5">
-                    Stable hostnames run on your own Cloudflare-managed domain.
-                    Connect your account once to enable them.
+                    Stable hostnames run on your own Cloudflare-managed domain. Connect
+                    your account once to enable them.
                   </p>
                   <button
                     onClick={handleCfLogin}
@@ -241,7 +241,11 @@ export default function SharePanel({
           Public share tunnel
         </span>
         {!tunnelActive && onClose && (
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600" title="Close">
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600"
+            title="Close"
+          >
             <X size={13} />
           </button>
         )}
@@ -283,7 +287,11 @@ export default function SharePanel({
         <div>
           <div className="flex items-center gap-1.5">
             {tunnel.authEnabled && (
-              <Lock size={12} className="text-wp-green flex-shrink-0" title="Password protected" />
+              <Lock
+                size={12}
+                className="text-wp-green flex-shrink-0"
+                title="Password protected"
+              />
             )}
             <button
               onClick={() => window.electronAPI.openSiteInBrowser(tunnel.url)}
@@ -297,7 +305,11 @@ export default function SharePanel({
               title="Copy URL"
               className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-200"
             >
-              {copied ? <Check size={13} className="text-wp-green" /> : <Copy size={13} />}
+              {copied ? (
+                <Check size={13} className="text-wp-green" />
+              ) : (
+                <Copy size={13} />
+              )}
             </button>
             <button
               onClick={() => onStopTunnel(site)}

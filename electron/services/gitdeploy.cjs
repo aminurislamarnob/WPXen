@@ -130,7 +130,13 @@ function setUploadsIgnored(sitePath, ignored) {
 async function getStatus(sitePath) {
   if (!(await isRepo(sitePath))) return { isRepo: false };
 
-  const status = { isRepo: true, branch: null, remoteUrl: null, dirtyCount: 0, lastCommit: null };
+  const status = {
+    isRepo: true,
+    branch: null,
+    remoteUrl: null,
+    dirtyCount: 0,
+    lastCommit: null,
+  };
   try {
     const { stdout } = await git(sitePath, ['rev-parse', '--abbrev-ref', 'HEAD']);
     status.branch = stdout.trim(); // 'HEAD' when detached
@@ -200,7 +206,13 @@ function gitStream(sitePath, args, onLine, { env, timeoutMs = 600000 } = {}) {
     child.on('close', (code) => {
       clearTimeout(timer);
       if (code === 0) resolve({ code, tail });
-      else reject(Object.assign(new Error(tail.trim() || `git exited (code ${code}).`), { code, tail }));
+      else
+        reject(
+          Object.assign(new Error(tail.trim() || `git exited (code ${code}).`), {
+            code,
+            tail,
+          })
+        );
     });
   });
 }
@@ -242,7 +254,8 @@ async function deploy(site, message, onLine = () => {}) {
   }
 
   onLine('Committing…');
-  const commitMessage = (message || '').trim() || `WPHerd deploy ${new Date().toISOString()}`;
+  const commitMessage =
+    (message || '').trim() || `WPHerd deploy ${new Date().toISOString()}`;
   try {
     await gitStream(sitePath, [...identityArgs, 'commit', '-m', commitMessage], onLine);
   } catch (err) {
@@ -289,9 +302,13 @@ function dumpPlainSql(dbName, destPath) {
     throw new Error(`Unsafe database name: ${dbName}`);
   }
   return new Promise((resolve, reject) => {
-    const child = spawn(mysql.getMysqldumpBin(), mysql.buildDumpArgs(dbName, mysql.getCredentials()), {
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    const child = spawn(
+      mysql.getMysqldumpBin(),
+      mysql.buildDumpArgs(dbName, mysql.getCredentials()),
+      {
+        stdio: ['ignore', 'pipe', 'pipe'],
+      }
+    );
     const out = fs.createWriteStream(destPath, { mode: 0o600 });
     let stderrTail = '';
     let exitCode = null;

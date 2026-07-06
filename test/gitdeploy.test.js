@@ -16,9 +16,7 @@ describe('buildGitignore', () => {
   });
 
   it('drops the uploads rule when includeUploads is on', () => {
-    expect(buildGitignore({ includeUploads: true })).not.toContain(
-      'wp-content/uploads/'
-    );
+    expect(buildGitignore({ includeUploads: true })).not.toContain('wp-content/uploads/');
   });
 
   it('excludes junk and cache dirs', () => {

@@ -96,8 +96,8 @@ export default function SiteGitDeploy({ site }) {
         <div className="settings-card px-6 py-10 text-center">
           <GitBranch size={26} className="mx-auto text-gray-300 mb-2" />
           <p className="text-[13px] text-gray-500">
-            Git is not installed. Install the Xcode Command Line Tools
-            (<span className="font-mono">xcode-select --install</span>) to deploy.
+            Git is not installed. Install the Xcode Command Line Tools (
+            <span className="font-mono">xcode-select --install</span>) to deploy.
           </p>
         </div>
       </div>
@@ -133,7 +133,11 @@ export default function SiteGitDeploy({ site }) {
           </label>
           <div>
             <button onClick={handleInit} disabled={busy} className="btn-primary">
-              {busy ? <Loader size={12} className="animate-spin" /> : <GitBranch size={12} strokeWidth={2.5} />}
+              {busy ? (
+                <Loader size={12} className="animate-spin" />
+              ) : (
+                <GitBranch size={12} strokeWidth={2.5} />
+              )}
               Initialize Git Repository
             </button>
           </div>
@@ -148,7 +152,9 @@ export default function SiteGitDeploy({ site }) {
               </span>
               <div className="flex-1 min-w-0">
                 <p className="text-[13px] text-gray-900">
-                  {status.branch === 'HEAD' ? 'Detached HEAD' : status.branch || 'No commits yet'}
+                  {status.branch === 'HEAD'
+                    ? 'Detached HEAD'
+                    : status.branch || 'No commits yet'}
                 </p>
                 <p className="text-xs text-gray-500 mt-0.5">
                   {status.dirtyCount > 0
@@ -189,7 +195,9 @@ export default function SiteGitDeploy({ site }) {
               />
               <button
                 onClick={handleSaveRemote}
-                disabled={busy || !remoteInput.trim() || remoteInput.trim() === status.remoteUrl}
+                disabled={
+                  busy || !remoteInput.trim() || remoteInput.trim() === status.remoteUrl
+                }
                 className="btn-secondary text-xs"
               >
                 Save
@@ -203,7 +211,8 @@ export default function SiteGitDeploy({ site }) {
               <div className="flex-1 min-w-0">
                 <p className="text-[13px] text-gray-900">Include uploads</p>
                 <p className="text-xs text-gray-500 mt-0.5">
-                  Commit <span className="font-mono">wp-content/uploads</span> (can be large)
+                  Commit <span className="font-mono">wp-content/uploads</span> (can be
+                  large)
                 </p>
               </div>
               <Toggle

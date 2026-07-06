@@ -12,9 +12,7 @@ import { buildDumpArgs } from '../electron/services/mysql.cjs';
 
 describe('formatTimestamp', () => {
   it('formats YYYY-MM-DD-HHmmss in local time', () => {
-    expect(formatTimestamp(new Date(2026, 6, 5, 14, 25, 30))).toBe(
-      '2026-07-05-142530'
-    );
+    expect(formatTimestamp(new Date(2026, 6, 5, 14, 25, 30))).toBe('2026-07-05-142530');
   });
 
   it('zero-pads every component', () => {
@@ -38,9 +36,13 @@ describe('parseBackupDirName', () => {
 
 describe('tar argv builders', () => {
   it('creates a gzipped archive of the site dir contents', () => {
-    expect(buildTarCreateArgs('/Users/dev/Sites/demo', '/backups/files.tar.gz')).toEqual(
-      ['-czf', '/backups/files.tar.gz', '-C', '/Users/dev/Sites/demo', '.']
-    );
+    expect(buildTarCreateArgs('/Users/dev/Sites/demo', '/backups/files.tar.gz')).toEqual([
+      '-czf',
+      '/backups/files.tar.gz',
+      '-C',
+      '/Users/dev/Sites/demo',
+      '.',
+    ]);
   });
 
   it('extracts into the destination dir', () => {
