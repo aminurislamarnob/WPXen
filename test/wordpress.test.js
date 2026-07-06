@@ -27,3 +27,30 @@ describe('generateId', () => {
     expect(ids.size).toBe(1000);
   });
 });
+
+describe('selectExistingPlugins', () => {
+  const present = new Set([
+    'woocommerce/woocommerce.php',
+    'akismet/akismet.php',
+    'hello.php',
+  ]);
+  const exists = (p) => present.has(p);
+
+  it('keeps only plugins whose file exists', () => {
+    const input = ['woocommerce/woocommerce.php', 'missing/missing.php', 'hello.php'];
+    expect(wordpress.selectExistingPlugins(input, exists)).toEqual([
+      'woocommerce/woocommerce.php',
+      'hello.php',
+    ]);
+  });
+
+  it('de-duplicates and ignores non-string entries', () => {
+    const input = ['hello.php', 'hello.php', null, 42, ''];
+    expect(wordpress.selectExistingPlugins(input, exists)).toEqual(['hello.php']);
+  });
+
+  it('returns [] for non-array input', () => {
+    expect(wordpress.selectExistingPlugins(undefined, exists)).toEqual([]);
+    expect(wordpress.selectExistingPlugins(null, exists)).toEqual([]);
+  });
+});

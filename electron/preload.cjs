@@ -2,6 +2,25 @@
 
 const { contextBridge, ipcRenderer } = require('electron');
 
+// Event channels the renderer may subscribe to. Any channel pushed from the
+// main process via event.sender.send(...) must be whitelisted here.
+const VALID_EVENT_CHANNELS = [
+  'service-status-update',
+  'site-create-progress',
+  'php-install-progress',
+  'dependencies-update',
+  'notification',
+  'tunnel-update',
+  'cloudflared-install-progress',
+  'mailpit-install-progress',
+  'core-deps-install-progress',
+  'site-export-progress',
+  'site-import-progress',
+  'site-clone-progress',
+  'site-changeurl-progress',
+  'blueprint-save-progress',
+];
+
 contextBridge.exposeInMainWorld('electronAPI', {
   // Sites
   getSites: () => ipcRenderer.invoke('get-sites'),
@@ -13,6 +32,23 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openSiteInTerminal: (sitePath) => ipcRenderer.invoke('open-in-terminal', sitePath),
   openWpAdmin: (id) => ipcRenderer.invoke('open-wp-admin', id),
   openPhpMyAdmin: (dbName) => ipcRenderer.invoke('open-phpmyadmin', dbName),
+
+  // Export / Import
+  exportSite: (id) => ipcRenderer.invoke('export-site', id),
+  selectImportFile: () => ipcRenderer.invoke('select-import-file'),
+  inspectImportArchive: (archivePath) =>
+    ipcRenderer.invoke('inspect-import-archive', archivePath),
+  importSite: (payload) => ipcRenderer.invoke('import-site', payload),
+  cloneSite: (id, target) => ipcRenderer.invoke('clone-site', id, target),
+  changeSiteUrl: (id, newDomain) => ipcRenderer.invoke('change-site-url', id, newDomain),
+  getCaStatus: () => ipcRenderer.invoke('get-ca-status'),
+
+  // Blueprints
+  getBlueprints: () => ipcRenderer.invoke('get-blueprints'),
+  saveBlueprint: (id, opts) => ipcRenderer.invoke('save-blueprint', id, opts),
+  deleteBlueprint: (id) => ipcRenderer.invoke('delete-blueprint', id),
+  createSiteFromBlueprint: (payload) =>
+    ipcRenderer.invoke('create-site-from-blueprint', payload),
 
   // One-click admin (magic login)
   listAdminUsers: (id) => ipcRenderer.invoke('list-admin-users', id),
@@ -123,34 +159,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // IPC Events (renderer listening to main)
   on: (channel, callback) => {
-    const validChannels = [
-      'service-status-update',
-      'site-create-progress',
-      'php-install-progress',
-      'dependencies-update',
-      'notification',
-      'tunnel-update',
-      'cloudflared-install-progress',
-      'mailpit-install-progress',
-      'core-deps-install-progress',
-    ];
-    if (validChannels.includes(channel)) {
+    if (VALID_EVENT_CHANNELS.includes(channel)) {
       ipcRenderer.on(channel, (_, data) => callback(data));
     }
   },
   off: (channel) => {
-    const validChannels = [
-      'service-status-update',
-      'site-create-progress',
-      'php-install-progress',
-      'dependencies-update',
-      'notification',
-      'tunnel-update',
-      'cloudflared-install-progress',
-      'mailpit-install-progress',
-      'core-deps-install-progress',
-    ];
-    if (validChannels.includes(channel)) {
+    if (VALID_EVENT_CHANNELS.includes(channel)) {
       ipcRenderer.removeAllListeners(channel);
     }
   },

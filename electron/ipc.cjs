@@ -28,6 +28,8 @@ const phpService = require('./services/php.cjs');
 const mysql = require('./services/mysql.cjs');
 const dnsmasq = require('./services/dnsmasq.cjs');
 const wordpress = require('./services/wordpress.cjs');
+const siteops = require('./services/siteops.cjs');
+const blueprints = require('./services/blueprints.cjs');
 const mkcert = require('./services/mkcert.cjs');
 const phpmyadmin = require('./services/phpmyadmin.cjs');
 const mailpit = require('./services/mailpit.cjs');
@@ -348,6 +350,368 @@ function registerHandlers(win, storeInstance) {
     }
   });
 
+  // ─── Export / Import ─────────────────────────────────────────────────
+
+  ipcMain.handle('export-site', async (event, id) => {
+    try {
+      const site = store.get('sites', []).find((s) => s.id === id);
+      if (!site) return { success: false, error: 'Site not found' };
+      if (!mysql.isRunning()) {
+        return {
+          success: false,
+          error: 'MySQL is not running. Start it in the Services panel.',
+        };
+      }
+
+      const result = await dialog.showSaveDialog(mainWindow, {
+        defaultPath: path.join(
+          os.homedir(),
+          'Desktop',
+          `${wordpress.sanitizeDomain(site.name) || site.domain}-export.zip`
+        ),
+        filters: [{ name: 'Zip archive', extensions: ['zip'] }],
+      });
+      if (result.canceled || !result.filePath) {
+        return { success: true, canceled: true };
+      }
+
+      const progress = (data) => {
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('site-export-progress', data);
+        }
+      };
+      const { sizeBytes } = await siteops.exportSite(site, result.filePath, progress);
+      return { success: true, filePath: result.filePath, sizeBytes };
+    } catch (err) {
+      console.error('export-site error:', err);
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('select-import-file', async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      properties: ['openFile'],
+      filters: [{ name: 'Site archives', extensions: ['zip', 'wpress'] }],
+    });
+    return result.canceled ? null : result.filePaths[0];
+  });
+
+  ipcMain.handle('inspect-import-archive', async (_, archivePath) => {
+    try {
+      if (typeof archivePath !== 'string' || !path.isAbsolute(archivePath)) {
+        return { success: false, error: 'Invalid archive path.' };
+      }
+      const info = await siteops.inspectArchive(archivePath);
+      return { success: true, ...info };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('import-site', async (event, payload = {}) => {
+    try {
+      const { archivePath, ...target } = payload;
+      if (typeof archivePath !== 'string' || !fs.existsSync(archivePath)) {
+        return { success: false, error: 'The selected archive no longer exists.' };
+      }
+
+      // Same authoritative validation as add-site (admin fields don't apply —
+      // the imported database carries its own users).
+      const { valid, errors } = validation.validateSiteInput({
+        ...target,
+        adminUser: 'admin',
+        adminPassword: 'imported',
+        adminEmail: `admin@${target.domain}`,
+      });
+      if (!valid) return { success: false, error: errors.join(' ') };
+
+      const sites = store.get('sites', []);
+      if (sites.some((s) => s.domain === target.domain)) {
+        return { success: false, error: `Domain ${target.domain} already exists` };
+      }
+      if (sites.some((s) => s.dbName === target.dbName)) {
+        return { success: false, error: `Database ${target.dbName} already exists` };
+      }
+      if (mysql.databaseExists(target.dbName)) {
+        return {
+          success: false,
+          error: `A database named ${target.dbName} already exists in MySQL.`,
+        };
+      }
+      if (nginx.siteConfigExists(target.domain)) {
+        return {
+          success: false,
+          error: `An nginx config for ${target.domain} already exists.`,
+        };
+      }
+      if (fs.existsSync(path.join(target.path, 'wp-config.php'))) {
+        return {
+          success: false,
+          error: `${target.path} already contains a WordPress install.`,
+        };
+      }
+      if (!mysql.isRunning()) {
+        return {
+          success: false,
+          error: 'MySQL is not running. Start it in the Services panel.',
+        };
+      }
+
+      const progress = (data) => {
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('site-import-progress', data);
+        }
+      };
+      const site = await siteops.importSite(archivePath, target, progress);
+
+      store.set('sites', [...store.get('sites', []), site]);
+      return { success: true, site };
+    } catch (err) {
+      console.error('import-site error:', err);
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  // ─── Clone / Change URL / CA status ──────────────────────────────────
+
+  ipcMain.handle('clone-site', async (event, id, target = {}) => {
+    try {
+      const source = store.get('sites', []).find((s) => s.id === id);
+      if (!source) return { success: false, error: 'Source site not found' };
+      if (!mysql.isRunning()) {
+        return {
+          success: false,
+          error: 'MySQL is not running. Start it in the Services panel.',
+        };
+      }
+
+      // Same authoritative validation + uniqueness checks as import.
+      const { valid, errors } = validation.validateSiteInput({
+        ...target,
+        adminUser: 'admin',
+        adminPassword: 'cloned',
+        adminEmail: `admin@${target.domain}`,
+      });
+      if (!valid) return { success: false, error: errors.join(' ') };
+
+      const sites = store.get('sites', []);
+      if (sites.some((s) => s.domain === target.domain)) {
+        return { success: false, error: `Domain ${target.domain} already exists` };
+      }
+      if (sites.some((s) => s.dbName === target.dbName)) {
+        return { success: false, error: `Database ${target.dbName} already exists` };
+      }
+      if (mysql.databaseExists(target.dbName)) {
+        return {
+          success: false,
+          error: `A database named ${target.dbName} already exists in MySQL.`,
+        };
+      }
+      if (nginx.siteConfigExists(target.domain)) {
+        return {
+          success: false,
+          error: `An nginx config for ${target.domain} already exists.`,
+        };
+      }
+      if (fs.existsSync(target.path) && fs.readdirSync(target.path).length > 0) {
+        return {
+          success: false,
+          error: `${target.path} already exists and is not empty.`,
+        };
+      }
+
+      const progress = (data) => {
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('site-clone-progress', data);
+        }
+      };
+      const site = await siteops.cloneSite(source, target, progress);
+
+      store.set('sites', [...store.get('sites', []), site]);
+      return { success: true, site };
+    } catch (err) {
+      console.error('clone-site error:', err);
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('change-site-url', async (event, id, newDomain) => {
+    try {
+      const sites = store.get('sites', []);
+      const idx = sites.findIndex((s) => s.id === id);
+      if (idx === -1) return { success: false, error: 'Site not found' };
+      const site = sites[idx];
+
+      if (typeof newDomain !== 'string' || !validation.DOMAIN_RE.test(newDomain)) {
+        return {
+          success: false,
+          error: 'Please enter a valid domain (e.g. mysite.test).',
+        };
+      }
+      if (newDomain === site.domain) {
+        return { success: false, error: 'That is already the site’s domain.' };
+      }
+      if (sites.some((s) => s.id !== id && s.domain === newDomain)) {
+        return { success: false, error: `Domain ${newDomain} already exists` };
+      }
+      if (nginx.siteConfigExists(newDomain)) {
+        return {
+          success: false,
+          error: `An nginx config for ${newDomain} already exists.`,
+        };
+      }
+      if (!mysql.isRunning()) {
+        return {
+          success: false,
+          error: 'MySQL is not running. Start it in the Services panel.',
+        };
+      }
+
+      // Drop any live tunnel first — its server_name alias points at the old
+      // domain and would be orphaned by the rename.
+      cloudflared.stopTunnel(id);
+
+      const progress = (data) => {
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('site-changeurl-progress', data);
+        }
+      };
+      const patch = await siteops.changeSiteUrl(site, newDomain, progress);
+
+      const updated = { ...site, ...patch };
+      sites[idx] = updated;
+      store.set('sites', sites);
+      return { success: true, site: updated };
+    } catch (err) {
+      console.error('change-site-url error:', err);
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('get-ca-status', async () => {
+    try {
+      return { success: true, ...mkcert.getCaStatus() };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  // ─── Blueprints ──────────────────────────────────────────────────────
+
+  ipcMain.handle('get-blueprints', async () => {
+    try {
+      return { success: true, blueprints: blueprints.listBlueprints(store) };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('save-blueprint', async (event, id, opts = {}) => {
+    try {
+      const site = store.get('sites', []).find((s) => s.id === id);
+      if (!site) return { success: false, error: 'Site not found' };
+      if (!mysql.isRunning()) {
+        return {
+          success: false,
+          error: 'MySQL is not running. Start it in the Services panel.',
+        };
+      }
+      const progress = (data) => {
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('blueprint-save-progress', data);
+        }
+      };
+      const blueprint = await blueprints.saveBlueprint(
+        store,
+        { site, name: opts.name, description: opts.description },
+        progress
+      );
+      return { success: true, blueprint };
+    } catch (err) {
+      console.error('save-blueprint error:', err);
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('delete-blueprint', async (_, id) => {
+    try {
+      blueprints.deleteBlueprint(store, id);
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('create-site-from-blueprint', async (event, payload = {}) => {
+    try {
+      const { blueprintId, ...target } = payload;
+      const bp = blueprints.listBlueprints(store).find((b) => b.id === blueprintId);
+      if (!bp) return { success: false, error: 'That blueprint no longer exists.' };
+
+      // Same authoritative validation + uniqueness checks as import (the
+      // blueprint's database carries its own users, so admin fields are stubs).
+      const { valid, errors } = validation.validateSiteInput({
+        ...target,
+        adminUser: 'admin',
+        adminPassword: 'blueprint',
+        adminEmail: `admin@${target.domain}`,
+      });
+      if (!valid) return { success: false, error: errors.join(' ') };
+
+      const sites = store.get('sites', []);
+      if (sites.some((s) => s.domain === target.domain)) {
+        return { success: false, error: `Domain ${target.domain} already exists` };
+      }
+      if (sites.some((s) => s.dbName === target.dbName)) {
+        return { success: false, error: `Database ${target.dbName} already exists` };
+      }
+      if (mysql.databaseExists(target.dbName)) {
+        return {
+          success: false,
+          error: `A database named ${target.dbName} already exists in MySQL.`,
+        };
+      }
+      if (nginx.siteConfigExists(target.domain)) {
+        return {
+          success: false,
+          error: `An nginx config for ${target.domain} already exists.`,
+        };
+      }
+      if (fs.existsSync(path.join(target.path, 'wp-config.php'))) {
+        return {
+          success: false,
+          error: `${target.path} already contains a WordPress install.`,
+        };
+      }
+      if (!mysql.isRunning()) {
+        return {
+          success: false,
+          error: 'MySQL is not running. Start it in the Services panel.',
+        };
+      }
+
+      // Reuse the add-site progress channel so AddSiteModal's existing listener
+      // shows blueprint progress unchanged.
+      const progress = (data) => {
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('site-create-progress', data);
+        }
+      };
+      const site = await blueprints.createSiteFromBlueprint(
+        store,
+        blueprintId,
+        target,
+        progress
+      );
+
+      store.set('sites', [...store.get('sites', []), site]);
+      return { success: true, site };
+    } catch (err) {
+      console.error('create-site-from-blueprint error:', err);
+      return { success: false, error: humanize(err) };
+    }
+  });
+
   // ─── One-Click Admin (magic login) ─────────────────────────────────────
 
   // Lists the site's administrator accounts for the account picker.
@@ -415,7 +779,9 @@ function registerHandlers(win, storeInstance) {
       if (secret) target = `${base}/?wpherd_magic_login=${secret}`;
     }
     const ok = openExternalSafely(target);
-    return ok ? { success: true } : { success: false, error: 'Refused to open unsafe URL' };
+    return ok
+      ? { success: true }
+      : { success: false, error: 'Refused to open unsafe URL' };
   });
 
   // ─── Site config (WP Config Manager) ───────────────────────────────────

@@ -18,10 +18,21 @@ import {
   Download,
   X,
   SlidersHorizontal,
+  Archive,
+  CopyPlus,
+  Layers,
 } from 'lucide-react';
 import { WordPressIcon } from './icons';
 
-function ContextMenu({ site, onDelete, onManage, onClose }) {
+function ContextMenu({
+  site,
+  onDelete,
+  onManage,
+  onExport,
+  onClone,
+  onSaveBlueprint,
+  onClose,
+}) {
   return (
     <div
       className="absolute right-0 top-8 z-50 panel-menu rounded-xl shadow-card-hover border border-gray-100 py-1 w-48 animate-fade-in"
@@ -61,6 +72,37 @@ function ContextMenu({ site, onDelete, onManage, onClose }) {
       <div className="border-t border-gray-100 my-1" />
       <button
         onClick={() => {
+          onClone(site);
+          onClose();
+        }}
+        className="flex w-full items-center gap-2.5 px-3 py-2 text-xs text-gray-700 hover:bg-gray-50"
+      >
+        <CopyPlus size={13} />
+        Clone…
+      </button>
+      <button
+        onClick={() => {
+          onExport(site);
+          onClose();
+        }}
+        className="flex w-full items-center gap-2.5 px-3 py-2 text-xs text-gray-700 hover:bg-gray-50"
+      >
+        <Archive size={13} />
+        Export…
+      </button>
+      <button
+        onClick={() => {
+          onSaveBlueprint(site);
+          onClose();
+        }}
+        className="flex w-full items-center gap-2.5 px-3 py-2 text-xs text-gray-700 hover:bg-gray-50"
+      >
+        <Layers size={13} />
+        Save as Blueprint…
+      </button>
+      <div className="border-t border-gray-100 my-1" />
+      <button
+        onClick={() => {
           onDelete(site);
           onClose();
         }}
@@ -76,6 +118,9 @@ function ContextMenu({ site, onDelete, onManage, onClose }) {
 export default function SiteCard({
   site,
   onDelete,
+  onExport,
+  onClone,
+  onSaveBlueprint,
   onToggleHttps,
   tunnel,
   cfInstalled,
@@ -262,6 +307,9 @@ export default function SiteCard({
               site={site}
               onDelete={onDelete}
               onManage={openDetail}
+              onExport={onExport}
+              onClone={onClone}
+              onSaveBlueprint={onSaveBlueprint}
               onClose={() => setMenuOpen(false)}
             />
           )}

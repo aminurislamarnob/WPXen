@@ -157,7 +157,6 @@ export default function PHPVersions() {
     };
     window.electronAPI.on('php-install-progress', handleProgress);
     return () => window.electronAPI.off('php-install-progress');
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function loadVersions() {
