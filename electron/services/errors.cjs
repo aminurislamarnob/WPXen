@@ -54,9 +54,13 @@ function humanize(err, fallback) {
   if (m) return m[1].trim().replace(/\.$/, '') + '.';
 
   // Last resort: strip execSync's "Command failed: <full command>" noise, then
-  // return the first meaningful line that remains.
+  // return the first meaningful line that remains. Skip the mysql/mariadb
+  // "Using a password on the command line interface can be insecure." warning —
+  // it's harmless noise on stderr that would otherwise mask the real error.
   const cleaned = raw.replace(/^Command failed:.*$/gm, '').trim();
-  const firstLine = cleaned.split('\n').find((l) => l.trim());
+  const firstLine = cleaned
+    .split('\n')
+    .find((l) => l.trim() && !/using a password on the command line/i.test(l));
   return firstLine
     ? firstLine.trim()
     : fallback || 'Something went wrong. Please try again.';

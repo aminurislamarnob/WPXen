@@ -21,3 +21,38 @@ describe('sqlImportStartOffset', () => {
     expect(mysql.sqlImportStartOffset(Buffer.alloc(0))).toBe(0);
   });
 });
+
+describe('isDumpSessionOverrideLine', () => {
+  it('flags SET @@GLOBAL.GTID_PURGED', () => {
+    expect(
+      mysql.isDumpSessionOverrideLine(
+        "SET @@GLOBAL.GTID_PURGED=/*!80000 '+'*/ '3E11FA47-71CA-11E1-9E33:1-5';"
+      )
+    ).toBe(true);
+  });
+
+  it('flags SET @@SESSION.SQL_LOG_BIN (header and footer restore)', () => {
+    expect(mysql.isDumpSessionOverrideLine('SET @@SESSION.SQL_LOG_BIN= 0;')).toBe(true);
+    expect(
+      mysql.isDumpSessionOverrideLine(
+        'SET @@SESSION.SQL_LOG_BIN = @MYSQLDUMP_TEMP_LOG_BIN;'
+      )
+    ).toBe(true);
+  });
+
+  it('tolerates leading whitespace', () => {
+    expect(mysql.isDumpSessionOverrideLine("   SET @@GLOBAL.GTID_PURGED='x';")).toBe(
+      true
+    );
+  });
+
+  it('leaves ordinary statements untouched', () => {
+    expect(mysql.isDumpSessionOverrideLine('SET @MYSQLDUMP_TEMP_LOG_BIN = 1;')).toBe(
+      false
+    );
+    expect(mysql.isDumpSessionOverrideLine("INSERT INTO t VALUES ('GTID_PURGED');")).toBe(
+      false
+    );
+    expect(mysql.isDumpSessionOverrideLine('SET NAMES utf8mb4;')).toBe(false);
+  });
+});
