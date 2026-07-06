@@ -984,22 +984,23 @@ function registerHandlers(win, storeInstance) {
       const authUser = String(payload.authUser ?? prev.authUser ?? 'guest').trim();
       const password = payload.password != null ? String(payload.password) : '';
 
-      if (authEnabled) {
-        if (!htpasswd.isValidAuthUser(authUser)) {
-          return {
-            success: false,
-            error: 'Username may only contain letters, digits, ".", "_" and "-".',
-          };
-        }
-        // A new password (or changed username) rewrites the htpasswd file; with
-        // no password we keep the existing file — but one must exist.
-        if (password) {
-          htpasswd.writeHtpasswdFile(site.domain, authUser, password);
-        } else if (!htpasswd.hasHtpasswdFile(site.domain) || authUser !== prev.authUser) {
+      // Validate everything BEFORE any side effect (htpasswd file writes, store
+      // commit), so a later validation failure can't leave the on-disk auth
+      // state diverged from the persisted share record.
+      if (authEnabled && !htpasswd.isValidAuthUser(authUser)) {
+        return {
+          success: false,
+          error: 'Username may only contain letters, digits, ".", "_" and "-".',
+        };
+      }
+      // Whether we'll (re)write the htpasswd file: a new password, or a changed
+      // username with a password. With auth on and no password, an existing
+      // file must already be present.
+      const writeAuth = authEnabled && !!password;
+      if (authEnabled && !writeAuth) {
+        if (!htpasswd.hasHtpasswdFile(site.domain) || authUser !== prev.authUser) {
           return { success: false, error: 'Set a password to enable protection.' };
         }
-      } else {
-        htpasswd.removeHtpasswdFile(site.domain);
       }
 
       // Stable-hostname (named tunnel) settings.
@@ -1019,6 +1020,14 @@ function registerHandlers(win, storeInstance) {
 
       const autoStart =
         payload.autoStart != null ? !!payload.autoStart : !!prev.autoStart;
+
+      // All input validated — now apply side effects. The password is
+      // write-only: it becomes an apr1 hash on disk, never stored in JSON.
+      if (writeAuth) {
+        htpasswd.writeHtpasswdFile(site.domain, authUser, password);
+      } else if (!authEnabled) {
+        htpasswd.removeHtpasswdFile(site.domain);
+      }
 
       const share = {
         mode,

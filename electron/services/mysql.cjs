@@ -121,7 +121,11 @@ function dumpDatabase(dbName, destGzPath) {
     child.stderr.on('data', (b) => {
       stderrTail = (stderrTail + b.toString()).slice(-4000);
     });
-    child.stdout.pipe(zlib.createGzip()).pipe(out);
+    // pipe() does not forward errors between stages, so the gzip transform
+    // needs its own handler or a stream error would go unhandled and crash.
+    const gzip = zlib.createGzip();
+    gzip.on('error', fail);
+    child.stdout.pipe(gzip).pipe(out);
     child.on('error', fail);
     out.on('error', fail);
     child.on('close', (code) => {

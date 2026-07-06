@@ -204,14 +204,17 @@ function listBackups(siteId) {
 }
 
 // Restores a snapshot with a clean-slate strategy: the current site directory
-// is parked next to itself, the archive extracts fresh, then the DB is dropped,
-// recreated and re-imported. An extract failure rolls the directory back.
+// is parked next to itself and the archive extracts fresh, then the DB is
+// dropped, recreated and re-imported. Both steps roll back on failure — the
+// files via the parked copy, the DB via a safety dump taken before the drop —
+// so a failed restore never leaves the site with a destroyed database.
 async function restoreBackup(site, timestamp, onProgress = () => {}) {
   guardConcurrent(site.id);
   const dir = getBackupDir(site.id, timestamp);
   const filesArchive = path.join(dir, 'files.tar.gz');
   const dbFile = path.join(dir, 'db.sql.gz');
   const parked = `${site.path}.wpherd-restore-tmp`;
+  const dbRollback = `${site.path}.wpherd-db-rollback.sql.gz`;
   try {
     onProgress({ step: 'check', message: 'Verifying backup…' });
     if (!fs.existsSync(path.join(dir, 'manifest.json')) || !fs.existsSync(filesArchive)) {
@@ -238,9 +241,36 @@ async function restoreBackup(site, timestamp, onProgress = () => {}) {
 
     onProgress({ step: 'database', message: `Restoring database ${site.dbName}…` });
     if (fs.existsSync(dbFile)) {
-      mysql.dropDatabase(site.dbName);
-      mysql.createDatabase(site.dbName);
-      await mysql.importDatabase(site.dbName, dbFile);
+      // Safety-dump the current DB first so a failed import can be rolled back
+      // to the exact pre-restore state. Best-effort: if the DB doesn't exist
+      // yet there's nothing to preserve.
+      let haveRollback = false;
+      try {
+        await mysql.dumpDatabase(site.dbName, dbRollback);
+        haveRollback = true;
+      } catch {
+        fs.rmSync(dbRollback, { force: true });
+      }
+      try {
+        mysql.dropDatabase(site.dbName);
+        mysql.createDatabase(site.dbName);
+        await mysql.importDatabase(site.dbName, dbFile);
+      } catch (err) {
+        // Roll the DB back to the safety dump, then the files to the parked
+        // copy, so the site is left exactly as it was before the restore.
+        if (haveRollback) {
+          try {
+            mysql.dropDatabase(site.dbName);
+            mysql.createDatabase(site.dbName);
+            await mysql.importDatabase(site.dbName, dbRollback);
+          } catch {}
+        }
+        fs.rmSync(site.path, { recursive: true, force: true });
+        if (fs.existsSync(parked)) fs.renameSync(parked, site.path);
+        throw new Error(`Restoring database failed: ${err.message}`);
+      } finally {
+        fs.rmSync(dbRollback, { force: true });
+      }
     }
 
     onProgress({ step: 'cleanup', message: 'Cleaning up…' });
