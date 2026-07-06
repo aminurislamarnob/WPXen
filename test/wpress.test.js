@@ -29,8 +29,17 @@ describe('parseWpressHeader', () => {
     });
   });
 
-  it('returns null for the EOF block (all NULs)', () => {
+  it('returns null for the v1 EOF block (all NULs)', () => {
     expect(wpress.parseWpressHeader(Buffer.alloc(HEADER_SIZE))).toBeNull();
+  });
+
+  it('returns null for the v2 EOF block (empty name + CRC fields)', () => {
+    // Newer All-in-One WP Migration archives terminate with an empty name plus
+    // the archive CRC size (size field) and an 8-char hex CRC (trailing bytes).
+    const buf = Buffer.alloc(HEADER_SIZE);
+    buf.write('1024', 255, 'utf8'); // archive CRC size
+    buf.write('a1b2c3d4', HEADER_SIZE - 8, 'utf8'); // crc32 hex
+    expect(wpress.parseWpressHeader(buf)).toBeNull();
   });
 
   it('throws on a truncated buffer', () => {
@@ -51,10 +60,8 @@ describe('parseWpressHeader', () => {
     );
   });
 
-  it('throws on an empty filename', () => {
-    expect(() => wpress.parseWpressHeader(makeHeader({ name: '' }))).toThrow(
-      /could not be parsed/
-    );
+  it('treats an empty filename as the EOF terminator', () => {
+    expect(wpress.parseWpressHeader(makeHeader({ name: '' }))).toBeNull();
   });
 
   it('handles a root-level entry (dir ".")', () => {

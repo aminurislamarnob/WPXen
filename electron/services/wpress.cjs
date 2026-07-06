@@ -31,21 +31,29 @@ function readField(buf, start, end) {
   return buf.toString('utf8', start, stop);
 }
 
-// Parses one 4377-byte header. Returns null for the EOF block (all NULs);
+// Parses one 4377-byte header. Returns null for the EOF terminator block;
 // throws on anything malformed. Pure — covered by vitest.
+//
+// A real file entry always carries a filename, so an empty name field marks
+// the end of the archive. Two terminator variants exist and both must be
+// treated as EOF: v1 archives write an all-NUL block, while newer (v2)
+// All-in-One WP Migration archives write an empty name plus the archive CRC
+// size/value in the size and trailing crc32 fields — a non-NUL block that an
+// all-NUL test alone would reject as corrupt (the historical bug here).
 function parseWpressHeader(buf) {
   if (!Buffer.isBuffer(buf) || buf.length !== HEADER_SIZE) {
     throw new Error(PARSE_ERROR);
   }
-  if (buf.every((b) => b === 0)) return null;
 
   const name = readField(buf, 0, NAME_END);
+  if (name === '') return null; // EOF block (v1 all-NUL or v2 CRC terminator)
+
   const sizeStr = readField(buf, NAME_END, SIZE_END);
   const mtimeStr = readField(buf, SIZE_END, MTIME_END);
   const dir = readField(buf, MTIME_END, HEADER_SIZE);
 
   const size = Number(sizeStr);
-  if (!name || sizeStr === '' || !Number.isInteger(size) || size < 0) {
+  if (sizeStr === '' || !Number.isInteger(size) || size < 0) {
     throw new Error(PARSE_ERROR);
   }
   return { name, size, mtime: Number(mtimeStr) || 0, dir };
