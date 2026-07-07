@@ -85,11 +85,14 @@ async function downloadRemoteBackup(store, site, providerId, remoteName, onProgr
   progress({ step: 'download', message: `Downloading ${remoteName}...` });
 
   const id = parseRemoteBackupId(remoteName, site) || wordpress.generateId();
-  const file = path.join(backups.getBackupsDir(site.id), `${id}.zip`);
-  await provider.download(store, remoteName, file);
-
+  // Re-downloading a backup that still has a local record refreshes its
+  // existing archive in place; otherwise mint a fresh stamped filename.
   const existing = backups.findBackup(store, id);
-  if (existing) return existing; // archive refreshed on disk; record already there
+  const file =
+    existing?.file ||
+    path.join(backups.getBackupsDir(site.id), backups.backupFileName(id));
+  await provider.download(store, remoteName, file);
+  if (existing) return existing;
 
   const meta = {
     id,

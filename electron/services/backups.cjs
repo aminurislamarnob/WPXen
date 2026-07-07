@@ -60,6 +60,19 @@ function freeBytesAt(dir) {
 
 // ─── Create / list / delete ──────────────────────────────────────────────
 
+// Archive filename: "<local timestamp>--<backupId>.zip". The stamp makes the
+// file self-describing and chronologically sortable in Finder (colons are
+// avoided — macOS displays them as path separators); the id keeps it unique
+// and tied to its metadata record. The store's `file` path is authoritative,
+// so older `<id>.zip` archives keep working. Pure — covered by vitest.
+function backupFileName(id, date = new Date()) {
+  const p = (n) => String(n).padStart(2, '0');
+  const stamp =
+    `${date.getFullYear()}-${p(date.getMonth() + 1)}-${p(date.getDate())}` +
+    `_${p(date.getHours())}-${p(date.getMinutes())}-${p(date.getSeconds())}`;
+  return `${stamp}--${id}.zip`;
+}
+
 async function createBackup(
   store,
   site,
@@ -71,7 +84,8 @@ async function createBackup(
     throw new Error('Not enough free disk space to create a backup.');
   }
   const id = wordpress.generateId();
-  const file = path.join(dir, `${id}.zip`);
+  const createdAt = new Date();
+  const file = path.join(dir, backupFileName(id, createdAt));
   let sizeBytes = 0;
   try {
     ({ sizeBytes } = await siteops.exportSite(site, file, onProgress));
@@ -85,7 +99,7 @@ async function createBackup(
   const meta = {
     id,
     siteId: site.id,
-    createdAt: new Date().toISOString(),
+    createdAt: createdAt.toISOString(),
     sizeBytes,
     note: String(note || '').trim(),
     trigger,
@@ -294,6 +308,7 @@ function getTotalUsageBytes(store) {
 module.exports = {
   getBackupsRoot,
   getBackupsDir,
+  backupFileName,
   createBackup,
   listBackups,
   findBackup,
