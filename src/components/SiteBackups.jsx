@@ -139,7 +139,7 @@ function GitDeployCard({ site, onSaved }) {
     if (!res?.success) {
       setError(res?.error || 'Deploy failed.');
     } else {
-      setLog((prev) => [...(prev || []), 'Deploy complete.']);
+      // The main process already streamed its final "Deploy complete." line.
       onSaved?.();
       refresh();
     }
@@ -229,7 +229,7 @@ function GitDeployCard({ site, onSaved }) {
           </Button>
         </Row>
       </Card>
-      {log && <ProgressLog messages={log} className="mt-3" />}
+      {log && <ProgressLog messages={log} done={busy !== 'deploy'} className="mt-3" />}
       {error && (
         <div className="mt-2 flex items-start gap-2 bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400 rounded-lg px-3 py-2.5 text-xs">
           <AlertCircle size={13} className="flex-shrink-0 mt-0.5" />
