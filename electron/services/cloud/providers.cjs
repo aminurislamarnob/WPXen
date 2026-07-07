@@ -1,0 +1,138 @@
+'use strict';
+
+const fs = require('fs');
+const path = require('path');
+const dropbox = require('./dropbox.cjs');
+const gdrive = require('./gdrive.cjs');
+const backups = require('../backups.cjs');
+const wordpress = require('../wordpress.cjs');
+
+// Provider registry + the backup↔cloud sync logic on top of it. Each provider
+// implements the same adapter surface (connect/disconnect/upload/list/
+// download/remove), so adding S3 later is a new module + one registry entry.
+
+const PROVIDERS = { [dropbox.id]: dropbox, [gdrive.id]: gdrive };
+
+function getProvider(providerId) {
+  const provider = PROVIDERS[providerId];
+  if (!provider) throw new Error(`Unknown cloud provider: ${providerId}`);
+  return provider;
+}
+
+function listProviders() {
+  return Object.values(PROVIDERS);
+}
+
+// Connection snapshot for the Settings cards.
+function getStatus(store) {
+  const status = {};
+  for (const p of listProviders()) {
+    status[p.id] = {
+      id: p.id,
+      name: p.name,
+      configured: p.isConfigured(),
+      connected: p.isConfigured() && p.isConnected(store),
+      account: p.getAccount(store),
+    };
+  }
+  return status;
+}
+
+// Remote archives are named "<domain>--<backupId>.zip" so per-site listing is
+// a plain prefix match and the backup id survives a round trip. Pure — tested.
+function remoteNameFor(site, backup) {
+  return `${site.domain}--${backup.id}.zip`;
+}
+
+function sitePrefix(site) {
+  return `${site.domain}--`;
+}
+
+function parseRemoteBackupId(remoteName, site) {
+  const m = String(remoteName).match(/^(.+)--([A-Za-z0-9]+)\.zip$/);
+  return m && m[1] === site.domain ? m[2] : null;
+}
+
+async function uploadBackup(store, site, backupId, providerId, onProgress) {
+  const provider = getProvider(providerId);
+  const backup = backups.findBackup(store, backupId);
+  if (!backup) throw new Error('That backup no longer exists.');
+  const remoteName = remoteNameFor(site, backup);
+  await provider.upload(store, backup.file, remoteName, onProgress);
+  return backups.updateBackupMeta(store, backupId, {
+    uploads: {
+      ...(backup.uploads || {}),
+      [providerId]: { remoteName, uploadedAt: new Date().toISOString() },
+    },
+  });
+}
+
+async function listRemoteBackups(store, site, providerId) {
+  const provider = getProvider(providerId);
+  const local = new Set(backups.listBackups(store, site.id).map((b) => b.id));
+  return (await provider.list(store, sitePrefix(site))).map((f) => ({
+    ...f,
+    backupId: parseRemoteBackupId(f.name, site),
+    existsLocally: local.has(parseRemoteBackupId(f.name, site)),
+  }));
+}
+
+// Downloads a remote archive back into the site's local backups dir and
+// records it, so restore then goes through the normal local path.
+async function downloadRemoteBackup(store, site, providerId, remoteName, onProgress) {
+  const provider = getProvider(providerId);
+  const progress = onProgress || (() => {});
+  progress({ step: 'download', message: `Downloading ${remoteName}...` });
+
+  const id = parseRemoteBackupId(remoteName, site) || wordpress.generateId();
+  const file = path.join(backups.getBackupsDir(site.id), `${id}.zip`);
+  await provider.download(store, remoteName, file);
+
+  const existing = backups.findBackup(store, id);
+  if (existing) return existing; // archive refreshed on disk; record already there
+
+  const meta = {
+    id,
+    siteId: site.id,
+    createdAt: new Date().toISOString(),
+    sizeBytes: fs.statSync(file).size,
+    note: `Downloaded from ${provider.name}`,
+    trigger: 'cloud',
+    wpVersion: 'unknown',
+    phpVersion: site.phpVersion,
+    file,
+    uploads: { [providerId]: { remoteName, uploadedAt: new Date().toISOString() } },
+  };
+  store.set('backups', [...store.get('backups', []), meta]);
+  progress({ step: 'done', message: 'Download complete.' });
+  return meta;
+}
+
+// Remote retention mirrors the local retainCount: keep the newest N archives
+// for this site, remove the rest. Best-effort — a cloud hiccup must never
+// fail the backup that triggered it.
+async function applyRemoteRetention(store, site, providerId) {
+  const provider = getProvider(providerId);
+  const retainCount = Math.max(1, store.get('settings.backups.retainCount', 5));
+  try {
+    const remote = (await provider.list(store, sitePrefix(site))).sort(
+      (a, b) => new Date(b.modifiedAt || 0) - new Date(a.modifiedAt || 0)
+    );
+    for (const f of remote.slice(retainCount)) {
+      await provider.remove(store, f.name);
+    }
+  } catch {}
+}
+
+module.exports = {
+  getProvider,
+  listProviders,
+  getStatus,
+  remoteNameFor,
+  sitePrefix,
+  parseRemoteBackupId,
+  uploadBackup,
+  listRemoteBackups,
+  downloadRemoteBackup,
+  applyRemoteRetention,
+};

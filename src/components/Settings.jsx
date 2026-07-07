@@ -13,6 +13,9 @@ import {
   Lock,
   Layers,
   Trash2,
+  Archive,
+  Cloud,
+  FolderOpen as FolderReveal,
 } from 'lucide-react';
 import { Card, Row, SectionLabel, Toggle, Button } from './ui';
 
@@ -49,6 +52,10 @@ export default function Settings({ onOpenWizard }) {
   const [caStatus, setCaStatus] = useState(null);
   const [blueprints, setBlueprints] = useState([]);
   const [deletingBlueprint, setDeletingBlueprint] = useState(null);
+  const [backupSettings, setBackupSettings] = useState(null);
+  const [cloudProviders, setCloudProviders] = useState(null);
+  const [cloudBusy, setCloudBusy] = useState(null); // providerId being (dis)connected
+  const [cloudMessage, setCloudMessage] = useState(null);
 
   useEffect(() => {
     Promise.all([
@@ -67,7 +74,48 @@ export default function Settings({ onOpenWizard }) {
       .then(setCaStatus)
       .catch(() => {});
     refreshBlueprints();
+    window.electronAPI
+      .getBackupSettings()
+      .then(setBackupSettings)
+      .catch(() => {});
+    refreshCloud();
   }, []);
+
+  function refreshCloud() {
+    window.electronAPI
+      .getCloudStatus()
+      .then((r) => setCloudProviders(r?.success ? r.providers : null))
+      .catch(() => {});
+  }
+
+  async function saveBackupSettings(patch) {
+    setBackupSettings((s) => ({ ...s, ...patch }));
+    await window.electronAPI.setBackupSettings(patch);
+  }
+
+  async function handleCloudConnect(providerId) {
+    setCloudBusy(providerId);
+    setCloudMessage(null);
+    const res = await window.electronAPI.cloudConnect(providerId);
+    setCloudBusy(null);
+    if (res?.success) {
+      setCloudMessage({
+        type: 'success',
+        text: `Connected${res.account?.email ? ` as ${res.account.email}` : ''}.`,
+      });
+    } else {
+      setCloudMessage({ type: 'error', text: res?.error || 'Connection failed.' });
+    }
+    refreshCloud();
+  }
+
+  async function handleCloudDisconnect(providerId) {
+    setCloudBusy(providerId);
+    setCloudMessage(null);
+    await window.electronAPI.cloudDisconnect(providerId);
+    setCloudBusy(null);
+    refreshCloud();
+  }
 
   function refreshBlueprints() {
     window.electronAPI
@@ -385,6 +433,127 @@ export default function Settings({ onOpenWizard }) {
           Create a site from one via{' '}
           <span className="font-medium">Add Site → From Blueprint</span>.
         </p>
+      </div>
+
+      {/* Backups & Cloud Sync */}
+      <div>
+        <SectionLabel>Backups</SectionLabel>
+        <Card>
+          <Row
+            icon={<Archive size={18} className="text-gray-400 flex-shrink-0" />}
+            title="Default Schedule"
+            subtitle="Applies to every site without its own schedule"
+          >
+            <select
+              value={backupSettings?.defaultSchedule || 'off'}
+              onChange={(e) => saveBackupSettings({ defaultSchedule: e.target.value })}
+              className="form-input !w-32 !py-1 text-[13px]"
+            >
+              <option value="off">Off</option>
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+            </select>
+          </Row>
+          <Row
+            title="Keep Last"
+            subtitle="Older snapshots are pruned automatically after each backup"
+          >
+            <input
+              type="number"
+              min={1}
+              max={100}
+              className="form-input font-mono !text-xs !w-20 text-center"
+              value={backupSettings?.retainCount ?? 5}
+              onChange={(e) =>
+                saveBackupSettings({ retainCount: parseInt(e.target.value, 10) || 5 })
+              }
+            />
+            <span className="text-xs text-gray-500">backups per site</span>
+          </Row>
+          <Row title="Disk Usage" subtitle="Total space used by all local backups">
+            <span className="text-xs font-mono text-gray-700">
+              {formatBytes(backupSettings?.totalBytes || 0)}
+            </span>
+            <button
+              onClick={() => window.electronAPI.revealBackupsFolder()}
+              className="btn-secondary !px-2.5 !py-1.5"
+              title="Reveal backups folder"
+            >
+              <FolderReveal size={13} />
+            </button>
+          </Row>
+        </Card>
+
+        <div className="mt-4">
+          <SectionLabel>Cloud Sync</SectionLabel>
+          <Card>
+            {cloudProviders ? (
+              Object.values(cloudProviders).map((p) => (
+                <Row
+                  key={p.id}
+                  icon={
+                    <Cloud
+                      size={18}
+                      className={`flex-shrink-0 ${p.connected ? 'text-wp-blue' : 'text-gray-400'}`}
+                    />
+                  }
+                  title={p.name}
+                  subtitle={
+                    !p.configured
+                      ? 'Not available in this build'
+                      : p.connected
+                        ? `Connected${p.account?.email ? ` as ${p.account.email}` : ''}`
+                        : 'Upload backup archives to your own account'
+                  }
+                >
+                  {p.configured &&
+                    (p.connected ? (
+                      <button
+                        onClick={() => handleCloudDisconnect(p.id)}
+                        disabled={cloudBusy !== null}
+                        className="btn-ghost text-xs text-gray-400 hover:text-red-600 dark:hover:text-red-400"
+                      >
+                        {cloudBusy === p.id ? (
+                          <Loader size={12} className="animate-spin" />
+                        ) : null}
+                        Disconnect
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => handleCloudConnect(p.id)}
+                        disabled={cloudBusy !== null}
+                        className="btn-secondary text-xs"
+                      >
+                        {cloudBusy === p.id ? (
+                          <Loader size={12} className="animate-spin mr-1.5" />
+                        ) : null}
+                        Connect…
+                      </button>
+                    ))}
+                </Row>
+              ))
+            ) : (
+              <div className="px-4 py-4 text-xs text-gray-500">Loading…</div>
+            )}
+          </Card>
+          {cloudMessage && (
+            <div
+              className={`flex items-start gap-2 px-3 py-2.5 rounded-lg mt-2 text-[13px] ${
+                cloudMessage.type === 'error'
+                  ? 'bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400'
+                  : 'bg-green-50 text-green-700 dark:bg-green-500/10 dark:text-green-400'
+              }`}
+            >
+              <CheckCircle size={14} className="flex-shrink-0 mt-0.5" />
+              {cloudMessage.text}
+            </div>
+          )}
+          <p className="text-[11px] text-gray-400 mt-1.5 px-1">
+            Connecting opens your browser to sign in. WPHerd only sees its own app folder
+            and stores tokens encrypted in the macOS Keychain. Upload individual backups
+            from a site&apos;s Backups tab, or enable per-site auto-upload.
+          </p>
+        </div>
       </div>
 
       {/* Dependencies */}

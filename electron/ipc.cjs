@@ -30,6 +30,10 @@ const dnsmasq = require('./services/dnsmasq.cjs');
 const wordpress = require('./services/wordpress.cjs');
 const siteops = require('./services/siteops.cjs');
 const blueprints = require('./services/blueprints.cjs');
+const backups = require('./services/backups.cjs');
+const scheduler = require('./services/scheduler.cjs');
+const gitdeploy = require('./services/gitdeploy.cjs');
+const cloud = require('./services/cloud/providers.cjs');
 const mkcert = require('./services/mkcert.cjs');
 const phpmyadmin = require('./services/phpmyadmin.cjs');
 const mailpit = require('./services/mailpit.cjs');
@@ -1622,6 +1626,359 @@ function registerHandlers(win, storeInstance) {
     } catch (err) {
       return { success: false, error: humanize(err) };
     }
+  });
+
+  // ─── Backups ─────────────────────────────────────────────────────────
+
+  const VALID_SCHEDULES = ['off', 'daily', 'weekly'];
+
+  ipcMain.handle('list-backups', async (_, siteId) => {
+    try {
+      return { success: true, backups: backups.listBackups(store, siteId) };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('create-backup', async (event, siteId, opts = {}) => {
+    try {
+      const site = findSite(siteId);
+      if (!site) return { success: false, error: 'Site not found' };
+      if (!mysql.isRunning()) {
+        return {
+          success: false,
+          error: 'MySQL is not running. Start it in the Services panel.',
+        };
+      }
+      const progress = (data) => {
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('backup-progress', data);
+        }
+      };
+      const backup = await backups.createBackup(
+        store,
+        site,
+        { note: opts.note, trigger: 'manual' },
+        progress
+      );
+      backups.applyRetention(store, siteId);
+      return { success: true, backup };
+    } catch (err) {
+      console.error('create-backup error:', err);
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('restore-backup', async (event, siteId, backupId) => {
+    try {
+      const sites = store.get('sites', []);
+      const idx = sites.findIndex((s) => s.id === siteId);
+      if (idx === -1) return { success: false, error: 'Site not found' };
+      const site = sites[idx];
+      if (!mysql.isRunning()) {
+        return {
+          success: false,
+          error: 'MySQL is not running. Start it in the Services panel.',
+        };
+      }
+      const progress = (data) => {
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('restore-progress', data);
+        }
+      };
+      const { wpVersion } = await backups.restoreBackup(store, site, backupId, progress);
+
+      // createBackup (the safety snapshot) rewrote the sites array — re-read
+      // before merging so its lastBackupAt stamp isn't lost.
+      const fresh = store.get('sites', []);
+      const freshIdx = fresh.findIndex((s) => s.id === siteId);
+      if (freshIdx !== -1) {
+        fresh[freshIdx] = { ...fresh[freshIdx], wpVersion };
+        store.set('sites', fresh);
+      }
+      return { success: true, wpVersion };
+    } catch (err) {
+      console.error('restore-backup error:', err);
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('delete-backup', async (_, backupId) => {
+    try {
+      backups.deleteBackup(store, backupId);
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('reveal-backup', async (_, backupId) => {
+    const backup = backups.findBackup(store, backupId);
+    if (!backup) return { success: false, error: 'That backup no longer exists.' };
+    shell.showItemInFolder(backup.file);
+    return { success: true };
+  });
+
+  ipcMain.handle('get-backup-settings', async () => {
+    return {
+      defaultSchedule: store.get('settings.backups.defaultSchedule', 'off'),
+      retainCount: store.get('settings.backups.retainCount', 5),
+      totalBytes: backups.getTotalUsageBytes(store),
+      backupsDir: backups.getBackupsRoot(),
+    };
+  });
+
+  ipcMain.handle('set-backup-settings', async (_, payload = {}) => {
+    try {
+      if (payload.defaultSchedule != null) {
+        if (!VALID_SCHEDULES.includes(payload.defaultSchedule)) {
+          return { success: false, error: 'Invalid schedule.' };
+        }
+        store.set('settings.backups.defaultSchedule', payload.defaultSchedule);
+      }
+      if (payload.retainCount != null) {
+        const n = parseInt(payload.retainCount, 10);
+        if (!Number.isInteger(n) || n < 1 || n > 100) {
+          return { success: false, error: 'Keep between 1 and 100 backups.' };
+        }
+        store.set('settings.backups.retainCount', n);
+      }
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('reveal-backups-folder', async () => {
+    const dir = backups.getBackupsRoot();
+    fs.mkdirSync(dir, { recursive: true });
+    shell.openPath(dir);
+    return { success: true };
+  });
+
+  // Per-site backup config: schedule override ('' = follow the global
+  // default) and the auto-upload provider (null = off).
+  ipcMain.handle('set-site-backup-config', async (_, siteId, payload = {}) => {
+    try {
+      const sites = store.get('sites', []);
+      const idx = sites.findIndex((s) => s.id === siteId);
+      if (idx === -1) return { success: false, error: 'Site not found' };
+      const updated = { ...sites[idx] };
+
+      if (payload.schedule !== undefined) {
+        if (payload.schedule && !VALID_SCHEDULES.includes(payload.schedule)) {
+          return { success: false, error: 'Invalid schedule.' };
+        }
+        if (payload.schedule) updated.backupSchedule = payload.schedule;
+        else delete updated.backupSchedule;
+      }
+      if (payload.autoUpload !== undefined) {
+        if (payload.autoUpload && !cloud.getStatus(store)[payload.autoUpload]) {
+          return { success: false, error: 'Unknown cloud provider.' };
+        }
+        if (payload.autoUpload) updated.cloudAutoUpload = payload.autoUpload;
+        else delete updated.cloudAutoUpload;
+      }
+
+      sites[idx] = updated;
+      store.set('sites', sites);
+      return { success: true, site: updated };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  // ─── Git deploy ──────────────────────────────────────────────────────
+
+  ipcMain.handle('get-git-deploy-status', async (_, siteId) => {
+    try {
+      const site = findSite(siteId);
+      if (!site) return { success: false, error: 'Site not found' };
+      const status = await gitdeploy.getStatus(site);
+      return { success: true, ...status, config: site.gitDeploy || null };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('configure-git-deploy', async (_, siteId, payload = {}) => {
+    try {
+      const sites = store.get('sites', []);
+      const idx = sites.findIndex((s) => s.id === siteId);
+      if (idx === -1) return { success: false, error: 'Site not found' };
+      const site = sites[idx];
+
+      const remoteUrl = String(payload.remoteUrl || '').trim();
+      const branch = String(payload.branch || 'main').trim();
+      await gitdeploy.configure(site, { remoteUrl, branch });
+
+      sites[idx] = {
+        ...site,
+        gitDeploy: {
+          ...(site.gitDeploy || {}),
+          remoteUrl,
+          branch,
+          includeDb: !!payload.includeDb,
+        },
+      };
+      store.set('sites', sites);
+      return { success: true, site: sites[idx] };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('run-git-deploy', async (event, siteId, opts = {}) => {
+    try {
+      const sites = store.get('sites', []);
+      const idx = sites.findIndex((s) => s.id === siteId);
+      if (idx === -1) return { success: false, error: 'Site not found' };
+      const site = sites[idx];
+      const config = site.gitDeploy;
+      if (!config?.remoteUrl) {
+        return { success: false, error: 'Configure a git remote first.' };
+      }
+      if (config.includeDb && !mysql.isRunning()) {
+        return {
+          success: false,
+          error: 'MySQL is not running — it is needed to include the database dump.',
+        };
+      }
+      const progress = (data) => {
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('deploy-progress', data);
+        }
+      };
+      const { deployedAt } = await gitdeploy.deploy(
+        site,
+        { message: opts.message, includeDb: config.includeDb, branch: config.branch },
+        progress
+      );
+      sites[idx] = { ...site, gitDeploy: { ...config, lastDeployAt: deployedAt } };
+      store.set('sites', sites);
+      return { success: true, site: sites[idx] };
+    } catch (err) {
+      console.error('run-git-deploy error:', err);
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  // ─── Cloud sync ──────────────────────────────────────────────────────
+
+  ipcMain.handle('cloud-status', async () => {
+    try {
+      return { success: true, providers: cloud.getStatus(store) };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('cloud-connect', async (_, providerId) => {
+    try {
+      const account = await cloud
+        .getProvider(providerId)
+        .connect(store, { openUrl: (url) => openExternalSafely(url) });
+      return { success: true, account };
+    } catch (err) {
+      console.error('cloud-connect error:', err);
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('cloud-disconnect', async (_, providerId) => {
+    try {
+      cloud.getProvider(providerId).disconnect(store);
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('upload-backup', async (event, backupId, providerId) => {
+    try {
+      const backup = backups.findBackup(store, backupId);
+      if (!backup) return { success: false, error: 'That backup no longer exists.' };
+      const site = findSite(backup.siteId);
+      if (!site) return { success: false, error: 'Site not found' };
+      const progress = (p) => {
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('cloud-sync-progress', { backupId, providerId, ...p });
+        }
+      };
+      const updated = await cloud.uploadBackup(
+        store,
+        site,
+        backupId,
+        providerId,
+        progress
+      );
+      return { success: true, backup: updated };
+    } catch (err) {
+      console.error('upload-backup error:', err);
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('list-remote-backups', async (_, siteId, providerId) => {
+    try {
+      const site = findSite(siteId);
+      if (!site) return { success: false, error: 'Site not found' };
+      const files = await cloud.listRemoteBackups(store, site, providerId);
+      return { success: true, files };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle(
+    'download-remote-backup',
+    async (event, siteId, providerId, remoteName) => {
+      try {
+        const site = findSite(siteId);
+        if (!site) return { success: false, error: 'Site not found' };
+        if (
+          typeof remoteName !== 'string' ||
+          remoteName.includes('/') ||
+          remoteName.includes('..')
+        ) {
+          return { success: false, error: 'Invalid file name.' };
+        }
+        const progress = (data) => {
+          if (!event.sender.isDestroyed()) {
+            event.sender.send('cloud-sync-progress', { providerId, ...data });
+          }
+        };
+        const backup = await cloud.downloadRemoteBackup(
+          store,
+          site,
+          providerId,
+          remoteName,
+          progress
+        );
+        return { success: true, backup };
+      } catch (err) {
+        console.error('download-remote-backup error:', err);
+        return { success: false, error: humanize(err) };
+      }
+    }
+  );
+
+  // Scheduled backups: hourly due-check; after each scheduled backup, push it
+  // to the site's auto-upload provider (best-effort) and mirror retention.
+  scheduler.startBackupScheduler(store, {
+    onEvent: async (evt) => {
+      if (evt.type !== 'backup-complete') return;
+      const providerId = evt.site.cloudAutoUpload;
+      if (!providerId) return;
+      try {
+        if (cloud.getStatus(store)[providerId]?.connected) {
+          await cloud.uploadBackup(store, evt.site, evt.backup.id, providerId);
+          await cloud.applyRemoteRetention(store, evt.site, providerId);
+        }
+      } catch (err) {
+        console.error('auto-upload:', err.message);
+      }
+    },
   });
 
   // ─── Settings ────────────────────────────────────────────────────────

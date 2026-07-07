@@ -26,7 +26,7 @@ prioritized list of features to implement. Compiled from:
 | Blueprints / templates                | ✅    | herd.yml    | ✅                    | ✅               |
 | Change site URL (+ DB search-replace) | ✅    | —           | ✅                    | ✅               |
 | Export / import site                  | ✅    | —           | ✅                    | ✅               |
-| Cloud backup / push-to-host sync      | ✅    | ✅ (Forge)  | ✅ (.com / Pressable) | ❌               |
+| Cloud backup / push-to-host sync      | ✅    | ✅ (Forge)  | ✅ (.com / Pressable) | ✅ (Dropbox / Drive / Git) |
 | Multisite support                     | ✅    | —           | —                     | ❌               |
 | AI / agentic coding                   | —     | —           | ✅ (Studio Code)      | ❌               |
 | Cross-platform (Windows / Linux)      | ✅    | ✅          | ✅                    | ❌ (macOS only)  |
@@ -53,6 +53,7 @@ spotting where WPHerd is already at parity and where it stands alone.
 - Export / import site: portable files+SQL zip; imports WPHerd, generic, and `.wpress` archives — _Also in: Local, Studio_
 - Site blueprints: save a full site snapshot and create new sites from it (Add Site → From Blueprint) — _Also in: Local, Herd (`herd.yml`), Studio_
 - HTTPS certificate trust automation: mkcert local CA install + per-site trusted cert — _Also in: Local, Studio_
+- Backups & cloud sync: manual + scheduled (daily/weekly) per-site snapshots with retention and in-place restore (auto safety snapshot); git deploy to any remote; Dropbox / Google Drive upload/download via OAuth+PKCE — _Also in: Local (Cloud Backups), Herd (Forge deploy), Studio (sync)_
 
 ---
 
@@ -72,6 +73,7 @@ benchmarking) and a **Reference** link to that solution's documentation.
    enable/disable. Fits `php.cjs` + `SitePhpSettings`.
    — _Provided by: Local, Herd, Studio_
    — Reference: [Local — Xdebug](https://localwp.com/help-docs/advanced/using-xdebug-within-local/) · [Studio — Xdebug](https://developer.wordpress.com/docs/developer-tools/studio/xdebug/)
+   — Plan: [`docs/plans/01-xdebug-integration.md`](../plans/01-xdebug-integration.md)
 2. **Change site URL** — ✅ **Shipped.** Rename a site's domain with WP-CLI
    `search-replace` across all tables, new nginx vhost written before the old is
    removed, fresh cert for HTTPS sites, and live tunnels stopped first. See
@@ -109,16 +111,19 @@ benchmarking) and a **Reference** link to that solution's documentation.
 8. **nginx ⇄ Apache hot-swap** — support both webservers per site.
    — _Provided by: Local_
    — Reference: [Local — features](https://localwp.com/features/)
+   — Plan: [`docs/plans/02-nginx-apache-swap.md`](../plans/02-nginx-apache-swap.md)
 9. **OpCache toggle & status** — surface OpCache config in PHP settings.
    — _Provided by: Local, Herd_
    — Reference: [Local — features](https://localwp.com/features/)
 10. **WordPress Multisite** — subdomain / subdirectory network setup during site creation.
     — _Provided by: Local_
     — Reference: [Local — multisite](https://localwp.com/help-docs/advanced/wordpress-multisite-with-local/)
+    — Plan: [`docs/plans/03-wordpress-multisite.md`](../plans/03-wordpress-multisite.md)
 11. **Composer / Node (nvm) management** — bundle or detect Composer and Node version
     switching per site.
     — _Provided by: Herd_
     — Reference: [Herd — databases & services](https://herd.laravel.com/docs/macos/getting-started/databases) · [Herd docs](https://herd.laravel.com/docs)
+    — Plan: [`docs/plans/04-composer-node-management.md`](../plans/04-composer-node-management.md)
 
 ### Tier 3 — Sharing, backup & deployment
 
@@ -129,10 +134,17 @@ benchmarking) and a **Reference** link to that solution's documentation.
 13. **Webhook testing helpers** — documented Stripe/PayPal webhook endpoints over the tunnel.
     — _Provided by: Local_
     — Reference: [Local — features](https://localwp.com/features/)
-14. **Backups + cloud sync** — scheduled local snapshots, plus optional push/pull to a host.
-    Vendor-neutral equivalent: a generic SFTP/rsync deploy target or Git-based deploy.
+14. **Backups + cloud sync** — ✅ **Shipped.** Manual + scheduled per-site snapshots
+    (`backups.cjs` + `scheduler.cjs`) with retention pruning and in-place restore
+    behind an automatic safety snapshot; git deploy to any remote (`gitdeploy.cjs`,
+    optional DB dump, no stored credentials); Dropbox + Google Drive archive sync
+    behind a provider adapter (`services/cloud/`, OAuth 2 PKCE loopback, tokens in
+    `safeStorage`). Note: cloud providers report "not configured" until the
+    maintainer registers the OAuth apps and bakes in the client ids
+    (`WPHERD_DROPBOX_CLIENT_ID` / `WPHERD_GDRIVE_CLIENT_ID` env for dev).
     — _Provided by: Local (Cloud Backups), Herd (Forge deploy), Studio (.com / Pressable sync)_
     — Reference: [Studio — sync](https://developer.wordpress.com/docs/developer-tools/studio/sync/) · [Local — features](https://localwp.com/features/)
+    — Plan: [`docs/plans/05-backups-cloud-sync.md`](../plans/05-backups-cloud-sync.md)
 
 ### Tier 4 — Pre-launch & quality tools (Local's toolbox)
 
@@ -156,6 +168,7 @@ benchmarking) and a **Reference** link to that solution's documentation.
     Studio Code defaults to Claude Sonnet/Opus, so this aligns well.
     — _Provided by: Studio (Studio Code)_
     — Reference: [Studio Code](https://developer.wordpress.com/docs/developer-tools/studio/studio-code/)
+    — Plan: [`docs/plans/06-ai-assistant-panel.md`](../plans/06-ai-assistant-panel.md)
 
 ### Tier 6 — Reach
 
