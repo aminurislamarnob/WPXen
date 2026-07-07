@@ -22,10 +22,10 @@ prioritized list of features to implement. Compiled from:
 | One-click admin / magic login         | —     | —           | —                     | ✅               |
 | Log viewer                            | ✅    | ✅ (Pro)    | ✅                    | ✅ (per-site)    |
 | Xdebug                                | ✅    | ✅          | ✅                    | ❌               |
-| Site cloning                          | ✅    | —           | —                     | ❌               |
-| Blueprints / templates                | ✅    | herd.yml    | ✅                    | ❌               |
-| Change site URL (+ DB search-replace) | ✅    | —           | ✅                    | ❌               |
-| Export / import site                  | ✅    | —           | ✅                    | ❌               |
+| Site cloning                          | ✅    | —           | —                     | ✅               |
+| Blueprints / templates                | ✅    | herd.yml    | ✅                    | ✅               |
+| Change site URL (+ DB search-replace) | ✅    | —           | ✅                    | ✅               |
+| Export / import site                  | ✅    | —           | ✅                    | ✅               |
 | Cloud backup / push-to-host sync      | ✅    | ✅ (Forge)  | ✅ (.com / Pressable) | ❌               |
 | Multisite support                     | ✅    | —           | —                     | ❌               |
 | AI / agentic coding                   | —     | —           | ✅ (Studio Code)      | ❌               |
@@ -48,6 +48,11 @@ spotting where WPHerd is already at parity and where it stands alone.
 - phpMyAdmin, open in browser / Finder / terminal, per-site HTTPS toggle — _Also in: Local, Studio_
 - Per-site logs (view / clear) — _Also in: Local, Herd, Studio_
 - dnsmasq + `/etc/resolver/test` setup, sudoers management, dependency checks, onboarding — _Also in: Local, Herd, Studio_
+- Change site URL: rename a domain with WP-CLI `search-replace`, vhost regen, fresh cert — _Also in: Local, Studio_
+- Clone / duplicate a site: copy files + dump/restore DB + rewrite config/URLs + new vhost — _Also in: Local_
+- Export / import site: portable files+SQL zip; imports WPHerd, generic, and `.wpress` archives — _Also in: Local, Studio_
+- Site blueprints: save a full site snapshot and create new sites from it (Add Site → From Blueprint) — _Also in: Local, Herd (`herd.yml`), Studio_
+- HTTPS certificate trust automation: mkcert local CA install + per-site trusted cert — _Also in: Local, Studio_
 
 ---
 
