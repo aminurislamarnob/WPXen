@@ -60,13 +60,20 @@ function freeBytesAt(dir) {
 
 // ─── Create / list / delete ──────────────────────────────────────────────
 
-// Archive filename: "<domain>--<backupId>.zip" — the single naming convention
-// shared with cloud archives (providers.remoteNameFor delegates here), so a
-// backup keeps the same name on disk and in Dropbox/Drive. The store's `file`
-// path is authoritative, so archives created under older names keep working.
+// Archive filename: "<domain>--<local timestamp>--<backupId>.zip" — the
+// single naming convention shared with cloud archives
+// (providers.remoteNameFor delegates here), so a backup keeps the same name
+// on disk and in Dropbox/Drive. The stamp is Finder-safe (no colons — macOS
+// displays them as path separators) and sorts chronologically; the id keeps
+// the name unique and tied to its metadata record. The store's `file` path
+// is authoritative, so archives created under older names keep working.
 // Pure — covered by vitest.
-function backupFileName(domain, id) {
-  return `${domain}--${id}.zip`;
+function backupFileName(domain, id, date = new Date()) {
+  const p = (n) => String(n).padStart(2, '0');
+  const stamp =
+    `${date.getFullYear()}-${p(date.getMonth() + 1)}-${p(date.getDate())}` +
+    `_${p(date.getHours())}-${p(date.getMinutes())}-${p(date.getSeconds())}`;
+  return `${domain}--${stamp}--${id}.zip`;
 }
 
 async function createBackup(
@@ -81,7 +88,7 @@ async function createBackup(
   }
   const id = wordpress.generateId();
   const createdAt = new Date();
-  const file = path.join(dir, backupFileName(site.domain, id));
+  const file = path.join(dir, backupFileName(site.domain, id, createdAt));
   let sizeBytes = 0;
   try {
     ({ sizeBytes } = await siteops.exportSite(site, file, onProgress));

@@ -38,20 +38,29 @@ function getStatus(store) {
   return status;
 }
 
-// Archives are named "<domain>--<backupId>.zip" locally and remotely (one
-// shared convention — backups.backupFileName), so per-site listing is a plain
-// prefix match and the backup id survives a round trip. Pure — tested.
+// Archives are named "<domain>--<timestamp>--<backupId>.zip" locally and
+// remotely (one shared convention — backups.backupFileName), so per-site
+// listing is a plain prefix match and the backup id survives a round trip.
+// Pure — tested.
 function remoteNameFor(site, backup) {
-  return backups.backupFileName(site.domain, backup.id);
+  return backups.backupFileName(site.domain, backup.id, new Date(backup.createdAt));
 }
 
 function sitePrefix(site) {
   return `${site.domain}--`;
 }
 
+// Recovers the backup id: the segment after the LAST "--", so both the
+// current "<domain>--<stamp>--<id>.zip" and the legacy "<domain>--<id>.zip"
+// forms parse. Pure — tested.
 function parseRemoteBackupId(remoteName, site) {
-  const m = String(remoteName).match(/^(.+)--([A-Za-z0-9]+)\.zip$/);
-  return m && m[1] === site.domain ? m[2] : null;
+  const prefix = sitePrefix(site);
+  const name = String(remoteName);
+  if (!name.startsWith(prefix) || !name.endsWith('.zip')) return null;
+  const rest = name.slice(prefix.length, -4);
+  const sep = rest.lastIndexOf('--');
+  const id = sep === -1 ? rest : rest.slice(sep + 2);
+  return /^[A-Za-z0-9]+$/.test(id) ? id : null;
 }
 
 async function uploadBackup(store, site, backupId, providerId, onProgress) {
@@ -87,12 +96,11 @@ async function downloadRemoteBackup(store, site, providerId, remoteName, onProgr
 
   const id = parseRemoteBackupId(remoteName, site) || wordpress.generateId();
   // Re-downloading a backup that still has a local record refreshes its
-  // existing archive in place; otherwise the local file takes the same
-  // "<domain>--<id>.zip" name it has in the cloud.
+  // existing archive in place; otherwise the local file takes the exact name
+  // it has in the cloud (the IPC handler already rejected path-y names).
   const existing = backups.findBackup(store, id);
   const file =
-    existing?.file ||
-    path.join(backups.getBackupsDir(site.id), backups.backupFileName(site.domain, id));
+    existing?.file || path.join(backups.getBackupsDir(site.id), remoteName);
   await provider.download(store, remoteName, file);
   if (existing) return existing;
 

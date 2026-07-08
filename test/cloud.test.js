@@ -50,15 +50,22 @@ describe('remote archive naming', () => {
   const site = { domain: 'my-blog.test' };
 
   it('round-trips the backup id through the remote name', () => {
-    const backup = { id: 'abc123xyz' };
+    const backup = { id: 'abc123xyz', createdAt: new Date(2026, 6, 7, 22, 30, 5).toISOString() };
     const name = providers.remoteNameFor(site, backup);
-    expect(name).toBe('my-blog.test--abc123xyz.zip');
+    expect(name).toBe('my-blog.test--2026-07-07_22-30-05--abc123xyz.zip');
     expect(providers.parseRemoteBackupId(name, site)).toBe('abc123xyz');
+  });
+
+  it('still parses legacy names without a timestamp', () => {
+    expect(providers.parseRemoteBackupId('my-blog.test--abc123xyz.zip', site)).toBe(
+      'abc123xyz'
+    );
   });
 
   it('rejects names for another site or malformed names', () => {
     expect(providers.parseRemoteBackupId('other.test--abc.zip', site)).toBe(null);
     expect(providers.parseRemoteBackupId('random.zip', site)).toBe(null);
+    expect(providers.parseRemoteBackupId('my-blog.test--bad id!.zip', site)).toBe(null);
   });
 
   it('sitePrefix matches only this site', () => {
