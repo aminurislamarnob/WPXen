@@ -38,10 +38,11 @@ function getStatus(store) {
   return status;
 }
 
-// Remote archives are named "<domain>--<backupId>.zip" so per-site listing is
-// a plain prefix match and the backup id survives a round trip. Pure — tested.
+// Archives are named "<domain>--<backupId>.zip" locally and remotely (one
+// shared convention — backups.backupFileName), so per-site listing is a plain
+// prefix match and the backup id survives a round trip. Pure — tested.
 function remoteNameFor(site, backup) {
-  return `${site.domain}--${backup.id}.zip`;
+  return backups.backupFileName(site.domain, backup.id);
 }
 
 function sitePrefix(site) {
@@ -86,11 +87,12 @@ async function downloadRemoteBackup(store, site, providerId, remoteName, onProgr
 
   const id = parseRemoteBackupId(remoteName, site) || wordpress.generateId();
   // Re-downloading a backup that still has a local record refreshes its
-  // existing archive in place; otherwise mint a fresh stamped filename.
+  // existing archive in place; otherwise the local file takes the same
+  // "<domain>--<id>.zip" name it has in the cloud.
   const existing = backups.findBackup(store, id);
   const file =
     existing?.file ||
-    path.join(backups.getBackupsDir(site.id), backups.backupFileName(id));
+    path.join(backups.getBackupsDir(site.id), backups.backupFileName(site.domain, id));
   await provider.download(store, remoteName, file);
   if (existing) return existing;
 

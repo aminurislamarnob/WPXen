@@ -60,17 +60,13 @@ function freeBytesAt(dir) {
 
 // ─── Create / list / delete ──────────────────────────────────────────────
 
-// Archive filename: "<local timestamp>--<backupId>.zip". The stamp makes the
-// file self-describing and chronologically sortable in Finder (colons are
-// avoided — macOS displays them as path separators); the id keeps it unique
-// and tied to its metadata record. The store's `file` path is authoritative,
-// so older `<id>.zip` archives keep working. Pure — covered by vitest.
-function backupFileName(id, date = new Date()) {
-  const p = (n) => String(n).padStart(2, '0');
-  const stamp =
-    `${date.getFullYear()}-${p(date.getMonth() + 1)}-${p(date.getDate())}` +
-    `_${p(date.getHours())}-${p(date.getMinutes())}-${p(date.getSeconds())}`;
-  return `${stamp}--${id}.zip`;
+// Archive filename: "<domain>--<backupId>.zip" — the single naming convention
+// shared with cloud archives (providers.remoteNameFor delegates here), so a
+// backup keeps the same name on disk and in Dropbox/Drive. The store's `file`
+// path is authoritative, so archives created under older names keep working.
+// Pure — covered by vitest.
+function backupFileName(domain, id) {
+  return `${domain}--${id}.zip`;
 }
 
 async function createBackup(
@@ -85,7 +81,7 @@ async function createBackup(
   }
   const id = wordpress.generateId();
   const createdAt = new Date();
-  const file = path.join(dir, backupFileName(id, createdAt));
+  const file = path.join(dir, backupFileName(site.domain, id));
   let sizeBytes = 0;
   try {
     ({ sizeBytes } = await siteops.exportSite(site, file, onProgress));

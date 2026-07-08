@@ -55,16 +55,9 @@ describe('selectBackupsToPrune', () => {
 });
 
 describe('backupFileName', () => {
-  it('embeds a sortable local timestamp and the backup id', () => {
-    const date = new Date(2026, 6, 7, 22, 30, 5); // Jul 7 2026, 22:30:05 local
-    expect(backups.backupFileName('m4p2q8r1', date)).toBe(
-      '2026-07-07_22-30-05--m4p2q8r1.zip'
-    );
-  });
-
-  it('uses only Finder-safe characters', () => {
-    expect(backups.backupFileName('abc123')).toMatch(
-      /^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}--abc123\.zip$/
+  it('is <domain>--<backupId>.zip — the same convention cloud archives use', () => {
+    expect(backups.backupFileName('my-blog.test', 'm4p2q8r1')).toBe(
+      'my-blog.test--m4p2q8r1.zip'
     );
   });
 });
