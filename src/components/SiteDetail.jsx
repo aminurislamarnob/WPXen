@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
+  Archive,
   ChevronLeft,
   ExternalLink,
   Settings,
@@ -30,6 +31,7 @@ import WpOverview from './WpOverview';
 import WpPlugins from './WpPlugins';
 import WpThemes from './WpThemes';
 import SiteLogs from './SiteLogs';
+import SiteBackups from './SiteBackups';
 import { WordPressIcon } from './icons';
 
 const NAV = [
@@ -53,6 +55,7 @@ const NAV = [
       { id: 'wp-themes', label: 'Themes' },
     ],
   },
+  { id: 'backups', label: 'Backups', icon: Archive },
   { id: 'logs', label: 'Logs', icon: FileText },
 ];
 
@@ -478,6 +481,7 @@ export default function SiteDetail({ sites, refreshSites }) {
           {active === 'wp-overview' && <WpOverview site={site} onSaved={refreshSites} />}
           {active === 'wp-plugins' && <WpPlugins site={site} onSaved={refreshSites} />}
           {active === 'wp-themes' && <WpThemes site={site} onSaved={refreshSites} />}
+          {active === 'backups' && <SiteBackups site={site} onSaved={refreshSites} />}
           {active === 'logs' && <SiteLogs site={site} />}
         </div>
       </div>

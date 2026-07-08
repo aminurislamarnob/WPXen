@@ -19,6 +19,10 @@ const VALID_EVENT_CHANNELS = [
   'site-clone-progress',
   'site-changeurl-progress',
   'blueprint-save-progress',
+  'backup-progress',
+  'restore-progress',
+  'deploy-progress',
+  'cloud-sync-progress',
 ];
 
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -49,6 +53,36 @@ contextBridge.exposeInMainWorld('electronAPI', {
   deleteBlueprint: (id) => ipcRenderer.invoke('delete-blueprint', id),
   createSiteFromBlueprint: (payload) =>
     ipcRenderer.invoke('create-site-from-blueprint', payload),
+
+  // Backups
+  listBackups: (siteId) => ipcRenderer.invoke('list-backups', siteId),
+  createBackup: (siteId, opts) => ipcRenderer.invoke('create-backup', siteId, opts),
+  restoreBackup: (siteId, backupId) =>
+    ipcRenderer.invoke('restore-backup', siteId, backupId),
+  deleteBackup: (backupId) => ipcRenderer.invoke('delete-backup', backupId),
+  revealBackup: (backupId) => ipcRenderer.invoke('reveal-backup', backupId),
+  getBackupSettings: () => ipcRenderer.invoke('get-backup-settings'),
+  setBackupSettings: (payload) => ipcRenderer.invoke('set-backup-settings', payload),
+  revealBackupsFolder: () => ipcRenderer.invoke('reveal-backups-folder'),
+  setSiteBackupConfig: (siteId, payload) =>
+    ipcRenderer.invoke('set-site-backup-config', siteId, payload),
+
+  // Git deploy
+  getGitDeployStatus: (siteId) => ipcRenderer.invoke('get-git-deploy-status', siteId),
+  configureGitDeploy: (siteId, payload) =>
+    ipcRenderer.invoke('configure-git-deploy', siteId, payload),
+  runGitDeploy: (siteId, opts) => ipcRenderer.invoke('run-git-deploy', siteId, opts),
+
+  // Cloud sync
+  getCloudStatus: () => ipcRenderer.invoke('cloud-status'),
+  cloudConnect: (providerId) => ipcRenderer.invoke('cloud-connect', providerId),
+  cloudDisconnect: (providerId) => ipcRenderer.invoke('cloud-disconnect', providerId),
+  uploadBackup: (backupId, providerId) =>
+    ipcRenderer.invoke('upload-backup', backupId, providerId),
+  listRemoteBackups: (siteId, providerId) =>
+    ipcRenderer.invoke('list-remote-backups', siteId, providerId),
+  downloadRemoteBackup: (siteId, providerId, remoteName) =>
+    ipcRenderer.invoke('download-remote-backup', siteId, providerId, remoteName),
 
   // One-click admin (magic login)
   listAdminUsers: (id) => ipcRenderer.invoke('list-admin-users', id),

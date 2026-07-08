@@ -726,6 +726,7 @@ module.exports = {
   inspectArchive,
   exportSite,
   importSite,
+  searchReplaceHost,
   cloneSite,
   changeSiteUrl,
 };

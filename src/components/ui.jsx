@@ -172,8 +172,10 @@ export function StepIndicator({ current, steps, className = '' }) {
 }
 
 // Scrolling terminal-style log panel. The last line is highlighted with a
-// spinner (in-progress); earlier lines get a green check.
-export function ProgressLog({ messages, className = '' }) {
+// spinner (in-progress); earlier lines get a green check. Pass `done` once the
+// operation has finished so the last line gets a check instead of spinning
+// forever.
+export function ProgressLog({ messages, done = false, className = '' }) {
   return (
     <div
       className={`bg-zinc-900 rounded-xl p-4 h-40 overflow-y-auto font-mono text-xs ${className}`}
@@ -183,7 +185,7 @@ export function ProgressLog({ messages, className = '' }) {
           key={i}
           className={`flex items-start gap-2 ${i === messages.length - 1 ? 'text-white' : 'text-zinc-400'}`}
         >
-          {i === messages.length - 1 ? (
+          {i === messages.length - 1 && !done ? (
             <Loader
               size={11}
               className="animate-spin mt-0.5 flex-shrink-0 text-wp-blue-light"
