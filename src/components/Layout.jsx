@@ -10,14 +10,17 @@ import {
   Search,
   ChevronLeft,
   ChevronRight,
+  Terminal,
 } from 'lucide-react';
 import logo from '../assets/logo.png';
+import AgentsSidebar from './AgentsSidebar';
 
 // System Settings-style nav: grouped items, each with its own colored tile.
 const NAV_GROUPS = [
   [
     { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard', color: 'blue' },
     { to: '/sites', icon: Globe, label: 'Sites', color: 'teal' },
+    { to: '/agents', icon: Terminal, label: 'Agents', color: 'purple' },
   ],
   [
     { to: '/services', icon: Server, label: 'Services', color: 'green' },
@@ -34,11 +37,13 @@ const TILE_COLORS = {
   indigo: 'bg-[#5856d6]',
   red: 'bg-[#ff3b30]',
   gray: 'bg-[#8e8e93]',
+  purple: 'bg-[#af52de]',
 };
 
 const PAGE_TITLES = {
   '/dashboard': 'Dashboard',
   '/sites': 'Sites',
+  '/agents': 'Agents',
   '/services': 'Services',
   '/php': 'PHP',
   '/mail': 'Mail',
@@ -55,6 +60,8 @@ export default function Layout() {
       Object.keys(PAGE_TITLES).find((p) => location.pathname.startsWith(p)) || ''
     ] || 'WPHerd';
 
+  const agentsMode = location.pathname.startsWith('/agents');
+
   const q = filter.trim().toLowerCase();
   const groups = q
     ? NAV_GROUPS.map((g) => g.filter((i) => i.label.toLowerCase().includes(q))).filter(
@@ -70,56 +77,64 @@ export default function Layout() {
         {/* Title bar drag region (hosts the traffic lights) */}
         <div className="drag-region h-12 flex-shrink-0" />
 
-        {/* Search */}
-        <div className="px-3 pb-2 no-drag">
-          <div className="relative">
-            <Search
-              size={13}
-              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500"
-            />
-            <input
-              type="text"
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-              placeholder="Search"
-              className="w-full pl-8 pr-3 py-1.5 text-[13px] bg-black/[0.06] dark:bg-white/10 border-0 rounded-full placeholder-gray-500 focus:ring-2 focus:ring-accent/40"
-            />
-          </div>
-        </div>
-
-        {/* Navigation groups */}
-        <nav className="flex-1 px-3 py-1 overflow-y-auto no-drag">
-          {groups.map((group, gi) => (
-            <div key={gi} className="space-y-1.5 mb-2 last:mb-0">
-              {group.map(({ to, icon: Icon, label, color }) => (
-                <NavLink
-                  key={to}
-                  to={to}
-                  className={({ isActive }) =>
-                    `flex items-center gap-2.5 px-2 py-[5px] rounded-md text-[13px] sidebar-item ${
-                      isActive
-                        ? 'bg-sidebar-active text-white font-medium'
-                        : 'text-gray-800 hover:bg-black/[0.05] dark:hover:bg-white/[0.07]'
-                    }`
-                  }
-                >
-                  {({ isActive }) => (
-                    <>
-                      <span
-                        className={`icon-tile w-[22px] h-[22px] ${
-                          isActive ? 'bg-white/25' : TILE_COLORS[color]
-                        }`}
-                      >
-                        <Icon size={13} strokeWidth={2.2} />
-                      </span>
-                      {label}
-                    </>
-                  )}
-                </NavLink>
-              ))}
+        {agentsMode ? (
+          // Agents mode: the sidebar becomes a Sites → providers tree with a
+          // back button, in place of the main menu.
+          <AgentsSidebar onBack={() => navigate('/sites')} />
+        ) : (
+          <>
+            {/* Search */}
+            <div className="px-3 pb-2 no-drag">
+              <div className="relative">
+                <Search
+                  size={13}
+                  className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500"
+                />
+                <input
+                  type="text"
+                  value={filter}
+                  onChange={(e) => setFilter(e.target.value)}
+                  placeholder="Search"
+                  className="w-full pl-8 pr-3 py-1.5 text-[13px] bg-black/[0.06] dark:bg-white/10 border-0 rounded-full placeholder-gray-500 focus:ring-2 focus:ring-accent/40"
+                />
+              </div>
             </div>
-          ))}
-        </nav>
+
+            {/* Navigation groups */}
+            <nav className="flex-1 px-3 py-1 overflow-y-auto no-drag">
+              {groups.map((group, gi) => (
+                <div key={gi} className="space-y-1.5 mb-2 last:mb-0">
+                  {group.map(({ to, icon: Icon, label, color }) => (
+                    <NavLink
+                      key={to}
+                      to={to}
+                      className={({ isActive }) =>
+                        `flex items-center gap-2.5 px-2 py-[5px] rounded-md text-[13px] sidebar-item ${
+                          isActive
+                            ? 'bg-sidebar-active text-white font-medium'
+                            : 'text-gray-800 hover:bg-black/[0.05] dark:hover:bg-white/[0.07]'
+                        }`
+                      }
+                    >
+                      {({ isActive }) => (
+                        <>
+                          <span
+                            className={`icon-tile w-[22px] h-[22px] ${
+                              isActive ? 'bg-white/25' : TILE_COLORS[color]
+                            }`}
+                          >
+                            <Icon size={13} strokeWidth={2.2} />
+                          </span>
+                          {label}
+                        </>
+                      )}
+                    </NavLink>
+                  ))}
+                </div>
+              ))}
+            </nav>
+          </>
+        )}
 
         {/* Footer — app logo */}
         <div className="flex items-center px-4 py-3">

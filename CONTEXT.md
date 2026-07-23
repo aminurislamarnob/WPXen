@@ -16,15 +16,15 @@ terminal scoped to a Site.
 _Avoid_: AI tool, provider, bot, assistant
 
 **Agent Launcher**:
-The feature by which WPHerd detects the Agents installed on the user's machine and
-spawns a chosen one in a terminal rooted at a Site's directory. WPHerd curates and
-launches Agents rather than offering a bare shell.
+The top-level **Agents** section of the app. Its sidebar is a tree of Sites, each
+collapsing to the Agents detected on the machine; choosing one spawns it in a
+terminal rooted at that Site's directory. WPHerd curates and launches Agents
+rather than offering a bare shell.
 _Avoid_: Terminal feature, console
 
 **Session**:
 One running Agent bound to one Site — a live pseudo-terminal (pty) hosted in the
 app's main process. At most one Session per Site; it survives the main window
 hiding to the tray and is torn down when WPHerd quits. Rendered inline in the
-Site's Agents view (embedded in the main window, Superset-style — not a separate
-window).
+Agents section's main pane (embedded, Superset-style — not a separate window).
 _Avoid_: Terminal, process, tab
