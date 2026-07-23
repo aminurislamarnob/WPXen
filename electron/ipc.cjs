@@ -1,6 +1,6 @@
 'use strict';
 
-const { ipcMain, shell, dialog, app } = require('electron');
+const { ipcMain, shell, dialog, app, BrowserWindow } = require('electron');
 const { execFile } = require('child_process');
 const crypto = require('crypto');
 const path = require('path');
@@ -39,6 +39,7 @@ const sudoers = require('./services/sudoers.cjs');
 const setup = require('./services/setup.cjs');
 const logs = require('./services/logs.cjs');
 const validation = require('./services/validation.cjs');
+const agents = require('./services/agents.cjs');
 const { humanize } = require('./services/errors.cjs');
 
 let store;
@@ -155,6 +156,37 @@ function registerHandlers(win, storeInstance) {
         win.webContents.send('service-status-update', getServiceStatus());
       }
     });
+  });
+
+  // ── Agent Launcher (see services/agents.cjs) ──────────────────────────────
+  // (findSite is declared below in this same function scope — hoisted.)
+  ipcMain.handle('agent-list', () => agents.listAgents());
+
+  ipcMain.handle('agent-status', (_e, siteId) => agents.status(siteId));
+
+  // Launch an Agent for a Site. Q10: if a Session is already live, launch()
+  // keeps it — the embedded terminal simply attaches to it.
+  ipcMain.handle('agent-launch', (_e, siteId, agentId) => {
+    const site = findSite(siteId);
+    if (!site) return { error: 'Site not found' };
+    return agents.launch({ site, agentId });
+  });
+
+  // The embedded terminal calls this once xterm is mounted; bind the sender's
+  // window to the Session and replay the ring buffer (Q9).
+  ipcMain.handle('terminal-ready', (event, siteId) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win) return { error: 'no window' };
+    return agents.attach(siteId, win);
+  });
+
+  ipcMain.on('terminal-input', (_e, siteId, data) => agents.write(siteId, data));
+  ipcMain.on('terminal-resize', (_e, siteId, cols, rows) =>
+    agents.resize(siteId, cols, rows)
+  );
+  ipcMain.handle('terminal-stop', (_e, siteId) => {
+    agents.stop(siteId);
+    return { ok: true };
   });
 
   // Heal per-site vhosts shortly after startup: regenerate each from the

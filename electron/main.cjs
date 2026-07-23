@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, dialog, screen } = require('electron');
 const path = require('path');
 
 const JsonStore = require('./store.cjs');
@@ -16,11 +16,16 @@ let store = null;
 app.dock?.hide();
 
 function createWindow() {
+  // A roomy default window (fits the embedded terminal), centered and clamped
+  // to the display so it never opens larger than the screen. Min floor matches
+  // Superset's 400×400.
+  const { width: waWidth, height: waHeight } = screen.getPrimaryDisplay().workAreaSize;
   mainWindow = new BrowserWindow({
-    width: 940,
-    height: 720,
-    minWidth: 780,
-    minHeight: 580,
+    width: Math.min(1200, waWidth),
+    height: Math.min(800, waHeight),
+    minWidth: 400,
+    minHeight: 400,
+    center: true,
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 16, y: 18 },
     // Fully transparent over the vibrancy material — the renderer paints
@@ -168,8 +173,39 @@ if (!gotLock) {
 let quitCleanupDone = false;
 app.on('before-quit', (e) => {
   if (quitCleanupDone) return;
+
+  // Q11: quitting is the one destructive moment for a Session — an Agent may be
+  // mid-edit. Confirm only when a Session is actually live, then tear it down
+  // gracefully as part of cleanup below.
+  const agents = require('./services/agents.cjs');
+  if (agents.hasActiveSessions()) {
+    const sitesById = new Map(
+      (store?.get('sites', []) || []).map((s) => [s.id, s.name])
+    );
+    const names = agents
+      .activeSiteIds()
+      .map((id) => sitesById.get(id) || id)
+      .join(', ');
+    const choice = dialog.showMessageBoxSync(mainWindow, {
+      type: 'warning',
+      buttons: ['Quit Anyway', 'Cancel'],
+      defaultId: 1,
+      cancelId: 1,
+      message: 'An agent is still running.',
+      detail: `Agents are running in: ${names}. Quitting will stop them.`,
+    });
+    if (choice === 1) {
+      e.preventDefault();
+      return;
+    }
+  }
+
   e.preventDefault();
   quitCleanupDone = true;
+
+  try {
+    agents.stopAll();
+  } catch {}
 
   // Allow the window to actually close on quit
   if (mainWindow) {

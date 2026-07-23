@@ -30,6 +30,7 @@ import WpOverview from './WpOverview';
 import WpPlugins from './WpPlugins';
 import WpThemes from './WpThemes';
 import SiteLogs from './SiteLogs';
+import AgentLauncher from './AgentLauncher';
 import { WordPressIcon } from './icons';
 
 const NAV = [
@@ -53,6 +54,7 @@ const NAV = [
       { id: 'wp-themes', label: 'Themes' },
     ],
   },
+  { id: 'agents', label: 'Agents', icon: Terminal },
   { id: 'logs', label: 'Logs', icon: FileText },
 ];
 
@@ -471,14 +473,24 @@ export default function SiteDetail({ sites, refreshSites }) {
           )}
         </nav>
 
-        <div className="flex-1 min-w-0 max-w-3xl">
-          {active === 'overview' && <Overview site={site} onSaved={refreshSites} />}
-          {active === 'wpconfig' && <WpConfigManager site={site} />}
-          {active === 'php' && <SitePhpSettings site={site} onSaved={refreshSites} />}
-          {active === 'wp-overview' && <WpOverview site={site} onSaved={refreshSites} />}
-          {active === 'wp-plugins' && <WpPlugins site={site} onSaved={refreshSites} />}
-          {active === 'wp-themes' && <WpThemes site={site} onSaved={refreshSites} />}
-          {active === 'logs' && <SiteLogs site={site} />}
+        <div className="flex-1 min-w-0">
+          {/* The Agents tab hosts a terminal, so it uses full width; every other
+              tab keeps the standard settings column. */}
+          {active === 'agents' ? (
+            <AgentLauncher site={site} />
+          ) : (
+            <div className="max-w-3xl">
+              {active === 'overview' && <Overview site={site} onSaved={refreshSites} />}
+              {active === 'wpconfig' && <WpConfigManager site={site} />}
+              {active === 'php' && <SitePhpSettings site={site} onSaved={refreshSites} />}
+              {active === 'wp-overview' && (
+                <WpOverview site={site} onSaved={refreshSites} />
+              )}
+              {active === 'wp-plugins' && <WpPlugins site={site} onSaved={refreshSites} />}
+              {active === 'wp-themes' && <WpThemes site={site} onSaved={refreshSites} />}
+              {active === 'logs' && <SiteLogs site={site} />}
+            </div>
+          )}
         </div>
       </div>
     </div>

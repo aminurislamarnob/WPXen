@@ -8,3 +8,6 @@ npm-debug.log*
 .env
 .env.local
 .vite/
+
+# Local reference checkouts (not part of the app)
+reference/

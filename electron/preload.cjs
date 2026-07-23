@@ -19,6 +19,9 @@ const VALID_EVENT_CHANNELS = [
   'site-clone-progress',
   'site-changeurl-progress',
   'blueprint-save-progress',
+  'terminal-data',
+  'terminal-replay',
+  'terminal-exit',
 ];
 
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -156,6 +159,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // System info
   getSystemInfo: () => ipcRenderer.invoke('get-system-info'),
+
+  // Agent Launcher / Terminal
+  listAgents: () => ipcRenderer.invoke('agent-list'),
+  agentStatus: (siteId) => ipcRenderer.invoke('agent-status', siteId),
+  launchAgent: (siteId, agentId) =>
+    ipcRenderer.invoke('agent-launch', siteId, agentId),
+  terminalReady: (siteId) => ipcRenderer.invoke('terminal-ready', siteId),
+  terminalInput: (siteId, data) => ipcRenderer.send('terminal-input', siteId, data),
+  terminalResize: (siteId, cols, rows) =>
+    ipcRenderer.send('terminal-resize', siteId, cols, rows),
+  terminalStop: (siteId) => ipcRenderer.invoke('terminal-stop', siteId),
 
   // IPC Events (renderer listening to main)
   on: (channel, callback) => {
