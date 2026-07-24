@@ -111,6 +111,23 @@ export default function AgentsPane() {
     });
   };
 
+  // Respawn the same Agent in place after its shell exited: reap the dead
+  // session, launch a fresh one, and swap it into the same tab position.
+  const respawn = async (sessionId) => {
+    const tab = tabs.find((t) => t.sessionId === sessionId);
+    if (!tab) return;
+    const res = await window.electronAPI.launchAgent(siteId, tab.agentId);
+    if (res?.error) return setError(res.error);
+    if (!res?.sessionId) return;
+    window.electronAPI.terminalStop(sessionId);
+    setTabs((prev) =>
+      prev.map((t) =>
+        t.sessionId === sessionId ? { ...t, sessionId: res.sessionId } : t
+      )
+    );
+    setActiveTab(res.sessionId);
+  };
+
   // Open a plain (editable) file tab, keyed by its absolute path.
   const openFile = (entry) => {
     const key = entry.path;
@@ -289,6 +306,7 @@ export default function AgentsPane() {
                 key={activeTab}
                 sessionId={activeTab}
                 onExited={() => closeTab(activeTab)}
+                onRestart={() => respawn(activeTab)}
               />
             ) : (
               <div className="h-full flex flex-col items-center justify-center text-center">

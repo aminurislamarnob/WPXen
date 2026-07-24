@@ -170,6 +170,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.send('terminal-input', sessionId, data),
   terminalResize: (sessionId, cols, rows) =>
     ipcRenderer.send('terminal-resize', sessionId, cols, rows),
+  terminalClear: (sessionId) => ipcRenderer.send('terminal-clear', sessionId),
   terminalStop: (sessionId) => ipcRenderer.invoke('terminal-stop', sessionId),
   listDirectory: (rootPath, dirPath) =>
     ipcRenderer.invoke('list-directory', rootPath, dirPath),

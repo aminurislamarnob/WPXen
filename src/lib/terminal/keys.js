@@ -21,13 +21,7 @@ function shiftOnly(e) {
 // Cmd+A → select all terminal contents (VS Code's mac binding), instead of
 // letting ^A reach the shell.
 export function isSelectAllChord(e) {
-  return (
-    e.code === 'KeyA' &&
-    e.metaKey &&
-    !e.ctrlKey &&
-    !e.altKey &&
-    !e.shiftKey
-  );
+  return e.code === 'KeyA' && e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey;
 }
 
 // Translate Mac Cmd/Option arrow, backspace, and newline chords into the byte
@@ -94,7 +88,5 @@ export function isNonTextPaste(e) {
 // each in single quotes, escaping embedded single quotes as '\'' , then joins
 // with spaces. (Used by the terminal drag-and-drop handler in Phase 3.)
 export function shellEscape(paths) {
-  return paths
-    .map((p) => `'${String(p).replace(/'/g, "'\\''")}'`)
-    .join(' ');
+  return paths.map((p) => `'${String(p).replace(/'/g, "'\\''")}'`).join(' ');
 }
