@@ -123,7 +123,7 @@ export default function App() {
           <Route path="sites" element={<Sites {...sharedProps} />} />
           <Route path="sites/:id" element={<SiteDetail {...sharedProps} />} />
           <Route path="agents" element={<AgentsPane />} />
-          <Route path="agents/:siteId/:agentId" element={<AgentsPane />} />
+          <Route path="agents/:siteId" element={<AgentsPane />} />
           <Route path="services" element={<Services {...sharedProps} />} />
           <Route path="php" element={<PHPVersions {...sharedProps} />} />
           <Route path="mail" element={<Mail {...sharedProps} />} />

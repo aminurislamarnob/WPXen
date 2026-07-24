@@ -3,12 +3,11 @@ import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 
-// Embedded terminal pane (Q4, revised: inline in the main window, Superset-style).
-// Attaches to the main-process Session for `siteId`, replays the ring buffer,
-// then streams live. Fills its parent, which sets the height.
-export default function Terminal({ siteId, agentId, onExited }) {
+// Embedded terminal pane bound to a single main-process Session (by sessionId).
+// Replays the ring buffer on attach, then streams live. Fills its parent, which
+// sets the height.
+export default function Terminal({ sessionId, onExited }) {
   const hostRef = useRef(null);
-  const termRef = useRef(null);
   const [exit, setExit] = useState(null); // { code } once the Session ends
 
   useEffect(() => {
@@ -24,32 +23,31 @@ export default function Terminal({ siteId, agentId, onExited }) {
     term.loadAddon(fit);
     term.open(hostRef.current);
     fit.fit();
-    termRef.current = term;
 
     const api = window.electronAPI;
-    const onData = term.onData((data) => api.terminalInput(siteId, data));
+    const onData = term.onData((data) => api.terminalInput(sessionId, data));
 
     api.on('terminal-replay', (msg) => {
-      if (msg.siteId && msg.siteId !== siteId) return;
+      if (msg.sessionId !== sessionId) return;
       if (msg.data) term.write(msg.data);
       if (msg.exited) setExit({ code: null });
       fit.fit();
-      api.terminalResize(siteId, term.cols, term.rows);
+      api.terminalResize(sessionId, term.cols, term.rows);
     });
     api.on('terminal-data', (msg) => {
-      if (!msg.siteId || msg.siteId === siteId) term.write(msg.data);
+      if (msg.sessionId === sessionId) term.write(msg.data);
     });
     api.on('terminal-exit', (msg) => {
-      if (!msg.siteId || msg.siteId === siteId) setExit({ code: msg.code });
+      if (msg.sessionId === sessionId) setExit({ code: msg.code });
     });
 
     // Attach: main binds this window to the Session and replays the buffer.
-    api.terminalReady(siteId);
+    api.terminalReady(sessionId);
     term.focus();
 
     const onResize = () => {
       fit.fit();
-      api.terminalResize(siteId, term.cols, term.rows);
+      api.terminalResize(sessionId, term.cols, term.rows);
     };
     const ro = new ResizeObserver(onResize);
     ro.observe(hostRef.current);
@@ -62,16 +60,7 @@ export default function Terminal({ siteId, agentId, onExited }) {
       api.off('terminal-exit');
       term.dispose();
     };
-  }, [siteId]);
-
-  const relaunch = async () => {
-    const res = await window.electronAPI.launchAgent(siteId, agentId);
-    if (res?.error) return;
-    termRef.current?.reset();
-    setExit(null);
-    window.electronAPI.terminalReady(siteId);
-    termRef.current?.focus();
-  };
+  }, [sessionId]);
 
   return (
     <div className="relative h-full w-full rounded-xl overflow-hidden bg-[#1c1c1e]">
@@ -82,15 +71,10 @@ export default function Terminal({ siteId, agentId, onExited }) {
             <p className="text-sm font-medium text-gray-900">Session ended</p>
             <p className="mt-1 text-xs text-gray-500">
               {exit.code == null
-                ? 'The agent is no longer running.'
-                : `The agent exited (code ${exit.code}).`}
+                ? 'The shell is no longer running.'
+                : `The shell exited (code ${exit.code}).`}
             </p>
             <div className="mt-4 flex justify-center gap-2">
-              {agentId && (
-                <button className="btn btn-primary" onClick={relaunch}>
-                  Relaunch
-                </button>
-              )}
               <button className="btn btn-secondary" onClick={onExited}>
                 Close
               </button>

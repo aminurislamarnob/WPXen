@@ -24,7 +24,10 @@ _Avoid_: Terminal feature, console
 
 **Session**:
 One running Agent bound to one Site — a live pseudo-terminal (pty) hosted in the
-app's main process. At most one Session per Site; it survives the main window
-hiding to the tray and is torn down when WPHerd quits. Rendered inline in the
-Agents section's main pane (embedded, Superset-style — not a separate window).
-_Avoid_: Terminal, process, tab
+app's main process, identified by a unique sessionId. A Site may host **many**
+concurrent Sessions (any mix of Agents, including several of the same provider);
+each is a terminal tab in the Agents pane. A Session survives the main window
+hiding to the tray and is torn down when its shell exits or WPHerd quits.
+Rendered inline in the Agents section's main pane (embedded, Superset-style —
+not a separate window).
+_Avoid_: Terminal, process

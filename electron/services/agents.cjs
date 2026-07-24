@@ -133,36 +133,45 @@ function listAgents() {
 }
 
 // ── Sessions ─────────────────────────────────────────────────────────────────
+// A Site may host MANY concurrent Sessions (any mix of Agents, incl. several of
+// the same provider). Sessions are therefore keyed by a unique sessionId, not by
+// siteId; each carries its own pty + ring buffer.
+const { randomUUID } = require('crypto');
 const MAX_BUFFER = 1024 * 1024; // ~1 MB ring buffer (Q9)
-const sessions = new Map(); // siteId -> session
+const sessions = new Map(); // sessionId -> session
 
-function getSession(siteId) {
-  return sessions.get(siteId) || null;
+function getSession(sessionId) {
+  return sessions.get(sessionId) || null;
 }
 
-function status(siteId) {
-  const s = sessions.get(siteId);
-  return s && !s.exited
-    ? { running: true, agentId: s.agentId, agentName: s.agentName }
-    : { running: false };
-}
-
-// Launch an Agent for a Site. Idempotent-ish: if a live Session already exists we
-// keep it (the caller focuses its window). Returns { ok } or { error }.
-function launch({ site, agentId }) {
-  const existing = sessions.get(site.id);
-  if (existing && !existing.exited) {
-    return { ok: true, alreadyRunning: true };
+// The live Sessions for a Site, oldest first — used to restore terminal tabs.
+function listSessions(siteId) {
+  const out = [];
+  for (const s of sessions.values()) {
+    if (s.siteId === siteId && !s.exited) {
+      out.push({ sessionId: s.sessionId, agentId: s.agentId, agentName: s.agentName });
+    }
   }
+  return out;
+}
 
+// Launch an Agent for a Site. Always creates a NEW Session so multiple can run
+// per directory. Returns { ok, sessionId } or { error }.
+function launch({ site, agentId }) {
   const agent = listAgents().find((a) => a.id === agentId);
   if (!agent) return { error: `Unknown agent: ${agentId}` };
   if (!agent.detected) return { error: `${agent.name} is not installed` };
 
+  const sessionId = randomUUID();
   const env = resolveShellEnv();
+  // Spawn the user's interactive login SHELL — not the agent binary directly —
+  // and type the agent command into it. Exiting the agent CLI then drops back to
+  // a normal shell prompt (like Superset), and the Session only ends when the
+  // shell itself exits. `-il` sources the user's rc files.
+  const shell = getUserShell();
   let term;
   try {
-    term = pty.spawn(agent.path, [], {
+    term = pty.spawn(shell, ['-il'], {
       name: 'xterm-256color',
       cols: 80,
       rows: 24,
@@ -174,6 +183,7 @@ function launch({ site, agentId }) {
   }
 
   const session = {
+    sessionId,
     siteId: site.id,
     agentId: agent.id,
     agentName: agent.name,
@@ -181,17 +191,36 @@ function launch({ site, agentId }) {
     buffer: '',
     window: null,
     exited: false,
+    started: false,
   };
-  sessions.set(site.id, session);
+  sessions.set(sessionId, session);
+
+  // Run the agent once the shell is ready: wait a short settle window after the
+  // first output (so rc files that print during init don't swallow the typed
+  // command), with an absolute fallback if the shell prints nothing first.
+  let settleTimer = null;
+  const runAgent = () => {
+    if (session.started || session.exited) return;
+    session.started = true;
+    try {
+      term.write(`${agent.cmd}\r`);
+    } catch {}
+  };
+  const scheduleRun = () => {
+    if (session.started || settleTimer) return;
+    settleTimer = setTimeout(runAgent, 150);
+  };
+  setTimeout(runAgent, 1200); // fallback: no output before the prompt
 
   term.onData((data) => {
+    scheduleRun();
     session.buffer += data;
     if (session.buffer.length > MAX_BUFFER) {
       session.buffer = session.buffer.slice(session.buffer.length - MAX_BUFFER);
     }
     const win = session.window;
     if (win && !win.isDestroyed()) {
-      win.webContents.send('terminal-data', { siteId: site.id, data });
+      win.webContents.send('terminal-data', { sessionId, data });
     }
   });
 
@@ -199,35 +228,35 @@ function launch({ site, agentId }) {
     session.exited = true;
     const win = session.window;
     if (win && !win.isDestroyed()) {
-      win.webContents.send('terminal-exit', { siteId: site.id, code: exitCode });
+      win.webContents.send('terminal-exit', { sessionId, code: exitCode });
     }
   });
 
-  return { ok: true };
+  return { ok: true, sessionId };
 }
 
 // Bind a Terminal Window to its Session and replay the ring buffer (Q9). Setting
 // the window ref and sending replay happen synchronously, so no onData chunk can
 // interleave between them — live chunks that follow arrive after the replay.
-function attach(siteId, win) {
-  const session = sessions.get(siteId);
+function attach(sessionId, win) {
+  const session = sessions.get(sessionId);
   if (!session) return { error: 'no session' };
   session.window = win;
   win.webContents.send('terminal-replay', {
-    siteId,
+    sessionId,
     data: session.buffer,
     exited: session.exited,
   });
   return { ok: true };
 }
 
-function write(siteId, data) {
-  const session = sessions.get(siteId);
+function write(sessionId, data) {
+  const session = sessions.get(sessionId);
   if (session && !session.exited) session.pty.write(data);
 }
 
-function resize(siteId, cols, rows) {
-  const session = sessions.get(siteId);
+function resize(sessionId, cols, rows) {
+  const session = sessions.get(sessionId);
   if (session && !session.exited && cols > 0 && rows > 0) {
     try {
       session.pty.resize(cols, rows);
@@ -236,8 +265,8 @@ function resize(siteId, cols, rows) {
 }
 
 // Graceful stop: SIGTERM, escalate to SIGKILL after a grace period (Q11).
-function stop(siteId) {
-  const session = sessions.get(siteId);
+function stop(sessionId) {
+  const session = sessions.get(sessionId);
   if (!session) return;
   if (!session.exited) {
     try {
@@ -252,7 +281,7 @@ function stop(siteId) {
       }
     }, 3000);
   }
-  sessions.delete(siteId);
+  sessions.delete(sessionId);
 }
 
 function hasActiveSessions() {
@@ -260,20 +289,20 @@ function hasActiveSessions() {
   return false;
 }
 
-// Names of Sites with a live Session — for the quit-confirmation dialog (Q11).
+// Distinct Site ids that have a live Session — for the quit-confirmation dialog.
 function activeSiteIds() {
-  const ids = [];
-  for (const [siteId, s] of sessions.entries()) if (!s.exited) ids.push(siteId);
-  return ids;
+  const ids = new Set();
+  for (const s of sessions.values()) if (!s.exited) ids.add(s.siteId);
+  return [...ids];
 }
 
 function stopAll() {
-  for (const siteId of [...sessions.keys()]) stop(siteId);
+  for (const sessionId of [...sessions.keys()]) stop(sessionId);
 }
 
 module.exports = {
   listAgents,
-  status,
+  listSessions,
   launch,
   attach,
   write,

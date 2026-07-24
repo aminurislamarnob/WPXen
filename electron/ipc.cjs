@@ -163,10 +163,11 @@ function registerHandlers(win, storeInstance) {
   // (findSite is declared below in this same function scope — hoisted.)
   ipcMain.handle('agent-list', () => agents.listAgents());
 
-  ipcMain.handle('agent-status', (_e, siteId) => agents.status(siteId));
+  // The live Sessions for a Site — the renderer restores its terminal tabs.
+  ipcMain.handle('agent-sessions', (_e, siteId) => agents.listSessions(siteId));
 
-  // Launch an Agent for a Site. Q10: if a Session is already live, launch()
-  // keeps it — the embedded terminal simply attaches to it.
+  // Launch an Agent for a Site. Always spawns a NEW Session (many per Site are
+  // allowed), returning its sessionId for the renderer to attach a terminal to.
   ipcMain.handle('agent-launch', (_e, siteId, agentId) => {
     const site = findSite(siteId);
     if (!site) return { error: 'Site not found' };
@@ -175,18 +176,20 @@ function registerHandlers(win, storeInstance) {
 
   // The embedded terminal calls this once xterm is mounted; bind the sender's
   // window to the Session and replay the ring buffer (Q9).
-  ipcMain.handle('terminal-ready', (event, siteId) => {
+  ipcMain.handle('terminal-ready', (event, sessionId) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (!win) return { error: 'no window' };
-    return agents.attach(siteId, win);
+    return agents.attach(sessionId, win);
   });
 
-  ipcMain.on('terminal-input', (_e, siteId, data) => agents.write(siteId, data));
-  ipcMain.on('terminal-resize', (_e, siteId, cols, rows) =>
-    agents.resize(siteId, cols, rows)
+  ipcMain.on('terminal-input', (_e, sessionId, data) =>
+    agents.write(sessionId, data)
   );
-  ipcMain.handle('terminal-stop', (_e, siteId) => {
-    agents.stop(siteId);
+  ipcMain.on('terminal-resize', (_e, sessionId, cols, rows) =>
+    agents.resize(sessionId, cols, rows)
+  );
+  ipcMain.handle('terminal-stop', (_e, sessionId) => {
+    agents.stop(sessionId);
     return { ok: true };
   });
 

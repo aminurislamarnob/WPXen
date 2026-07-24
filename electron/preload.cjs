@@ -162,14 +162,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Agent Launcher / Terminal
   listAgents: () => ipcRenderer.invoke('agent-list'),
-  agentStatus: (siteId) => ipcRenderer.invoke('agent-status', siteId),
+  listSessions: (siteId) => ipcRenderer.invoke('agent-sessions', siteId),
   launchAgent: (siteId, agentId) =>
     ipcRenderer.invoke('agent-launch', siteId, agentId),
-  terminalReady: (siteId) => ipcRenderer.invoke('terminal-ready', siteId),
-  terminalInput: (siteId, data) => ipcRenderer.send('terminal-input', siteId, data),
-  terminalResize: (siteId, cols, rows) =>
-    ipcRenderer.send('terminal-resize', siteId, cols, rows),
-  terminalStop: (siteId) => ipcRenderer.invoke('terminal-stop', siteId),
+  terminalReady: (sessionId) => ipcRenderer.invoke('terminal-ready', sessionId),
+  terminalInput: (sessionId, data) =>
+    ipcRenderer.send('terminal-input', sessionId, data),
+  terminalResize: (sessionId, cols, rows) =>
+    ipcRenderer.send('terminal-resize', sessionId, cols, rows),
+  terminalStop: (sessionId) => ipcRenderer.invoke('terminal-stop', sessionId),
   listDirectory: (rootPath, dirPath) =>
     ipcRenderer.invoke('list-directory', rootPath, dirPath),
   openFilePath: (filePath) => ipcRenderer.invoke('open-file-path', filePath),

@@ -9,11 +9,10 @@ export default function AgentsSidebar({ onBack }) {
   const navigate = useNavigate();
   const location = useLocation();
 
-  // Active site/agent parsed from the path (Layout renders this outside the
-  // matched route, so useParams isn't available here).
-  const m = location.pathname.match(/^\/agents\/([^/]+)(?:\/([^/]+))?/);
+  // Active site parsed from the path (Layout renders this outside the matched
+  // route, so useParams isn't available here).
+  const m = location.pathname.match(/^\/agents\/([^/]+)/);
   const activeSite = m?.[1] ? decodeURIComponent(m[1]) : null;
-  const activeAgent = m?.[2] ? decodeURIComponent(m[2]) : null;
 
   const [sites, setSites] = useState([]);
   const [agents, setAgents] = useState([]);
@@ -79,26 +78,26 @@ export default function AgentsSidebar({ onBack }) {
               {isOpen && (
                 <div className="ml-[18px] mt-0.5 space-y-0.5 border-l border-black/[0.06] dark:border-white/[0.08] pl-2">
                   {agents.map((agent) => {
-                    const isActive =
-                      activeSite === site.id && activeAgent === agent.id;
+                    // Each click spawns a NEW Session (many per Site allowed);
+                    // the pane reads spawn+nonce from navigation state.
                     return (
                       <button
                         key={agent.id}
                         disabled={!agent.detected}
                         title={
-                          agent.detected ? '' : `Not installed · ${agent.install}`
+                          agent.detected
+                            ? 'Open a new session'
+                            : `Not installed · ${agent.install}`
                         }
                         onClick={() =>
-                          navigate(
-                            `/agents/${encodeURIComponent(site.id)}/${agent.id}`
-                          )
+                          navigate(`/agents/${encodeURIComponent(site.id)}`, {
+                            state: { spawn: agent.id, nonce: Date.now() },
+                          })
                         }
                         className={`w-full flex items-center gap-1.5 px-2 py-[5px] rounded-md text-[13px] ${
-                          isActive
-                            ? 'bg-sidebar-active text-white font-medium'
-                            : agent.detected
-                              ? 'text-gray-700 hover:bg-black/[0.05] dark:hover:bg-white/[0.07]'
-                              : 'text-gray-400 cursor-not-allowed'
+                          agent.detected
+                            ? 'text-gray-700 hover:bg-black/[0.05] dark:hover:bg-white/[0.07]'
+                            : 'text-gray-400 cursor-not-allowed'
                         }`}
                       >
                         <Terminal size={12} strokeWidth={2.2} className="flex-shrink-0" />
