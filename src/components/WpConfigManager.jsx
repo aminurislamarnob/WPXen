@@ -124,7 +124,7 @@ export default function WpConfigManager({ site }) {
           <Loader size={22} className="animate-spin text-highlight" />
         </div>
       ) : (
-        <div className="settings-card divide-y divide-gray-100">
+        <div className="settings-card divide-y divide-border">
           {schema.map((setting) => {
             const blocked = setting.dependsOn && !draft[setting.dependsOn];
             const depLabel =

@@ -78,7 +78,7 @@ function SettingGroup({ setting, versions, onSaveOne, onSaveAll }) {
           {versions.map((v) => (
             <div
               key={v.version}
-              className="flex items-center justify-between px-4 py-2.5 border-b border-gray-50 last:border-b-0"
+              className="flex items-center justify-between px-4 py-2.5 border-b border-border last:border-b-0"
             >
               <span className="text-sm text-foreground font-mono">{v.version}</span>
               <SettingInput

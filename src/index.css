@@ -54,20 +54,6 @@
   --status-error: 239 68 68;
 
   --radius: 10px;
-
-  /* Migration shim: the gray ramp inverts in dark mode so gray-900 is always
-     "primary text" and gray-50 always "subtle fill". Deprecated for new code —
-     prefer foreground / muted-foreground / muted. */
-  --gray-50: 247 247 247;
-  --gray-100: 240 240 240;
-  --gray-200: 231 231 231;
-  --gray-300: 209 209 209;
-  --gray-400: 161 161 161;
-  --gray-500: 130 130 130;
-  --gray-600: 95 95 95;
-  --gray-700: 70 70 70;
-  --gray-800: 52 52 52;
-  --gray-900: 37 37 37;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -106,18 +92,6 @@
     --highlight-foreground: 255 255 255;
     --highlight-match: rgba(10, 132, 255, 0.22);
     --highlight-active: rgba(10, 132, 255, 0.45);
-
-    /* Migration shim — warm ramp derived from the ember neutrals */
-    --gray-50: 32 30 28;
-    --gray-100: 42 40 39;
-    --gray-200: 55 52 50;
-    --gray-300: 70 67 65;
-    --gray-400: 122 119 117;
-    --gray-500: 150 147 145;
-    --gray-600: 168 165 163;
-    --gray-700: 198 195 193;
-    --gray-800: 220 218 216;
-    --gray-900: 234 232 230;
   }
 }
 

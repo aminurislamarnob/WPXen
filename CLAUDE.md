@@ -101,8 +101,8 @@ variable in `src/index.css`, exposed to Tailwind in `tailwind.config.js` as
 backwards is silent — it just renders the wrong color.
 
 Radius scale is driven by `--radius: 10px`: `rounded-sm` 6px, `md` 8px, `lg`
-10px, `xl` 14px. `text-gray-*` / `surface-*` / `wp-*` still resolve on-palette
-but are **deprecated migration shims** — new code uses the semantic tokens.
+10px, `xl` 14px. The old `gray-*` / `surface-*` / `wp-*` palettes are **gone**
+— those utilities no longer compile; use the semantic tokens.
 
 **Buttons.** All shape/size lives in the base `.btn` class (`src/index.css`):
 `rounded-md`, `h-8`, `text-[13px]`, `px-3`, `gap-1.5` for icon+label spacing.

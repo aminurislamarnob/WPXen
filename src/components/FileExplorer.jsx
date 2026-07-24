@@ -36,7 +36,8 @@ const STATUS_DOT = {
   C: { cls: 'bg-highlight/10', label: 'Copied' },
   '?': { cls: 'bg-status-running/10', label: 'Untracked' },
 };
-const statusDot = (s) => STATUS_DOT[s] || { cls: 'bg-gray-400', label: s || 'Changed' };
+const statusDot = (s) =>
+  STATUS_DOT[s] || { cls: 'bg-muted-foreground', label: s || 'Changed' };
 
 // Filename tint for git-modified entries in the Files tree (VS Code style).
 const NAME_TINT = {

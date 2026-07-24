@@ -6,8 +6,8 @@
 >
 > - `wp.*` Tailwind colors and `boxShadow.card*` were kept as **aliases onto the
 >   new tokens** through Phase 1 rather than deleted immediately, so the app
->   stayed usable between phases. `wp.*` still exists as a deprecated shim;
->   `shadow-card*` is gone (zero call sites remain).
+>   stayed usable between phases. Once the sweep reached zero call sites, the
+>   `gray.*` / `surface.*` / `wp.*` shims and `shadow-card*` were all deleted.
 > - All component classes in `index.css` were moved into `@layer components` so
 >   call-site utilities reliably beat them (`.panel` setting `rounded-lg` would
 >   otherwise silently override a call-site `rounded-*`).
@@ -59,20 +59,20 @@ Source: `apps/desktop/src/renderer/globals.css`, `apps/desktop/src/shared/themes
 
 Warm, slightly reddish neutrals — this is the signature look:
 
-| Token | Value | Role |
-|---|---|---|
-| background | `#151110` | window/app background |
-| foreground | `#eae8e6` | primary text (warm off-white) |
-| card / popover | `#201e1c` | raised surfaces |
-| secondary / muted / accent / border / input | `#2a2827` | fills, borders |
-| muted-foreground | `#a8a5a3` | secondary text |
-| tertiary | `#1a1716` | panel/toolbar bg (also sidebar) |
-| tertiary-active | `#252220` | active toolbar / sidebar hover |
-| primary | `#eae8e6` (fg on it: `#151110`) | **monochrome** primary buttons |
-| destructive | `#cc4444` (fg `#ffcccc`) | danger |
-| ring | `#3a3837` | focus rings |
-| highlight | `#e07850` | brand ember orange (cursor, active accents, sidebar-primary) |
-| chart-1..5 | `#e07850 #50a878 #d4a84b #7b68ee #dc6b6b` | data colors |
+| Token                                       | Value                                     | Role                                                         |
+| ------------------------------------------- | ----------------------------------------- | ------------------------------------------------------------ |
+| background                                  | `#151110`                                 | window/app background                                        |
+| foreground                                  | `#eae8e6`                                 | primary text (warm off-white)                                |
+| card / popover                              | `#201e1c`                                 | raised surfaces                                              |
+| secondary / muted / accent / border / input | `#2a2827`                                 | fills, borders                                               |
+| muted-foreground                            | `#a8a5a3`                                 | secondary text                                               |
+| tertiary                                    | `#1a1716`                                 | panel/toolbar bg (also sidebar)                              |
+| tertiary-active                             | `#252220`                                 | active toolbar / sidebar hover                               |
+| primary                                     | `#eae8e6` (fg on it: `#151110`)           | **monochrome** primary buttons                               |
+| destructive                                 | `#cc4444` (fg `#ffcccc`)                  | danger                                                       |
+| ring                                        | `#3a3837`                                 | focus rings                                                  |
+| highlight                                   | `#e07850`                                 | brand ember orange (cursor, active accents, sidebar-primary) |
+| chart-1..5                                  | `#e07850 #50a878 #d4a84b #7b68ee #dc6b6b` | data colors                                                  |
 
 Light theme (`built-in/light.ts`): pure neutral oklch — `background oklch(1 0 0)`,
 `foreground oklch(0.145 0 0)`, `card/secondary/muted oklch(0.97 0 0)`,
@@ -81,7 +81,7 @@ Light theme (`built-in/light.ts`): pure neutral oklch — `background oklch(1 0 
 hue `oklch(0.95 0.003 40)`, highlight `oklch(0.646 0.222 41.116)` (same orange family).
 
 Key insight: **primary actions are monochrome** (near-white button on dark,
-near-black on light); the ember orange is an *accent*, used for the terminal
+near-black on light); the ember orange is an _accent_, used for the terminal
 cursor, selection/search tints, brand moments — not for every button.
 
 ### 1.3 Surfaces & cards
@@ -116,7 +116,7 @@ cursor, selection/search tints, brand moments — not for every button.
   `rounded-[7px] px-2 py-1 text-sm font-medium`, active
   `bg-background shadow-sm` (dark: `bg-input/30 border-input`).
 - **Tooltip**: `bg-foreground text-background rounded-md px-3 py-1.5 text-xs`
-  + 45°-rotated arrow; `<Kbd>` inside tooltips at `bg-background/20`.
+  - 45°-rotated arrow; `<Kbd>` inside tooltips at `bg-background/20`.
 - **Kbd**: `bg-muted text-muted-foreground h-5 min-w-5 rounded-sm px-1 text-xs font-medium`.
 - **Dialog**: overlay `bg-black/50`; content
   `bg-background rounded-lg border p-6 shadow-lg max-w-lg`, zoom/fade animations.
@@ -133,7 +133,7 @@ cursor, selection/search tints, brand moments — not for every button.
 - **UI font:** system sans (Tailwind default stack) — no bundled UI font.
 - **Terminal font** (`renderer/lib/terminal/appearance/index.ts`):
   `"JetBrains Mono", "JetBrainsMono Nerd Font", "MesloLGM Nerd Font", …,
-  "Menlo", "Monaco", "Courier New", monospace` at **14px**, with a
+"Menlo", "Monaco", "Courier New", monospace` at **14px**, with a
   monospace-validation guard.
 - **Code editor font** (`CodeEditor/constants.ts`):
   `ui-monospace, Menlo, Consolas, Liberation Mono, monospace` at **13px**,
@@ -198,9 +198,9 @@ Editor theme is **derived from the app theme**:
    accents, the active sidebar pill, and toggles. Primary buttons follow
    Superset's monochrome `default` variant; if blue primaries are preferred
    later, it's a one-line swap (`.btn-primary` → `bg-highlight
-   text-highlight-foreground`).
-   ⚠️ **Semantic trap:** in the new token set `--accent` means *neutral hover
-   fill* (shadcn semantics), but in today's code `accent` means *blue*. Every
+text-highlight-foreground`).
+   ⚠️ **Semantic trap:** in the new token set `--accent` means _neutral hover
+   fill_ (shadcn semantics), but in today's code `accent` means _blue_. Every
    existing `bg-accent` / `ring-accent` / `text-accent` call site must be
    re-pointed to `highlight` during the sweep, or it silently turns gray.
    Grep `accent` early and track the list.
@@ -208,7 +208,7 @@ Editor theme is **derived from the app theme**:
    exactly as today — that's a deliberate WPHerd identity carve-out from
    Superset's all-monochrome iconography. `IconTile` stays a supported
    primitive (sidebar, PageHero, settings rows keep their tiles).
-5. **No shadcn/ui dependency.** We port shadcn's *styling recipes* (which
+5. **No shadcn/ui dependency.** We port shadcn's _styling recipes_ (which
    Superset uses) into WPHerd's existing primitives (`ui.jsx` + `.btn-*` /
    card classes). Do not add Radix, cva, clsx, or tailwind-merge.
 6. **Keep the existing component seam:** pages keep composing `Button`, `Card`,
@@ -257,39 +257,39 @@ media query. Convert Superset's oklch light values to their RGB equivalents:
 
   /* Superset semantic palette — light */
   --background: 255 255 255;
-  --foreground: 37 37 37;        /* oklch(.145) */
-  --card: 247 247 247;           /* oklch(.97) */
+  --foreground: 37 37 37; /* oklch(.145) */
+  --card: 247 247 247; /* oklch(.97) */
   --card-foreground: 37 37 37;
   --popover: 255 255 255;
   --popover-foreground: 37 37 37;
-  --primary: 52 52 52;           /* oklch(.205) */
+  --primary: 52 52 52; /* oklch(.205) */
   --primary-foreground: 251 251 251;
   --secondary: 247 247 247;
   --secondary-foreground: 52 52 52;
   --muted: 247 247 247;
   --muted-foreground: 130 130 130; /* oklch(.556) */
-  --accent: 236 236 236;         /* oklch(.93) — hover fill */
+  --accent: 236 236 236; /* oklch(.93) — hover fill */
   --accent-foreground: 52 52 52;
-  --tertiary: 240 238 237;       /* oklch(.95 .003 40) — toolbars/wells */
+  --tertiary: 240 238 237; /* oklch(.95 .003 40) — toolbars/wells */
   --tertiary-active: 226 223 221;
   --destructive: 220 38 38;
   --destructive-foreground: 251 251 251;
-  --border: 231 231 231;         /* oklch(.922) */
+  --border: 231 231 231; /* oklch(.922) */
   --input: 231 231 231;
-  --ring: 178 178 178;           /* oklch(.708) */
-  --sidebar: 250 250 250;        /* oklch(.985) */
+  --ring: 178 178 178; /* oklch(.708) */
+  --sidebar: 250 250 250; /* oklch(.985) */
   --sidebar-foreground: 37 37 37;
   --sidebar-accent: 240 238 237; /* hover/active fill */
   --sidebar-border: 231 231 231;
-  --highlight: 10 96 255;        /* WPHerd blue (kept) */
+  --highlight: 10 96 255; /* WPHerd blue (kept) */
   --highlight-foreground: 255 255 255;
-  --highlight-match: rgba(255, 211, 61, 0.35);   /* search: yellow reads best in light */
+  --highlight-match: rgba(255, 211, 61, 0.35); /* search: yellow reads best in light */
   --highlight-active: rgba(10, 96, 255, 0.35);
 
   /* Status */
-  --status-running: 16 185 129;   /* #10b981 */
-  --status-warning: 245 158 11;   /* #f59e0b */
-  --status-error: 239 68 68;      /* #ef4444 */
+  --status-running: 16 185 129; /* #10b981 */
+  --status-warning: 245 158 11; /* #f59e0b */
+  --status-error: 239 68 68; /* #ef4444 */
 
   --radius: 10px;
 
@@ -305,9 +305,9 @@ media query. Convert Superset's oklch light values to their RGB equivalents:
   --gray-700: 70 70 70;
   --gray-800: 52 52 52;
   --gray-900: 37 37 37;
-  --surface: 255 255 255;         /* → background */
-  --surface-card: 247 247 247;    /* → card */
-  --surface-border: 231 231 231;  /* → border */
+  --surface: 255 255 255; /* → background */
+  --surface-card: 247 247 247; /* → card */
+  --surface-border: 231 231 231; /* → border */
   --surface-hairline: 235 235 235;
 }
 
@@ -316,32 +316,32 @@ media query. Convert Superset's oklch light values to their RGB equivalents:
     color-scheme: dark;
 
     /* ember */
-    --background: 21 17 16;        /* #151110 */
-    --foreground: 234 232 230;     /* #eae8e6 */
-    --card: 32 30 28;              /* #201e1c */
+    --background: 21 17 16; /* #151110 */
+    --foreground: 234 232 230; /* #eae8e6 */
+    --card: 32 30 28; /* #201e1c */
     --card-foreground: 234 232 230;
     --popover: 32 30 28;
     --popover-foreground: 234 232 230;
-    --primary: 234 232 230;        /* monochrome primary */
+    --primary: 234 232 230; /* monochrome primary */
     --primary-foreground: 21 17 16;
-    --secondary: 42 40 39;         /* #2a2827 */
+    --secondary: 42 40 39; /* #2a2827 */
     --secondary-foreground: 234 232 230;
     --muted: 42 40 39;
     --muted-foreground: 168 165 163; /* #a8a5a3 */
     --accent: 42 40 39;
     --accent-foreground: 234 232 230;
-    --tertiary: 26 23 22;          /* #1a1716 */
-    --tertiary-active: 37 34 32;   /* #252220 */
-    --destructive: 204 68 68;      /* #cc4444 */
+    --tertiary: 26 23 22; /* #1a1716 */
+    --tertiary-active: 37 34 32; /* #252220 */
+    --destructive: 204 68 68; /* #cc4444 */
     --destructive-foreground: 255 204 204;
     --border: 42 40 39;
     --input: 42 40 39;
-    --ring: 58 56 55;              /* #3a3837 */
-    --sidebar: 26 23 22;           /* #1a1716 */
+    --ring: 58 56 55; /* #3a3837 */
+    --sidebar: 26 23 22; /* #1a1716 */
     --sidebar-foreground: 234 232 230;
-    --sidebar-accent: 37 34 32;    /* #252220 */
+    --sidebar-accent: 37 34 32; /* #252220 */
     --sidebar-border: 42 40 39;
-    --highlight: 10 132 255;       /* WPHerd blue, dark-mode variant (kept) */
+    --highlight: 10 132 255; /* WPHerd blue, dark-mode variant (kept) */
     --highlight-foreground: 255 255 255;
     --highlight-match: rgba(10, 132, 255, 0.22);
     --highlight-active: rgba(10, 132, 255, 0.45);
@@ -421,8 +421,8 @@ fontFamily: {
 Remove `wp.*` colors and `boxShadow.card/card-hover/window`. Keep animations.
 
 **`accent` re-pointing (from §2.3):** before deleting the old blue `accent`
-mapping, `grep -rn "accent" src/` and re-point every call site that *means
-blue* to `highlight`: the sidebar active pill (`bg-sidebar-active` /
+mapping, `grep -rn "accent" src/` and re-point every call site that _means
+blue_ to `highlight`: the sidebar active pill (`bg-sidebar-active` /
 `bg-accent`), search-field focus rings (`ring-accent/40`), `Toggle` checked
 state, `StepIndicator` active step, and any `text-accent` links. Keep a
 `sidebar.active: 'rgb(var(--highlight) / <alpha-value>)'` alias so
@@ -461,10 +461,18 @@ Superset shape — **rounded-md, not capsule**:
     disabled:opacity-50 disabled:cursor-not-allowed
     focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50;
 }
-.btn-primary   { @apply btn bg-primary text-primary-foreground hover:bg-primary/90; }
-.btn-secondary { @apply btn border border-border bg-background shadow-sm hover:bg-accent hover:text-accent-foreground dark:bg-input/30 dark:hover:bg-input/50; }  /* = Superset "outline" */
-.btn-danger    { @apply btn bg-destructive text-white hover:bg-destructive/90 dark:bg-destructive/70; }
-.btn-ghost     { @apply btn text-muted-foreground hover:bg-accent hover:text-accent-foreground; }
+.btn-primary {
+  @apply btn bg-primary text-primary-foreground hover:bg-primary/90;
+}
+.btn-secondary {
+  @apply btn border border-border bg-background shadow-sm hover:bg-accent hover:text-accent-foreground dark:bg-input/30 dark:hover:bg-input/50;
+} /* = Superset "outline" */
+.btn-danger {
+  @apply btn bg-destructive text-white hover:bg-destructive/90 dark:bg-destructive/70;
+}
+.btn-ghost {
+  @apply btn text-muted-foreground hover:bg-accent hover:text-accent-foreground;
+}
 ```
 
 Update the button conventions: icons stay `size={14} strokeWidth={2}` at call
@@ -481,10 +489,19 @@ Rename in place (keep the class name to avoid a 60-file rename):
 .settings-card {
   @apply rounded-xl border border-border bg-card shadow-sm overflow-hidden;
 }
-.settings-row { /* unchanged layout */ }
-.settings-row + .settings-row, .settings-row-divider { @apply border-t border-border; }
-.settings-row-btn { @apply w-full text-left transition-colors hover:bg-accent/50 active:bg-accent; }
-.settings-section-label { @apply text-[13px] font-semibold text-foreground mb-2 px-1; }
+.settings-row {
+  /* unchanged layout */
+}
+.settings-row + .settings-row,
+.settings-row-divider {
+  @apply border-t border-border;
+}
+.settings-row-btn {
+  @apply w-full text-left transition-colors hover:bg-accent/50 active:bg-accent;
+}
+.settings-section-label {
+  @apply text-[13px] font-semibold text-foreground mb-2 px-1;
+}
 ```
 
 No backdrop-filter anywhere. `site-card:hover` keeps the lift but swap shadow:
@@ -501,8 +518,8 @@ No backdrop-filter anywhere. `site-card:hover` keeps the lift but swap shadow:
   `@apply rounded-lg bg-tertiary p-4 border border-border/60;`
 - `.form-input` → mirror Superset input:
   `@apply w-full h-8 px-3 rounded-md border border-input bg-transparent text-[13px]
-   text-foreground placeholder:text-muted-foreground shadow-sm transition-colors
-   dark:bg-input/30 focus:border-ring focus:ring-[3px] focus:ring-ring/50;`
+ text-foreground placeholder:text-muted-foreground shadow-sm transition-colors
+ dark:bg-input/30 focus:border-ring focus:ring-[3px] focus:ring-ring/50;`
 
 ### 5.4 ui.jsx component updates
 
@@ -527,7 +544,7 @@ No backdrop-filter anywhere. `site-card:hover` keeps the lift but swap shadow:
 - **New `SegmentedTabs` component** (Superset tabs): container
   `inline-flex h-8 items-center rounded-lg bg-muted p-[3px]`, buttons
   `h-full px-3 rounded-[7px] text-[13px] font-medium text-muted-foreground
-   data-active:bg-background data-active:text-foreground data-active:shadow-sm`.
+ data-active:bg-background data-active:text-foreground data-active:shadow-sm`.
   Use it in Phase 5 wherever pages hand-roll tab switchers (SiteDetail,
   WpPlugins/WpThemes filters, Mail folders — check each).
 - **StatusBadge** (`StatusBadge.jsx`): dot + label chip →
@@ -560,18 +577,18 @@ unaffected but run anyway).
    hover fill changes from literal `bg-black/[0.05] dark:bg-white/[0.07]` to
    the `bg-sidebar-accent` token.
 3. Search field: `h-7 rounded-md bg-muted border-0 text-[13px] pl-8
-   placeholder:text-muted-foreground focus:ring-2 focus:ring-ring/60` (rectangular,
+placeholder:text-muted-foreground focus:ring-2 focus:ring-ring/60` (rectangular,
    not capsule).
 4. Main pane: `bg-background` (remove `bg-surface/55`). Remove the
    `border-black/[0.06] dark:border-white/[0.06]` literal on the aside (now
    `border-sidebar-border`).
 5. Window control cluster (sidebar toggle, back/forward): keep positions;
    restyle to `rounded-md text-muted-foreground hover:text-foreground
-   hover:bg-accent` (drop literal black/white hovers).
+hover:bg-accent` (drop literal black/white hovers).
 6. `AgentsSidebar.jsx`: same treatment — tree rows `text-[13px]`, hover
    `bg-sidebar-accent`, selection `bg-sidebar-active text-white` where it uses
    the nav-pill pattern, section headers `text-[11px] font-medium uppercase
-   tracking-wider text-muted-foreground` (Superset section style). Icons here
+tracking-wider text-muted-foreground` (Superset section style). Icons here
    are functional (chevrons, git glyphs) — keep them monochrome.
 
 ---
@@ -585,21 +602,36 @@ Export the ember/light palettes as JS (single source for xterm + CodeMirror):
 ```js
 export const terminalThemes = {
   dark: {
-    background: '#151110', foreground: '#eae8e6',
-    cursor: '#0a84ff', cursorAccent: '#151110',   /* WPHerd blue (kept) */
+    background: '#151110',
+    foreground: '#eae8e6',
+    cursor: '#0a84ff',
+    cursorAccent: '#151110' /* WPHerd blue (kept) */,
     selectionBackground: 'rgba(10,132,255,0.28)',
-    black:'#151110', red:'#dc6b6b', green:'#7ec699', yellow:'#e5c07b',
-    blue:'#61afef', magenta:'#c678dd', cyan:'#56b6c2', white:'#eae8e6',
-    brightBlack:'#5c5856', brightRed:'#e88888', brightGreen:'#98d1a8',
-    brightYellow:'#ecd08f', brightBlue:'#7ec0f5', brightMagenta:'#d494e6',
-    brightCyan:'#73c7d3', brightWhite:'#ffffff',
+    black: '#151110',
+    red: '#dc6b6b',
+    green: '#7ec699',
+    yellow: '#e5c07b',
+    blue: '#61afef',
+    magenta: '#c678dd',
+    cyan: '#56b6c2',
+    white: '#eae8e6',
+    brightBlack: '#5c5856',
+    brightRed: '#e88888',
+    brightGreen: '#98d1a8',
+    brightYellow: '#ecd08f',
+    brightBlue: '#7ec0f5',
+    brightMagenta: '#d494e6',
+    brightCyan: '#73c7d3',
+    brightWhite: '#ffffff',
   },
-  light: { /* xterm defaults from Superset light.ts:
+  light: {
+    /* xterm defaults from Superset light.ts:
     background '#ffffff', foreground '#000000', cursor '#000000',
     selectionBackground '#add6ff', black '#2e3436', red '#cc0000',
     green '#4e9a06', yellow '#c4a000', blue '#3465a4', magenta '#75507b',
     cyan '#06989a', white '#d3d7cf', bright: '#555753' '#ef2929' '#8ae234'
-    '#fce94f' '#729fcf' '#ad7fa8' '#34e2e2' '#eeeeec' */ },
+    '#fce94f' '#729fcf' '#ad7fa8' '#34e2e2' '#eeeeec' */
+  },
 };
 export const isDark = () => window.matchMedia('(prefers-color-scheme: dark)').matches;
 ```
@@ -622,6 +654,7 @@ Replace the fixed `oneDarkPro` import with a token-faithful port of Superset's
 dependency). Build **two themes** from the palettes above:
 
 Dark (ember):
+
 ```
 background/gutterBackground: #151110   foreground: #eae8e6
 gutterForeground: #a8a5a3              lineHighlight: rgba(42,40,39,0.5)
@@ -632,16 +665,18 @@ syntax: comment #a8a5a3 italic? no — plain
   variableName/plain #eae8e6 · invalid #e88888
   propertyName #61afef · attributeName #e5c07b
 ```
+
 Light: backgrounds `#ffffff`, gutter fg `#828282`, selection `#add6ff`,
 caret `#000`, syntax from the light ANSI set (keyword `#75507b`, string
 `#4e9a06`, number `#c4a000`, function `#3465a4`, type `#06989a`, tag `#cc0000`,
 comment `#555753`).
 
 Editor chrome in the component:
+
 - Root/tab strip: replace `bg-[#282c34]`/`bg-[#21252b]`/zinc classes with
   tokens: root `bg-background text-foreground`; tab strip `h-9 bg-tertiary
-  border-b border-border`; tab `text-[12.5px] text-muted-foreground border-r
-  border-border`, active `bg-background text-foreground`; hover controls
+border-b border-border`; tab `text-[12.5px] text-muted-foreground border-r
+border-border`, active `bg-background text-foreground`; hover controls
   `hover:bg-accent`. Dirty dot `bg-highlight`. (This matches the mosaic
   toolbar spec: tertiary chrome, background content.)
 - Header action buttons: `text-muted-foreground hover:text-foreground hover:bg-accent rounded-md`.
@@ -684,10 +719,10 @@ Per-file notes (sizes are current line counts, biggest risk first):
 - **WpPlugins/WpThemes (625/617)** — filter tabs → `SegmentedTabs`; status
   chips → StatusBadge recipe; action buttons already `.btn-*`.
 - **SiteDetail/SiteCard (491/482)** — running indicator: dot `bg-status-running`
-  + optional Superset run-pane treatment on the card:
-  `border-color: color-mix(in srgb, rgb(var(--status-running)) 25%, rgb(var(--border)))`
-  while the site is running (add a `.card-running` rule in index.css).
-  Screenshot/favicon wells → `bg-tertiary`.
+  - optional Superset run-pane treatment on the card:
+    `border-color: color-mix(in srgb, rgb(var(--status-running)) 25%, rgb(var(--border)))`
+    while the site is running (add a `.card-running` rule in index.css).
+    Screenshot/favicon wells → `bg-tertiary`.
 - **Settings/Services/PHPVersions/PhpSettings/SitePhpSettings** — rows keep
   `Row`; version pills → Badge recipe (`rounded-full border px-2 text-xs`);
   the dnsmasq sudo callout → `bg-highlight/10 text-highlight border-highlight/30`
@@ -700,7 +735,7 @@ Per-file notes (sizes are current line counts, biggest risk first):
 - **AddSite/Import/Clone/ChangeUrl/SaveBlueprint modals** — `.sheet` restyle
   lands automatically; inside, swap any literal grays; wells → `.sheet-well`.
 - **AgentsPane/AgentsSidebar** — pane toolbars: `h-7 bg-tertiary border-b
-  border-border text-[11px] font-medium text-muted-foreground tracking-[0.01em]`,
+border-border text-[11px] font-medium text-muted-foreground tracking-[0.01em]`,
   focused pane title `text-foreground` (mosaic spec §1.3); pane borders
   `border-border`; running-agent tint via the color-mix rule above.
 - **StatusBadge.jsx, icons.jsx** — finish anything left from Phase 2.
