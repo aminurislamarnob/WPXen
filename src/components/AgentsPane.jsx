@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Terminal as TerminalIcon, Square } from 'lucide-react';
+import { Panel, PanelGroup } from 'react-resizable-panels';
 import { Button } from './ui';
 import Terminal from './Terminal';
 import FileExplorer from './FileExplorer';
 import CodeEditor from './CodeEditor';
+import ResizeHandle from './ResizeHandle';
 
 // Main pane for the Agents section. With no selection it shows an empty state;
 // with /agents/<siteId>/<agentId> it launches (idempotently) and hosts the
@@ -117,58 +119,80 @@ export default function AgentsPane() {
     );
   }
 
+  const editorOpen = openFiles.length > 0;
+
   return (
-    <div className="h-full flex">
+    // `autoSaveId` persists the drag sizes; keying by whether the editor is open
+    // keeps each layout (2-pane vs 3-pane) with its own remembered proportions.
+    <PanelGroup
+      direction="horizontal"
+      autoSaveId={editorOpen ? 'agents-3pane' : 'agents-2pane'}
+      className="h-full"
+    >
       {/* Project explorer for the selected Site, between sidebar and terminal. */}
       {sitePath && (
-        <aside className="w-60 flex-shrink-0 border-r border-black/[0.06] dark:border-white/[0.08]">
-          <FileExplorer
-            rootPath={sitePath}
-            rootName={meta.siteName}
-            onOpenFile={openFile}
-          />
-        </aside>
+        <>
+          <Panel id="explorer" order={1} defaultSize={20} minSize={12}>
+            <div className="h-full border-r border-black/[0.06] dark:border-white/[0.08]">
+              <FileExplorer
+                rootPath={sitePath}
+                rootName={meta.siteName}
+                onOpenFile={openFile}
+              />
+            </div>
+          </Panel>
+          <ResizeHandle />
+        </>
       )}
 
       {/* Terminal column */}
-      <div className="flex-1 min-w-0 flex flex-col p-4">
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2.5">
-            <span className="icon-tile w-[26px] h-[26px] bg-[#28c840]">
-              <TerminalIcon size={15} strokeWidth={2.2} />
-            </span>
-            <div>
-              <p className="text-[13px] font-medium text-gray-900">{meta.agentName}</p>
-              <p className="text-xs text-gray-500">{meta.siteName}</p>
+      <Panel id="terminal" order={2} minSize={20} defaultSize={editorOpen ? 50 : 80}>
+        <div className="h-full min-w-0 flex flex-col p-4">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2.5">
+              <span className="icon-tile w-[26px] h-[26px] bg-[#28c840]">
+                <TerminalIcon size={15} strokeWidth={2.2} />
+              </span>
+              <div>
+                <p className="text-[13px] font-medium text-gray-900">
+                  {meta.agentName}
+                </p>
+                <p className="text-xs text-gray-500">{meta.siteName}</p>
+              </div>
             </div>
+            <Button variant="danger" onClick={stop}>
+              <Square size={12} strokeWidth={2.5} fill="currentColor" />
+              Stop
+            </Button>
           </div>
-          <Button variant="danger" onClick={stop}>
-            <Square size={12} strokeWidth={2.5} fill="currentColor" />
-            Stop
-          </Button>
+          <div className="flex-1 min-h-0">
+            <Terminal
+              key={`${siteId}:${agentId}`}
+              siteId={siteId}
+              agentId={agentId}
+              onExited={() => navigate('/agents')}
+            />
+          </div>
         </div>
-        <div className="flex-1 min-h-0">
-          <Terminal
-            key={`${siteId}:${agentId}`}
-            siteId={siteId}
-            agentId={agentId}
-            onExited={() => navigate('/agents')}
-          />
-        </div>
-      </div>
+      </Panel>
 
       {/* Code editor column — appears once a file is opened from the explorer. */}
-      {openFiles.length > 0 && (
-        <div className="flex-1 min-w-0 border-l border-black/[0.06] dark:border-white/[0.08]">
-          <CodeEditor
-            rootPath={sitePath}
-            files={openFiles}
-            activePath={activeFile}
-            onSelect={setActiveFile}
-            onClose={closeFile}
-          />
-        </div>
+      {editorOpen && (
+        <>
+          <ResizeHandle />
+          <Panel id="editor" order={3} minSize={20} defaultSize={30}>
+            <div className="h-full min-w-0 border-l border-black/[0.06] dark:border-white/[0.08]">
+              <CodeEditor
+                rootPath={sitePath}
+                files={openFiles}
+                activePath={activeFile}
+                onSelect={setActiveFile}
+                onClose={closeFile}
+              />
+            </div>
+          </Panel>
+        </>
       )}
-    </div>
+    </PanelGroup>
   );
 }

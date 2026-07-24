@@ -12,6 +12,7 @@ import { markdown } from '@codemirror/lang-markdown';
 import { yaml } from '@codemirror/lang-yaml';
 import { sql } from '@codemirror/lang-sql';
 import { Copy, ExternalLink, Save, X } from 'lucide-react';
+import { FileGlyph } from '../lib/fileIcons';
 
 // Pick CodeMirror language extensions from a file's extension.
 function languageFor(name) {
@@ -155,6 +156,7 @@ export default function CodeEditor({ rootPath, files, activePath, onSelect, onCl
                   : 'text-zinc-400 hover:text-zinc-200'
               }`}
             >
+              <FileGlyph name={f.name} size={13} className="flex-shrink-0" />
               <span className="truncate max-w-[160px]">{f.name}</span>
               {isDirty ? (
                 <span

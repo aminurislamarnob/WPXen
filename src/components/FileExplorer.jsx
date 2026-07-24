@@ -4,7 +4,6 @@ import {
   ChevronDown,
   Folder,
   FolderOpen,
-  File,
   Search,
   FilePlus,
   FolderPlus,
@@ -16,6 +15,7 @@ import {
   Pencil,
   Trash2,
 } from 'lucide-react';
+import { FileGlyph } from '../lib/fileIcons';
 
 // The macOS path separator; the explorer is confined to a Site's webroot.
 const parentOf = (p) => p.slice(0, p.lastIndexOf('/')) || '/';
@@ -184,7 +184,7 @@ export default function FileExplorer({ rootPath, rootName, onOpenFile }) {
           {creating.isDir ? (
             <Folder size={14} className="text-[#5ac8fa] flex-shrink-0" />
           ) : (
-            <File size={14} className="text-gray-400 flex-shrink-0" />
+            <FileGlyph name={creating.draft || 'file'} className="flex-shrink-0" />
           )}
           <input
             autoFocus
@@ -218,7 +218,7 @@ export default function FileExplorer({ rootPath, rootName, onOpenFile }) {
               {entry.isDir ? (
                 <Folder size={14} className="text-[#5ac8fa] flex-shrink-0" />
               ) : (
-                <File size={14} className="text-gray-400 flex-shrink-0" />
+                <FileGlyph name={entry.name} className="flex-shrink-0" />
               )}
               <input
                 autoFocus
@@ -258,7 +258,7 @@ export default function FileExplorer({ rootPath, rootName, onOpenFile }) {
                   <Folder size={14} className="text-[#5ac8fa] flex-shrink-0" />
                 )
               ) : (
-                <File size={14} className="text-gray-400 flex-shrink-0" />
+                <FileGlyph name={entry.name} className="flex-shrink-0" />
               )}
               <span className="truncate">{entry.name}</span>
             </button>
