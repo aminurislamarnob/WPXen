@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { ChevronRight, Check, CheckCircle, Loader } from 'lucide-react';
 
 // Shared macOS System Settings primitives. Pages compose these instead of
@@ -207,6 +208,56 @@ export function PageHeader({ title, subtitle, children }) {
         {subtitle && <p className="text-xs text-gray-500 mt-0.5">{subtitle}</p>}
       </div>
       {children && <div className="flex items-center gap-2">{children}</div>}
+    </div>
+  );
+}
+
+// Modal confirm dialog on the frosted `.panel` surface. Used for destructive
+// actions (discard changes, delete file) so we never lean on window.confirm.
+// Enter confirms, Escape cancels; clicking the backdrop cancels.
+export function ConfirmDialog({
+  open,
+  title,
+  description,
+  confirmLabel = 'Confirm',
+  cancelLabel = 'Cancel',
+  danger = true,
+  onConfirm,
+  onCancel,
+}) {
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e) => {
+      if (e.key === 'Escape') onCancel?.();
+      if (e.key === 'Enter') onConfirm?.();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, onConfirm, onCancel]);
+
+  if (!open) return null;
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/30"
+      onClick={onCancel}
+    >
+      <div
+        className="panel w-[320px] max-w-[90vw] p-4"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <p className="text-[13.5px] font-semibold text-gray-900">{title}</p>
+        {description && (
+          <p className="mt-1.5 text-[12.5px] leading-snug text-gray-500">{description}</p>
+        )}
+        <div className="mt-4 flex justify-end gap-2">
+          <Button variant="secondary" onClick={onCancel}>
+            {cancelLabel}
+          </Button>
+          <Button variant={danger ? 'danger' : 'primary'} onClick={onConfirm}>
+            {confirmLabel}
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }

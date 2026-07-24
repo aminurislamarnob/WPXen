@@ -284,6 +284,40 @@ function registerHandlers(win, storeInstance) {
     }
   });
 
+  // Stage / unstage changed paths from the Changes tab (git add / restore).
+  ipcMain.handle('git-stage', async (_e, rootPath, rels) => {
+    try {
+      return await git.stage(rootPath, rels);
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+  ipcMain.handle('git-unstage', async (_e, rootPath, rels) => {
+    try {
+      return await git.unstage(rootPath, rels);
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
+  // Discard a file's unstaged changes. Tracked files are reverted with git
+  // restore; untracked files are moved to the Trash (confined to the site
+  // root) — never `git clean`, so it's recoverable.
+  ipcMain.handle('git-discard', async (_e, rootPath, rel, status) => {
+    try {
+      if (status === '?') {
+        const abs = path.join(path.resolve(rootPath), rel);
+        const { root, resolved } = files.assertInRoot(rootPath, abs);
+        if (resolved === root) throw new Error('Invalid path');
+        await shell.trashItem(resolved);
+        return { ok: true };
+      }
+      return await git.discardTracked(rootPath, rel);
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
   // Move a file/folder to the system Trash (confined to the site root).
   ipcMain.handle('trash-path', async (_e, rootPath, targetPath) => {
     try {

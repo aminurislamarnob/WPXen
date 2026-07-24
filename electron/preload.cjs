@@ -191,6 +191,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   gitStatus: (rootPath) => ipcRenderer.invoke('git-status', rootPath),
   gitFileAt: (rootPath, rel, rev) =>
     ipcRenderer.invoke('git-file-at', rootPath, rel, rev),
+  gitStage: (rootPath, rels) => ipcRenderer.invoke('git-stage', rootPath, rels),
+  gitUnstage: (rootPath, rels) => ipcRenderer.invoke('git-unstage', rootPath, rels),
+  gitDiscard: (rootPath, rel, status) =>
+    ipcRenderer.invoke('git-discard', rootPath, rel, status),
 
   // IPC Events (renderer listening to main)
   on: (channel, callback) => {

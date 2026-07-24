@@ -211,4 +211,60 @@ async function fileAt(rootPath, rel, rev) {
   return { content: out };
 }
 
-module.exports = { gitStatus, parseStatus, parseNumstat, fileAt };
+// Run a mutating git subcommand, surfacing failures (unlike read-only `run`,
+// which swallows them). Resolves { ok } or { ok:false, error }.
+function runMutate(root, args) {
+  return new Promise((resolve) => {
+    execFile(
+      'git',
+      ['-C', root, ...args],
+      { timeout: 8000, maxBuffer: 16 * 1024 * 1024 },
+      (err, _stdout, stderr) => {
+        if (err) {
+          resolve({
+            ok: false,
+            error: (stderr || err.message || '').trim() || 'git command failed',
+          });
+        } else {
+          resolve({ ok: true });
+        }
+      }
+    );
+  });
+}
+
+function relList(rels) {
+  return (Array.isArray(rels) ? rels : [rels]).filter(Boolean).map(assertRepoRel);
+}
+
+// Stage the given repo-relative paths (git add).
+async function stage(rootPath, rels) {
+  const list = relList(rels);
+  if (list.length === 0) return { ok: true };
+  return runMutate(path.resolve(rootPath), ['add', '--', ...list]);
+}
+
+// Unstage the given repo-relative paths (git restore --staged).
+async function unstage(rootPath, rels) {
+  const list = relList(rels);
+  if (list.length === 0) return { ok: true };
+  return runMutate(path.resolve(rootPath), ['restore', '--staged', '--', ...list]);
+}
+
+// Discard a tracked file's unstaged changes (git restore): reverts a
+// modification or restores a worktree deletion. Untracked files are handled by
+// the caller (moved to Trash), never git clean.
+async function discardTracked(rootPath, rel) {
+  assertRepoRel(rel);
+  return runMutate(path.resolve(rootPath), ['restore', '--', rel]);
+}
+
+module.exports = {
+  gitStatus,
+  parseStatus,
+  parseNumstat,
+  fileAt,
+  stage,
+  unstage,
+  discardTracked,
+};

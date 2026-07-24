@@ -19,8 +19,12 @@ import {
   FileText,
   GitBranch,
   GitCompare,
+  Plus,
+  Minus,
+  Undo2,
 } from 'lucide-react';
 import { FileGlyph } from '../lib/fileIcons';
+import { ConfirmDialog } from './ui';
 
 // Per-status dot color + human label for the Changes list, mirroring
 // source-control UIs (a colored dot rather than a letter).
@@ -78,6 +82,8 @@ export default function FileExplorer({
   });
   const changesRef = useRef(null); // last good result, to suppress the loading flash
   const inFlightRef = useRef(false); // dedupe overlapping fetches
+  const [changesError, setChangesError] = useState(null); // last git mutation error
+  const [discardTarget, setDiscardTarget] = useState(null); // file pending discard confirm
 
   const load = useCallback(
     async (dirPath) => {
@@ -101,6 +107,8 @@ export default function FileExplorer({
     setTab('files');
     setChanges(null);
     changesRef.current = null;
+    setChangesError(null);
+    setDiscardTarget(null);
     load(rootPath);
   }, [rootPath, load]);
 
@@ -163,6 +171,34 @@ export default function FileExplorer({
       }
       return next;
     });
+
+  // Stage / unstage / discard from the Changes tab, then silently refresh so
+  // the list reflects the new index/worktree state without a loading flash.
+  const runChangeMutation = useCallback(
+    async (fn) => {
+      const res = await fn();
+      setChangesError(res?.error || null);
+      loadChanges({ silent: true });
+    },
+    [loadChanges]
+  );
+  const doStage = useCallback(
+    (rels) => runChangeMutation(() => window.electronAPI.gitStage(rootPath, rels)),
+    [runChangeMutation, rootPath]
+  );
+  const doUnstage = useCallback(
+    (rels) => runChangeMutation(() => window.electronAPI.gitUnstage(rootPath, rels)),
+    [runChangeMutation, rootPath]
+  );
+  const confirmDiscard = () => {
+    const file = discardTarget;
+    setDiscardTarget(null);
+    if (file) {
+      runChangeMutation(() =>
+        window.electronAPI.gitDiscard(rootPath, file.rel, file.status)
+      );
+    }
+  };
 
   // Dismiss the context menu on any outside interaction.
   useEffect(() => {
@@ -459,6 +495,10 @@ export default function FileExplorer({
           onRefresh={() => loadChanges()}
           onOpenDiff={onOpenDiff}
           onRowContext={openChangeMenu}
+          onStage={doStage}
+          onUnstage={doUnstage}
+          onDiscard={(file) => setDiscardTarget(file)}
+          changesError={changesError}
           foldSignal={foldSignal}
           allCollapsed={allCollapsed}
           onToggleFold={toggleFold}
@@ -583,6 +623,24 @@ export default function FileExplorer({
           />
         </div>
       )}
+
+      {/* Discard/delete confirmation for a Changes row. */}
+      <ConfirmDialog
+        open={!!discardTarget}
+        title={
+          discardTarget?.status === '?'
+            ? `Delete “${discardTarget?.name}”?`
+            : `Discard changes to “${discardTarget?.name}”?`
+        }
+        description={
+          discardTarget?.status === '?'
+            ? 'This moves the untracked file to the Trash.'
+            : 'This reverts the file to its last committed or staged state and cannot be undone.'
+        }
+        confirmLabel={discardTarget?.status === '?' ? 'Delete' : 'Discard'}
+        onConfirm={confirmDiscard}
+        onCancel={() => setDiscardTarget(null)}
+      />
     </div>
   );
 }
@@ -637,6 +695,10 @@ function ChangesView({
   onRefresh,
   onOpenDiff,
   onRowContext,
+  onStage,
+  onUnstage,
+  onDiscard,
+  changesError,
   foldSignal,
   allCollapsed,
   onToggleFold,
@@ -678,6 +740,9 @@ function ChangesView({
   const handlers = {
     onOpen: (file) => onOpenDiff?.(enrich(file)),
     onContext: (e, file) => onRowContext?.(e, enrich(file)),
+    onStage: (rels) => onStage?.(rels),
+    onUnstage: (rels) => onUnstage?.(rels),
+    onDiscard: (file) => onDiscard?.(enrich(file)),
   };
 
   return (
@@ -739,6 +804,13 @@ function ChangesView({
               title="Unstaged"
               count={unstaged.length}
               foldSignal={foldSignal}
+              action={
+                <SectionAction
+                  icon={Plus}
+                  label="Stage all"
+                  onClick={() => handlers.onStage(unstaged.map((f) => f.rel))}
+                />
+              }
             >
               <SectionBody
                 files={unstaged}
@@ -754,6 +826,13 @@ function ChangesView({
               title="Staged"
               count={staged.length}
               foldSignal={foldSignal}
+              action={
+                <SectionAction
+                  icon={Minus}
+                  label="Unstage all"
+                  onClick={() => handlers.onUnstage(staged.map((f) => f.rel))}
+                />
+              }
             >
               <SectionBody
                 files={staged}
@@ -765,13 +844,23 @@ function ChangesView({
           )}
         </div>
       )}
+
+      {changesError && (
+        <div
+          className="px-3 py-1.5 text-[11px] text-red-600 dark:text-red-400 truncate border-t border-black/[0.06] dark:border-white/[0.08]"
+          title={changesError}
+        >
+          {changesError}
+        </div>
+      )}
     </div>
   );
 }
 
 // One collapsible group in the Changes list (Unstaged / Staged). Responds to
-// the toolbar's collapse-all / expand-all signal.
-function ChangesSection({ id, title, count, foldSignal, children }) {
+// the toolbar's collapse-all / expand-all signal. `action` is an optional
+// header button (stage-all / unstage-all) revealed on hover.
+function ChangesSection({ id, title, count, foldSignal, action, children }) {
   const [open, setOpen] = useState(true);
   useEffect(() => {
     if (foldSignal.epoch === 0) return; // ignore the initial (untriggered) value
@@ -779,23 +868,44 @@ function ChangesSection({ id, title, count, foldSignal, children }) {
   }, [foldSignal]);
 
   return (
-    <div className="mb-1" data-section={id}>
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center gap-1 px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
-      >
-        {open ? (
-          <ChevronDown size={12} className="flex-shrink-0" />
-        ) : (
-          <ChevronRight size={12} className="flex-shrink-0" />
+    <div className="mb-1 group/section" data-section={id}>
+      <div className="flex items-center pr-2">
+        <button
+          onClick={() => setOpen((v) => !v)}
+          className="flex-1 min-w-0 flex items-center gap-1 px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+        >
+          {open ? (
+            <ChevronDown size={12} className="flex-shrink-0" />
+          ) : (
+            <ChevronRight size={12} className="flex-shrink-0" />
+          )}
+          <span className="truncate">{title}</span>
+          <span className="min-w-[16px] px-1 text-center rounded-full bg-black/10 dark:bg-white/15 text-[10px] font-semibold text-gray-500 normal-case">
+            {count}
+          </span>
+        </button>
+        {action && (
+          <div className="opacity-0 group-hover/section:opacity-100 transition-opacity">
+            {action}
+          </div>
         )}
-        <span className="truncate">{title}</span>
-        <span className="min-w-[16px] px-1 text-center rounded-full bg-black/10 dark:bg-white/15 text-[10px] font-semibold text-gray-500 normal-case">
-          {count}
-        </span>
-      </button>
+      </div>
       {open && <div>{children}</div>}
     </div>
+  );
+}
+
+// A small text+icon action shown in a section header (stage-all / unstage-all).
+function SectionAction({ icon: Icon, label, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      title={label}
+      className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] text-gray-500 hover:text-gray-800 hover:bg-black/[0.05] dark:hover:text-gray-200 dark:hover:bg-white/[0.07]"
+    >
+      <Icon size={12} className="flex-shrink-0" />
+      {label}
+    </button>
   );
 }
 
@@ -980,59 +1090,109 @@ function TreeDir({ node, depth, foldSignal, handlers }) {
 }
 
 // A single changed-file row: type icon, muted directory prefix, bold basename
-// (with old→new for renames), +/- counts, and a colored status dot. `depth`
-// indents the row under a folder/tree header.
+// (with old→new for renames), +/- counts, and a colored status dot. Clicking
+// opens the diff (including for deletions — all-red). On hover the counts/dot
+// give way to stage/unstage/discard actions. `depth` indents under a header.
 function ChangeRow({ file, hideDir, depth = 0, handlers }) {
   const meta = statusDot(file.status);
   const deleted = file.status === 'D';
+  const untracked = file.status === '?';
   const dir = hideDir ? '' : dirOf(file.rel, file.name);
   const oldName = file.oldRel ? baseOf(file.oldRel) : null;
 
+  const act = (fn) => (e) => {
+    e.stopPropagation();
+    fn();
+  };
+
+  return (
+    <div
+      className="group/row relative hover:bg-black/[0.05] dark:hover:bg-white/[0.07]"
+      onContextMenu={(e) => handlers?.onContext(e, file)}
+    >
+      <button
+        onClick={() => handlers?.onOpen(file)}
+        title={file.rel}
+        style={{ paddingLeft: 12 + depth * 12 }}
+        className="w-full flex items-center gap-1.5 pr-3 py-1 text-[12.5px] text-left"
+      >
+        <FileGlyph name={file.name} className="flex-shrink-0" />
+        <span className="flex min-w-0 flex-1 items-baseline overflow-hidden">
+          {dir && <span className="truncate text-gray-500">{dir}/</span>}
+          {oldName && (
+            <span className="truncate text-gray-400 flex-shrink-0">
+              {oldName}
+              <span className="px-1">→</span>
+            </span>
+          )}
+          <span
+            className={`min-w-[80px] truncate font-medium text-gray-800 ${
+              deleted ? 'line-through' : ''
+            }`}
+          >
+            {file.name}
+          </span>
+        </span>
+        <span className="flex items-center gap-1.5 flex-shrink-0 group-hover/row:invisible">
+          {(file.additions > 0 || file.deletions > 0) && (
+            <span className="text-[10.5px] tabular-nums">
+              {file.additions > 0 && (
+                <span className="text-green-500 dark:text-green-400">+{file.additions}</span>
+              )}
+              {file.additions > 0 && file.deletions > 0 && ' '}
+              {file.deletions > 0 && (
+                <span className="text-red-500 dark:text-red-400">−{file.deletions}</span>
+              )}
+            </span>
+          )}
+          <span
+            className={`w-2 h-2 rounded-full ${meta.cls}`}
+            title={meta.label}
+          />
+        </span>
+      </button>
+
+      {/* Hover actions: stage (unstaged) / unstage (staged) + discard. */}
+      <div className="absolute inset-y-0 right-2 flex items-center gap-0.5 opacity-0 group-hover/row:opacity-100">
+        {file.source === 'unstaged' ? (
+          <>
+            <RowAction
+              icon={Plus}
+              label="Stage"
+              onClick={act(() => handlers?.onStage([file.rel]))}
+            />
+            <RowAction
+              icon={untracked ? Trash2 : Undo2}
+              label={untracked ? 'Delete' : 'Discard changes'}
+              danger
+              onClick={act(() => handlers?.onDiscard(file))}
+            />
+          </>
+        ) : (
+          <RowAction
+            icon={Minus}
+            label="Unstage"
+            onClick={act(() => handlers?.onUnstage([file.rel]))}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// A small square icon button for a Changes row's hover actions.
+function RowAction({ icon: Icon, label, onClick, danger }) {
   return (
     <button
-      disabled={deleted}
-      onClick={() => !deleted && handlers?.onOpen(file)}
-      onContextMenu={(e) => handlers?.onContext(e, file)}
-      title={file.rel}
-      style={{ paddingLeft: 12 + depth * 12 }}
-      className={`w-full flex items-center gap-1.5 pr-3 py-1 text-[12.5px] text-left ${
-        deleted
-          ? 'opacity-60 cursor-default'
-          : 'hover:bg-black/[0.05] dark:hover:bg-white/[0.07]'
+      onClick={onClick}
+      title={label}
+      className={`flex w-5 h-5 items-center justify-center rounded text-gray-500 hover:bg-black/10 dark:hover:bg-white/15 ${
+        danger
+          ? 'hover:text-red-600 dark:hover:text-red-400'
+          : 'hover:text-gray-800 dark:hover:text-gray-100'
       }`}
     >
-      <FileGlyph name={file.name} className="flex-shrink-0" />
-      <span className="flex min-w-0 flex-1 items-baseline overflow-hidden">
-        {dir && <span className="truncate text-gray-500">{dir}/</span>}
-        {oldName && (
-          <span className="truncate text-gray-400 flex-shrink-0">
-            {oldName}
-            <span className="px-1">→</span>
-          </span>
-        )}
-        <span
-          className={`min-w-[80px] truncate font-medium text-gray-800 ${
-            deleted ? 'line-through' : ''
-          }`}
-        >
-          {file.name}
-        </span>
-      </span>
-      {(file.additions > 0 || file.deletions > 0) && (
-        <span className="flex-shrink-0 text-[10.5px] tabular-nums">
-          {file.additions > 0 && (
-            <span className="text-green-500 dark:text-green-400">+{file.additions}</span>
-          )}
-          {file.additions > 0 && file.deletions > 0 && ' '}
-          {file.deletions > 0 && (
-            <span className="text-red-500 dark:text-red-400">−{file.deletions}</span>
-          )}
-        </span>
-      )}
-      <span
-        className={`w-2 h-2 rounded-full flex-shrink-0 ${meta.cls}`}
-        title={meta.label}
-      />
+      <Icon size={13} className="flex-shrink-0" />
     </button>
   );
 }
