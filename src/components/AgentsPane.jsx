@@ -3,6 +3,8 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { Terminal as TerminalIcon, Square } from 'lucide-react';
 import { Button } from './ui';
 import Terminal from './Terminal';
+import FileExplorer from './FileExplorer';
+import CodeEditor from './CodeEditor';
 
 // Main pane for the Agents section. With no selection it shows an empty state;
 // with /agents/<siteId>/<agentId> it launches (idempotently) and hosts the
@@ -11,7 +13,37 @@ export default function AgentsPane() {
   const { siteId, agentId } = useParams();
   const navigate = useNavigate();
   const [meta, setMeta] = useState({ siteName: siteId, agentName: agentId });
+  const [sitePath, setSitePath] = useState(null);
   const [error, setError] = useState(null);
+  const [openFiles, setOpenFiles] = useState([]); // [{ path, name }]
+  const [activeFile, setActiveFile] = useState(null);
+
+  // Drop any open editor tabs when the selected Site changes.
+  useEffect(() => {
+    setOpenFiles([]);
+    setActiveFile(null);
+  }, [siteId]);
+
+  const openFile = (entry) => {
+    setOpenFiles((prev) =>
+      prev.some((f) => f.path === entry.path)
+        ? prev
+        : [...prev, { path: entry.path, name: entry.name }]
+    );
+    setActiveFile(entry.path);
+  };
+
+  const closeFile = (path) => {
+    setOpenFiles((prev) => {
+      const idx = prev.findIndex((f) => f.path === path);
+      const next = prev.filter((f) => f.path !== path);
+      if (activeFile === path) {
+        const fallback = next[idx] || next[idx - 1] || null;
+        setActiveFile(fallback?.path || null);
+      }
+      return next;
+    });
+  };
 
   useEffect(() => {
     if (!siteId || !agentId) return;
@@ -27,6 +59,7 @@ export default function AgentsPane() {
       const agent = (agents || []).find((a) => a.id === agentId);
       if (cancelled) return;
       setMeta({ siteName: site?.name || siteId, agentName: agent?.name || agentId });
+      setSitePath(site?.path || null);
 
       // One Session per Site (Q2). If a different Agent is already running for
       // this Site, offer to switch rather than silently ignore or kill (Q10).
@@ -85,30 +118,57 @@ export default function AgentsPane() {
   }
 
   return (
-    <div className="h-full flex flex-col p-4">
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-2.5">
-          <span className="icon-tile w-[26px] h-[26px] bg-[#28c840]">
-            <TerminalIcon size={15} strokeWidth={2.2} />
-          </span>
-          <div>
-            <p className="text-[13px] font-medium text-gray-900">{meta.agentName}</p>
-            <p className="text-xs text-gray-500">{meta.siteName}</p>
+    <div className="h-full flex">
+      {/* Project explorer for the selected Site, between sidebar and terminal. */}
+      {sitePath && (
+        <aside className="w-60 flex-shrink-0 border-r border-black/[0.06] dark:border-white/[0.08]">
+          <FileExplorer
+            rootPath={sitePath}
+            rootName={meta.siteName}
+            onOpenFile={openFile}
+          />
+        </aside>
+      )}
+
+      {/* Terminal column */}
+      <div className="flex-1 min-w-0 flex flex-col p-4">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2.5">
+            <span className="icon-tile w-[26px] h-[26px] bg-[#28c840]">
+              <TerminalIcon size={15} strokeWidth={2.2} />
+            </span>
+            <div>
+              <p className="text-[13px] font-medium text-gray-900">{meta.agentName}</p>
+              <p className="text-xs text-gray-500">{meta.siteName}</p>
+            </div>
           </div>
+          <Button variant="danger" onClick={stop}>
+            <Square size={12} strokeWidth={2.5} fill="currentColor" />
+            Stop
+          </Button>
         </div>
-        <Button variant="danger" onClick={stop}>
-          <Square size={12} strokeWidth={2.5} fill="currentColor" />
-          Stop
-        </Button>
+        <div className="flex-1 min-h-0">
+          <Terminal
+            key={`${siteId}:${agentId}`}
+            siteId={siteId}
+            agentId={agentId}
+            onExited={() => navigate('/agents')}
+          />
+        </div>
       </div>
-      <div className="flex-1 min-h-0">
-        <Terminal
-          key={`${siteId}:${agentId}`}
-          siteId={siteId}
-          agentId={agentId}
-          onExited={() => navigate('/agents')}
-        />
-      </div>
+
+      {/* Code editor column — appears once a file is opened from the explorer. */}
+      {openFiles.length > 0 && (
+        <div className="flex-1 min-w-0 border-l border-black/[0.06] dark:border-white/[0.08]">
+          <CodeEditor
+            rootPath={sitePath}
+            files={openFiles}
+            activePath={activeFile}
+            onSelect={setActiveFile}
+            onClose={closeFile}
+          />
+        </div>
+      )}
     </div>
   );
 }

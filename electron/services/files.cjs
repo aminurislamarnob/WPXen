@@ -1,0 +1,129 @@
+'use strict';
+
+// Directory operations for the Agents project explorer. Every path is confined
+// to within a Site's webroot (`rootPath`) so the explorer can never read or
+// mutate anything outside the selected project.
+
+const fs = require('fs');
+const path = require('path');
+
+// Resolve `target` and guarantee it stays inside `rootPath`. Returns the
+// resolved absolute paths; throws if the target escapes the root.
+function assertInRoot(rootPath, target) {
+  const root = path.resolve(rootPath);
+  const resolved = path.resolve(target || rootPath);
+  if (resolved !== root && !resolved.startsWith(root + path.sep)) {
+    throw new Error('Path is outside the site root');
+  }
+  return { root, resolved };
+}
+
+function listDirectory(rootPath, dirPath) {
+  const { resolved: target } = assertInRoot(rootPath, dirPath);
+
+  const dirents = fs.readdirSync(target, { withFileTypes: true });
+  const entries = dirents.map((d) => {
+    let isDir = d.isDirectory();
+    if (d.isSymbolicLink()) {
+      try {
+        isDir = fs.statSync(path.join(target, d.name)).isDirectory();
+      } catch {
+        isDir = false;
+      }
+    }
+    return { name: d.name, path: path.join(target, d.name), isDir };
+  });
+
+  // Folders first, then case-insensitive alpha.
+  entries.sort((a, b) => {
+    if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
+    return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+  });
+
+  return entries;
+}
+
+// Reject names that would traverse or escape the parent directory.
+function assertSimpleName(name) {
+  const trimmed = (name || '').trim();
+  if (!trimmed || trimmed === '.' || trimmed === '..') {
+    throw new Error('Invalid name');
+  }
+  if (trimmed.includes('/') || trimmed.includes('\\') || trimmed.includes('\0')) {
+    throw new Error('Name cannot contain path separators');
+  }
+  return trimmed;
+}
+
+function createFile(rootPath, dirPath, name) {
+  const { resolved: dir } = assertInRoot(rootPath, dirPath);
+  const clean = assertSimpleName(name);
+  const target = path.join(dir, clean);
+  assertInRoot(rootPath, target);
+  if (fs.existsSync(target)) throw new Error('A file with that name already exists');
+  fs.writeFileSync(target, '', { flag: 'wx' });
+  return { path: target };
+}
+
+function createFolder(rootPath, dirPath, name) {
+  const { resolved: dir } = assertInRoot(rootPath, dirPath);
+  const clean = assertSimpleName(name);
+  const target = path.join(dir, clean);
+  assertInRoot(rootPath, target);
+  if (fs.existsSync(target)) throw new Error('A folder with that name already exists');
+  fs.mkdirSync(target);
+  return { path: target };
+}
+
+// Read a text file for the in-app editor. Confined to the site root, size-capped,
+// and binary files are refused (so we never dump megabytes of bytes into React).
+const MAX_READ_BYTES = 2 * 1024 * 1024; // 2 MB
+
+function readFile(rootPath, filePath) {
+  const { root, resolved } = assertInRoot(rootPath, filePath);
+  if (resolved === root) throw new Error('Not a file');
+  const stat = fs.statSync(resolved);
+  if (stat.isDirectory()) throw new Error('Not a file');
+  if (stat.size > MAX_READ_BYTES) {
+    return { tooLarge: true, size: stat.size };
+  }
+  const buf = fs.readFileSync(resolved);
+  // Treat a NUL byte in the first 8 KB as a binary sniff.
+  if (buf.subarray(0, 8192).includes(0)) {
+    return { binary: true, size: stat.size };
+  }
+  return { content: buf.toString('utf8'), size: stat.size };
+}
+
+// Write edited text back to a file. Confined to the site root; refuses to
+// create new paths (the file must already exist) and rejects directories.
+function writeFile(rootPath, filePath, content) {
+  const { root, resolved } = assertInRoot(rootPath, filePath);
+  if (resolved === root) throw new Error('Not a file');
+  const stat = fs.statSync(resolved); // throws if missing
+  if (stat.isDirectory()) throw new Error('Not a file');
+  fs.writeFileSync(resolved, content, 'utf8');
+  return { path: resolved };
+}
+
+function renamePath(rootPath, targetPath, newName) {
+  const { root, resolved: src } = assertInRoot(rootPath, targetPath);
+  if (src === root) throw new Error('Cannot rename the site root');
+  const clean = assertSimpleName(newName);
+  const dest = path.join(path.dirname(src), clean);
+  assertInRoot(rootPath, dest);
+  if (dest === src) return { path: dest };
+  if (fs.existsSync(dest)) throw new Error('A file with that name already exists');
+  fs.renameSync(src, dest);
+  return { path: dest };
+}
+
+module.exports = {
+  assertInRoot,
+  listDirectory,
+  readFile,
+  writeFile,
+  createFile,
+  createFolder,
+  renamePath,
+};

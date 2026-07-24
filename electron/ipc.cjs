@@ -40,6 +40,7 @@ const setup = require('./services/setup.cjs');
 const logs = require('./services/logs.cjs');
 const validation = require('./services/validation.cjs');
 const agents = require('./services/agents.cjs');
+const files = require('./services/files.cjs');
 const { humanize } = require('./services/errors.cjs');
 
 let store;
@@ -187,6 +188,89 @@ function registerHandlers(win, storeInstance) {
   ipcMain.handle('terminal-stop', (_e, siteId) => {
     agents.stop(siteId);
     return { ok: true };
+  });
+
+  // Project explorer: read-only directory listing confined to a Site's root.
+  ipcMain.handle('list-directory', (_e, rootPath, dirPath) => {
+    try {
+      return { ok: true, entries: files.listDirectory(rootPath, dirPath) };
+    } catch (err) {
+      return { error: err.message };
+    }
+  });
+
+  // Open a file in the OS default application.
+  ipcMain.handle('open-file-path', (_e, filePath) => {
+    shell.openPath(filePath);
+    return { ok: true };
+  });
+
+  // Read a text file for the in-app code editor (confined to the site root).
+  ipcMain.handle('read-file', (_e, rootPath, filePath) => {
+    try {
+      return { ok: true, ...files.readFile(rootPath, filePath) };
+    } catch (err) {
+      return { error: err.message };
+    }
+  });
+
+  // Write edited file contents back to disk (confined to the site root).
+  ipcMain.handle('write-file', (_e, rootPath, filePath, content) => {
+    try {
+      return { ok: true, ...files.writeFile(rootPath, filePath, content) };
+    } catch (err) {
+      return { error: err.message };
+    }
+  });
+
+  // Reveal a file/folder in Finder (confined to the site root).
+  ipcMain.handle('reveal-in-finder', (_e, rootPath, targetPath) => {
+    try {
+      const { resolved } = files.assertInRoot(rootPath, targetPath);
+      shell.showItemInFolder(resolved);
+      return { ok: true };
+    } catch (err) {
+      return { error: err.message };
+    }
+  });
+
+  // Create a new empty file inside a directory.
+  ipcMain.handle('create-file', (_e, rootPath, dirPath, name) => {
+    try {
+      return { ok: true, ...files.createFile(rootPath, dirPath, name) };
+    } catch (err) {
+      return { error: err.message };
+    }
+  });
+
+  // Create a new folder inside a directory.
+  ipcMain.handle('create-folder', (_e, rootPath, dirPath, name) => {
+    try {
+      return { ok: true, ...files.createFolder(rootPath, dirPath, name) };
+    } catch (err) {
+      return { error: err.message };
+    }
+  });
+
+  // Rename a file/folder in place.
+  ipcMain.handle('rename-path', (_e, rootPath, targetPath, newName) => {
+    try {
+      return { ok: true, ...files.renamePath(rootPath, targetPath, newName) };
+    } catch (err) {
+      return { error: err.message };
+    }
+  });
+
+  // Move a file/folder to the system Trash (confined to the site root).
+  ipcMain.handle('trash-path', async (_e, rootPath, targetPath) => {
+    try {
+      const { root, resolved } = files.assertInRoot(rootPath, targetPath);
+      if (resolved === root) throw new Error('Cannot delete the site root');
+      await shell.trashItem(resolved);
+      return { ok: true };
+    } catch (err) {
+      return { error: err.message };
+    }
   });
 
   // Heal per-site vhosts shortly after startup: regenerate each from the

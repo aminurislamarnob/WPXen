@@ -170,6 +170,23 @@ contextBridge.exposeInMainWorld('electronAPI', {
   terminalResize: (siteId, cols, rows) =>
     ipcRenderer.send('terminal-resize', siteId, cols, rows),
   terminalStop: (siteId) => ipcRenderer.invoke('terminal-stop', siteId),
+  listDirectory: (rootPath, dirPath) =>
+    ipcRenderer.invoke('list-directory', rootPath, dirPath),
+  openFilePath: (filePath) => ipcRenderer.invoke('open-file-path', filePath),
+  readFile: (rootPath, filePath) =>
+    ipcRenderer.invoke('read-file', rootPath, filePath),
+  writeFile: (rootPath, filePath, content) =>
+    ipcRenderer.invoke('write-file', rootPath, filePath, content),
+  revealInFinder: (rootPath, targetPath) =>
+    ipcRenderer.invoke('reveal-in-finder', rootPath, targetPath),
+  createFile: (rootPath, dirPath, name) =>
+    ipcRenderer.invoke('create-file', rootPath, dirPath, name),
+  createFolder: (rootPath, dirPath, name) =>
+    ipcRenderer.invoke('create-folder', rootPath, dirPath, name),
+  renamePath: (rootPath, targetPath, newName) =>
+    ipcRenderer.invoke('rename-path', rootPath, targetPath, newName),
+  trashPath: (rootPath, targetPath) =>
+    ipcRenderer.invoke('trash-path', rootPath, targetPath),
 
   // IPC Events (renderer listening to main)
   on: (channel, callback) => {
