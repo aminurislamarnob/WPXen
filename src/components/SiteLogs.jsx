@@ -7,6 +7,7 @@ import {
   CheckCircle,
   AlertTriangle,
 } from 'lucide-react';
+import { Tooltip } from './ui';
 
 const LOG_TABS = [
   { id: 'debug', label: 'Debug Log' },
@@ -99,41 +100,47 @@ export default function SiteLogs({ site }) {
           </p>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
-          <button
-            onClick={handleClear}
-            disabled={isBusy || loading || !hasContent}
-            title="Clear log"
-            className="btn-secondary text-sm"
-          >
-            {busy === 'clear' ? (
-              <Loader size={14} className="animate-spin" />
-            ) : (
-              <Trash2 size={14} />
-            )}
-          </button>
-          <button
-            onClick={handleDownload}
-            disabled={isBusy || loading || !log?.exists}
-            title="Download log"
-            className="btn-secondary text-sm"
-          >
-            {busy === 'download' ? (
-              <Loader size={14} className="animate-spin" />
-            ) : (
-              <Download size={14} />
-            )}
-          </button>
-          <button
-            onClick={() => {
-              setMessage(null);
-              load(tab);
-            }}
-            disabled={isBusy || loading}
-            title="Refresh"
-            className="btn-secondary text-sm"
-          >
-            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-          </button>
+          <Tooltip label="Clear log">
+            <button
+              onClick={handleClear}
+              disabled={isBusy || loading || !hasContent}
+              aria-label="Clear log"
+              className="btn-secondary text-sm"
+            >
+              {busy === 'clear' ? (
+                <Loader size={14} className="animate-spin" />
+              ) : (
+                <Trash2 size={14} />
+              )}
+            </button>
+          </Tooltip>
+          <Tooltip label="Download log">
+            <button
+              onClick={handleDownload}
+              disabled={isBusy || loading || !log?.exists}
+              aria-label="Download log"
+              className="btn-secondary text-sm"
+            >
+              {busy === 'download' ? (
+                <Loader size={14} className="animate-spin" />
+              ) : (
+                <Download size={14} />
+              )}
+            </button>
+          </Tooltip>
+          <Tooltip label="Refresh">
+            <button
+              onClick={() => {
+                setMessage(null);
+                load(tab);
+              }}
+              disabled={isBusy || loading}
+              aria-label="Refresh"
+              className="btn-secondary text-sm"
+            >
+              <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+            </button>
+          </Tooltip>
         </div>
       </div>
 

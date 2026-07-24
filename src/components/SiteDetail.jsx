@@ -22,7 +22,7 @@ import {
   KeyRound,
   Pencil,
 } from 'lucide-react';
-import { Toggle } from './ui';
+import { Toggle, Tooltip } from './ui';
 import ChangeUrlModal from './ChangeUrlModal';
 import WpConfigManager from './WpConfigManager';
 import SitePhpSettings from './SitePhpSettings';
@@ -229,7 +229,6 @@ function Overview({ site, onSaved }) {
               key={label}
               onClick={onClick}
               disabled={disabled}
-              title={label}
               className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs transition-colors font-medium disabled:opacity-50 justify-start ${
                 active
                   ? 'bg-wp-blue/10 text-wp-blue hover:bg-wp-blue/15'
@@ -252,24 +251,28 @@ function Overview({ site, onSaved }) {
             >
               {tunnel.url}
             </button>
-            <button
-              onClick={copyTunnelUrl}
-              title="Copy URL"
-              className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-200"
-            >
-              {copied ? (
-                <Check size={13} className="text-wp-green" />
-              ) : (
-                <Copy size={13} />
-              )}
-            </button>
-            <button
-              onClick={handleStopTunnel}
-              title="Stop sharing"
-              className="p-1.5 rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10"
-            >
-              <X size={13} />
-            </button>
+            <Tooltip label={copied ? 'Copied' : 'Copy URL'}>
+              <button
+                onClick={copyTunnelUrl}
+                aria-label="Copy URL"
+                className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-200"
+              >
+                {copied ? (
+                  <Check size={13} className="text-wp-green" />
+                ) : (
+                  <Copy size={13} />
+                )}
+              </button>
+            </Tooltip>
+            <Tooltip label="Stop sharing">
+              <button
+                onClick={handleStopTunnel}
+                aria-label="Stop sharing"
+                className="p-1.5 rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10"
+              >
+                <X size={13} />
+              </button>
+            </Tooltip>
           </div>
         )}
         {tunnel?.status === 'error' && (
@@ -395,13 +398,15 @@ export default function SiteDetail({ sites, refreshSites }) {
       <div className="sticky top-0 z-10 bg-surface/80 backdrop-macos border-b border-surface-border px-4 py-2.5">
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-1 min-w-0">
-            <button
-              onClick={() => navigate('/sites')}
-              title="Back to Sites"
-              className="p-1.5 rounded-lg hover:bg-black/5 dark:hover:bg-white/10 text-gray-500 flex-shrink-0"
-            >
-              <ChevronLeft size={17} />
-            </button>
+            <Tooltip label="Back to Sites">
+              <button
+                onClick={() => navigate('/sites')}
+                aria-label="Back to Sites"
+                className="p-1.5 rounded-lg hover:bg-black/5 dark:hover:bg-white/10 text-gray-500 flex-shrink-0"
+              >
+                <ChevronLeft size={17} />
+              </button>
+            </Tooltip>
             <span className="text-[15px] font-bold text-gray-900 truncate">
               {site.name}
             </span>

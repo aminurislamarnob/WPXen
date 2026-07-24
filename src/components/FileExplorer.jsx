@@ -24,7 +24,7 @@ import {
   Undo2,
 } from 'lucide-react';
 import { FileGlyph } from '../lib/fileIcons';
-import { ConfirmDialog } from './ui';
+import { ConfirmDialog, Tooltip } from './ui';
 
 // Per-status dot color + human label for the Changes list, mirroring
 // source-control UIs (a colored dot rather than a letter).
@@ -56,7 +56,7 @@ const relTo = (root, p) => p.slice(root.length).replace(/^\/+/, '');
 
 // Shared toolbar icon-button styling (Files toolbar + Changes toolbar).
 const iconBtn =
-  'p-1 rounded-md text-gray-500 hover:text-gray-800 hover:bg-black/[0.05] dark:hover:text-gray-200 dark:hover:bg-white/[0.07]';
+  'p-1 rounded-md text-gray-500 hover:text-gray-900 hover:bg-black/[0.05] dark:hover:bg-white/[0.07]';
 
 // Lazy project explorer for the selected Site's directory, with a search
 // filter, a toolbar (new file/folder, refresh, collapse all) and a right-click
@@ -86,7 +86,9 @@ export default function FileExplorer({
   const [allCollapsed, setAllCollapsed] = useState(false);
   const [viewMode, setViewMode] = useState(() => {
     try {
-      return localStorage.getItem('wpherd.changesViewMode') === 'tree' ? 'tree' : 'folders';
+      return localStorage.getItem('wpherd.changesViewMode') === 'tree'
+        ? 'tree'
+        : 'folders';
     } catch {
       return 'folders';
     }
@@ -389,9 +391,7 @@ export default function FileExplorer({
       const entries = childrenByPath[dirPath];
       if (!entries) return false;
       return entries.some(
-        (en) =>
-          en.name.toLowerCase().includes(q) ||
-          (en.isDir && subtreeMatches(en.path))
+        (en) => en.name.toLowerCase().includes(q) || (en.isDir && subtreeMatches(en.path))
       );
     },
     [childrenByPath, q]
@@ -474,11 +474,11 @@ export default function FileExplorer({
             </div>
           ) : (
             <button
-              onClick={() =>
-                entry.isDir ? toggle(entry.path) : onOpenFile?.(entry)
-              }
+              onClick={() => (entry.isDir ? toggle(entry.path) : onOpenFile?.(entry))}
               onContextMenu={(e) => openMenu(e, entry)}
-              onDragOver={entry.isDir ? (e) => onFolderDragOver(e, entry.path) : undefined}
+              onDragOver={
+                entry.isDir ? (e) => onFolderDragOver(e, entry.path) : undefined
+              }
               title={entry.name}
               className={`w-full flex items-center gap-1.5 py-[3px] pr-2 rounded-md text-[12.5px] text-gray-800 ${
                 isDropTarget
@@ -507,10 +507,9 @@ export default function FileExplorer({
               )}
               <span className={`truncate ${nameTint}`}>{entry.name}</span>
               {dirChanged && (
-                <span
-                  className="ml-auto w-1.5 h-1.5 rounded-full bg-amber-500 flex-shrink-0"
-                  title="Contains changes"
-                />
+                <Tooltip label="Contains changes">
+                  <span className="ml-auto w-1.5 h-1.5 rounded-full bg-amber-500 flex-shrink-0" />
+                </Tooltip>
               )}
             </button>
           )}
@@ -565,23 +564,33 @@ export default function FileExplorer({
                 className="flex-1 min-w-0 bg-transparent text-[12.5px] outline-none placeholder:text-gray-400"
               />
             </div>
-            <button className={iconBtn} title="New File" onClick={() => startCreate(false)}>
-              <FilePlus size={15} />
-            </button>
-            <button className={iconBtn} title="New Folder" onClick={() => startCreate(true)}>
-              <FolderPlus size={15} />
-            </button>
-            <button className={iconBtn} title="Refresh" onClick={refresh}>
-              <RefreshCw size={14} />
-            </button>
-            <button className={iconBtn} title="Collapse All" onClick={collapseAll}>
-              <FoldVertical size={15} />
-            </button>
+            <Tooltip label="New file">
+              <button className={iconBtn} onClick={() => startCreate(false)}>
+                <FilePlus size={15} />
+              </button>
+            </Tooltip>
+            <Tooltip label="New folder">
+              <button className={iconBtn} onClick={() => startCreate(true)}>
+                <FolderPlus size={15} />
+              </button>
+            </Tooltip>
+            <Tooltip label="Refresh">
+              <button className={iconBtn} onClick={refresh}>
+                <RefreshCw size={14} />
+              </button>
+            </Tooltip>
+            <Tooltip label="Collapse all">
+              <button className={iconBtn} onClick={collapseAll}>
+                <FoldVertical size={15} />
+              </button>
+            </Tooltip>
           </div>
 
           <div
             className={`relative flex-1 overflow-auto px-2 py-2 ${
-              dropTarget === rootPath ? 'ring-1 ring-inset ring-blue-400 bg-blue-50/40 dark:bg-blue-500/10' : ''
+              dropTarget === rootPath
+                ? 'ring-1 ring-inset ring-blue-400 bg-blue-50/40 dark:bg-blue-500/10'
+                : ''
             }`}
             onContextMenu={(e) => e.preventDefault()}
             onDragOver={onTreeDragOver}
@@ -593,14 +602,19 @@ export default function FileExplorer({
               <div className="pointer-events-none sticky bottom-0 left-0 right-0 flex justify-center pt-2">
                 <span className="rounded-full bg-blue-500 text-white text-[11px] px-2.5 py-1 shadow-sm">
                   Drop to upload to{' '}
-                  {dropTarget === rootPath ? rootName || 'project root' : baseOf(dropTarget)}
+                  {dropTarget === rootPath
+                    ? rootName || 'project root'
+                    : baseOf(dropTarget)}
                 </span>
               </div>
             )}
           </div>
 
           {error && (
-            <div className="px-3 py-1.5 text-[11px] text-red-600 dark:text-red-400 truncate border-t border-black/[0.06] dark:border-white/[0.08]" title={error}>
+            <div
+              className="px-3 py-1.5 text-[11px] text-red-600 dark:text-red-400 truncate border-t border-black/[0.06] dark:border-white/[0.08]"
+              title={error}
+            >
               {error}
             </div>
           )}
@@ -869,13 +883,13 @@ function ChangesView({
   const stagedKeys = new Set();
   for (const r of repos) {
     for (const f of r.files) {
-      if (f.source === 'staged') stagedKeys.add(`${f.repoRoot} ${f.rel}`);
+      if (f.source === 'staged') stagedKeys.add(`${f.repoRoot}\u0000${f.rel}`);
     }
   }
   const enrich = (file) => ({
     ...file,
     hasStagedTwin:
-      file.source === 'unstaged' && stagedKeys.has(`${file.repoRoot} ${file.rel}`),
+      file.source === 'unstaged' && stagedKeys.has(`${file.repoRoot}\u0000${file.rel}`),
   });
   const handlers = {
     onOpen: (file) => onOpenDiff?.(enrich(file)),
@@ -904,9 +918,7 @@ function ChangesView({
           {totalFiles} {totalFiles === 1 ? 'file' : 'files'}
         </span>
         {!singleRoot && repos.length > 1 && (
-          <span className="whitespace-nowrap">
-            · {repos.length} repos
-          </span>
+          <span className="whitespace-nowrap">· {repos.length} repos</span>
         )}
         {(totalAdd > 0 || totalDel > 0) && (
           <span className="whitespace-nowrap tabular-nums">
@@ -920,23 +932,21 @@ function ChangesView({
           </span>
         )}
         <div className="ml-auto flex items-center gap-0.5">
-          <button
-            className={iconBtn}
-            title={viewMode === 'folders' ? 'Tree view' : 'Folder view'}
-            onClick={onToggleViewMode}
-          >
-            {viewMode === 'folders' ? <ListTree size={14} /> : <Folder size={14} />}
-          </button>
-          <button className={iconBtn} title="Refresh" onClick={onRefresh}>
-            <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
-          </button>
-          <button
-            className={iconBtn}
-            title={allCollapsed ? 'Expand all' : 'Collapse all'}
-            onClick={onToggleFold}
-          >
-            {allCollapsed ? <UnfoldVertical size={14} /> : <FoldVertical size={14} />}
-          </button>
+          <Tooltip label={viewMode === 'folders' ? 'Tree view' : 'Folder view'}>
+            <button className={iconBtn} onClick={onToggleViewMode}>
+              {viewMode === 'folders' ? <ListTree size={14} /> : <Folder size={14} />}
+            </button>
+          </Tooltip>
+          <Tooltip label="Refresh">
+            <button className={iconBtn} onClick={onRefresh}>
+              <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
+            </button>
+          </Tooltip>
+          <Tooltip label={allCollapsed ? 'Expand all' : 'Collapse all'}>
+            <button className={iconBtn} onClick={onToggleFold}>
+              {allCollapsed ? <UnfoldVertical size={14} /> : <FoldVertical size={14} />}
+            </button>
+          </Tooltip>
         </div>
       </div>
 
@@ -995,7 +1005,9 @@ function RepoGroup({ repo, showHeader, viewMode, foldSignal, handlers }) {
           {(repo.additions > 0 || repo.deletions > 0) && (
             <span className="ml-auto flex-shrink-0 text-[10.5px] tabular-nums">
               {repo.additions > 0 && (
-                <span className="text-green-500 dark:text-green-400">+{repo.additions}</span>
+                <span className="text-green-500 dark:text-green-400">
+                  +{repo.additions}
+                </span>
               )}
               {repo.additions > 0 && repo.deletions > 0 && ' '}
               {repo.deletions > 0 && (
@@ -1015,7 +1027,12 @@ function RepoGroup({ repo, showHeader, viewMode, foldSignal, handlers }) {
             <SectionAction
               icon={Plus}
               label="Stage all"
-              onClick={() => handlers.onStage(repo.root, unstaged.map((f) => f.rel))}
+              onClick={() =>
+                handlers.onStage(
+                  repo.root,
+                  unstaged.map((f) => f.rel)
+                )
+              }
             />
           }
         >
@@ -1037,7 +1054,12 @@ function RepoGroup({ repo, showHeader, viewMode, foldSignal, handlers }) {
             <SectionAction
               icon={Minus}
               label="Unstage all"
-              onClick={() => handlers.onUnstage(repo.root, staged.map((f) => f.rel))}
+              onClick={() =>
+                handlers.onUnstage(
+                  repo.root,
+                  staged.map((f) => f.rel)
+                )
+              }
             />
           }
         >
@@ -1068,7 +1090,7 @@ function ChangesSection({ id, title, count, foldSignal, action, children }) {
       <div className="flex items-center pr-2">
         <button
           onClick={() => setOpen((v) => !v)}
-          className="flex-1 min-w-0 flex items-center gap-1 px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+          className="flex-1 min-w-0 flex items-center gap-1 px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500 hover:text-gray-900"
         >
           {open ? (
             <ChevronDown size={12} className="flex-shrink-0" />
@@ -1096,8 +1118,7 @@ function SectionAction({ icon: Icon, label, onClick }) {
   return (
     <button
       onClick={onClick}
-      title={label}
-      className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] text-gray-500 hover:text-gray-800 hover:bg-black/[0.05] dark:hover:text-gray-200 dark:hover:bg-white/[0.07]"
+      className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] text-gray-500 hover:text-gray-900 hover:bg-black/[0.05] dark:hover:bg-white/[0.07]"
     >
       <Icon size={12} className="flex-shrink-0" />
       {label}
@@ -1333,7 +1354,9 @@ function ChangeRow({ file, hideDir, depth = 0, handlers }) {
           {(file.additions > 0 || file.deletions > 0) && (
             <span className="text-[10.5px] tabular-nums">
               {file.additions > 0 && (
-                <span className="text-green-500 dark:text-green-400">+{file.additions}</span>
+                <span className="text-green-500 dark:text-green-400">
+                  +{file.additions}
+                </span>
               )}
               {file.additions > 0 && file.deletions > 0 && ' '}
               {file.deletions > 0 && (
@@ -1341,10 +1364,9 @@ function ChangeRow({ file, hideDir, depth = 0, handlers }) {
               )}
             </span>
           )}
-          <span
-            className={`w-2 h-2 rounded-full ${meta.cls}`}
-            title={meta.label}
-          />
+          <Tooltip label={meta.label}>
+            <span className={`w-2 h-2 rounded-full ${meta.cls}`} />
+          </Tooltip>
         </span>
       </button>
 
@@ -1379,16 +1401,16 @@ function ChangeRow({ file, hideDir, depth = 0, handlers }) {
 // A small square icon button for a Changes row's hover actions.
 function RowAction({ icon: Icon, label, onClick, danger }) {
   return (
-    <button
-      onClick={onClick}
-      title={label}
-      className={`flex w-5 h-5 items-center justify-center rounded text-gray-500 hover:bg-black/10 dark:hover:bg-white/15 ${
-        danger
-          ? 'hover:text-red-600 dark:hover:text-red-400'
-          : 'hover:text-gray-800 dark:hover:text-gray-100'
-      }`}
-    >
-      <Icon size={13} className="flex-shrink-0" />
-    </button>
+    <Tooltip label={label}>
+      <button
+        onClick={onClick}
+        aria-label={label}
+        className={`flex w-5 h-5 items-center justify-center rounded text-gray-500 hover:bg-black/10 dark:hover:bg-white/15 ${
+          danger ? 'hover:text-red-600 dark:hover:text-red-400' : 'hover:text-gray-900'
+        }`}
+      >
+        <Icon size={13} className="flex-shrink-0" />
+      </button>
+    </Tooltip>
   );
 }

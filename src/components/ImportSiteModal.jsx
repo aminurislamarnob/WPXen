@@ -9,7 +9,7 @@ import {
   ChevronRight,
   Globe,
 } from 'lucide-react';
-import { StepIndicator, ProgressLog } from './ui';
+import { ProgressLog, StepIndicator, Tooltip } from './ui';
 
 const STEPS = ['Archive', 'Destination', 'Importing'];
 
@@ -183,14 +183,15 @@ export default function ImportSiteModal({ onClose, onSiteImported, phpVersions }
                     value={archivePath}
                     placeholder="Choose a .zip or .wpress file…"
                   />
-                  <button
-                    onClick={handlePickArchive}
-                    title="Choose archive"
-                    aria-label="Choose archive"
-                    className="btn-secondary !px-0 w-8 flex-shrink-0"
-                  >
-                    <FolderOpen size={14} />
-                  </button>
+                  <Tooltip label="Choose archive">
+                    <button
+                      onClick={handlePickArchive}
+                      aria-label="Choose archive"
+                      className="btn-secondary !px-0 w-8 flex-shrink-0"
+                    >
+                      <FolderOpen size={14} />
+                    </button>
+                  </Tooltip>
                 </div>
               </div>
 
@@ -292,14 +293,15 @@ export default function ImportSiteModal({ onClose, onSiteImported, phpVersions }
                     value={formData.path}
                     onChange={(e) => setFormData((p) => ({ ...p, path: e.target.value }))}
                   />
-                  <button
-                    onClick={handleSelectFolder}
-                    title="Choose folder"
-                    aria-label="Choose folder"
-                    className="btn-secondary !px-0 w-8 flex-shrink-0"
-                  >
-                    <FolderOpen size={14} />
-                  </button>
+                  <Tooltip label="Choose folder">
+                    <button
+                      onClick={handleSelectFolder}
+                      aria-label="Choose folder"
+                      className="btn-secondary !px-0 w-8 flex-shrink-0"
+                    >
+                      <FolderOpen size={14} />
+                    </button>
+                  </Tooltip>
                 </div>
               </div>
               <div>

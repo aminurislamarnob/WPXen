@@ -13,7 +13,7 @@ import {
   ExternalLink,
   ShieldAlert,
 } from 'lucide-react';
-import { Card, Row, SectionLabel, IconTile } from './ui';
+import { Card, IconTile, Row, SectionLabel, Tooltip } from './ui';
 import { StatusBadge } from './StatusBadge';
 
 const SERVICE_ROWS = [
@@ -189,19 +189,21 @@ export default function Dashboard({ serviceStatus, sites, refreshStatus }) {
               chevron
             >
               {/* span, not button — Row renders as a <button> when clickable */}
-              <span
-                role="button"
-                tabIndex={0}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  window.electronAPI.openSiteInBrowser(site.url);
-                }}
-                onKeyDown={(e) => e.key === 'Enter' && e.stopPropagation()}
-                title="Open in browser"
-                className="p-1.5 rounded-md hover:bg-black/5 dark:hover:bg-white/10 text-gray-400 flex-shrink-0"
-              >
-                <ExternalLink size={13} />
-              </span>
+              <Tooltip label="Open in browser">
+                <span
+                  role="button"
+                  tabIndex={0}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    window.electronAPI.openSiteInBrowser(site.url);
+                  }}
+                  onKeyDown={(e) => e.key === 'Enter' && e.stopPropagation()}
+                  aria-label="Open in browser"
+                  className="p-1.5 rounded-md hover:bg-black/5 dark:hover:bg-white/10 text-gray-400 flex-shrink-0"
+                >
+                  <ExternalLink size={13} />
+                </span>
+              </Tooltip>
             </Row>
           ))
         )}

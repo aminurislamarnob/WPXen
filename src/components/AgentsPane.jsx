@@ -6,6 +6,7 @@ import Terminal from './Terminal';
 import FileExplorer from './FileExplorer';
 import CodeEditor from './CodeEditor';
 import ResizeHandle from './ResizeHandle';
+import { Tooltip } from './ui';
 
 // Main pane for the Agents section. A Site can host MANY concurrent Sessions
 // (any mix of Agents, incl. several of the same provider); each is a terminal
@@ -165,8 +166,8 @@ export default function AgentsPane() {
         </div>
         <p className="text-[15px] font-semibold text-gray-900">Agents</p>
         <p className="mt-1 max-w-sm text-[13px] text-gray-500">
-          Pick a site in the sidebar, expand it, and choose an AI agent to open it
-          in that site&rsquo;s directory.
+          Pick a site in the sidebar, expand it, and choose an AI agent to open it in that
+          site&rsquo;s directory.
         </p>
       </div>
     );
@@ -176,9 +177,7 @@ export default function AgentsPane() {
   const detected = agents.filter((a) => a.detected);
   // Ordinal suffix for duplicate providers, so identical tabs are tellable apart.
   const ordinal = (tab, i) => {
-    const sameBefore = tabs
-      .slice(0, i)
-      .filter((t) => t.agentId === tab.agentId).length;
+    const sameBefore = tabs.slice(0, i).filter((t) => t.agentId === tab.agentId).length;
     const total = tabs.filter((t) => t.agentId === tab.agentId).length;
     return total > 1 ? ` ${sameBefore + 1}` : '';
   };
@@ -229,30 +228,34 @@ export default function AgentsPane() {
                     {tab.agentName}
                     {ordinal(tab, i)}
                   </span>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      closeTab(tab.sessionId);
-                    }}
-                    className="p-0.5 rounded hover:bg-black/10 dark:hover:bg-white/15 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
-                    title="Close session"
-                  >
-                    <X size={12} />
-                  </button>
+                  <Tooltip label="Close session">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        closeTab(tab.sessionId);
+                      }}
+                      aria-label="Close session"
+                      className="p-0.5 rounded hover:bg-black/10 dark:hover:bg-white/15 text-gray-400 hover:text-gray-900"
+                    >
+                      <X size={12} />
+                    </button>
+                  </Tooltip>
                 </div>
               );
             })}
 
             {/* Add-session button. The menu is rendered fixed (below) so the
                 tab strip's overflow-x-auto can't clip it. */}
-            <button
-              onClick={openAddMenu}
-              disabled={detected.length === 0}
-              className="flex-shrink-0 p-1 rounded-md text-gray-500 hover:text-gray-800 hover:bg-black/[0.05] dark:hover:text-gray-200 dark:hover:bg-white/[0.07] disabled:opacity-40"
-              title="New session"
-            >
-              <Plus size={16} />
-            </button>
+            <Tooltip label="New session">
+              <button
+                onClick={openAddMenu}
+                disabled={detected.length === 0}
+                aria-label="New session"
+                className="flex-shrink-0 p-1 rounded-md text-gray-500 hover:text-gray-900 hover:bg-black/[0.05] dark:hover:bg-white/[0.07] disabled:opacity-40"
+              >
+                <Plus size={16} />
+              </button>
+            </Tooltip>
           </div>
 
           {addMenu && (

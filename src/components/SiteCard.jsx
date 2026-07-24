@@ -23,6 +23,7 @@ import {
   Layers,
 } from 'lucide-react';
 import { WordPressIcon } from './icons';
+import { Tooltip } from './ui';
 
 function ContextMenu({
   site,
@@ -220,26 +221,29 @@ export default function SiteCard({
     <div className={`site-card settings-card group relative ${menuOpen ? 'z-40' : ''}`}>
       {/* Main row: tile · [ title + chips + HTTPS / domain · path ] · menu */}
       <div className="flex items-start gap-3 px-4 py-3">
-        <button
-          onClick={openDetail}
-          title="Manage site"
-          className="icon-tile w-9 h-9 bg-[#30b0c7] hover:brightness-95 transition-all flex-shrink-0"
-        >
-          <span className="text-white text-sm font-bold">
-            {site.name.charAt(0).toUpperCase()}
-          </span>
-        </button>
+        <Tooltip label="Manage site">
+          <button
+            onClick={openDetail}
+            aria-label="Manage site"
+            className="icon-tile w-9 h-9 bg-[#30b0c7] hover:brightness-95 transition-all flex-shrink-0"
+          >
+            <span className="text-white text-sm font-bold">
+              {site.name.charAt(0).toUpperCase()}
+            </span>
+          </button>
+        </Tooltip>
 
         <div className="min-w-0 flex-1">
           {/* Top line: title · version chips · db name · HTTPS */}
           <div className="flex items-center gap-2">
-            <button
-              onClick={openDetail}
-              className="text-sm font-semibold text-gray-900 truncate hover:text-wp-blue transition-colors text-left min-w-0"
-              title="Manage site"
-            >
-              {site.name}
-            </button>
+            <Tooltip label="Manage site">
+              <button
+                onClick={openDetail}
+                className="text-sm font-semibold text-gray-900 truncate hover:text-wp-blue transition-colors text-left min-w-0"
+              >
+                {site.name}
+              </button>
+            </Tooltip>
 
             <div className="flex items-center gap-1.5 flex-shrink-0 ml-auto">
               <span className="inline-flex items-center px-2 py-0.5 bg-purple-50 text-purple-700 dark:bg-purple-500/15 dark:text-purple-300 rounded-full text-xs font-medium">
@@ -259,22 +263,23 @@ export default function SiteCard({
               </span>
 
               {/* HTTPS lock toggle — click the icon to enable/disable HTTPS */}
-              <button
-                onClick={handleToggleHttps}
-                disabled={httpsBusy}
-                title={site.https ? 'Disable HTTPS' : 'Enable HTTPS'}
-                aria-label={site.https ? 'Disable HTTPS' : 'Enable HTTPS'}
-                aria-pressed={!!site.https}
-                className="p-1.5 rounded-lg hover:bg-gray-100 disabled:opacity-50 transition-colors"
-              >
-                {httpsBusy ? (
-                  <Loader size={14} className="animate-spin text-gray-400" />
-                ) : site.https ? (
-                  <Lock size={14} className="text-wp-green" />
-                ) : (
-                  <Unlock size={14} className="text-gray-400" />
-                )}
-              </button>
+              <Tooltip label={site.https ? 'Disable HTTPS' : 'Enable HTTPS'}>
+                <button
+                  onClick={handleToggleHttps}
+                  disabled={httpsBusy}
+                  aria-label={site.https ? 'Disable HTTPS' : 'Enable HTTPS'}
+                  aria-pressed={!!site.https}
+                  className="p-1.5 rounded-lg hover:bg-gray-100 disabled:opacity-50 transition-colors"
+                >
+                  {httpsBusy ? (
+                    <Loader size={14} className="animate-spin text-gray-400" />
+                  ) : site.https ? (
+                    <Lock size={14} className="text-wp-green" />
+                  ) : (
+                    <Unlock size={14} className="text-gray-400" />
+                  )}
+                </button>
+              </Tooltip>
             </div>
           </div>
 
@@ -327,7 +332,6 @@ export default function SiteCard({
             key={label}
             onClick={onClick}
             disabled={disabled}
-            title={label}
             className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs transition-colors font-medium disabled:opacity-50 ${
               active
                 ? 'bg-wp-blue/10 text-wp-blue hover:bg-wp-blue/15'
@@ -352,16 +356,18 @@ export default function SiteCard({
               Public share tunnel
             </span>
             {!tunnelActive && (
-              <button
-                onClick={() => {
-                  setShareOpen(false);
-                  if (tunnel?.status === 'error') onStopTunnel(site);
-                }}
-                className="text-gray-400 hover:text-gray-600"
-                title="Close"
-              >
-                <X size={13} />
-              </button>
+              <Tooltip label="Close">
+                <button
+                  onClick={() => {
+                    setShareOpen(false);
+                    if (tunnel?.status === 'error') onStopTunnel(site);
+                  }}
+                  aria-label="Close"
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <X size={13} />
+                </button>
+              </Tooltip>
             )}
           </div>
 
@@ -408,24 +414,28 @@ export default function SiteCard({
                 >
                   {tunnel.url}
                 </button>
-                <button
-                  onClick={copyTunnelUrl}
-                  title="Copy URL"
-                  className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-200"
-                >
-                  {copied ? (
-                    <Check size={13} className="text-wp-green" />
-                  ) : (
-                    <Copy size={13} />
-                  )}
-                </button>
-                <button
-                  onClick={() => onStopTunnel(site)}
-                  title="Stop sharing"
-                  className="p-1.5 rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10"
-                >
-                  <X size={13} />
-                </button>
+                <Tooltip label={copied ? 'Copied' : 'Copy URL'}>
+                  <button
+                    onClick={copyTunnelUrl}
+                    aria-label="Copy URL"
+                    className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-200"
+                  >
+                    {copied ? (
+                      <Check size={13} className="text-wp-green" />
+                    ) : (
+                      <Copy size={13} />
+                    )}
+                  </button>
+                </Tooltip>
+                <Tooltip label="Stop sharing">
+                  <button
+                    onClick={() => onStopTunnel(site)}
+                    aria-label="Stop sharing"
+                    className="p-1.5 rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10"
+                  >
+                    <X size={13} />
+                  </button>
+                </Tooltip>
               </div>
               <p className="mt-1.5 text-xs text-gray-400">
                 Anyone with this link can reach your local site while it&apos;s open.

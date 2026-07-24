@@ -1,4 +1,12 @@
-import { useEffect } from 'react';
+import {
+  cloneElement,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
+import { createPortal } from 'react-dom';
 import { ChevronRight, Check, CheckCircle, Loader } from 'lucide-react';
 
 // Shared macOS System Settings primitives. Pages compose these instead of
@@ -209,6 +217,169 @@ export function PageHeader({ title, subtitle, children }) {
       </div>
       {children && <div className="flex items-center gap-2">{children}</div>}
     </div>
+  );
+}
+
+// Keycap chip for a shortcut, shown inside a Tooltip. The tooltip pill is an
+// inverted surface, so the cap tints with `surface` (which inverts with the
+// theme) rather than a literal color.
+export function Kbd({ children }) {
+  return (
+    <kbd className="inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-md bg-surface/[0.22] dark:bg-surface/[0.14] px-1 font-sans text-[11px] font-medium leading-none">
+      {children}
+    </kbd>
+  );
+}
+
+const TOOLTIP_GAP = 6; // px between the trigger and the pill
+const TOOLTIP_MARGIN = 8; // px minimum clearance from the window edge
+
+// Place the pill on `side` of the trigger, centered, then clamp it inside the
+// window so a control near an edge still shows its label in full.
+function placeTooltip(trigger, tip, side) {
+  let top, left;
+  switch (side) {
+    case 'top':
+      top = trigger.top - tip.height - TOOLTIP_GAP;
+      left = trigger.left + trigger.width / 2 - tip.width / 2;
+      break;
+    case 'left':
+      top = trigger.top + trigger.height / 2 - tip.height / 2;
+      left = trigger.left - tip.width - TOOLTIP_GAP;
+      break;
+    case 'right':
+      top = trigger.top + trigger.height / 2 - tip.height / 2;
+      left = trigger.right + TOOLTIP_GAP;
+      break;
+    default:
+      top = trigger.bottom + TOOLTIP_GAP;
+      left = trigger.left + trigger.width / 2 - tip.width / 2;
+  }
+  const clamp = (v, max) => Math.min(Math.max(TOOLTIP_MARGIN, v), max - TOOLTIP_MARGIN);
+  return {
+    top: clamp(top, window.innerHeight - tip.height),
+    left: clamp(left, window.innerWidth - tip.width),
+  };
+}
+
+// Hover tooltip: a capsule on an inverted surface holding a label and, when
+// the action has a shortcut, its keycaps — e.g. `keys={['⌘', 'B']}`.
+//
+//   <Tooltip label="Toggle sidebar" keys={['⌘', 'B']}>
+//     <button …>…</button>
+//   </Tooltip>
+//
+// The single child is cloned (not wrapped) so it keeps its place in the parent
+// layout; it must be a host element that accepts a ref. The pill portals to
+// <body> and is pointer-events-none, so it never intercepts clicks and never
+// gets clipped by an overflow-hidden ancestor. Prefer this over the native
+// `title` attribute — don't set both, or macOS draws a second tooltip.
+export function Tooltip({ label, keys, side = 'bottom', delay = 300, children }) {
+  const triggerRef = useRef(null);
+  const tipRef = useRef(null);
+  const timerRef = useRef(null);
+  const [open, setOpen] = useState(false);
+  const [coords, setCoords] = useState(null);
+
+  const hide = useCallback(() => {
+    clearTimeout(timerRef.current);
+    setOpen(false);
+    setCoords(null);
+  }, []);
+
+  const show = useCallback(() => {
+    clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => setOpen(true), delay);
+  }, [delay]);
+
+  useEffect(() => () => clearTimeout(timerRef.current), []);
+
+  // Measure once mounted, then position. Until then the pill is laid out but
+  // invisible, so it's sized without flashing in the wrong spot.
+  useLayoutEffect(() => {
+    if (!open || !triggerRef.current || !tipRef.current) return;
+    setCoords(
+      placeTooltip(
+        triggerRef.current.getBoundingClientRect(),
+        tipRef.current.getBoundingClientRect(),
+        side
+      )
+    );
+  }, [open, side, label, keys]);
+
+  // Anything that can move the trigger out from under the pill dismisses it.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e) => e.key === 'Escape' && hide();
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('scroll', hide, true);
+    window.addEventListener('resize', hide);
+    window.addEventListener('blur', hide);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('scroll', hide, true);
+      window.removeEventListener('resize', hide);
+      window.removeEventListener('blur', hide);
+    };
+  }, [open, hide]);
+
+  const childRef = children.ref;
+  const trigger = cloneElement(children, {
+    ref: (node) => {
+      triggerRef.current = node;
+      if (typeof childRef === 'function') childRef(node);
+      else if (childRef) childRef.current = node;
+    },
+    onMouseEnter: (e) => {
+      children.props.onMouseEnter?.(e);
+      show();
+    },
+    onMouseLeave: (e) => {
+      children.props.onMouseLeave?.(e);
+      hide();
+    },
+    onFocus: (e) => {
+      children.props.onFocus?.(e);
+      show();
+    },
+    onBlur: (e) => {
+      children.props.onBlur?.(e);
+      hide();
+    },
+    // Dismiss on activation, so the pill doesn't hang over the result.
+    onClick: (e) => {
+      children.props.onClick?.(e);
+      hide();
+    },
+  });
+
+  return (
+    <>
+      {trigger}
+      {open &&
+        createPortal(
+          <div
+            ref={tipRef}
+            role="tooltip"
+            style={{
+              top: coords?.top ?? 0,
+              left: coords?.left ?? 0,
+              visibility: coords ? 'visible' : 'hidden',
+            }}
+            className="fixed z-[70] pointer-events-none flex items-center gap-2 whitespace-nowrap rounded-full bg-gray-900 px-3 py-1.5 text-[12px] font-medium text-surface shadow-lg animate-fade-in"
+          >
+            {label}
+            {keys?.length > 0 && (
+              <span className="flex items-center gap-1">
+                {keys.map((k) => (
+                  <Kbd key={k}>{k}</Kbd>
+                ))}
+              </span>
+            )}
+          </div>,
+          document.body
+        )}
+    </>
   );
 }
 

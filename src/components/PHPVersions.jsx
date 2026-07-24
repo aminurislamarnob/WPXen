@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import { StatusBadge } from './StatusBadge';
 import PhpSettings from './PhpSettings';
-import { Card, Row, SectionLabel } from './ui';
+import { Card, Row, SectionLabel, Tooltip } from './ui';
 
 // Version-number tile (like System Settings colored tiles, but numeric).
 function VersionTile({ version, active }) {
@@ -238,14 +238,12 @@ export default function PHPVersions() {
   return (
     <div className="px-6 pb-6 max-w-[735px] mx-auto animate-fade-in">
       <div className="flex items-center justify-end gap-2 mb-4">
-        <button
-          onClick={scrollToSettings}
-          title="PHP configuration"
-          className="btn-secondary"
-        >
-          <Sliders size={14} />
-          Configuration
-        </button>
+        <Tooltip label="PHP configuration">
+          <button onClick={scrollToSettings} className="btn-secondary">
+            <Sliders size={14} />
+            Configuration
+          </button>
+        </Tooltip>
         <button onClick={loadVersions} disabled={busy} className="btn-secondary">
           <RefreshCw size={12} strokeWidth={2.5} className={busy ? 'animate-spin' : ''} />
           Refresh

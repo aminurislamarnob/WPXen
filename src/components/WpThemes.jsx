@@ -10,6 +10,7 @@ import {
   Trash2,
   Palette,
 } from 'lucide-react';
+import { Tooltip } from './ui';
 
 const TABS = [
   { id: 'all', label: 'All' },
@@ -360,20 +361,22 @@ export default function WpThemes({ site, onSaved }) {
             <Plus size={14} className="mr-1.5" />
             Add New
           </button>
-          <button
-            onClick={() => {
-              setMessage(null);
-              load();
-            }}
-            disabled={loading || refreshing || isBusy}
-            title="Refresh"
-            className="btn-secondary text-sm"
-          >
-            <RefreshCw
-              size={14}
-              className={loading || refreshing ? 'animate-spin' : ''}
-            />
-          </button>
+          <Tooltip label="Refresh">
+            <button
+              onClick={() => {
+                setMessage(null);
+                load();
+              }}
+              disabled={loading || refreshing || isBusy}
+              aria-label="Refresh"
+              className="btn-secondary text-sm"
+            >
+              <RefreshCw
+                size={14}
+                className={loading || refreshing ? 'animate-spin' : ''}
+              />
+            </button>
+          </Tooltip>
           {withUpdates.length > 0 && (
             <button
               onClick={() =>

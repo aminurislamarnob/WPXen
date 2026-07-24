@@ -9,6 +9,7 @@ import {
   Palette,
   Users,
 } from 'lucide-react';
+import { Tooltip } from './ui';
 
 function StatCard({ icon: Icon, label, value, description, updates, tint }) {
   return (
@@ -89,17 +90,22 @@ export default function WpOverview({ site, onSaved }) {
             Core, plugin and theme inventory with pending updates.
           </p>
         </div>
-        <button
-          onClick={() => {
-            setMessage(null);
-            load();
-          }}
-          disabled={loading || refreshing || busy}
-          title="Refresh"
-          className="btn-secondary text-sm"
-        >
-          <RefreshCw size={14} className={loading || refreshing ? 'animate-spin' : ''} />
-        </button>
+        <Tooltip label="Refresh">
+          <button
+            onClick={() => {
+              setMessage(null);
+              load();
+            }}
+            disabled={loading || refreshing || busy}
+            aria-label="Refresh"
+            className="btn-secondary text-sm"
+          >
+            <RefreshCw
+              size={14}
+              className={loading || refreshing ? 'animate-spin' : ''}
+            />
+          </button>
+        </Tooltip>
       </div>
 
       {message && (

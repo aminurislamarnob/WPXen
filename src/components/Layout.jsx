@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard,
@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import logo from '../assets/logo.png';
 import AgentsSidebar from './AgentsSidebar';
+import { Tooltip } from './ui';
 
 // System Settings-style nav: grouped items, each with its own colored tile.
 const NAV_GROUPS = [
@@ -49,6 +50,22 @@ export default function Layout() {
 
   const agentsMode = location.pathname.startsWith('/agents');
 
+  // Shortcuts for the window controls, matching the keycaps in their tooltips.
+  // ⌘[ / ⌘] are the macOS system bindings for history; ⌘B is the usual
+  // sidebar toggle. Keep these in sync with the `keys` props below.
+  useEffect(() => {
+    const onKey = (e) => {
+      if (!e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === 'b' || e.key === 'B') setSidebarCollapsed((v) => !v);
+      else if (e.key === '[') navigate(-1);
+      else if (e.key === ']') navigate(1);
+      else return;
+      e.preventDefault();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [navigate]);
+
   const q = filter.trim().toLowerCase();
   const groups = q
     ? NAV_GROUPS.map((g) => g.filter((i) => i.label.toLowerCase().includes(q))).filter(
@@ -58,34 +75,6 @@ export default function Layout() {
 
   return (
     <div className="h-screen flex overflow-hidden relative">
-      {/* Window controls, docked just after the native macOS traffic lights.
-          Absolutely positioned so they stay put whether the sidebar is shown
-          or hidden — sidebar toggle, then thin back/forward arrows. */}
-      <div className="no-drag absolute top-2 left-[84px] z-30 flex items-center gap-1.5">
-        <button
-          onClick={() => setSidebarCollapsed((v) => !v)}
-          aria-label={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
-          title={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
-          className="p-1.5 rounded-lg text-gray-600 hover:text-gray-900 hover:bg-black/[0.06] active:bg-black/10 dark:text-gray-400 dark:hover:text-gray-100 dark:hover:bg-white/10 dark:active:bg-white/15 transition-colors"
-        >
-          <PanelLeft size={18} strokeWidth={1.8} />
-        </button>
-        <button
-          onClick={() => navigate(-1)}
-          aria-label="Back"
-          className="p-1.5 rounded-lg text-gray-700 hover:text-gray-900 hover:bg-black/[0.06] active:bg-black/10 dark:text-gray-300 dark:hover:text-gray-100 dark:hover:bg-white/10 dark:active:bg-white/15 transition-colors"
-        >
-          <ArrowLeft size={18} strokeWidth={1.8} />
-        </button>
-        <button
-          onClick={() => navigate(1)}
-          aria-label="Forward"
-          className="p-1.5 rounded-lg text-gray-400 hover:text-gray-900 hover:bg-black/[0.06] active:bg-black/10 dark:hover:text-gray-100 dark:hover:bg-white/10 dark:active:bg-white/15 transition-colors"
-        >
-          <ArrowRight size={18} strokeWidth={1.8} />
-        </button>
-      </div>
-
       {/* Sidebar — raw window vibrancy, one continuous glass sheet with the
           content pane (macOS 26 System Settings). Collapsible from the top bar. */}
       <aside
@@ -177,6 +166,45 @@ export default function Layout() {
           <Outlet context={{ sidebarCollapsed, agentsMode }} />
         </div>
       </main>
+
+      {/* Window controls, docked just after the native macOS traffic lights.
+          Absolutely positioned so they stay put whether the sidebar is shown
+          or hidden — sidebar toggle, then thin back/forward arrows.
+
+          These MUST stay the last child: macOS builds the window's draggable
+          region by walking the DOM in order, adding `drag` rects and
+          subtracting `no-drag` ones. The sidebar/content drag strips overlap
+          this cluster, so if they were processed afterwards they'd re-cover it
+          and the OS would swallow every click as a title-bar drag. */}
+      <div className="no-drag absolute top-2 left-[84px] z-30 flex items-center gap-1.5">
+        <Tooltip label="Toggle sidebar" keys={['⌘', 'B']}>
+          <button
+            onClick={() => setSidebarCollapsed((v) => !v)}
+            aria-label={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
+            className="no-drag p-1.5 rounded-lg text-gray-600 hover:text-gray-900 hover:bg-black/[0.06] active:bg-black/10 dark:hover:bg-white/10 dark:active:bg-white/15 transition-colors"
+          >
+            <PanelLeft size={18} strokeWidth={1.8} />
+          </button>
+        </Tooltip>
+        <Tooltip label="Go back" keys={['⌘', '[']}>
+          <button
+            onClick={() => navigate(-1)}
+            aria-label="Back"
+            className="no-drag p-1.5 rounded-lg text-gray-700 hover:text-gray-900 hover:bg-black/[0.06] active:bg-black/10 dark:hover:bg-white/10 dark:active:bg-white/15 transition-colors"
+          >
+            <ArrowLeft size={18} strokeWidth={1.8} />
+          </button>
+        </Tooltip>
+        <Tooltip label="Go forward" keys={['⌘', ']']}>
+          <button
+            onClick={() => navigate(1)}
+            aria-label="Forward"
+            className="no-drag p-1.5 rounded-lg text-gray-400 hover:text-gray-900 hover:bg-black/[0.06] active:bg-black/10 dark:hover:bg-white/10 dark:active:bg-white/15 transition-colors"
+          >
+            <ArrowRight size={18} strokeWidth={1.8} />
+          </button>
+        </Tooltip>
+      </div>
     </div>
   );
 }

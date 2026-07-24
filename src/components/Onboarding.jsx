@@ -14,7 +14,7 @@ import {
   CheckCircle,
   Circle,
 } from 'lucide-react';
-import { Button, StepIndicator, ProgressLog, IconTile } from './ui';
+import { Button, IconTile, ProgressLog, StepIndicator, Tooltip } from './ui';
 import logo from '../assets/logo.png';
 
 const CORE_KEYS = ['nginx', 'php', 'mysql', 'dnsmasq', 'wpCli'];
@@ -257,13 +257,15 @@ export default function Onboarding({ deps, onComplete, onCreateFirstSite }) {
                     <code className="text-[11px] text-zinc-300 font-mono truncate flex-1 text-left">
                       {brewCmd}
                     </code>
-                    <button
-                      onClick={handleCopyCmd}
-                      title="Copy command"
-                      className="text-zinc-400 hover:text-white flex-shrink-0 p-1"
-                    >
-                      {copied ? <Check size={13} /> : <Copy size={13} />}
-                    </button>
+                    <Tooltip label={copied ? 'Copied' : 'Copy command'}>
+                      <button
+                        onClick={handleCopyCmd}
+                        aria-label="Copy command"
+                        className="text-zinc-400 hover:text-white flex-shrink-0 p-1"
+                      >
+                        {copied ? <Check size={13} /> : <Copy size={13} />}
+                      </button>
+                    </Tooltip>
                   </div>
                 )}
                 <Button

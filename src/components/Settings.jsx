@@ -14,7 +14,7 @@ import {
   Layers,
   Trash2,
 } from 'lucide-react';
-import { Card, Row, SectionLabel, Toggle, Button } from './ui';
+import { Button, Card, Row, SectionLabel, Toggle, Tooltip } from './ui';
 
 function formatBytes(bytes) {
   if (!bytes || bytes < 1024) return `${bytes || 0} B`;
@@ -364,18 +364,20 @@ export default function Settings({ onOpenWizard }) {
                   bp.description ? ` · ${bp.description}` : ''
                 }`}
               >
-                <button
-                  onClick={() => handleDeleteBlueprint(bp.id)}
-                  disabled={deletingBlueprint === bp.id}
-                  title="Delete blueprint"
-                  className="btn-ghost text-xs text-gray-400 hover:text-red-600 dark:hover:text-red-400"
-                >
-                  {deletingBlueprint === bp.id ? (
-                    <Loader size={12} className="animate-spin" />
-                  ) : (
-                    <Trash2 size={12} />
-                  )}
-                </button>
+                <Tooltip label="Delete blueprint">
+                  <button
+                    onClick={() => handleDeleteBlueprint(bp.id)}
+                    disabled={deletingBlueprint === bp.id}
+                    aria-label="Delete blueprint"
+                    className="btn-ghost text-xs text-gray-400 hover:text-red-600 dark:hover:text-red-400"
+                  >
+                    {deletingBlueprint === bp.id ? (
+                      <Loader size={12} className="animate-spin" />
+                    ) : (
+                      <Trash2 size={12} />
+                    )}
+                  </button>
+                </Tooltip>
               </Row>
             ))
           )}

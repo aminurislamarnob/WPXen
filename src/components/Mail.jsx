@@ -16,7 +16,7 @@ import {
   FileText,
   Code2,
 } from 'lucide-react';
-import { Toggle } from './ui';
+import { Toggle, Tooltip } from './ui';
 
 const PAGE_SIZE = 50;
 
@@ -178,20 +178,24 @@ function MessageViewer({ message, loading, onDelete }) {
             {message.Subject || '(no subject)'}
           </h2>
           <div className="flex items-center gap-1 flex-shrink-0">
-            <button
-              onClick={() => window.electronAPI.openMailpit(message.ID)}
-              title="Open in Mailpit"
-              className="p-2 rounded-lg hover:bg-gray-100 text-gray-400 transition-colors"
-            >
-              <ExternalLink size={14} />
-            </button>
-            <button
-              onClick={() => onDelete(message.ID)}
-              title="Delete message"
-              className="p-2 rounded-lg hover:bg-red-50 dark:hover:bg-red-500/10 text-gray-400 hover:text-red-600 dark:hover:text-red-400 transition-colors"
-            >
-              <Trash2 size={14} />
-            </button>
+            <Tooltip label="Open in Mailpit">
+              <button
+                onClick={() => window.electronAPI.openMailpit(message.ID)}
+                aria-label="Open in Mailpit"
+                className="p-2 rounded-lg hover:bg-gray-100 text-gray-400 transition-colors"
+              >
+                <ExternalLink size={14} />
+              </button>
+            </Tooltip>
+            <Tooltip label="Delete message">
+              <button
+                onClick={() => onDelete(message.ID)}
+                aria-label="Delete message"
+                className="p-2 rounded-lg hover:bg-red-50 dark:hover:bg-red-500/10 text-gray-400 hover:text-red-600 dark:hover:text-red-400 transition-colors"
+              >
+                <Trash2 size={14} />
+              </button>
+            </Tooltip>
           </div>
         </div>
         <div className="mt-2 space-y-0.5 text-xs text-gray-500">
@@ -471,14 +475,15 @@ export default function Mail({ refreshStatus }) {
             : 'Capture outgoing email from your sites'}
         </p>
         {status.installed && (
-          <button
-            onClick={() => window.electronAPI.openMailpit()}
-            className="btn-secondary"
-            title="Open the full Mailpit web UI"
-          >
-            <ExternalLink size={12} strokeWidth={2.5} />
-            Open Mailpit UI
-          </button>
+          <Tooltip label="Open the full Mailpit web UI">
+            <button
+              onClick={() => window.electronAPI.openMailpit()}
+              className="btn-secondary"
+            >
+              <ExternalLink size={12} strokeWidth={2.5} />
+              Open Mailpit UI
+            </button>
+          </Tooltip>
         )}
       </div>
 
@@ -568,33 +573,39 @@ export default function Mail({ refreshStatus }) {
                   />
                 </div>
                 <div className="flex-1" />
-                <button
-                  onClick={() => loadInbox()}
-                  title="Refresh"
-                  className="p-2 rounded-lg hover:bg-gray-100 text-gray-400 transition-colors"
-                >
-                  <RefreshCw size={14} />
-                </button>
-                <button
-                  onClick={handleMarkAllRead}
-                  disabled={busy === 'read-all' || unread === 0}
-                  title="Mark all as read"
-                  className="p-2 rounded-lg hover:bg-gray-100 text-gray-400 disabled:opacity-30 transition-colors"
-                >
-                  <MailOpen size={14} />
-                </button>
-                <button
-                  onClick={handleDeleteAll}
-                  disabled={busy === 'delete-all' || total === 0}
-                  title="Delete all messages"
-                  className="p-2 rounded-lg hover:bg-red-50 dark:hover:bg-red-500/10 text-gray-400 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-30 transition-colors"
-                >
-                  {busy === 'delete-all' ? (
-                    <Loader size={14} className="animate-spin" />
-                  ) : (
-                    <Trash2 size={14} />
-                  )}
-                </button>
+                <Tooltip label="Refresh">
+                  <button
+                    onClick={() => loadInbox()}
+                    aria-label="Refresh"
+                    className="p-2 rounded-lg hover:bg-gray-100 text-gray-400 transition-colors"
+                  >
+                    <RefreshCw size={14} />
+                  </button>
+                </Tooltip>
+                <Tooltip label="Mark all as read">
+                  <button
+                    onClick={handleMarkAllRead}
+                    disabled={busy === 'read-all' || unread === 0}
+                    aria-label="Mark all as read"
+                    className="p-2 rounded-lg hover:bg-gray-100 text-gray-400 disabled:opacity-30 transition-colors"
+                  >
+                    <MailOpen size={14} />
+                  </button>
+                </Tooltip>
+                <Tooltip label="Delete all messages">
+                  <button
+                    onClick={handleDeleteAll}
+                    disabled={busy === 'delete-all' || total === 0}
+                    aria-label="Delete all messages"
+                    className="p-2 rounded-lg hover:bg-red-50 dark:hover:bg-red-500/10 text-gray-400 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-30 transition-colors"
+                  >
+                    {busy === 'delete-all' ? (
+                      <Loader size={14} className="animate-spin" />
+                    ) : (
+                      <Trash2 size={14} />
+                    )}
+                  </button>
+                </Tooltip>
               </div>
 
               {/* List + viewer */}

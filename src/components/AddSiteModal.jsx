@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { FolderOpen, CheckCircle, AlertCircle, Loader, ChevronRight } from 'lucide-react';
-import { StepIndicator, ProgressLog } from './ui';
+import { ProgressLog, StepIndicator, Tooltip } from './ui';
 
 export default function AddSiteModal({
   onClose,
@@ -290,14 +290,15 @@ export default function AddSiteModal({
                     onChange={(e) => setFormData((p) => ({ ...p, path: e.target.value }))}
                     placeholder={`~/Sites/${formData.domain.replace('.test', '')}`}
                   />
-                  <button
-                    onClick={handleSelectFolder}
-                    title="Choose folder"
-                    aria-label="Choose folder"
-                    className="btn-secondary !px-0 w-8 flex-shrink-0"
-                  >
-                    <FolderOpen size={14} />
-                  </button>
+                  <Tooltip label="Choose folder">
+                    <button
+                      onClick={handleSelectFolder}
+                      aria-label="Choose folder"
+                      className="btn-secondary !px-0 w-8 flex-shrink-0"
+                    >
+                      <FolderOpen size={14} />
+                    </button>
+                  </Tooltip>
                 </div>
                 <p className="text-xs text-gray-400 mt-1">
                   WordPress files will be installed here

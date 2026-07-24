@@ -6,7 +6,7 @@ import {
   Loader,
   Copy as CopyIcon,
 } from 'lucide-react';
-import { ProgressLog } from './ui';
+import { ProgressLog, Tooltip } from './ui';
 
 function slugify(value) {
   return value
@@ -159,14 +159,15 @@ export default function CloneSiteModal({ source, phpVersions, onClose, onCloned 
                     value={formData.path}
                     onChange={(e) => setFormData((p) => ({ ...p, path: e.target.value }))}
                   />
-                  <button
-                    onClick={handleSelectFolder}
-                    title="Choose folder"
-                    aria-label="Choose folder"
-                    className="btn-secondary !px-0 w-8 flex-shrink-0"
-                  >
-                    <FolderOpen size={14} />
-                  </button>
+                  <Tooltip label="Choose folder">
+                    <button
+                      onClick={handleSelectFolder}
+                      aria-label="Choose folder"
+                      className="btn-secondary !px-0 w-8 flex-shrink-0"
+                    >
+                      <FolderOpen size={14} />
+                    </button>
+                  </Tooltip>
                 </div>
               </div>
               <div>

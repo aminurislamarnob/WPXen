@@ -14,6 +14,7 @@ import { yaml } from '@codemirror/lang-yaml';
 import { sql } from '@codemirror/lang-sql';
 import { Copy, ExternalLink, Save, X, GitCompare, RefreshCw } from 'lucide-react';
 import { FileGlyph } from '../lib/fileIcons';
+import { Tooltip } from './ui';
 
 // Pick CodeMirror language extensions from a file's extension.
 function languageFor(name) {
@@ -74,7 +75,10 @@ async function loadDiff(rootPath, entry) {
   } else {
     const baseRev = hasStagedTwin ? 'index' : 'HEAD';
     original = status === '?' ? { content: '' } : await gitAt(baseRev);
-    modified = status === 'D' ? { content: '' } : await window.electronAPI.readFile(rootPath, path);
+    modified =
+      status === 'D'
+        ? { content: '' }
+        : await window.electronAPI.readFile(rootPath, path);
   }
 
   if (original?.error || modified?.error) {
@@ -147,7 +151,10 @@ export default function CodeEditor({ rootPath, files, activeKey, onSelect, onClo
     const res = await window.electronAPI.writeFile(rootPath, active.path, cur.text);
     setSaving(false);
     if (res?.error) {
-      setCache((prev) => ({ ...prev, [activeKey]: { ...prev[activeKey], error: res.error } }));
+      setCache((prev) => ({
+        ...prev,
+        [activeKey]: { ...prev[activeKey], error: res.error },
+      }));
       return;
     }
     setCache((prev) => {
@@ -181,7 +188,9 @@ export default function CodeEditor({ rootPath, files, activeKey, onSelect, onClo
 
   const extensions = useMemo(() => {
     const base = [
-      keymap.of([{ key: 'Mod-s', preventDefault: true, run: () => (saveRef.current(), true) }]),
+      keymap.of([
+        { key: 'Mod-s', preventDefault: true, run: () => (saveRef.current(), true) },
+      ]),
     ];
     if (!active) return base;
     if (isDiff && data?.diff) {
@@ -210,7 +219,9 @@ export default function CodeEditor({ rootPath, files, activeKey, onSelect, onClo
               onClick={() => onSelect(f.key)}
               title={tabIsDiff ? `${f.rel} — diff (${f.source})` : f.path}
               className={`group flex items-center gap-2 pl-3 pr-2 text-[12.5px] cursor-pointer border-r border-black/40 whitespace-nowrap ${
-                isActive ? 'bg-[#282c34] text-zinc-100' : 'text-zinc-400 hover:text-zinc-200'
+                isActive
+                  ? 'bg-[#282c34] text-zinc-100'
+                  : 'text-zinc-400 hover:text-zinc-200'
               }`}
             >
               <FileGlyph name={f.name} size={13} className="flex-shrink-0" />
@@ -224,18 +235,20 @@ export default function CodeEditor({ rootPath, files, activeKey, onSelect, onClo
                   title="Unsaved changes"
                 />
               ) : null}
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  requestClose(f.key);
-                }}
-                className={`p-0.5 rounded hover:bg-white/15 text-zinc-500 hover:text-zinc-200 ${
-                  isDirty ? 'hidden group-hover:block' : ''
-                }`}
-                title="Close"
-              >
-                <X size={13} />
-              </button>
+              <Tooltip label="Close tab">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    requestClose(f.key);
+                  }}
+                  aria-label="Close tab"
+                  className={`p-0.5 rounded hover:bg-white/15 text-zinc-500 hover:text-zinc-200 ${
+                    isDirty ? 'hidden group-hover:block' : ''
+                  }`}
+                >
+                  <X size={13} />
+                </button>
+              </Tooltip>
             </div>
           );
         })}
@@ -251,47 +264,61 @@ export default function CodeEditor({ rootPath, files, activeKey, onSelect, onClo
             </span>
             <div className="flex items-center gap-0.5">
               {isDiff ? (
+                <Tooltip label="Reload diff">
+                  <button
+                    className="p-1 rounded text-zinc-400 hover:text-zinc-100 hover:bg-white/10"
+                    aria-label="Reload diff"
+                    onClick={reloadActive}
+                  >
+                    <RefreshCw size={14} />
+                  </button>
+                </Tooltip>
+              ) : (
+                <Tooltip label="Save" keys={['⌘', 'S']}>
+                  <button
+                    className="p-1 rounded text-zinc-400 hover:text-zinc-100 hover:bg-white/10 disabled:opacity-40 disabled:hover:bg-transparent"
+                    aria-label="Save"
+                    disabled={!dirty || saving}
+                    onClick={save}
+                  >
+                    <Save size={14} />
+                  </button>
+                </Tooltip>
+              )}
+              <Tooltip label="Copy contents">
                 <button
                   className="p-1 rounded text-zinc-400 hover:text-zinc-100 hover:bg-white/10"
-                  title="Reload diff"
-                  onClick={reloadActive}
+                  aria-label="Copy contents"
+                  onClick={() => {
+                    const text = isDiff
+                      ? data?.diff?.modified
+                      : editable
+                        ? data.text
+                        : null;
+                    if (text != null) navigator.clipboard?.writeText(text);
+                  }}
                 >
-                  <RefreshCw size={14} />
+                  <Copy size={14} />
                 </button>
-              ) : (
+              </Tooltip>
+              <Tooltip label="Open in default app">
                 <button
-                  className="p-1 rounded text-zinc-400 hover:text-zinc-100 hover:bg-white/10 disabled:opacity-40 disabled:hover:bg-transparent"
-                  title="Save (⌘S)"
-                  disabled={!dirty || saving}
-                  onClick={save}
+                  className="p-1 rounded text-zinc-400 hover:text-zinc-100 hover:bg-white/10"
+                  aria-label="Open in default app"
+                  onClick={() => window.electronAPI.openFilePath(active.path)}
                 >
-                  <Save size={14} />
+                  <ExternalLink size={14} />
                 </button>
-              )}
-              <button
-                className="p-1 rounded text-zinc-400 hover:text-zinc-100 hover:bg-white/10"
-                title="Copy contents"
-                onClick={() => {
-                  const text = isDiff ? data?.diff?.modified : editable ? data.text : null;
-                  if (text != null) navigator.clipboard?.writeText(text);
-                }}
-              >
-                <Copy size={14} />
-              </button>
-              <button
-                className="p-1 rounded text-zinc-400 hover:text-zinc-100 hover:bg-white/10"
-                title="Open in default app"
-                onClick={() => window.electronAPI.openFilePath(active.path)}
-              >
-                <ExternalLink size={14} />
-              </button>
-              <button
-                className="p-1 rounded text-zinc-400 hover:text-zinc-100 hover:bg-white/10"
-                title="Close"
-                onClick={() => requestClose(active.key)}
-              >
-                <X size={14} />
-              </button>
+              </Tooltip>
+              <Tooltip label="Close">
+                <button
+                  className="p-1 rounded text-zinc-400 hover:text-zinc-100 hover:bg-white/10"
+                  aria-label="Close"
+                  onClick={() => requestClose(active.key)}
+                >
+                  <X size={14} />
+                </button>
+              </Tooltip>
             </div>
           </div>
 

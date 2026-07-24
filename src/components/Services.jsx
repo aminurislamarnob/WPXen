@@ -13,7 +13,7 @@ import {
   Loader,
   Info,
 } from 'lucide-react';
-import { Card, Row, SectionLabel, IconTile } from './ui';
+import { Card, IconTile, Row, SectionLabel, Tooltip } from './ui';
 import { StatusBadge } from './StatusBadge';
 
 const SERVICE_CONFIG = [
@@ -94,18 +94,20 @@ function ServiceRow({ config, status, onAction, loadingAction }) {
         )
       }
     >
-      <button
-        onClick={() => onAction('restart', config.id)}
-        disabled={!running || isLoading}
-        title="Restart"
-        className="p-1.5 rounded-md hover:bg-black/5 dark:hover:bg-white/10 text-gray-400 disabled:opacity-30 transition-colors"
-      >
-        {isLoading ? (
-          <Loader size={13} className="animate-spin" />
-        ) : (
-          <RotateCw size={13} />
-        )}
-      </button>
+      <Tooltip label="Restart">
+        <button
+          onClick={() => onAction('restart', config.id)}
+          disabled={!running || isLoading}
+          aria-label="Restart"
+          className="p-1.5 rounded-md hover:bg-black/5 dark:hover:bg-white/10 text-gray-400 disabled:opacity-30 transition-colors"
+        >
+          {isLoading ? (
+            <Loader size={13} className="animate-spin" />
+          ) : (
+            <RotateCw size={13} />
+          )}
+        </button>
+      </Tooltip>
       {running ? (
         <button
           onClick={() => onAction('stop', config.id)}
