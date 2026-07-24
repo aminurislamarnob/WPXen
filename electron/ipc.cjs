@@ -265,6 +265,16 @@ function registerHandlers(win, storeInstance) {
     }
   });
 
+  // Import files/folders dropped from Finder into a directory under the site
+  // root (confined; never overwrites).
+  ipcMain.handle('import-files', (_e, rootPath, dirPath, sourcePaths) => {
+    try {
+      return { ok: true, ...files.importFiles(rootPath, dirPath, sourcePaths) };
+    } catch (err) {
+      return { error: err.message };
+    }
+  });
+
   // Read-only git status for the explorer's Changes tab (source control view).
   ipcMain.handle('git-status', async (_e, rootPath) => {
     try {

@@ -186,6 +186,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('create-folder', rootPath, dirPath, name),
   renamePath: (rootPath, targetPath, newName) =>
     ipcRenderer.invoke('rename-path', rootPath, targetPath, newName),
+  importFiles: (rootPath, dirPath, sourcePaths) =>
+    ipcRenderer.invoke('import-files', rootPath, dirPath, sourcePaths),
   trashPath: (rootPath, targetPath) =>
     ipcRenderer.invoke('trash-path', rootPath, targetPath),
   gitStatus: (rootPath) => ipcRenderer.invoke('git-status', rootPath),

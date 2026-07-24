@@ -106,6 +106,39 @@ function writeFile(rootPath, filePath, content) {
   return { path: resolved };
 }
 
+// Find a non-colliding path in `dir` for `name`, appending " 2", " 3", …
+// before the extension (Finder-style) so an import never overwrites.
+function uniqueDest(dir, name) {
+  let candidate = path.join(dir, name);
+  if (!fs.existsSync(candidate)) return candidate;
+  const ext = path.extname(name);
+  const stem = ext ? name.slice(0, -ext.length) : name;
+  for (let i = 2; i < 1000; i++) {
+    candidate = path.join(dir, `${stem} ${i}${ext}`);
+    if (!fs.existsSync(candidate)) return candidate;
+  }
+  throw new Error('Too many name conflicts');
+}
+
+// Copy external files/folders (dragged from Finder) into a directory under the
+// site root. The destination is confined to the root and never overwrites; the
+// sources may live anywhere (the user dropped them). Returns created entries.
+function importFiles(rootPath, dirPath, sourcePaths) {
+  const { resolved: dir } = assertInRoot(rootPath, dirPath);
+  if (!fs.statSync(dir).isDirectory()) throw new Error('Not a directory');
+
+  const created = [];
+  for (const src of sourcePaths || []) {
+    if (typeof src !== 'string' || !src) continue;
+    const base = assertSimpleName(path.basename(src));
+    const dest = uniqueDest(dir, base);
+    assertInRoot(rootPath, dest);
+    fs.cpSync(src, dest, { recursive: true, errorOnExist: true, force: false });
+    created.push({ path: dest, name: path.basename(dest) });
+  }
+  return { imported: created };
+}
+
 function renamePath(rootPath, targetPath, newName) {
   const { root, resolved: src } = assertInRoot(rootPath, targetPath);
   if (src === root) throw new Error('Cannot rename the site root');
@@ -126,4 +159,5 @@ module.exports = {
   createFile,
   createFolder,
   renamePath,
+  importFiles,
 };

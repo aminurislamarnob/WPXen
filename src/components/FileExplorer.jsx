@@ -76,6 +76,7 @@ export default function FileExplorer({
   const [renaming, setRenaming] = useState(null); // { path, draft }
   const [creating, setCreating] = useState(null); // { parentPath, isDir, draft }
   const [error, setError] = useState(null);
+  const [dropTarget, setDropTarget] = useState(null); // dir path being dragged over, or null
 
   const [tab, setTab] = useState('files'); // 'files' | 'changes'
   const [changes, setChanges] = useState(null); // git status result
@@ -122,6 +123,7 @@ export default function FileExplorer({
     setChangesError(null);
     setDiscardTarget(null);
     setDeleteTarget(null);
+    setDropTarget(null);
     load(rootPath);
   }, [rootPath, load]);
 
@@ -320,6 +322,45 @@ export default function FileExplorer({
 
   const copy = (text) => navigator.clipboard?.writeText(text);
 
+  // --- Drag & drop upload from Finder. Files dropped on a folder land in it;
+  // anywhere else in the tree lands in the site root. Confined in the main
+  // process; the tree area is the drop zone, folder rows override the target.
+  const isFileDrag = (e) => Array.from(e.dataTransfer?.types || []).includes('Files');
+
+  const onTreeDragOver = (e) => {
+    if (!isFileDrag(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    setDropTarget(rootPath);
+  };
+  const onFolderDragOver = (e, dirPath) => {
+    if (!isFileDrag(e)) return;
+    e.preventDefault();
+    e.stopPropagation(); // keep the container from resetting the target to root
+    e.dataTransfer.dropEffect = 'copy';
+    setDropTarget(dirPath);
+  };
+  const onTreeDragLeave = (e) => {
+    // Only clear when the pointer truly leaves the tree pane, not on inner moves.
+    if (e.currentTarget.contains(e.relatedTarget)) return;
+    setDropTarget(null);
+  };
+  const onTreeDrop = async (e) => {
+    if (!isFileDrag(e)) return;
+    e.preventDefault();
+    const target = dropTarget || rootPath;
+    setDropTarget(null);
+    const paths = Array.from(e.dataTransfer.files || [])
+      .map((f) => f.path)
+      .filter(Boolean);
+    if (paths.length === 0) return;
+    const res = await window.electronAPI.importFiles(rootPath, target, paths);
+    if (res?.error) return setError(res.error);
+    setError(null);
+    setExpanded((prev) => new Set(prev).add(target));
+    await load(target); // refresh the destination so the new items show
+  };
+
   const openMenu = (e, entry) => {
     e.preventDefault();
     e.stopPropagation();
@@ -398,6 +439,7 @@ export default function FileExplorer({
       const rel = relTo(rootPath, entry.path);
       const nameTint = entry.isDir ? '' : NAME_TINT[gitDecor.fileStatus.get(rel)] || '';
       const dirChanged = entry.isDir && gitDecor.dirs.has(rel);
+      const isDropTarget = entry.isDir && dropTarget === entry.path;
       rows.push(
         <div key={entry.path}>
           {isRenaming ? (
@@ -429,8 +471,13 @@ export default function FileExplorer({
                 entry.isDir ? toggle(entry.path) : onOpenFile?.(entry)
               }
               onContextMenu={(e) => openMenu(e, entry)}
+              onDragOver={entry.isDir ? (e) => onFolderDragOver(e, entry.path) : undefined}
               title={entry.name}
-              className="w-full flex items-center gap-1.5 py-[3px] pr-2 rounded-md text-[12.5px] text-gray-800 hover:bg-black/[0.05] dark:hover:bg-white/[0.07]"
+              className={`w-full flex items-center gap-1.5 py-[3px] pr-2 rounded-md text-[12.5px] text-gray-800 ${
+                isDropTarget
+                  ? 'bg-blue-50 dark:bg-blue-500/15 ring-1 ring-blue-400'
+                  : 'hover:bg-black/[0.05] dark:hover:bg-white/[0.07]'
+              }`}
               style={{ paddingLeft: depth * 12 + 8 }}
             >
               {entry.isDir ? (
@@ -523,8 +570,24 @@ export default function FileExplorer({
             </button>
           </div>
 
-          <div className="flex-1 overflow-auto px-2 py-2" onContextMenu={(e) => e.preventDefault()}>
+          <div
+            className={`relative flex-1 overflow-auto px-2 py-2 ${
+              dropTarget === rootPath ? 'ring-1 ring-inset ring-blue-400 bg-blue-50/40 dark:bg-blue-500/10' : ''
+            }`}
+            onContextMenu={(e) => e.preventDefault()}
+            onDragOver={onTreeDragOver}
+            onDragLeave={onTreeDragLeave}
+            onDrop={onTreeDrop}
+          >
             {renderNodes(rootPath, 0)}
+            {dropTarget !== null && (
+              <div className="pointer-events-none sticky bottom-0 left-0 right-0 flex justify-center pt-2">
+                <span className="rounded-full bg-blue-500 text-white text-[11px] px-2.5 py-1 shadow-sm">
+                  Drop to upload to{' '}
+                  {dropTarget === rootPath ? rootName || 'project root' : baseOf(dropTarget)}
+                </span>
+              </div>
+            )}
           </div>
 
           {error && (
