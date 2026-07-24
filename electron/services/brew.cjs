@@ -33,13 +33,17 @@ function execBrew(command) {
     .trim();
 }
 
+// A formula is installed iff it has a keg in the Cellar. We check the
+// filesystem directly rather than shelling out to `brew list` because the
+// latter tries to refresh Homebrew's JSON API cache and exits non-zero on any
+// warning — e.g. a "Permission denied" on a root-owned cache file (left behind
+// by a past `sudo brew` run) makes `brew list` fail even though the formula is
+// present, which would make WPHerd report core services as missing. The
+// filesystem check is also far faster (no Ruby spawn).
 function isPackageInstalled(name) {
-  try {
-    execBrew(`list --formula ${name}`);
-    return true;
-  } catch {
-    return false;
-  }
+  const prefix = getBrewPrefix();
+  if (!prefix) return false;
+  return fs.existsSync(`${prefix}/Cellar/${name}`) || fs.existsSync(`${prefix}/opt/${name}`);
 }
 
 // Non-blocking `brew` runner for the dependency check (see asyncExec.cjs).
@@ -53,13 +57,11 @@ function execBrewAsync(command) {
   });
 }
 
+// Async-signatured for call-site compatibility, but resolved from the
+// filesystem (see isPackageInstalled) so it never depends on `brew list`'s exit
+// code or the network cache.
 async function isPackageInstalledAsync(name) {
-  try {
-    await execBrewAsync(`list --formula ${name}`);
-    return true;
-  } catch {
-    return false;
-  }
+  return isPackageInstalled(name);
 }
 
 // Runs a php binary and returns its major.minor (e.g. "8.3"), or null. Used to
