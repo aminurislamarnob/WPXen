@@ -37,6 +37,16 @@ const STATUS_DOT = {
   '?': { cls: 'bg-green-500', label: 'Untracked' },
 };
 const statusDot = (s) => STATUS_DOT[s] || { cls: 'bg-gray-400', label: s || 'Changed' };
+
+// Filename tint for git-modified entries in the Files tree (VS Code style).
+const NAME_TINT = {
+  M: 'text-amber-600 dark:text-amber-400',
+  A: 'text-green-600 dark:text-green-400',
+  '?': 'text-green-600 dark:text-green-400',
+  D: 'text-red-600 dark:text-red-400 line-through',
+  R: 'text-blue-600 dark:text-blue-400',
+  C: 'text-blue-600 dark:text-blue-400',
+};
 const dirOf = (rel, name) => rel.slice(0, rel.length - name.length).replace(/\/$/, '');
 const baseOf = (p) => p.slice(p.lastIndexOf('/') + 1);
 
@@ -69,7 +79,7 @@ export default function FileExplorer({
 
   const [tab, setTab] = useState('files'); // 'files' | 'changes'
   const [changes, setChanges] = useState(null); // git status result
-  const [changesState, setChangesState] = useState('idle'); // idle|loading|error
+  const [changesState, setChangesState] = useState('loading'); // idle|loading|error
   const [refreshing, setRefreshing] = useState(false); // spinner during any refetch
   const [foldSignal, setFoldSignal] = useState({ epoch: 0, action: 'collapse' });
   const [allCollapsed, setAllCollapsed] = useState(false);
@@ -84,6 +94,7 @@ export default function FileExplorer({
   const inFlightRef = useRef(false); // dedupe overlapping fetches
   const [changesError, setChangesError] = useState(null); // last git mutation error
   const [discardTarget, setDiscardTarget] = useState(null); // file pending discard confirm
+  const [deleteTarget, setDeleteTarget] = useState(null); // tree entry pending delete confirm
 
   const load = useCallback(
     async (dirPath) => {
@@ -107,8 +118,10 @@ export default function FileExplorer({
     setTab('files');
     setChanges(null);
     changesRef.current = null;
+    setChangesState('loading');
     setChangesError(null);
     setDiscardTarget(null);
+    setDeleteTarget(null);
     load(rootPath);
   }, [rootPath, load]);
 
@@ -137,11 +150,11 @@ export default function FileExplorer({
     [rootPath]
   );
 
-  // Fetch when the Changes tab opens, then keep it live while it's visible:
-  // poll every 5s and refetch on window focus (agents edit files out-of-band).
+  // Keep git status live while the explorer is mounted: poll every 5s and
+  // refetch on window focus (agents edit files out-of-band). Runs on both tabs
+  // so the Files tree's git decorations and the Changes badge stay current.
   useEffect(() => {
-    if (tab !== 'changes') return;
-    loadChanges();
+    loadChanges({ silent: true });
     const onFocus = () => loadChanges({ silent: true });
     const id = setInterval(() => loadChanges({ silent: true }), 5000);
     window.addEventListener('focus', onFocus);
@@ -149,7 +162,7 @@ export default function FileExplorer({
       clearInterval(id);
       window.removeEventListener('focus', onFocus);
     };
-  }, [tab, loadChanges]);
+  }, [loadChanges]);
 
   // Collapse/expand every Changes section (and, in the grouped views, every
   // folder/tree node) at once. `foldSignal.epoch` bumps so children re-apply.
@@ -275,12 +288,35 @@ export default function FileExplorer({
     await reload(parent);
   };
 
-  const doDelete = async (entry) => {
-    if (!window.confirm(`Move "${entry.name}" to the Trash?`)) return;
+  const confirmDelete = async () => {
+    const entry = deleteTarget;
+    setDeleteTarget(null);
+    if (!entry) return;
     const res = await window.electronAPI.trashPath(rootPath, entry.path);
     if (res?.error) return setError(res.error);
     await reload(parentOf(entry.path));
   };
+
+  // Git decorations for the Files tree: which relative paths are changed (→
+  // tinted filenames) and which directories contain a change (→ trailing dot).
+  const gitDecor = useMemo(() => {
+    const fileStatus = new Map();
+    const dirs = new Set();
+    if (changes?.isRepo) {
+      for (const f of changes.files) {
+        // A file may appear staged + unstaged; the first (unstaged) status wins.
+        if (!fileStatus.has(f.rel)) fileStatus.set(f.rel, f.status);
+        const parts = f.rel.split('/');
+        parts.pop();
+        let acc = '';
+        for (const seg of parts) {
+          acc = acc ? `${acc}/${seg}` : seg;
+          dirs.add(acc);
+        }
+      }
+    }
+    return { fileStatus, dirs };
+  }, [changes]);
 
   const copy = (text) => navigator.clipboard?.writeText(text);
 
@@ -358,6 +394,10 @@ export default function FileExplorer({
       const isOpen =
         entry.isDir && (expanded.has(entry.path) || (q && subtreeMatches(entry.path)));
       const isRenaming = renaming?.path === entry.path;
+      // Git decoration: tint changed files, dot directories with changes.
+      const rel = relTo(rootPath, entry.path);
+      const nameTint = entry.isDir ? '' : NAME_TINT[gitDecor.fileStatus.get(rel)] || '';
+      const dirChanged = entry.isDir && gitDecor.dirs.has(rel);
       rows.push(
         <div key={entry.path}>
           {isRenaming ? (
@@ -411,7 +451,13 @@ export default function FileExplorer({
               ) : (
                 <FileGlyph name={entry.name} className="flex-shrink-0" />
               )}
-              <span className="truncate">{entry.name}</span>
+              <span className={`truncate ${nameTint}`}>{entry.name}</span>
+              {dirChanged && (
+                <span
+                  className="ml-auto w-1.5 h-1.5 rounded-full bg-amber-500 flex-shrink-0"
+                  title="Contains changes"
+                />
+              )}
             </button>
           )}
           {isOpen && renderNodes(entry.path, depth + 1)}
@@ -618,11 +664,25 @@ export default function FileExplorer({
             onClick={() => {
               const entry = menu.entry;
               setMenu(null);
-              doDelete(entry);
+              setDeleteTarget(entry);
             }}
           />
         </div>
       )}
+
+      {/* Delete confirmation for a Files-tree entry. */}
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title={`Move “${deleteTarget?.name}” to the Trash?`}
+        description={
+          deleteTarget?.isDir
+            ? 'This folder and its contents will be moved to the Trash.'
+            : 'This file will be moved to the Trash.'
+        }
+        confirmLabel="Delete"
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteTarget(null)}
+      />
 
       {/* Discard/delete confirmation for a Changes row. */}
       <ConfirmDialog
