@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
+import { MONO_STACK, onThemeChange, terminalThemes, themeName } from '../lib/theme';
 
 // Embedded terminal pane bound to a single main-process Session (by sessionId).
 // Replays the ring buffer on attach, then streams live. Fills its parent, which
@@ -12,12 +13,18 @@ export default function Terminal({ sessionId, onExited }) {
 
   useEffect(() => {
     const term = new XTerm({
-      fontFamily:
-        'SFMono-Regular, ui-monospace, Menlo, Monaco, "Cascadia Code", monospace',
+      fontFamily: MONO_STACK,
       fontSize: 13,
       cursorBlink: true,
+      cursorStyle: 'block',
+      cursorInactiveStyle: 'outline',
       allowProposedApi: true,
-      theme: { background: '#1c1c1e', foreground: '#e5e5e7' },
+      theme: terminalThemes[themeName()],
+    });
+    // The terminal blends into the page, so its palette has to flip with the
+    // macOS appearance rather than staying a fixed dark box.
+    const stopThemeWatch = onThemeChange((name) => {
+      term.options.theme = terminalThemes[name];
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
@@ -54,6 +61,7 @@ export default function Terminal({ sessionId, onExited }) {
 
     return () => {
       onData.dispose();
+      stopThemeWatch();
       ro.disconnect();
       api.off('terminal-replay');
       api.off('terminal-data');
@@ -63,13 +71,13 @@ export default function Terminal({ sessionId, onExited }) {
   }, [sessionId]);
 
   return (
-    <div className="relative h-full w-full rounded-xl overflow-hidden bg-[#1c1c1e]">
+    <div className="relative h-full w-full overflow-hidden bg-background">
       <div ref={hostRef} className="h-full w-full p-2" />
       {exit && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/60">
-          <div className="panel rounded-2xl p-6 w-[320px] text-center">
-            <p className="text-sm font-medium text-gray-900">Session ended</p>
-            <p className="mt-1 text-xs text-gray-500">
+        <div className="absolute inset-0 flex items-center justify-center bg-black/50">
+          <div className="panel p-6 w-[320px] text-center">
+            <p className="text-sm font-medium text-foreground">Session ended</p>
+            <p className="mt-1 text-xs text-muted-foreground">
               {exit.code == null
                 ? 'The shell is no longer running.'
                 : `The shell exited (code ${exit.code}).`}

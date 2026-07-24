@@ -43,8 +43,8 @@ export default function ChangeUrlModal({ site, onClose, onChanged }) {
     >
       <div className="sheet w-[520px] max-h-[90vh] overflow-hidden animate-slide-in">
         <div className="px-6 pt-6">
-          <h2 className="text-[15px] font-bold text-gray-900">Change Site URL</h2>
-          <p className="text-[13px] text-gray-500 mt-0.5">
+          <h2 className="text-[15px] font-bold text-foreground">Change Site URL</h2>
+          <p className="text-[13px] text-muted-foreground mt-0.5">
             Rename the local domain for <span className="font-semibold">{site.name}</span>
           </p>
         </div>
@@ -53,13 +53,13 @@ export default function ChangeUrlModal({ site, onClose, onChanged }) {
           {phase === 'form' && (
             <div className="sheet-well space-y-4 animate-fade-in">
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1.5">
+                <label className="block text-xs font-medium text-foreground mb-1.5">
                   New Domain
                 </label>
                 <div className="relative">
                   <Globe
                     size={14}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
                   />
                   <input
                     type="text"
@@ -70,13 +70,13 @@ export default function ChangeUrlModal({ site, onClose, onChanged }) {
                     autoFocus
                   />
                 </div>
-                <p className="text-xs text-gray-500 mt-1.5">
+                <p className="text-xs text-muted-foreground mt-1.5">
                   Currently <span className="font-mono">{site.domain}</span>. Use a{' '}
                   <span className="font-mono">.test</span> domain so dnsmasq resolves it.
                 </p>
               </div>
 
-              <div className="flex items-start gap-2 bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400 rounded-xl px-3 py-2.5 text-xs">
+              <div className="flex items-start gap-2 bg-status-warning/10 text-status-warning rounded-xl px-3 py-2.5 text-xs">
                 <AlertTriangle size={14} className="flex-shrink-0 mt-0.5" />
                 <span>
                   This runs a database search-and-replace across all tables and rewrites
@@ -91,11 +91,11 @@ export default function ChangeUrlModal({ site, onClose, onChanged }) {
             <div className="sheet-well animate-fade-in">
               {phase === 'done' ? (
                 <div className="text-center py-4">
-                  <div className="w-14 h-14 rounded-full bg-green-100 dark:bg-green-500/15 flex items-center justify-center mx-auto mb-3">
-                    <CheckCircle size={28} className="text-wp-green" />
+                  <div className="w-14 h-14 rounded-full bg-status-running/10 flex items-center justify-center mx-auto mb-3">
+                    <CheckCircle size={28} className="text-status-running" />
                   </div>
-                  <h3 className="text-base font-bold text-gray-900">URL Changed!</h3>
-                  <p className="text-sm text-gray-500 mt-1 mb-4">
+                  <h3 className="text-base font-bold text-foreground">URL Changed!</h3>
+                  <p className="text-sm text-muted-foreground mt-1 mb-4">
                     The site now lives at{' '}
                     <button
                       onClick={() =>
@@ -103,7 +103,7 @@ export default function ChangeUrlModal({ site, onClose, onChanged }) {
                           resultSite?.url || `http://${domain}`
                         )
                       }
-                      className="text-wp-blue hover:underline font-medium"
+                      className="text-highlight hover:underline font-medium"
                     >
                       {domain}
                     </button>
@@ -117,9 +117,9 @@ export default function ChangeUrlModal({ site, onClose, onChanged }) {
                   <div className="flex items-center gap-3 mb-2">
                     <Loader
                       size={18}
-                      className="animate-spin text-wp-blue flex-shrink-0"
+                      className="animate-spin text-highlight flex-shrink-0"
                     />
-                    <p className="text-sm font-medium text-gray-700">Changing URL…</p>
+                    <p className="text-sm font-medium text-foreground">Changing URL…</p>
                   </div>
                   <ProgressLog messages={progressMessages} className="mt-4" />
                 </div>
@@ -128,7 +128,7 @@ export default function ChangeUrlModal({ site, onClose, onChanged }) {
           )}
 
           {error && (
-            <div className="mt-4 flex items-start gap-2 bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400 rounded-xl px-4 py-3 text-sm">
+            <div className="mt-4 flex items-start gap-2 bg-destructive/10 text-destructive rounded-xl px-4 py-3 text-sm">
               <AlertCircle size={16} className="flex-shrink-0 mt-0.5" />
               <span>{error}</span>
             </div>

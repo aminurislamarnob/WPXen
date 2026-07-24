@@ -80,10 +80,10 @@ export default function App() {
 
   if (loading) {
     return (
-      <div className="h-screen flex items-center justify-center bg-surface/60">
+      <div className="h-screen flex items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-4">
           <img src={logo} alt="WPHerd" className="h-9 w-auto" draggable={false} />
-          <p className="text-sm text-gray-500">Starting WPHerd…</p>
+          <p className="text-sm text-muted-foreground">Starting WPHerd…</p>
         </div>
       </div>
     );

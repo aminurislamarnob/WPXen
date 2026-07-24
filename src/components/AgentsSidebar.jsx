@@ -46,14 +46,14 @@ export default function AgentsSidebar({ onBack }) {
       <div className="px-3 pb-2">
         <button
           onClick={onBack}
-          className="flex items-center gap-1 px-2 py-1 rounded-md text-[13px] text-gray-700 hover:text-gray-900 hover:bg-black/[0.05] dark:hover:bg-white/[0.07]"
+          className="flex items-center gap-1 px-2 py-1 rounded-md text-[13px] text-muted-foreground hover:text-foreground hover:bg-sidebar-accent"
         >
           <ChevronLeft size={15} strokeWidth={2.4} />
           Menu
         </button>
       </div>
 
-      <div className="px-4 pb-1 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">
+      <div className="px-4 pb-1 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
         Sites
       </div>
 
@@ -64,19 +64,25 @@ export default function AgentsSidebar({ onBack }) {
             <div key={site.id}>
               <button
                 onClick={() => toggle(site.id)}
-                className="w-full flex items-center gap-1.5 px-2 py-[5px] rounded-md text-[13px] text-gray-800 hover:bg-black/[0.05] dark:hover:bg-white/[0.07]"
+                className="w-full flex items-center gap-1.5 px-2 py-[5px] rounded-md text-[13px] text-sidebar-foreground/90 hover:bg-sidebar-accent"
               >
                 {isOpen ? (
-                  <ChevronDown size={14} className="text-gray-500 flex-shrink-0" />
+                  <ChevronDown
+                    size={14}
+                    className="text-muted-foreground flex-shrink-0"
+                  />
                 ) : (
-                  <ChevronRight size={14} className="text-gray-500 flex-shrink-0" />
+                  <ChevronRight
+                    size={14}
+                    className="text-muted-foreground flex-shrink-0"
+                  />
                 )}
-                <Globe size={13} className="text-gray-500 flex-shrink-0" />
+                <Globe size={13} className="text-muted-foreground flex-shrink-0" />
                 <span className="truncate flex-1 text-left">{site.name}</span>
               </button>
 
               {isOpen && (
-                <div className="ml-[18px] mt-0.5 space-y-0.5 border-l border-black/[0.06] dark:border-white/[0.08] pl-2">
+                <div className="ml-[18px] mt-0.5 space-y-0.5 border-l border-sidebar-border pl-2">
                   {agents.map((agent) => {
                     // Each click spawns a NEW Session (many per Site allowed);
                     // the pane reads spawn+nonce from navigation state.
@@ -96,8 +102,8 @@ export default function AgentsSidebar({ onBack }) {
                         }
                         className={`w-full flex items-center gap-1.5 px-2 py-[5px] rounded-md text-[13px] ${
                           agent.detected
-                            ? 'text-gray-700 hover:bg-black/[0.05] dark:hover:bg-white/[0.07]'
-                            : 'text-gray-400 cursor-not-allowed'
+                            ? 'text-sidebar-foreground/80 hover:bg-sidebar-accent'
+                            : 'text-muted-foreground/60 cursor-not-allowed'
                         }`}
                       >
                         <Terminal size={12} strokeWidth={2.2} className="flex-shrink-0" />
@@ -111,7 +117,7 @@ export default function AgentsSidebar({ onBack }) {
           );
         })}
         {sites.length === 0 && (
-          <p className="px-2 py-1 text-xs text-gray-500">No sites yet.</p>
+          <p className="px-2 py-1 text-xs text-muted-foreground">No sites yet.</p>
         )}
       </nav>
     </div>

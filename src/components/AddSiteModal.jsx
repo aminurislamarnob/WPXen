@@ -158,8 +158,8 @@ export default function AddSiteModal({
       <div className="sheet w-[540px] max-h-[90vh] overflow-hidden animate-slide-in">
         {/* Header — title + description block, no close chip (macOS sheet) */}
         <div className="px-6 pt-6">
-          <h2 className="text-[15px] font-bold text-gray-900">Add WordPress Site</h2>
-          <p className="text-[13px] text-gray-500 mt-0.5">
+          <h2 className="text-[15px] font-bold text-foreground">Add WordPress Site</h2>
+          <p className="text-[13px] text-muted-foreground mt-0.5">
             Set up a new local WordPress site
           </p>
         </div>
@@ -172,16 +172,16 @@ export default function AddSiteModal({
             <div className="sheet-well space-y-4 animate-fade-in">
               {blueprints.length > 0 && (
                 <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1.5">
+                  <label className="block text-xs font-medium text-foreground mb-1.5">
                     Start From
                   </label>
-                  <div className="flex gap-1 p-0.5 bg-gray-100 dark:bg-white/5 rounded-lg">
+                  <div className="flex gap-1 p-0.5 bg-muted rounded-lg">
                     <button
                       onClick={() => chooseSource('blank')}
                       className={`flex-1 text-xs font-medium py-1.5 rounded-md transition-colors ${
                         source === 'blank'
-                          ? 'bg-surface shadow-sm text-gray-900'
-                          : 'text-gray-500 hover:text-gray-700'
+                          ? 'bg-background shadow-sm text-foreground'
+                          : 'text-muted-foreground hover:text-foreground'
                       }`}
                     >
                       Blank WordPress
@@ -192,8 +192,8 @@ export default function AddSiteModal({
                       }
                       className={`flex-1 text-xs font-medium py-1.5 rounded-md transition-colors ${
                         isBlueprint
-                          ? 'bg-surface shadow-sm text-gray-900'
-                          : 'text-gray-500 hover:text-gray-700'
+                          ? 'bg-background shadow-sm text-foreground'
+                          : 'text-muted-foreground hover:text-foreground'
                       }`}
                     >
                       From Blueprint
@@ -215,7 +215,7 @@ export default function AddSiteModal({
                 </div>
               )}
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1.5">
+                <label className="block text-xs font-medium text-foreground mb-1.5">
                   Site Name
                 </label>
                 <input
@@ -228,7 +228,7 @@ export default function AddSiteModal({
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1.5">
+                <label className="block text-xs font-medium text-foreground mb-1.5">
                   Local Domain
                 </label>
                 <div className="relative">
@@ -242,16 +242,16 @@ export default function AddSiteModal({
                     placeholder="mysite.test"
                   />
                 </div>
-                <p className="text-xs text-gray-400 mt-1">
+                <p className="text-xs text-muted-foreground mt-1">
                   Accessible at{' '}
-                  <span className="font-mono text-wp-blue">
+                  <span className="font-mono text-highlight">
                     {formData.domain || 'mysite.test'}
                   </span>
                 </p>
               </div>
               {!isBlueprint && (
                 <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1.5">
+                  <label className="block text-xs font-medium text-foreground mb-1.5">
                     Site Title
                   </label>
                   <input
@@ -266,7 +266,7 @@ export default function AddSiteModal({
                 </div>
               )}
               {isBlueprint && (
-                <div className="bg-blue-50 dark:bg-blue-500/10 rounded-xl px-4 py-3 text-xs text-blue-700 dark:text-blue-300">
+                <div className="bg-highlight/10 rounded-xl px-4 py-3 text-xs text-highlight">
                   This site will be created from the{' '}
                   <span className="font-semibold">{blueprint.name}</span> blueprint — its
                   files, database, and users are restored as-is.
@@ -279,7 +279,7 @@ export default function AddSiteModal({
           {step === 1 && (
             <div className="sheet-well space-y-4 animate-fade-in">
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1.5">
+                <label className="block text-xs font-medium text-foreground mb-1.5">
                   Site Directory
                 </label>
                 <div className="flex gap-2">
@@ -300,13 +300,13 @@ export default function AddSiteModal({
                     </button>
                   </Tooltip>
                 </div>
-                <p className="text-xs text-gray-400 mt-1">
+                <p className="text-xs text-muted-foreground mt-1">
                   WordPress files will be installed here
                 </p>
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1.5">
+                <label className="block text-xs font-medium text-foreground mb-1.5">
                   PHP Version
                 </label>
                 <select
@@ -334,7 +334,7 @@ export default function AddSiteModal({
           {step === 2 && !isBlueprint && (
             <div className="sheet-well space-y-4 animate-fade-in">
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1.5">
+                <label className="block text-xs font-medium text-foreground mb-1.5">
                   Database Name
                 </label>
                 <input
@@ -346,7 +346,7 @@ export default function AddSiteModal({
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1.5">
+                  <label className="block text-xs font-medium text-foreground mb-1.5">
                     Admin Username
                   </label>
                   <input
@@ -359,7 +359,7 @@ export default function AddSiteModal({
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1.5">
+                  <label className="block text-xs font-medium text-foreground mb-1.5">
                     Admin Password
                   </label>
                   <input
@@ -373,7 +373,7 @@ export default function AddSiteModal({
                 </div>
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1.5">
+                <label className="block text-xs font-medium text-foreground mb-1.5">
                   Admin Email
                 </label>
                 <input
@@ -385,7 +385,7 @@ export default function AddSiteModal({
                   }
                 />
               </div>
-              <div className="bg-blue-50 dark:bg-blue-500/10 rounded-xl px-4 py-3 text-xs text-blue-700 dark:text-blue-300">
+              <div className="bg-highlight/10 rounded-xl px-4 py-3 text-xs text-highlight">
                 WordPress will be installed at{' '}
                 <span className="font-semibold font-mono">{formData.domain}</span> with
                 the credentials above.
@@ -398,17 +398,17 @@ export default function AddSiteModal({
             <div className="sheet-well animate-fade-in">
               {done ? (
                 <div className="text-center py-4">
-                  <div className="w-14 h-14 rounded-full bg-green-100 dark:bg-green-500/15 flex items-center justify-center mx-auto mb-3">
-                    <CheckCircle size={28} className="text-wp-green" />
+                  <div className="w-14 h-14 rounded-full bg-status-running/10 flex items-center justify-center mx-auto mb-3">
+                    <CheckCircle size={28} className="text-status-running" />
                   </div>
-                  <h3 className="text-base font-bold text-gray-900">Site Created!</h3>
-                  <p className="text-sm text-gray-500 mt-1 mb-4">
+                  <h3 className="text-base font-bold text-foreground">Site Created!</h3>
+                  <p className="text-sm text-muted-foreground mt-1 mb-4">
                     Your WordPress site is ready at{' '}
                     <button
                       onClick={() =>
                         window.electronAPI.openSiteInBrowser(`http://${formData.domain}`)
                       }
-                      className="text-wp-blue hover:underline font-medium"
+                      className="text-highlight hover:underline font-medium"
                     >
                       {formData.domain}
                     </button>
@@ -442,9 +442,9 @@ export default function AddSiteModal({
                   <div className="flex items-center gap-3 mb-2">
                     <Loader
                       size={18}
-                      className="animate-spin text-wp-blue flex-shrink-0"
+                      className="animate-spin text-highlight flex-shrink-0"
                     />
-                    <p className="text-sm font-medium text-gray-700">
+                    <p className="text-sm font-medium text-foreground">
                       {isBlueprint
                         ? 'Creating site from blueprint…'
                         : 'Creating WordPress site…'}
@@ -458,7 +458,7 @@ export default function AddSiteModal({
 
           {/* Error */}
           {error && (
-            <div className="mt-4 flex items-start gap-2 bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400 rounded-xl px-4 py-3 text-sm">
+            <div className="mt-4 flex items-start gap-2 bg-destructive/10 text-destructive rounded-xl px-4 py-3 text-sm">
               <AlertCircle size={16} className="flex-shrink-0 mt-0.5" />
               <span>{error}</span>
             </div>

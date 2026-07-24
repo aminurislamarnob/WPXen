@@ -42,8 +42,8 @@ export default function SaveBlueprintModal({ site, onClose, onSaved }) {
     >
       <div className="sheet w-[520px] max-h-[90vh] overflow-hidden animate-slide-in">
         <div className="px-6 pt-6">
-          <h2 className="text-[15px] font-bold text-gray-900">Save as Blueprint</h2>
-          <p className="text-[13px] text-gray-500 mt-0.5">
+          <h2 className="text-[15px] font-bold text-foreground">Save as Blueprint</h2>
+          <p className="text-[13px] text-muted-foreground mt-0.5">
             Snapshot <span className="font-semibold">{site.name}</span> to spin up new
             sites from it later
           </p>
@@ -53,7 +53,7 @@ export default function SaveBlueprintModal({ site, onClose, onSaved }) {
           {phase === 'form' && (
             <div className="sheet-well space-y-4 animate-fade-in">
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1.5">
+                <label className="block text-xs font-medium text-foreground mb-1.5">
                   Blueprint Name
                 </label>
                 <input
@@ -65,8 +65,8 @@ export default function SaveBlueprintModal({ site, onClose, onSaved }) {
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1.5">
-                  Description <span className="text-gray-400">(optional)</span>
+                <label className="block text-xs font-medium text-foreground mb-1.5">
+                  Description <span className="text-muted-foreground">(optional)</span>
                 </label>
                 <textarea
                   className="form-input resize-none"
@@ -76,7 +76,7 @@ export default function SaveBlueprintModal({ site, onClose, onSaved }) {
                   placeholder="What's in this blueprint (plugins, theme, sample content)…"
                 />
               </div>
-              <div className="bg-blue-50 dark:bg-blue-500/10 rounded-xl px-4 py-3 text-xs text-blue-700 dark:text-blue-300">
+              <div className="bg-highlight/10 rounded-xl px-4 py-3 text-xs text-highlight">
                 A full snapshot (files + database) is saved. New sites created from this
                 blueprint inherit its content and users.
               </div>
@@ -87,11 +87,13 @@ export default function SaveBlueprintModal({ site, onClose, onSaved }) {
             <div className="sheet-well animate-fade-in">
               {phase === 'done' ? (
                 <div className="text-center py-4">
-                  <div className="w-14 h-14 rounded-full bg-green-100 dark:bg-green-500/15 flex items-center justify-center mx-auto mb-3">
-                    <CheckCircle size={28} className="text-wp-green" />
+                  <div className="w-14 h-14 rounded-full bg-status-running/10 flex items-center justify-center mx-auto mb-3">
+                    <CheckCircle size={28} className="text-status-running" />
                   </div>
-                  <h3 className="text-base font-bold text-gray-900">Blueprint Saved!</h3>
-                  <p className="text-sm text-gray-500 mt-1 mb-4">
+                  <h3 className="text-base font-bold text-foreground">
+                    Blueprint Saved!
+                  </h3>
+                  <p className="text-sm text-muted-foreground mt-1 mb-4">
                     Create sites from it via <span className="font-medium">Add Site</span>
                     .
                   </p>
@@ -104,9 +106,11 @@ export default function SaveBlueprintModal({ site, onClose, onSaved }) {
                   <div className="flex items-center gap-3 mb-2">
                     <Loader
                       size={18}
-                      className="animate-spin text-wp-blue flex-shrink-0"
+                      className="animate-spin text-highlight flex-shrink-0"
                     />
-                    <p className="text-sm font-medium text-gray-700">Saving blueprint…</p>
+                    <p className="text-sm font-medium text-foreground">
+                      Saving blueprint…
+                    </p>
                   </div>
                   <ProgressLog messages={progressMessages} className="mt-4" />
                 </div>
@@ -115,7 +119,7 @@ export default function SaveBlueprintModal({ site, onClose, onSaved }) {
           )}
 
           {error && (
-            <div className="mt-4 flex items-start gap-2 bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400 rounded-xl px-4 py-3 text-sm">
+            <div className="mt-4 flex items-start gap-2 bg-destructive/10 text-destructive rounded-xl px-4 py-3 text-sm">
               <AlertCircle size={16} className="flex-shrink-0 mt-0.5" />
               <span>{error}</span>
             </div>

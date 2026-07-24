@@ -24,12 +24,12 @@ function DeleteConfirmModal({ site, onConfirm, onClose }) {
       <div className="sheet w-[420px] animate-slide-in">
         <div className="p-6">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-red-100 dark:bg-red-500/15 flex items-center justify-center flex-shrink-0">
-              <AlertTriangle size={20} className="text-red-600 dark:text-red-400" />
+            <div className="w-10 h-10 rounded-xl bg-destructive/10 flex items-center justify-center flex-shrink-0">
+              <AlertTriangle size={20} className="text-destructive" />
             </div>
             <div>
-              <h3 className="text-[15px] font-bold text-gray-900">Remove Site</h3>
-              <p className="text-[13px] text-gray-500 mt-0.5">
+              <h3 className="text-[15px] font-bold text-foreground">Remove Site</h3>
+              <p className="text-[13px] text-muted-foreground mt-0.5">
                 Remove <span className="font-semibold">{site.name}</span> ({site.domain})?
                 This cannot be undone.
               </p>
@@ -40,22 +40,24 @@ function DeleteConfirmModal({ site, onConfirm, onClose }) {
             <label className="flex items-center gap-2.5 cursor-pointer">
               <input
                 type="checkbox"
-                className="w-4 h-4 rounded border-gray-300 text-wp-red"
+                className="w-4 h-4 rounded border-border text-status-error"
                 checked={removeDb}
                 onChange={(e) => setRemoveDb(e.target.checked)}
               />
-              <span className="text-sm text-gray-700">Drop database ({site.dbName})</span>
+              <span className="text-sm text-foreground">
+                Drop database ({site.dbName})
+              </span>
             </label>
             <label className="flex items-center gap-2.5 cursor-pointer">
               <input
                 type="checkbox"
-                className="w-4 h-4 rounded border-gray-300 text-wp-red"
+                className="w-4 h-4 rounded border-border text-status-error"
                 checked={removeFiles}
                 onChange={(e) => setRemoveFiles(e.target.checked)}
               />
-              <span className="text-sm text-gray-700">
+              <span className="text-sm text-foreground">
                 Delete site files{' '}
-                <span className="text-gray-400 text-xs">(irreversible)</span>
+                <span className="text-muted-foreground text-xs">(irreversible)</span>
               </span>
             </label>
           </div>
@@ -257,7 +259,7 @@ export default function Sites({ sites, setSites, refreshSites }) {
           <div className="relative flex-1 max-w-xs">
             <Search
               size={13}
-              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400"
+              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
             />
             <input
               type="text"
@@ -268,7 +270,7 @@ export default function Sites({ sites, setSites, refreshSites }) {
             />
           </div>
         ) : (
-          <p className="text-xs text-gray-500">
+          <p className="text-xs text-muted-foreground">
             {sites.length} WordPress site{sites.length !== 1 ? 's' : ''}
           </p>
         )}
@@ -289,10 +291,10 @@ export default function Sites({ sites, setSites, refreshSites }) {
         <div
           className={`flex items-center gap-2 rounded-xl px-4 py-2.5 mb-3 text-xs animate-fade-in ${
             exportStatus.state === 'error'
-              ? 'bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400'
+              ? 'bg-destructive/10 text-destructive'
               : exportStatus.state === 'done'
-                ? 'bg-green-50 text-green-700 dark:bg-green-500/10 dark:text-green-400'
-                : 'bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300'
+                ? 'bg-status-running/10 text-status-running'
+                : 'bg-highlight/10 text-highlight'
           }`}
         >
           {exportStatus.state === 'busy' ? (
@@ -320,11 +322,11 @@ export default function Sites({ sites, setSites, refreshSites }) {
       {/* Sites grid */}
       {sites.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 text-center">
-          <div className="w-16 h-16 rounded-2xl bg-wp-blue/10 flex items-center justify-center mb-4">
-            <Globe size={28} className="text-wp-blue" />
+          <div className="w-16 h-16 rounded-2xl bg-highlight/10 flex items-center justify-center mb-4">
+            <Globe size={28} className="text-highlight" />
           </div>
-          <h2 className="text-base font-bold text-gray-800">No sites yet</h2>
-          <p className="text-sm text-gray-400 mt-2 mb-6 max-w-xs">
+          <h2 className="text-base font-bold text-foreground">No sites yet</h2>
+          <p className="text-sm text-muted-foreground mt-2 mb-6 max-w-xs">
             Create your first local WordPress site. It&apos;ll be up and running in
             minutes.
           </p>
@@ -335,7 +337,9 @@ export default function Sites({ sites, setSites, refreshSites }) {
         </div>
       ) : filtered.length === 0 ? (
         <div className="text-center py-16">
-          <p className="text-sm text-gray-400">No sites match &quot;{search}&quot;</p>
+          <p className="text-sm text-muted-foreground">
+            No sites match &quot;{search}&quot;
+          </p>
         </div>
       ) : (
         <div className="space-y-3">

@@ -10,7 +10,7 @@ import {
   Trash2,
   Power,
 } from 'lucide-react';
-import { Tooltip } from './ui';
+import { SegmentedTabs, Tooltip } from './ui';
 
 const TABS = [
   { id: 'all', label: 'All' },
@@ -27,7 +27,7 @@ function Toggle({ checked, onChange, disabled }) {
       onClick={() => onChange(!checked)}
       disabled={disabled}
       className={`relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full transition-colors ${
-        checked ? 'bg-wp-blue' : 'bg-gray-300'
+        checked ? 'bg-highlight' : 'bg-border'
       } ${disabled ? 'opacity-50' : ''}`}
     >
       <span
@@ -42,14 +42,14 @@ function Toggle({ checked, onChange, disabled }) {
 function RowMenu({ plugin, busy, onAction, onClose }) {
   return (
     <div
-      className="absolute right-0 top-7 z-30 panel-menu rounded-xl shadow-card-hover border border-gray-100 py-1 w-40 animate-fade-in"
+      className="absolute right-0 top-7 z-30 panel-menu p-1 w-40 animate-fade-in"
       onMouseLeave={onClose}
     >
       {plugin.status === 'active' ? (
         <button
           onClick={() => onAction('deactivate', plugin.name)}
           disabled={busy}
-          className="flex w-full items-center gap-2.5 px-3 py-2 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+          className="flex w-full items-center gap-2.5 px-3 py-2 text-xs text-foreground hover:bg-accent disabled:opacity-50"
         >
           <Power size={13} />
           Deactivate
@@ -58,7 +58,7 @@ function RowMenu({ plugin, busy, onAction, onClose }) {
         <button
           onClick={() => onAction('activate', plugin.name)}
           disabled={busy}
-          className="flex w-full items-center gap-2.5 px-3 py-2 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+          className="flex w-full items-center gap-2.5 px-3 py-2 text-xs text-foreground hover:bg-accent disabled:opacity-50"
         >
           <Power size={13} />
           Activate
@@ -68,17 +68,17 @@ function RowMenu({ plugin, busy, onAction, onClose }) {
         <button
           onClick={() => onAction('update', plugin.name)}
           disabled={busy}
-          className="flex w-full items-center gap-2.5 px-3 py-2 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+          className="flex w-full items-center gap-2.5 px-3 py-2 text-xs text-foreground hover:bg-accent disabled:opacity-50"
         >
           <ArrowUpCircle size={13} />
           Update{plugin.updateVersion ? ` to ${plugin.updateVersion}` : ''}
         </button>
       )}
-      <div className="border-t border-gray-100 my-1" />
+      <div className="border-t border-border my-1" />
       <button
         onClick={() => onAction('confirm-delete', plugin.name)}
         disabled={busy}
-        className="flex w-full items-center gap-2.5 px-3 py-2 text-xs text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-500/10 disabled:opacity-50"
+        className="flex w-full items-center gap-2.5 px-3 py-2 text-xs text-destructive hover:bg-destructive/10 disabled:opacity-50"
       >
         <Trash2 size={13} />
         Delete…
@@ -97,12 +97,12 @@ function InstallModal({ onInstall, installing, onClose }) {
       onClick={(e) => e.target === e.currentTarget && !installing && onClose()}
     >
       <div className="sheet w-[26rem] animate-slide-in p-6">
-        <h3 className="text-[15px] font-bold text-gray-900">Add New Plugin</h3>
-        <p className="text-[13px] text-gray-500 mt-0.5">
+        <h3 className="text-[15px] font-bold text-foreground">Add New Plugin</h3>
+        <p className="text-[13px] text-muted-foreground mt-0.5">
           Install a plugin from wordpress.org
         </p>
         <div className="sheet-well mt-4">
-          <label className="block text-xs font-medium text-gray-700 mb-1.5">
+          <label className="block text-xs font-medium text-foreground mb-1.5">
             wordpress.org plugin slug
           </label>
           <input
@@ -116,7 +116,7 @@ function InstallModal({ onInstall, installing, onClose }) {
               e.key === 'Enter' && slug && !installing && onInstall(slug, activate)
             }
           />
-          <p className="text-xs text-gray-400 mt-1.5">
+          <p className="text-xs text-muted-foreground mt-1.5">
             The slug is the last part of the plugin&apos;s wordpress.org URL, e.g.{' '}
             <span className="font-mono">wordpress.org/plugins/woocommerce</span>.
           </p>
@@ -125,9 +125,9 @@ function InstallModal({ onInstall, installing, onClose }) {
               type="checkbox"
               checked={activate}
               onChange={(e) => setActivate(e.target.checked)}
-              className="w-4 h-4 rounded border-gray-300 text-wp-blue"
+              className="w-4 h-4 rounded border-border text-highlight"
             />
-            <span className="text-sm text-gray-700">Activate after install</span>
+            <span className="text-sm text-foreground">Activate after install</span>
           </label>
         </div>
         <div className="flex justify-end gap-2 mt-5">
@@ -162,19 +162,19 @@ function DeleteModal({ names, deleting, onConfirm, onClose }) {
     >
       <div className="sheet w-[420px] animate-slide-in p-6">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-red-100 dark:bg-red-500/15 flex items-center justify-center flex-shrink-0">
-            <AlertTriangle size={20} className="text-red-600 dark:text-red-400" />
+          <div className="w-10 h-10 rounded-xl bg-destructive/10 flex items-center justify-center flex-shrink-0">
+            <AlertTriangle size={20} className="text-destructive" />
           </div>
           <div>
-            <h3 className="text-[15px] font-bold text-gray-900">
+            <h3 className="text-[15px] font-bold text-foreground">
               Delete plugin{names.length !== 1 ? 's' : ''}
             </h3>
-            <p className="text-[13px] text-gray-500 mt-0.5">
+            <p className="text-[13px] text-muted-foreground mt-0.5">
               This removes the plugin files
             </p>
           </div>
         </div>
-        <p className="text-sm text-gray-700 mt-4 break-words">
+        <p className="text-sm text-foreground mt-4 break-words">
           Delete <span className="font-semibold">{names.join(', ')}</span>? The plugin
           will be deactivated first.
         </p>
@@ -324,8 +324,8 @@ export default function WpPlugins({ site, onSaved }) {
       {/* Header */}
       <div className="flex items-start justify-between gap-3 mb-5">
         <div>
-          <h2 className="text-lg font-bold text-gray-900">Plugins</h2>
-          <p className="text-sm text-gray-500 mt-0.5">
+          <h2 className="text-lg font-bold text-foreground">Plugins</h2>
+          <p className="text-sm text-muted-foreground mt-0.5">
             Manage this site&apos;s plugins via WP-CLI.
           </p>
         </div>
@@ -387,8 +387,8 @@ export default function WpPlugins({ site, onSaved }) {
         <div
           className={`flex items-center gap-2 px-4 py-3 rounded-xl mb-4 text-sm ${
             message.type === 'error'
-              ? 'bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400'
-              : 'bg-green-50 text-green-700 dark:bg-green-500/10 dark:text-green-400'
+              ? 'bg-destructive/10 text-destructive'
+              : 'bg-status-running/10 text-status-running'
           }`}
         >
           {message.type === 'error' ? (
@@ -401,27 +401,25 @@ export default function WpPlugins({ site, onSaved }) {
       )}
 
       {/* Tabs */}
-      <div className="flex items-center gap-1 border-b border-surface-border mb-4">
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            onClick={() => setTab(t.id)}
-            className={`px-3 py-2 text-sm border-b-2 -mb-px transition-colors ${
-              tab === t.id
-                ? 'border-wp-blue text-wp-blue font-medium'
-                : 'border-transparent text-gray-500 hover:text-gray-700'
-            }`}
-          >
-            {t.label}
-            <span className="ml-1.5 text-xs text-gray-400">{tabCount(t.id)}</span>
-          </button>
-        ))}
-      </div>
+      <SegmentedTabs
+        className="mb-4"
+        value={tab}
+        onChange={setTab}
+        tabs={TABS.map((t) => ({
+          value: t.id,
+          label: (
+            <>
+              {t.label}
+              <span className="text-xs opacity-60">{tabCount(t.id)}</span>
+            </>
+          ),
+        }))}
+      />
 
       {/* Bulk bar */}
       {selectedNames.length > 0 && (
-        <div className="flex items-center gap-2 px-4 py-2.5 bg-wp-blue/5 border border-wp-blue/20 rounded-xl mb-4 text-sm animate-fade-in">
-          <span className="text-wp-blue font-medium">
+        <div className="flex items-center gap-2 px-4 py-2.5 bg-highlight/5 border border-highlight/20 rounded-xl mb-4 text-sm animate-fade-in">
+          <span className="text-highlight font-medium">
             {selectedNames.length} selected
           </span>
           <div className="flex-1" />
@@ -460,7 +458,7 @@ export default function WpPlugins({ site, onSaved }) {
             Delete
           </button>
           {busy === '__bulk__' && (
-            <Loader size={14} className="animate-spin text-wp-blue" />
+            <Loader size={14} className="animate-spin text-highlight" />
           )}
         </div>
       )}
@@ -468,10 +466,10 @@ export default function WpPlugins({ site, onSaved }) {
       {/* List */}
       {loading ? (
         <div className="flex items-center justify-center py-16">
-          <Loader size={22} className="animate-spin text-wp-blue" />
+          <Loader size={22} className="animate-spin text-highlight" />
         </div>
       ) : error ? (
-        <div className="bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400 rounded-xl px-4 py-3 text-sm">
+        <div className="bg-destructive/10 text-destructive rounded-xl px-4 py-3 text-sm">
           <p>{error}</p>
           <button onClick={() => load(true)} className="btn-secondary text-xs mt-3">
             Try again
@@ -480,12 +478,12 @@ export default function WpPlugins({ site, onSaved }) {
       ) : (
         <div className="settings-card">
           {/* Table head */}
-          <div className="flex items-center gap-3 px-5 py-2.5 bg-gray-50 rounded-t-xl text-xs text-gray-500 uppercase tracking-wide">
+          <div className="flex items-center gap-3 px-5 py-2.5 bg-muted rounded-t-xl text-xs text-muted-foreground uppercase tracking-wide">
             <input
               type="checkbox"
               checked={allChecked}
               onChange={toggleAll}
-              className="w-4 h-4 rounded border-gray-300 text-wp-blue"
+              className="w-4 h-4 rounded border-border text-highlight"
             />
             <span className="flex-1 font-medium">Plugin</span>
             <span className="w-20 font-medium">Status</span>
@@ -494,7 +492,7 @@ export default function WpPlugins({ site, onSaved }) {
           </div>
 
           {filtered.length === 0 ? (
-            <p className="px-5 py-8 text-sm text-gray-400 text-center">
+            <p className="px-5 py-8 text-sm text-muted-foreground text-center">
               No plugins in this view.
             </p>
           ) : (
@@ -505,39 +503,39 @@ export default function WpPlugins({ site, onSaved }) {
               return (
                 <div
                   key={p.name}
-                  className="flex items-center gap-3 px-5 py-3.5 border-t border-gray-100"
+                  className="flex items-center gap-3 px-5 py-3.5 border-t border-border"
                 >
                   <input
                     type="checkbox"
                     checked={selected.has(p.name)}
                     onChange={() => toggleOne(p.name)}
-                    className="w-4 h-4 rounded border-gray-300 text-wp-blue"
+                    className="w-4 h-4 rounded border-border text-highlight"
                   />
 
                   {/* Avatar */}
-                  <div className="w-9 h-9 rounded-lg bg-purple-50 text-purple-700 dark:bg-purple-500/15 dark:text-purple-300 flex items-center justify-center text-sm font-bold flex-shrink-0">
+                  <div className="w-9 h-9 rounded-lg bg-muted text-muted-foreground flex items-center justify-center text-sm font-bold flex-shrink-0">
                     {p.title.charAt(0).toUpperCase()}
                   </div>
 
                   {/* Name / description */}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <h4 className="text-sm font-semibold text-gray-900 truncate">
+                      <h4 className="text-sm font-semibold text-foreground truncate">
                         {p.title}
                       </h4>
                       {p.updateAvailable && (
-                        <span className="flex-shrink-0 flex items-center gap-1 px-2 py-0.5 bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300 rounded-full text-[10px] font-medium">
+                        <span className="flex-shrink-0 flex items-center gap-1 px-2 py-0.5 bg-status-warning/10 text-status-warning rounded-full text-[10px] font-medium">
                           <ArrowUpCircle size={10} />
                           {p.updateVersion || 'update'}
                         </span>
                       )}
                     </div>
                     {p.description && (
-                      <p className="text-xs text-gray-500 truncate mt-0.5">
+                      <p className="text-xs text-muted-foreground truncate mt-0.5">
                         {p.description}
                       </p>
                     )}
-                    <p className="text-xs text-gray-400 mt-0.5 truncate">
+                    <p className="text-xs text-muted-foreground mt-0.5 truncate">
                       {p.author ? `By ${p.author} • ` : ''}Version {p.version}
                     </p>
                   </div>
@@ -547,8 +545,8 @@ export default function WpPlugins({ site, onSaved }) {
                     <span
                       className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${
                         p.status === 'active'
-                          ? 'bg-green-50 text-wp-green dark:bg-green-500/15'
-                          : 'bg-gray-100 text-gray-500'
+                          ? 'bg-status-running/10 text-status-running'
+                          : 'bg-muted text-muted-foreground'
                       }`}
                     >
                       {p.status === 'active' ? 'Active' : 'Inactive'}
@@ -563,19 +561,19 @@ export default function WpPlugins({ site, onSaved }) {
                       disabled={isBusy}
                     />
                     {busy === `auto:${p.name}` && (
-                      <Loader size={12} className="animate-spin text-gray-400" />
+                      <Loader size={12} className="animate-spin text-muted-foreground" />
                     )}
                   </div>
 
                   {/* Row menu */}
                   <div className="w-6 flex-shrink-0 relative">
                     {rowBusy && busy !== `auto:${p.name}` ? (
-                      <Loader size={14} className="animate-spin text-wp-blue" />
+                      <Loader size={14} className="animate-spin text-highlight" />
                     ) : (
                       <button
                         onClick={() => setMenuFor((m) => (m === p.name ? null : p.name))}
                         disabled={isBusy}
-                        className="p-1 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 disabled:opacity-50"
+                        className="p-1 rounded-lg text-muted-foreground hover:bg-accent hover:text-muted-foreground disabled:opacity-50"
                       >
                         <MoreVertical size={15} />
                       </button>

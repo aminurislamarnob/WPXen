@@ -15,16 +15,16 @@ function StatCard({ icon: Icon, label, value, description, updates, tint }) {
   return (
     <div className="settings-card p-5">
       <div className="flex items-start justify-between">
-        <span className="text-sm font-semibold text-gray-700">{label}</span>
+        <span className="text-sm font-semibold text-foreground">{label}</span>
         <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${tint}`}>
           <Icon size={17} />
         </div>
       </div>
-      <div className="text-3xl font-bold text-gray-900 mt-2">{value}</div>
+      <div className="text-3xl font-bold text-foreground mt-2">{value}</div>
       <div className="flex items-end justify-between gap-2 mt-1.5">
-        <p className="text-xs text-gray-500 leading-relaxed">{description}</p>
+        <p className="text-xs text-muted-foreground leading-relaxed">{description}</p>
         {updates > 0 && (
-          <span className="flex-shrink-0 px-2 py-0.5 bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300 rounded-full text-xs font-medium">
+          <span className="flex-shrink-0 px-2 py-0.5 bg-status-warning/10 text-status-warning rounded-full text-xs font-medium">
             {updates} update{updates !== 1 ? 's' : ''}
           </span>
         )}
@@ -85,8 +85,8 @@ export default function WpOverview({ site, onSaved }) {
     <div>
       <div className="flex items-start justify-between mb-5">
         <div>
-          <h2 className="text-lg font-bold text-gray-900">WordPress Overview</h2>
-          <p className="text-sm text-gray-500 mt-0.5">
+          <h2 className="text-lg font-bold text-foreground">WordPress Overview</h2>
+          <p className="text-sm text-muted-foreground mt-0.5">
             Core, plugin and theme inventory with pending updates.
           </p>
         </div>
@@ -112,8 +112,8 @@ export default function WpOverview({ site, onSaved }) {
         <div
           className={`flex items-center gap-2 px-4 py-3 rounded-xl mb-4 text-sm ${
             message.type === 'error'
-              ? 'bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400'
-              : 'bg-green-50 text-green-700 dark:bg-green-500/10 dark:text-green-400'
+              ? 'bg-destructive/10 text-destructive'
+              : 'bg-status-running/10 text-status-running'
           }`}
         >
           {message.type === 'error' ? (
@@ -127,10 +127,10 @@ export default function WpOverview({ site, onSaved }) {
 
       {loading ? (
         <div className="flex items-center justify-center py-16">
-          <Loader size={22} className="animate-spin text-wp-blue" />
+          <Loader size={22} className="animate-spin text-highlight" />
         </div>
       ) : error ? (
-        <div className="bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400 rounded-xl px-4 py-3 text-sm">
+        <div className="bg-destructive/10 text-destructive rounded-xl px-4 py-3 text-sm">
           <p>{error}</p>
           <button onClick={() => load(true)} className="btn-secondary text-xs mt-3">
             Try again
@@ -145,8 +145,8 @@ export default function WpOverview({ site, onSaved }) {
                 <div
                   className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${
                     core.updateVersion
-                      ? 'bg-amber-100 text-amber-600 dark:bg-amber-500/15 dark:text-amber-400'
-                      : 'bg-green-50 text-wp-green dark:bg-green-500/15'
+                      ? 'bg-status-warning/10 text-status-warning'
+                      : 'bg-status-running/10 text-status-running'
                   }`}
                 >
                   {core.updateVersion ? (
@@ -156,8 +156,10 @@ export default function WpOverview({ site, onSaved }) {
                   )}
                 </div>
                 <div className="min-w-0">
-                  <h3 className="text-sm font-semibold text-gray-900">WordPress Core</h3>
-                  <p className="text-xs text-gray-500 mt-0.5">
+                  <h3 className="text-sm font-semibold text-foreground">
+                    WordPress Core
+                  </h3>
+                  <p className="text-xs text-muted-foreground mt-0.5">
                     {core.updateVersion
                       ? `Update available from ${core.version} to ${core.updateVersion}.`
                       : `WordPress ${core.version} is up to date.`}
@@ -197,7 +199,7 @@ export default function WpOverview({ site, onSaved }) {
               value={data.counts.plugins}
               description="Installed plugins currently available on this site."
               updates={data.counts.pluginUpdates}
-              tint="bg-blue-50 text-wp-blue dark:bg-blue-500/15"
+              tint="bg-highlight/10 text-highlight"
             />
             <StatCard
               icon={Palette}
@@ -205,7 +207,7 @@ export default function WpOverview({ site, onSaved }) {
               value={data.counts.themes}
               description="Installed themes ready for editors and site admins."
               updates={data.counts.themeUpdates}
-              tint="bg-green-50 text-wp-green dark:bg-green-500/15"
+              tint="bg-status-running/10 text-status-running"
             />
             <StatCard
               icon={Users}
@@ -213,7 +215,7 @@ export default function WpOverview({ site, onSaved }) {
               value={data.counts.users}
               description="WordPress user accounts on this site."
               updates={0}
-              tint="bg-amber-50 text-amber-600 dark:bg-amber-500/15 dark:text-amber-400"
+              tint="bg-status-warning/10 text-status-warning"
             />
           </div>
 
@@ -221,13 +223,15 @@ export default function WpOverview({ site, onSaved }) {
           <div className="settings-card">
             <div className="flex items-center justify-between gap-3 p-5 pb-4">
               <div>
-                <h3 className="text-sm font-semibold text-gray-900">Available Updates</h3>
-                <p className="text-xs text-gray-500 mt-0.5">
+                <h3 className="text-sm font-semibold text-foreground">
+                  Available Updates
+                </h3>
+                <p className="text-xs text-muted-foreground mt-0.5">
                   Review pending plugin and theme updates before applying them.
                 </p>
               </div>
               <div className="flex items-center gap-2 flex-shrink-0">
-                <span className="px-2.5 py-1 bg-gray-100 text-gray-600 rounded-full text-xs font-medium">
+                <span className="px-2.5 py-1 bg-muted text-muted-foreground rounded-full text-xs font-medium">
                   {pending} pending update{pending !== 1 ? 's' : ''}
                 </span>
                 {data.updates.length > 0 && (
@@ -257,14 +261,14 @@ export default function WpOverview({ site, onSaved }) {
 
             {data.updates.length === 0 ? (
               <div className="px-5 pb-5">
-                <p className="text-xs text-gray-400">
+                <p className="text-xs text-muted-foreground">
                   All plugins and themes are up to date.
                 </p>
               </div>
             ) : (
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="bg-gray-50 text-left text-xs text-gray-500 uppercase tracking-wide">
+                  <tr className="bg-muted text-left text-xs text-muted-foreground uppercase tracking-wide">
                     <th className="px-5 py-2.5 font-medium">Name</th>
                     <th className="px-3 py-2.5 font-medium">Type</th>
                     <th className="px-3 py-2.5 font-medium">Version</th>
@@ -276,13 +280,17 @@ export default function WpOverview({ site, onSaved }) {
                   {data.updates.map((u) => {
                     const key = `${u.type}:${u.name}`;
                     return (
-                      <tr key={key} className="border-t border-gray-100">
-                        <td className="px-5 py-3 text-gray-900 font-medium">{u.title}</td>
-                        <td className="px-3 py-3 text-gray-500 capitalize">{u.type}</td>
-                        <td className="px-3 py-3 text-gray-500 font-mono text-xs">
+                      <tr key={key} className="border-t border-border">
+                        <td className="px-5 py-3 text-foreground font-medium">
+                          {u.title}
+                        </td>
+                        <td className="px-3 py-3 text-muted-foreground capitalize">
+                          {u.type}
+                        </td>
+                        <td className="px-3 py-3 text-muted-foreground font-mono text-xs">
                           {u.version}
                         </td>
-                        <td className="px-3 py-3 text-gray-500 font-mono text-xs">
+                        <td className="px-3 py-3 text-muted-foreground font-mono text-xs">
                           {u.latest || '—'}
                         </td>
                         <td className="px-5 py-3 text-right">
@@ -320,7 +328,7 @@ export default function WpOverview({ site, onSaved }) {
             )}
           </div>
 
-          <p className="text-xs text-gray-400">
+          <p className="text-xs text-muted-foreground">
             Last synced{' '}
             {new Date(data.syncedAt).toLocaleString(undefined, {
               dateStyle: 'medium',

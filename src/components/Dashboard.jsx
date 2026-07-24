@@ -70,16 +70,11 @@ export default function Dashboard({ serviceStatus, sites, refreshStatus }) {
     <div className="px-6 pb-6 max-w-[735px] mx-auto animate-fade-in">
       {/* Permissions banner */}
       {!sudoersConfigured && (
-        <Card className="mb-4 !bg-amber-50 dark:!bg-amber-500/10">
+        <Card className="mb-4 !bg-status-warning/10">
           <Row
-            icon={
-              <ShieldAlert
-                size={18}
-                className="text-amber-600 dark:text-amber-400 flex-shrink-0"
-              />
-            }
+            icon={<ShieldAlert size={18} className="text-status-warning flex-shrink-0" />}
             title={
-              <span className="font-semibold text-amber-800 dark:text-amber-300">
+              <span className="font-semibold text-status-warning">
                 Password required for DNS
               </span>
             }
@@ -87,7 +82,7 @@ export default function Dashboard({ serviceStatus, sites, refreshStatus }) {
           >
             <button
               onClick={() => navigate('/settings')}
-              className="text-xs font-semibold text-amber-800 bg-amber-100 hover:bg-amber-200 dark:text-amber-200 dark:bg-amber-500/20 dark:hover:bg-amber-500/30 px-3 py-1.5 rounded-md transition-colors flex-shrink-0"
+              className="text-xs font-semibold text-status-warning bg-status-warning/10 hover:bg-status-warning/20 px-3 py-1.5 rounded-md transition-colors flex-shrink-0"
             >
               Set Up
             </button>
@@ -134,7 +129,7 @@ export default function Dashboard({ serviceStatus, sites, refreshStatus }) {
                   : undefined
               }
             >
-              <span className="flex items-center gap-1.5 text-xs text-gray-500">
+              <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
                 <StatusBadge running={running} size="xs" />
                 {running ? 'Running' : 'Stopped'}
               </span>
@@ -155,7 +150,7 @@ export default function Dashboard({ serviceStatus, sites, refreshStatus }) {
         right={
           <button
             onClick={() => navigate('/sites')}
-            className="text-xs text-accent hover:underline"
+            className="text-xs text-highlight hover:underline"
           >
             View all ({sites.length})
           </button>
@@ -167,10 +162,10 @@ export default function Dashboard({ serviceStatus, sites, refreshStatus }) {
         {recentSites.length === 0 ? (
           <div className="px-6 py-10 text-center">
             <IconTile icon={Globe} color="teal" size={40} />
-            <p className="text-[13px] font-medium text-gray-700 mt-3">
+            <p className="text-[13px] font-medium text-foreground mt-3">
               No WordPress sites yet
             </p>
-            <p className="text-xs text-gray-400 mt-1 mb-4">
+            <p className="text-xs text-muted-foreground mt-1 mb-4">
               Create your first local WordPress site to get started
             </p>
             <button onClick={() => navigate('/sites')} className="btn-primary">
@@ -199,7 +194,7 @@ export default function Dashboard({ serviceStatus, sites, refreshStatus }) {
                   }}
                   onKeyDown={(e) => e.key === 'Enter' && e.stopPropagation()}
                   aria-label="Open in browser"
-                  className="p-1.5 rounded-md hover:bg-black/5 dark:hover:bg-white/10 text-gray-400 flex-shrink-0"
+                  className="p-1.5 rounded-md hover:bg-accent text-muted-foreground flex-shrink-0"
                 >
                   <ExternalLink size={13} />
                 </span>
@@ -220,8 +215,8 @@ export default function Dashboard({ serviceStatus, sites, refreshStatus }) {
           { label: 'PHP Version', value: serviceStatus?.php?.version || '—' },
         ].map(({ label, value }) => (
           <Card key={label} className="px-4 py-3">
-            <p className="text-[11px] text-gray-400">{label}</p>
-            <p className="text-xl font-bold text-gray-900 mt-0.5">{value}</p>
+            <p className="text-[11px] text-muted-foreground">{label}</p>
+            <p className="text-xl font-bold text-foreground mt-0.5">{value}</p>
           </Card>
         ))}
       </div>

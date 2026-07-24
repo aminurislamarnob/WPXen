@@ -83,8 +83,8 @@ const BY_NAME = {
   '.gitattributes': [GitBranch, '#f14e32'],
   '.env': [FileKey, '#e5c07b'],
   'readme.md': [BookOpen, '#519aba'],
-  'readme': [BookOpen, '#519aba'],
-  'license': [FileText, '#cbcb41'],
+  readme: [BookOpen, '#519aba'],
+  license: [FileText, '#cbcb41'],
 };
 
 function lookup(name) {

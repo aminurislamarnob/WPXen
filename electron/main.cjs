@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, dialog, screen } = require('electron');
+const { app, BrowserWindow, dialog, nativeTheme, screen } = require('electron');
 const path = require('path');
 
 const JsonStore = require('./store.cjs');
@@ -11,6 +11,12 @@ const isDev = process.env.NODE_ENV === 'development';
 
 let mainWindow = null;
 let store = null;
+
+// Opaque window backdrop, matching the renderer's --background token so there's
+// no flash of the wrong color while the page paints (or on resize).
+const BG_DARK = '#151110'; // ember
+const BG_LIGHT = '#ffffff';
+const windowBackground = () => (nativeTheme.shouldUseDarkColors ? BG_DARK : BG_LIGHT);
 
 // macOS: Don't show in dock (menu bar app), show when window is active
 app.dock?.hide();
@@ -28,12 +34,7 @@ function createWindow() {
     center: true,
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 16, y: 18 },
-    // Fully transparent over the vibrancy material — the renderer paints
-    // translucent "Liquid Glass" surfaces on top, so the desktop shows
-    // through the whole window like macOS 26 native apps.
-    backgroundColor: '#00000000',
-    vibrancy: 'sidebar',
-    visualEffectState: 'active',
+    backgroundColor: windowBackground(),
     show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
@@ -74,12 +75,18 @@ app.whenReady().then(() => {
   // Initialize store
   store = new JsonStore('wpherd-data');
 
-  // Light/dark follows the macOS system appearance: nativeTheme defaults to
-  // 'system', which drives the renderer's prefers-color-scheme, and the
-  // vibrancy material adapts by itself — nothing to configure.
+  // Light/dark follows the macOS system appearance: nativeTheme stays on its
+  // default 'system' source, which drives the renderer's prefers-color-scheme.
+  // The window's opaque backdrop has to be flipped by hand to stay in sync.
 
   // Create main window
   const win = createWindow();
+
+  nativeTheme.on('updated', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.setBackgroundColor(windowBackground());
+    }
+  });
 
   // Register IPC handlers
   registerHandlers(win, store);
@@ -179,9 +186,7 @@ app.on('before-quit', (e) => {
   // gracefully as part of cleanup below.
   const agents = require('./services/agents.cjs');
   if (agents.hasActiveSessions()) {
-    const sitesById = new Map(
-      (store?.get('sites', []) || []).map((s) => [s.id, s.name])
-    );
+    const sitesById = new Map((store?.get('sites', []) || []).map((s) => [s.id, s.name]));
     const names = agents
       .activeSiteIds()
       .map((id) => sitesById.get(id) || id)

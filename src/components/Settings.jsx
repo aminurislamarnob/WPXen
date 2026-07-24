@@ -235,12 +235,9 @@ export default function Settings({ onOpenWizard }) {
           <Row
             icon={
               sudoers?.configured ? (
-                <ShieldCheck size={18} className="text-wp-green flex-shrink-0" />
+                <ShieldCheck size={18} className="text-status-running flex-shrink-0" />
               ) : (
-                <ShieldAlert
-                  size={18}
-                  className="text-amber-600 dark:text-amber-400 flex-shrink-0"
-                />
+                <ShieldAlert size={18} className="text-status-warning flex-shrink-0" />
               )
             }
             title="Passwordless DNS Control"
@@ -267,7 +264,7 @@ export default function Settings({ onOpenWizard }) {
               <button
                 onClick={handleUninstallSudoers}
                 disabled={sudoersLoading}
-                className="btn-ghost text-xs text-gray-400 hover:text-red-600 dark:hover:text-red-400"
+                className="btn-ghost text-xs text-muted-foreground hover:text-destructive"
               >
                 {sudoersLoading ? (
                   <Loader size={12} className="animate-spin mr-1.5" />
@@ -279,7 +276,7 @@ export default function Settings({ onOpenWizard }) {
             )}
           </Row>
           <Row
-            icon={<Wifi size={18} className="text-gray-400 flex-shrink-0" />}
+            icon={<Wifi size={18} className="text-muted-foreground flex-shrink-0" />}
             title="*.test DNS Resolution"
             subtitle="Route *.test domains to localhost via dnsmasq (admin privileges required)"
           >
@@ -297,9 +294,9 @@ export default function Settings({ onOpenWizard }) {
           <Row
             icon={
               caStatus?.trusted ? (
-                <Lock size={18} className="text-wp-green flex-shrink-0" />
+                <Lock size={18} className="text-status-running flex-shrink-0" />
               ) : (
-                <Lock size={18} className="text-gray-400 flex-shrink-0" />
+                <Lock size={18} className="text-muted-foreground flex-shrink-0" />
               )
             }
             title="Local HTTPS Certificate Authority"
@@ -312,15 +309,15 @@ export default function Settings({ onOpenWizard }) {
             <span
               className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${
                 caStatus?.trusted
-                  ? 'bg-green-50 text-green-700 dark:bg-green-500/10 dark:text-green-400'
-                  : 'bg-gray-100 text-gray-500 dark:bg-white/10 dark:text-gray-400'
+                  ? 'bg-status-running/10 text-status-running'
+                  : 'bg-muted text-muted-foreground'
               }`}
             >
               {caStatus?.trusted ? 'Trusted' : 'Not installed'}
             </span>
           </Row>
         </Card>
-        <p className="text-[11px] text-gray-400 mt-1.5 px-1">
+        <p className="text-[11px] text-muted-foreground mt-1.5 px-1">
           Installs <span className="font-mono">/etc/sudoers.d/wpherd</span> granting
           passwordless <span className="font-mono">sudo brew services</span>, used only
           for dnsmasq — the other services run inside WPHerd and need no privileges.
@@ -331,8 +328,8 @@ export default function Settings({ onOpenWizard }) {
               key={i}
               className={`flex items-start gap-2 px-3 py-2.5 rounded-lg mt-2 text-[13px] ${
                 m.type === 'error'
-                  ? 'bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400'
-                  : 'bg-green-50 text-green-700 dark:bg-green-500/10 dark:text-green-400'
+                  ? 'bg-destructive/10 text-destructive'
+                  : 'bg-status-running/10 text-status-running'
               }`}
             >
               <CheckCircle size={14} className="flex-shrink-0 mt-0.5" />
@@ -346,8 +343,8 @@ export default function Settings({ onOpenWizard }) {
         <SectionLabel>Site Blueprints</SectionLabel>
         <Card>
           {blueprints.length === 0 ? (
-            <div className="flex items-center gap-3 px-4 py-5 text-[13px] text-gray-500">
-              <Layers size={18} className="text-gray-400 flex-shrink-0" />
+            <div className="flex items-center gap-3 px-4 py-5 text-[13px] text-muted-foreground">
+              <Layers size={18} className="text-muted-foreground flex-shrink-0" />
               <span>
                 No blueprints yet. Save one from a site’s menu (
                 <span className="font-medium">Save as Blueprint…</span>) to create new
@@ -358,7 +355,7 @@ export default function Settings({ onOpenWizard }) {
             blueprints.map((bp) => (
               <Row
                 key={bp.id}
-                icon={<Layers size={18} className="text-wp-blue flex-shrink-0" />}
+                icon={<Layers size={18} className="text-highlight flex-shrink-0" />}
                 title={bp.name}
                 subtitle={`${bp.sourceSiteName ? `From ${bp.sourceSiteName} · ` : ''}PHP ${bp.phpVersion} · ${formatBytes(bp.sizeBytes)}${
                   bp.description ? ` · ${bp.description}` : ''
@@ -369,7 +366,7 @@ export default function Settings({ onOpenWizard }) {
                     onClick={() => handleDeleteBlueprint(bp.id)}
                     disabled={deletingBlueprint === bp.id}
                     aria-label="Delete blueprint"
-                    className="btn-ghost text-xs text-gray-400 hover:text-red-600 dark:hover:text-red-400"
+                    className="btn-ghost text-xs text-muted-foreground hover:text-destructive"
                   >
                     {deletingBlueprint === bp.id ? (
                       <Loader size={12} className="animate-spin" />
@@ -382,7 +379,7 @@ export default function Settings({ onOpenWizard }) {
             ))
           )}
         </Card>
-        <p className="text-[11px] text-gray-400 mt-1.5 px-1">
+        <p className="text-[11px] text-muted-foreground mt-1.5 px-1">
           Blueprints are full snapshots (files + database) stored in WPHerd’s data folder.
           Create a site from one via{' '}
           <span className="font-medium">Add Site → From Blueprint</span>.
@@ -410,7 +407,7 @@ export default function Settings({ onOpenWizard }) {
                 key={name}
                 icon={
                   <span
-                    className={`w-2 h-2 rounded-full flex-shrink-0 ${installed ? 'bg-wp-green' : 'bg-gray-300'}`}
+                    className={`w-2 h-2 rounded-full flex-shrink-0 ${installed ? 'bg-status-running' : 'bg-border'}`}
                   />
                 }
                 title={
@@ -421,7 +418,7 @@ export default function Settings({ onOpenWizard }) {
               >
                 <span
                   className={`text-xs font-medium ${
-                    installed ? 'text-wp-green' : 'text-gray-400'
+                    installed ? 'text-status-running' : 'text-muted-foreground'
                   }`}
                 >
                   {installed ? 'Installed' : 'Not found'}
@@ -430,7 +427,7 @@ export default function Settings({ onOpenWizard }) {
             ))}
         </Card>
         {deps && !deps.brew && (
-          <div className="flex items-start gap-2 bg-orange-50 dark:bg-orange-500/10 rounded-lg px-3 py-2.5 mt-2 text-xs text-orange-700 dark:text-orange-300">
+          <div className="flex items-start gap-2 bg-status-warning/10 rounded-lg px-3 py-2.5 mt-2 text-xs text-status-warning">
             <Info size={13} className="flex-shrink-0 mt-0.5" />
             <span>
               Install Homebrew first:{' '}
@@ -457,8 +454,11 @@ export default function Settings({ onOpenWizard }) {
               ['Electron', sysInfo.electronVersion],
               ['Node.js', sysInfo.nodeVersion],
             ].map(([label, value]) => (
-              <Row key={label} title={<span className="text-gray-500">{label}</span>}>
-                <span className="font-mono text-xs text-gray-700">{value}</span>
+              <Row
+                key={label}
+                title={<span className="text-muted-foreground">{label}</span>}
+              >
+                <span className="font-mono text-xs text-foreground">{value}</span>
               </Row>
             ))}
           </Card>

@@ -2,7 +2,8 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import CodeMirror from '@uiw/react-codemirror';
 import { keymap } from '@codemirror/view';
 import { unifiedMergeView } from '@codemirror/merge';
-import { oneDarkPro } from '../lib/oneDarkPro';
+import { editorMetrics, editorThemes } from '../lib/editorTheme';
+import { onThemeChange, themeName } from '../lib/theme';
 import { javascript } from '@codemirror/lang-javascript';
 import { css } from '@codemirror/lang-css';
 import { html } from '@codemirror/lang-html';
@@ -102,6 +103,11 @@ export default function CodeEditor({ rootPath, files, activeKey, onSelect, onClo
   // key -> { text, original } | { diff } | { binary } | { tooLarge } | { error }
   const [cache, setCache] = useState({});
   const [saving, setSaving] = useState(false);
+  // The editor palette is derived from the app tokens, so it has to follow the
+  // macOS appearance the same way the CSS does.
+  const [appearance, setAppearance] = useState(themeName);
+  useEffect(() => onThemeChange(setAppearance), []);
+  const theme = editorThemes[appearance];
 
   const active = files.find((f) => f.key === activeKey) || null;
   const data = activeKey ? cache[activeKey] : null;
@@ -188,6 +194,7 @@ export default function CodeEditor({ rootPath, files, activeKey, onSelect, onClo
 
   const extensions = useMemo(() => {
     const base = [
+      editorMetrics,
       keymap.of([
         { key: 'Mod-s', preventDefault: true, run: () => (saveRef.current(), true) },
       ]),
@@ -195,6 +202,7 @@ export default function CodeEditor({ rootPath, files, activeKey, onSelect, onClo
     if (!active) return base;
     if (isDiff && data?.diff) {
       return [
+        editorMetrics,
         unifiedMergeView({ original: data.diff.original, mergeControls: false }),
         ...languageFor(active.name),
       ];
@@ -203,9 +211,9 @@ export default function CodeEditor({ rootPath, files, activeKey, onSelect, onClo
   }, [active, isDiff, data]);
 
   return (
-    <div className="h-full flex flex-col bg-[#282c34] text-[#abb2bf]">
-      {/* Tab strip */}
-      <div className="flex items-stretch h-9 bg-[#21252b] border-b border-black/40 overflow-x-auto flex-shrink-0">
+    <div className="h-full flex flex-col bg-background text-foreground">
+      {/* Tab strip — pane chrome sits on `tertiary`, content on `background` */}
+      <div className="flex items-stretch h-9 bg-tertiary border-b border-border overflow-x-auto flex-shrink-0">
         {files.map((f) => {
           const isActive = f.key === activeKey;
           const tabIsDiff = f.kind === 'diff';
@@ -218,20 +226,20 @@ export default function CodeEditor({ rootPath, files, activeKey, onSelect, onClo
               key={f.key}
               onClick={() => onSelect(f.key)}
               title={tabIsDiff ? `${f.rel} — diff (${f.source})` : f.path}
-              className={`group flex items-center gap-2 pl-3 pr-2 text-[12.5px] cursor-pointer border-r border-black/40 whitespace-nowrap ${
+              className={`group flex items-center gap-2 pl-3 pr-2 text-[13px] cursor-pointer border-r border-border whitespace-nowrap transition-colors ${
                 isActive
-                  ? 'bg-[#282c34] text-zinc-100'
-                  : 'text-zinc-400 hover:text-zinc-200'
+                  ? 'bg-background text-foreground'
+                  : 'text-muted-foreground hover:text-foreground'
               }`}
             >
               <FileGlyph name={f.name} size={13} className="flex-shrink-0" />
               <span className="truncate max-w-[160px]">{f.name}</span>
               {tabIsDiff && (
-                <GitCompare size={11} className="flex-shrink-0 text-zinc-500" />
+                <GitCompare size={11} className="flex-shrink-0 text-muted-foreground" />
               )}
               {isDirty ? (
                 <span
-                  className="w-1.5 h-1.5 rounded-full bg-zinc-300 group-hover:hidden flex-shrink-0"
+                  className="w-1.5 h-1.5 rounded-full bg-highlight group-hover:hidden flex-shrink-0"
                   title="Unsaved changes"
                 />
               ) : null}
@@ -242,7 +250,7 @@ export default function CodeEditor({ rootPath, files, activeKey, onSelect, onClo
                     requestClose(f.key);
                   }}
                   aria-label="Close tab"
-                  className={`p-0.5 rounded hover:bg-white/15 text-zinc-500 hover:text-zinc-200 ${
+                  className={`p-0.5 rounded-sm text-muted-foreground hover:text-foreground hover:bg-accent ${
                     isDirty ? 'hidden group-hover:block' : ''
                   }`}
                 >
@@ -257,8 +265,8 @@ export default function CodeEditor({ rootPath, files, activeKey, onSelect, onClo
       {active && (
         <>
           {/* Header actions */}
-          <div className="flex items-center justify-between h-8 px-3 border-b border-black/30 flex-shrink-0">
-            <span className="text-[12px] text-zinc-400 truncate">
+          <div className="flex items-center justify-between h-8 px-3 border-b border-border flex-shrink-0">
+            <span className="text-[11px] font-medium tracking-[0.01em] text-muted-foreground truncate">
               {active.name}
               {isDiff ? ' — diff' : dirty ? ' •' : ''}
             </span>
@@ -266,7 +274,7 @@ export default function CodeEditor({ rootPath, files, activeKey, onSelect, onClo
               {isDiff ? (
                 <Tooltip label="Reload diff">
                   <button
-                    className="p-1 rounded text-zinc-400 hover:text-zinc-100 hover:bg-white/10"
+                    className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent"
                     aria-label="Reload diff"
                     onClick={reloadActive}
                   >
@@ -276,7 +284,7 @@ export default function CodeEditor({ rootPath, files, activeKey, onSelect, onClo
               ) : (
                 <Tooltip label="Save" keys={['⌘', 'S']}>
                   <button
-                    className="p-1 rounded text-zinc-400 hover:text-zinc-100 hover:bg-white/10 disabled:opacity-40 disabled:hover:bg-transparent"
+                    className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent disabled:opacity-40 disabled:hover:bg-transparent"
                     aria-label="Save"
                     disabled={!dirty || saving}
                     onClick={save}
@@ -287,7 +295,7 @@ export default function CodeEditor({ rootPath, files, activeKey, onSelect, onClo
               )}
               <Tooltip label="Copy contents">
                 <button
-                  className="p-1 rounded text-zinc-400 hover:text-zinc-100 hover:bg-white/10"
+                  className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent"
                   aria-label="Copy contents"
                   onClick={() => {
                     const text = isDiff
@@ -303,7 +311,7 @@ export default function CodeEditor({ rootPath, files, activeKey, onSelect, onClo
               </Tooltip>
               <Tooltip label="Open in default app">
                 <button
-                  className="p-1 rounded text-zinc-400 hover:text-zinc-100 hover:bg-white/10"
+                  className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent"
                   aria-label="Open in default app"
                   onClick={() => window.electronAPI.openFilePath(active.path)}
                 >
@@ -312,7 +320,7 @@ export default function CodeEditor({ rootPath, files, activeKey, onSelect, onClo
               </Tooltip>
               <Tooltip label="Close">
                 <button
-                  className="p-1 rounded text-zinc-400 hover:text-zinc-100 hover:bg-white/10"
+                  className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent"
                   aria-label="Close"
                   onClick={() => requestClose(active.key)}
                 >
@@ -325,42 +333,42 @@ export default function CodeEditor({ rootPath, files, activeKey, onSelect, onClo
           {/* Editor / diff / status */}
           <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
             {!data ? (
-              <div className="p-4 text-zinc-500 text-[12.5px]">Loading…</div>
+              <div className="p-4 text-muted-foreground text-[13px]">Loading…</div>
             ) : data.tooLarge ? (
-              <div className="p-4 text-zinc-500 text-[12.5px]">
+              <div className="p-4 text-muted-foreground text-[13px]">
                 File is too large to {isDiff ? 'diff' : 'edit'}
                 {data.size ? ` (${Math.round(data.size / 1024)} KB)` : ''}.
               </div>
             ) : data.binary ? (
-              <div className="p-4 text-zinc-500 text-[12.5px]">
+              <div className="p-4 text-muted-foreground text-[13px]">
                 Binary file — cannot {isDiff ? 'diff' : 'edit'}.
               </div>
             ) : data.error ? (
-              <div className="p-4 text-red-400 text-[12.5px]">{data.error}</div>
+              <div className="p-4 text-destructive text-[13px]">{data.error}</div>
             ) : isDiff ? (
               <CodeMirror
                 value={data.diff.modified}
                 height="100%"
-                theme={oneDarkPro}
+                theme={theme}
                 extensions={extensions}
                 editable={false}
-                className="flex-1 min-h-0 text-[12.5px]"
+                className="flex-1 min-h-0"
                 basicSetup={{ tabSize: 2 }}
               />
             ) : (
               <>
                 {data.error && (
-                  <div className="px-3 py-1 text-[11px] text-red-400 border-b border-white/10">
+                  <div className="px-3 py-1 text-[11px] text-destructive border-b border-border">
                     {data.error}
                   </div>
                 )}
                 <CodeMirror
                   value={data.text}
                   height="100%"
-                  theme={oneDarkPro}
+                  theme={theme}
                   extensions={extensions}
                   onChange={onChange}
-                  className="flex-1 min-h-0 text-[12.5px]"
+                  className="flex-1 min-h-0"
                   basicSetup={{ tabSize: 2 }}
                 />
               </>

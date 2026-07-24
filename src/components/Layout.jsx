@@ -75,10 +75,10 @@ export default function Layout() {
 
   return (
     <div className="h-screen flex overflow-hidden relative">
-      {/* Sidebar — raw window vibrancy, one continuous glass sheet with the
-          content pane (macOS 26 System Settings). Collapsible from the top bar. */}
+      {/* Sidebar — opaque, one shade off the content pane. Collapsible from the
+          top bar. */}
       <aside
-        className={`flex flex-col flex-shrink-0 overflow-hidden border-r border-black/[0.06] dark:border-white/[0.06] transition-[width] duration-200 ease-out ${
+        className={`flex flex-col flex-shrink-0 overflow-hidden bg-sidebar text-sidebar-foreground border-r border-sidebar-border transition-[width] duration-200 ease-out ${
           sidebarCollapsed ? 'w-0 border-r-0' : 'w-56'
         }`}
       >
@@ -96,14 +96,14 @@ export default function Layout() {
               <div className="relative">
                 <Search
                   size={13}
-                  className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500"
+                  className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
                 />
                 <input
                   type="text"
                   value={filter}
                   onChange={(e) => setFilter(e.target.value)}
                   placeholder="Search"
-                  className="w-full pl-8 pr-3 py-1.5 text-[13px] bg-black/[0.06] dark:bg-white/10 border-0 rounded-full placeholder-gray-500 focus:ring-2 focus:ring-accent/40"
+                  className="w-full h-7 pl-8 pr-3 text-[13px] bg-muted border-0 rounded-md placeholder:text-muted-foreground focus:ring-2 focus:ring-ring/60"
                 />
               </div>
             </div>
@@ -120,7 +120,7 @@ export default function Layout() {
                         `flex items-center gap-2.5 px-2 py-[5px] rounded-md text-[13px] sidebar-item ${
                           isActive
                             ? 'bg-sidebar-active text-white font-medium'
-                            : 'text-gray-800 hover:bg-black/[0.05] dark:hover:bg-white/[0.07]'
+                            : 'text-sidebar-foreground/90 hover:bg-sidebar-accent'
                         }`
                       }
                     >
@@ -155,9 +155,8 @@ export default function Layout() {
         </div>
       </aside>
 
-      {/* Main content — faint tint over the vibrancy, slightly lighter than
-          the sidebar like System Settings */}
-      <main className="flex-1 flex flex-col overflow-hidden bg-surface/55">
+      {/* Main content — the app background, a shade lighter than the sidebar */}
+      <main className="flex-1 flex flex-col overflow-hidden bg-background">
         {/* Slim drag region so the window stays movable and content clears the
             traffic-light controls. The Agents screens run their own top strip
             (tabs) up against the controls, so drop the gap there. */}
@@ -181,7 +180,7 @@ export default function Layout() {
           <button
             onClick={() => setSidebarCollapsed((v) => !v)}
             aria-label={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
-            className="no-drag p-1.5 rounded-lg text-gray-600 hover:text-gray-900 hover:bg-black/[0.06] active:bg-black/10 dark:hover:bg-white/10 dark:active:bg-white/15 transition-colors"
+            className="no-drag p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
           >
             <PanelLeft size={18} strokeWidth={1.8} />
           </button>
@@ -190,7 +189,7 @@ export default function Layout() {
           <button
             onClick={() => navigate(-1)}
             aria-label="Back"
-            className="no-drag p-1.5 rounded-lg text-gray-700 hover:text-gray-900 hover:bg-black/[0.06] active:bg-black/10 dark:hover:bg-white/10 dark:active:bg-white/15 transition-colors"
+            className="no-drag p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
           >
             <ArrowLeft size={18} strokeWidth={1.8} />
           </button>
@@ -199,7 +198,7 @@ export default function Layout() {
           <button
             onClick={() => navigate(1)}
             aria-label="Forward"
-            className="no-drag p-1.5 rounded-lg text-gray-400 hover:text-gray-900 hover:bg-black/[0.06] active:bg-black/10 dark:hover:bg-white/10 dark:active:bg-white/15 transition-colors"
+            className="no-drag p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
           >
             <ArrowRight size={18} strokeWidth={1.8} />
           </button>

@@ -159,8 +159,8 @@ export default function ImportSiteModal({ onClose, onSiteImported, phpVersions }
     >
       <div className="sheet w-[540px] max-h-[90vh] overflow-hidden animate-slide-in">
         <div className="px-6 pt-6">
-          <h2 className="text-[15px] font-bold text-gray-900">Import Site</h2>
-          <p className="text-[13px] text-gray-500 mt-0.5">
+          <h2 className="text-[15px] font-bold text-foreground">Import Site</h2>
+          <p className="text-[13px] text-muted-foreground mt-0.5">
             Restore a site from a WPHerd export, a .wpress file, or a generic zip
           </p>
         </div>
@@ -172,7 +172,7 @@ export default function ImportSiteModal({ onClose, onSiteImported, phpVersions }
           {step === 0 && (
             <div className="sheet-well space-y-4 animate-fade-in">
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1.5">
+                <label className="block text-xs font-medium text-foreground mb-1.5">
                   Site Archive
                 </label>
                 <div className="flex gap-2">
@@ -196,7 +196,7 @@ export default function ImportSiteModal({ onClose, onSiteImported, phpVersions }
               </div>
 
               {inspecting && (
-                <div className="flex items-center gap-2 text-xs text-gray-500">
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
                   <Loader size={13} className="animate-spin" />
                   Inspecting archive…
                 </div>
@@ -205,31 +205,31 @@ export default function ImportSiteModal({ onClose, onSiteImported, phpVersions }
               {info && (
                 <div className="space-y-2">
                   <div className="flex items-center gap-2">
-                    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 bg-blue-50 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300 rounded-full text-xs font-medium">
+                    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 bg-highlight/10 text-highlight rounded-full text-xs font-medium">
                       <FileArchive size={10} />
                       {KIND_LABELS[info.kind] || info.kind}
                     </span>
                     {info.manifest?.wpVersion &&
                       info.manifest.wpVersion !== 'unknown' && (
-                        <span className="inline-flex items-center px-2 py-0.5 bg-gray-100 text-gray-500 rounded-full text-xs font-medium">
+                        <span className="inline-flex items-center rounded-full border border-border bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
                           WP {info.manifest.wpVersion}
                         </span>
                       )}
                     {info.manifest?.phpVersion && (
-                      <span className="inline-flex items-center px-2 py-0.5 bg-purple-50 text-purple-700 dark:bg-purple-500/15 dark:text-purple-300 rounded-full text-xs font-medium">
+                      <span className="inline-flex items-center rounded-full border border-border bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
                         PHP {info.manifest.phpVersion}
                       </span>
                     )}
                   </div>
                   {info.originUrl && (
-                    <p className="flex items-center gap-1.5 text-xs text-gray-500">
+                    <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
                       <Globe size={11} className="flex-shrink-0" />
                       Origin URL:{' '}
-                      <span className="font-mono text-gray-700">{info.originUrl}</span>
+                      <span className="font-mono text-foreground">{info.originUrl}</span>
                     </p>
                   )}
                   {info.warning && (
-                    <div className="flex items-start gap-2 bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400 rounded-xl px-3 py-2.5 text-xs">
+                    <div className="flex items-start gap-2 bg-status-warning/10 text-status-warning rounded-xl px-3 py-2.5 text-xs">
                       <AlertTriangle size={13} className="flex-shrink-0 mt-0.5" />
                       <span>{info.warning}</span>
                     </div>
@@ -243,7 +243,7 @@ export default function ImportSiteModal({ onClose, onSiteImported, phpVersions }
           {step === 1 && (
             <div className="sheet-well space-y-4 animate-fade-in">
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1.5">
+                <label className="block text-xs font-medium text-foreground mb-1.5">
                   Site Name
                 </label>
                 <input
@@ -256,7 +256,7 @@ export default function ImportSiteModal({ onClose, onSiteImported, phpVersions }
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1.5">
+                  <label className="block text-xs font-medium text-foreground mb-1.5">
                     Local Domain
                   </label>
                   <input
@@ -269,7 +269,7 @@ export default function ImportSiteModal({ onClose, onSiteImported, phpVersions }
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1.5">
+                  <label className="block text-xs font-medium text-foreground mb-1.5">
                     Database Name
                   </label>
                   <input
@@ -283,7 +283,7 @@ export default function ImportSiteModal({ onClose, onSiteImported, phpVersions }
                 </div>
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1.5">
+                <label className="block text-xs font-medium text-foreground mb-1.5">
                   Site Directory
                 </label>
                 <div className="flex gap-2">
@@ -305,7 +305,7 @@ export default function ImportSiteModal({ onClose, onSiteImported, phpVersions }
                 </div>
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1.5">
+                <label className="block text-xs font-medium text-foreground mb-1.5">
                   PHP Version
                 </label>
                 <select
@@ -327,7 +327,7 @@ export default function ImportSiteModal({ onClose, onSiteImported, phpVersions }
                 </select>
               </div>
               {info?.originUrl && (
-                <div className="bg-blue-50 dark:bg-blue-500/10 rounded-xl px-4 py-3 text-xs text-blue-700 dark:text-blue-300">
+                <div className="bg-highlight/10 rounded-xl px-4 py-3 text-xs text-highlight">
                   URLs in the database will be rewritten from{' '}
                   <span className="font-semibold font-mono">{info.originUrl}</span> to{' '}
                   <span className="font-semibold font-mono">
@@ -344,11 +344,11 @@ export default function ImportSiteModal({ onClose, onSiteImported, phpVersions }
             <div className="sheet-well animate-fade-in">
               {done ? (
                 <div className="text-center py-4">
-                  <div className="w-14 h-14 rounded-full bg-green-100 dark:bg-green-500/15 flex items-center justify-center mx-auto mb-3">
-                    <CheckCircle size={28} className="text-wp-green" />
+                  <div className="w-14 h-14 rounded-full bg-status-running/10 flex items-center justify-center mx-auto mb-3">
+                    <CheckCircle size={28} className="text-status-running" />
                   </div>
-                  <h3 className="text-base font-bold text-gray-900">Site Imported!</h3>
-                  <p className="text-sm text-gray-500 mt-1 mb-4">
+                  <h3 className="text-base font-bold text-foreground">Site Imported!</h3>
+                  <p className="text-sm text-muted-foreground mt-1 mb-4">
                     Your site is ready at{' '}
                     <button
                       onClick={() =>
@@ -356,7 +356,7 @@ export default function ImportSiteModal({ onClose, onSiteImported, phpVersions }
                           resultSite?.url || `http://${formData.domain}`
                         )
                       }
-                      className="text-wp-blue hover:underline font-medium"
+                      className="text-highlight hover:underline font-medium"
                     >
                       {formData.domain}
                     </button>
@@ -382,9 +382,9 @@ export default function ImportSiteModal({ onClose, onSiteImported, phpVersions }
                   <div className="flex items-center gap-3 mb-2">
                     <Loader
                       size={18}
-                      className="animate-spin text-wp-blue flex-shrink-0"
+                      className="animate-spin text-highlight flex-shrink-0"
                     />
-                    <p className="text-sm font-medium text-gray-700">Importing site…</p>
+                    <p className="text-sm font-medium text-foreground">Importing site…</p>
                   </div>
                   <ProgressLog messages={progressMessages} className="mt-4" />
                 </div>
@@ -394,7 +394,7 @@ export default function ImportSiteModal({ onClose, onSiteImported, phpVersions }
 
           {/* Error */}
           {error && (
-            <div className="mt-4 flex items-start gap-2 bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400 rounded-xl px-4 py-3 text-sm">
+            <div className="mt-4 flex items-start gap-2 bg-destructive/10 text-destructive rounded-xl px-4 py-3 text-sm">
               <AlertCircle size={16} className="flex-shrink-0 mt-0.5" />
               <span>{error}</span>
             </div>

@@ -29,23 +29,23 @@ import { ConfirmDialog, Tooltip } from './ui';
 // Per-status dot color + human label for the Changes list, mirroring
 // source-control UIs (a colored dot rather than a letter).
 const STATUS_DOT = {
-  M: { cls: 'bg-amber-500', label: 'Modified' },
-  A: { cls: 'bg-green-500', label: 'Added' },
-  D: { cls: 'bg-red-500', label: 'Deleted' },
-  R: { cls: 'bg-blue-400', label: 'Renamed' },
-  C: { cls: 'bg-blue-400', label: 'Copied' },
-  '?': { cls: 'bg-green-500', label: 'Untracked' },
+  M: { cls: 'bg-status-warning/10', label: 'Modified' },
+  A: { cls: 'bg-status-running/10', label: 'Added' },
+  D: { cls: 'bg-destructive/10', label: 'Deleted' },
+  R: { cls: 'bg-highlight/10', label: 'Renamed' },
+  C: { cls: 'bg-highlight/10', label: 'Copied' },
+  '?': { cls: 'bg-status-running/10', label: 'Untracked' },
 };
 const statusDot = (s) => STATUS_DOT[s] || { cls: 'bg-gray-400', label: s || 'Changed' };
 
 // Filename tint for git-modified entries in the Files tree (VS Code style).
 const NAME_TINT = {
-  M: 'text-amber-600 dark:text-amber-400',
-  A: 'text-green-600 dark:text-green-400',
-  '?': 'text-green-600 dark:text-green-400',
-  D: 'text-red-600 dark:text-red-400 line-through',
-  R: 'text-blue-600 dark:text-blue-400',
-  C: 'text-blue-600 dark:text-blue-400',
+  M: 'text-status-warning',
+  A: 'text-status-running',
+  '?': 'text-status-running',
+  D: 'text-destructive line-through',
+  R: 'text-highlight',
+  C: 'text-highlight',
 };
 const dirOf = (rel, name) => rel.slice(0, rel.length - name.length).replace(/\/$/, '');
 const baseOf = (p) => p.slice(p.lastIndexOf('/') + 1);
@@ -56,7 +56,7 @@ const relTo = (root, p) => p.slice(root.length).replace(/^\/+/, '');
 
 // Shared toolbar icon-button styling (Files toolbar + Changes toolbar).
 const iconBtn =
-  'p-1 rounded-md text-gray-500 hover:text-gray-900 hover:bg-black/[0.05] dark:hover:bg-white/[0.07]';
+  'p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent';
 
 // Lazy project explorer for the selected Site's directory, with a search
 // filter, a toolbar (new file/folder, refresh, collapse all) and a right-click
@@ -431,7 +431,7 @@ export default function FileExplorer({
               if (e.key === 'Escape') setCreating(null);
             }}
             onBlur={submitCreate}
-            className="flex-1 min-w-0 bg-black/[0.06] dark:bg-white/[0.1] rounded px-1.5 py-0.5 text-[12.5px] outline-none focus:ring-1 focus:ring-blue-500"
+            className="flex-1 min-w-0 bg-muted rounded px-1.5 py-0.5 text-[12.5px] outline-none focus:ring-1 focus:ring-ring"
           />
         </div>
       );
@@ -469,7 +469,7 @@ export default function FileExplorer({
                   if (e.key === 'Escape') setRenaming(null);
                 }}
                 onBlur={submitRename}
-                className="flex-1 min-w-0 bg-black/[0.06] dark:bg-white/[0.1] rounded px-1.5 py-0.5 text-[12.5px] outline-none focus:ring-1 focus:ring-blue-500"
+                className="flex-1 min-w-0 bg-muted rounded px-1.5 py-0.5 text-[12.5px] outline-none focus:ring-1 focus:ring-ring"
               />
             </div>
           ) : (
@@ -480,18 +480,22 @@ export default function FileExplorer({
                 entry.isDir ? (e) => onFolderDragOver(e, entry.path) : undefined
               }
               title={entry.name}
-              className={`w-full flex items-center gap-1.5 py-[3px] pr-2 rounded-md text-[12.5px] text-gray-800 ${
-                isDropTarget
-                  ? 'bg-blue-50 dark:bg-blue-500/15 ring-1 ring-blue-400'
-                  : 'hover:bg-black/[0.05] dark:hover:bg-white/[0.07]'
+              className={`w-full flex items-center gap-1.5 py-[3px] pr-2 rounded-md text-[12.5px] text-foreground ${
+                isDropTarget ? 'bg-highlight/10 ring-1 ring-highlight' : 'hover:bg-accent'
               }`}
               style={{ paddingLeft: depth * 12 + 8 }}
             >
               {entry.isDir ? (
                 isOpen ? (
-                  <ChevronDown size={13} className="text-gray-500 flex-shrink-0" />
+                  <ChevronDown
+                    size={13}
+                    className="text-muted-foreground flex-shrink-0"
+                  />
                 ) : (
-                  <ChevronRight size={13} className="text-gray-500 flex-shrink-0" />
+                  <ChevronRight
+                    size={13}
+                    className="text-muted-foreground flex-shrink-0"
+                  />
                 )
               ) : (
                 <span className="w-[13px] flex-shrink-0" />
@@ -508,7 +512,7 @@ export default function FileExplorer({
               <span className={`truncate ${nameTint}`}>{entry.name}</span>
               {dirChanged && (
                 <Tooltip label="Contains changes">
-                  <span className="ml-auto w-1.5 h-1.5 rounded-full bg-amber-500 flex-shrink-0" />
+                  <span className="ml-auto w-1.5 h-1.5 rounded-full bg-status-warning/10 flex-shrink-0" />
                 </Tooltip>
               )}
             </button>
@@ -529,7 +533,7 @@ export default function FileExplorer({
       {/* Files / Changes tabs. When the app sidebar is hidden, inset past the
           floating window controls so they don't overlap the tabs. */}
       <div
-        className="flex items-center gap-0.5 px-2 pt-2 pb-1.5 border-b border-black/[0.06] dark:border-white/[0.08]"
+        className="flex items-center gap-0.5 px-2 pt-2 pb-1.5 border-b border-border"
         style={insetForControls ? { paddingLeft: 190 } : undefined}
       >
         <TabButton
@@ -549,19 +553,19 @@ export default function FileExplorer({
 
       {tab === 'files' ? (
         <>
-          <div className="px-3 pt-2 pb-1 text-[11px] font-semibold text-gray-400 uppercase tracking-wide truncate">
+          <div className="px-3 pt-2 pb-1 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide truncate">
             {rootName || 'Explorer'}
           </div>
 
           {/* Toolbar: search + new file / new folder / refresh / collapse all */}
-          <div className="flex items-center gap-1.5 px-2 pb-2 border-b border-black/[0.06] dark:border-white/[0.08]">
-            <div className="flex-1 flex items-center gap-1.5 min-w-0 bg-black/[0.05] dark:bg-white/[0.07] rounded-md px-2 py-1">
-              <Search size={13} className="text-gray-400 flex-shrink-0" />
+          <div className="flex items-center gap-1.5 px-2 pb-2 border-b border-border">
+            <div className="flex-1 flex items-center gap-1.5 min-w-0 bg-muted rounded-md px-2 py-1">
+              <Search size={13} className="text-muted-foreground flex-shrink-0" />
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Search files"
-                className="flex-1 min-w-0 bg-transparent text-[12.5px] outline-none placeholder:text-gray-400"
+                className="flex-1 min-w-0 bg-transparent text-[12.5px] outline-none placeholder:text-muted-foreground"
               />
             </div>
             <Tooltip label="New file">
@@ -589,7 +593,7 @@ export default function FileExplorer({
           <div
             className={`relative flex-1 overflow-auto px-2 py-2 ${
               dropTarget === rootPath
-                ? 'ring-1 ring-inset ring-blue-400 bg-blue-50/40 dark:bg-blue-500/10'
+                ? 'ring-1 ring-inset ring-highlight bg-highlight/10'
                 : ''
             }`}
             onContextMenu={(e) => e.preventDefault()}
@@ -600,7 +604,7 @@ export default function FileExplorer({
             {renderNodes(rootPath, 0)}
             {dropTarget !== null && (
               <div className="pointer-events-none sticky bottom-0 left-0 right-0 flex justify-center pt-2">
-                <span className="rounded-full bg-blue-500 text-white text-[11px] px-2.5 py-1 shadow-sm">
+                <span className="rounded-full bg-highlight/10 text-white text-[11px] px-2.5 py-1 shadow-sm">
                   Drop to upload to{' '}
                   {dropTarget === rootPath
                     ? rootName || 'project root'
@@ -612,7 +616,7 @@ export default function FileExplorer({
 
           {error && (
             <div
-              className="px-3 py-1.5 text-[11px] text-red-600 dark:text-red-400 truncate border-t border-black/[0.06] dark:border-white/[0.08]"
+              className="px-3 py-1.5 text-[11px] text-destructive truncate border-t border-border"
               title={error}
             >
               {error}
@@ -667,7 +671,7 @@ export default function FileExplorer({
               setMenu(null);
             }}
           />
-          <div className="my-1 border-t border-black/[0.08] dark:border-white/[0.1]" />
+          <div className="my-1 border-t border-border" />
           <MenuItem
             icon={Clipboard}
             label="Copy Path"
@@ -717,7 +721,7 @@ export default function FileExplorer({
               setMenu(null);
             }}
           />
-          <div className="my-1 border-t border-black/[0.08] dark:border-white/[0.1]" />
+          <div className="my-1 border-t border-border" />
           <MenuItem
             icon={Clipboard}
             label="Copy Path"
@@ -734,7 +738,7 @@ export default function FileExplorer({
               setMenu(null);
             }}
           />
-          <div className="my-1 border-t border-black/[0.08] dark:border-white/[0.1]" />
+          <div className="my-1 border-t border-border" />
           <MenuItem
             icon={Pencil}
             label="Rename…"
@@ -797,10 +801,8 @@ function MenuItem({ icon: Icon, label, onClick, danger, disabled }) {
       onClick={onClick}
       disabled={disabled}
       className={`w-full flex items-center gap-2.5 px-3 py-1.5 text-left ${
-        disabled
-          ? 'opacity-40 cursor-default'
-          : 'hover:bg-black/[0.06] dark:hover:bg-white/[0.08]'
-      } ${danger ? 'text-red-600 dark:text-red-400' : 'text-gray-800'}`}
+        disabled ? 'opacity-40 cursor-default' : 'hover:bg-accent'
+      } ${danger ? 'text-destructive' : 'text-foreground'}`}
     >
       <Icon size={14} className="flex-shrink-0" />
       <span className="truncate">{label}</span>
@@ -815,14 +817,14 @@ function TabButton({ icon: Icon, label, active, badge, onClick }) {
       onClick={onClick}
       className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[12.5px] ${
         active
-          ? 'bg-black/[0.06] dark:bg-white/[0.1] text-gray-900 font-medium'
-          : 'text-gray-500 hover:bg-black/[0.04] dark:hover:bg-white/[0.06]'
+          ? 'bg-muted text-foreground font-medium'
+          : 'text-muted-foreground hover:bg-accent'
       }`}
     >
       <Icon size={13} strokeWidth={2} className="flex-shrink-0" />
       {label}
       {badge > 0 && (
-        <span className="min-w-[16px] px-1 text-center rounded-full bg-black/10 dark:bg-white/15 text-[10.5px] font-semibold">
+        <span className="min-w-[16px] px-1 text-center rounded-full bg-foreground/10 text-[10.5px] font-semibold">
           {badge}
         </span>
       )}
@@ -853,14 +855,14 @@ function ChangesView({
 }) {
   if (state === 'loading' && !changes) {
     return (
-      <div className="flex-1 flex items-center justify-center text-[12px] text-gray-500">
+      <div className="flex-1 flex items-center justify-center text-[12px] text-muted-foreground">
         Loading changes…
       </div>
     );
   }
   if (state === 'error' || !changes?.isRepo) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center text-center px-4 text-gray-500">
+      <div className="flex-1 flex flex-col items-center justify-center text-center px-4 text-muted-foreground">
         <GitBranch size={22} className="mb-2 opacity-60" />
         <p className="text-[12.5px]">
           {state === 'error'
@@ -904,8 +906,8 @@ function ChangesView({
       {/* Branch header — only for a single repo at the root; multi/nested repos
           show their branch in each repo group header instead. */}
       {singleRoot && (
-        <div className="flex items-center gap-1.5 px-3 py-2 text-[13px] font-medium text-gray-800 border-b border-black/[0.06] dark:border-white/[0.08]">
-          <GitBranch size={14} className="text-gray-500 flex-shrink-0" />
+        <div className="flex items-center gap-1.5 px-3 py-2 text-[13px] font-medium text-foreground border-b border-border">
+          <GitBranch size={14} className="text-muted-foreground flex-shrink-0" />
           <span className="truncate" title={repos[0].branch}>
             {repos[0].branch}
           </span>
@@ -913,7 +915,7 @@ function ChangesView({
       )}
 
       {/* Toolbar: totals + refresh + collapse-all */}
-      <div className="flex items-center gap-2 px-3 py-1.5 text-[11px] text-gray-500 border-b border-black/[0.06] dark:border-white/[0.08]">
+      <div className="flex items-center gap-2 px-3 py-1.5 text-[11px] text-muted-foreground border-b border-border">
         <span className="whitespace-nowrap">
           {totalFiles} {totalFiles === 1 ? 'file' : 'files'}
         </span>
@@ -922,13 +924,9 @@ function ChangesView({
         )}
         {(totalAdd > 0 || totalDel > 0) && (
           <span className="whitespace-nowrap tabular-nums">
-            {totalAdd > 0 && (
-              <span className="text-green-500 dark:text-green-400">+{totalAdd}</span>
-            )}
+            {totalAdd > 0 && <span className="text-status-running">+{totalAdd}</span>}
             {totalAdd > 0 && totalDel > 0 && ' '}
-            {totalDel > 0 && (
-              <span className="text-red-500 dark:text-red-400 ml-0.5">−{totalDel}</span>
-            )}
+            {totalDel > 0 && <span className="text-destructive ml-0.5">−{totalDel}</span>}
           </span>
         )}
         <div className="ml-auto flex items-center gap-0.5">
@@ -951,7 +949,7 @@ function ChangesView({
       </div>
 
       {totalFiles === 0 ? (
-        <div className="flex-1 flex items-center justify-center text-[12px] text-gray-500">
+        <div className="flex-1 flex items-center justify-center text-[12px] text-muted-foreground">
           No changes — working tree clean.
         </div>
       ) : (
@@ -973,7 +971,7 @@ function ChangesView({
 
       {changesError && (
         <div
-          className="px-3 py-1.5 text-[11px] text-red-600 dark:text-red-400 truncate border-t border-black/[0.06] dark:border-white/[0.08]"
+          className="px-3 py-1.5 text-[11px] text-destructive truncate border-t border-border"
           title={changesError}
         >
           {changesError}
@@ -993,25 +991,26 @@ function RepoGroup({ repo, showHeader, viewMode, foldSignal, handlers }) {
   return (
     <div className="mb-1">
       {showHeader && (
-        <div className="flex items-center gap-1.5 px-2 py-1.5 text-[12px] font-medium text-gray-700 border-b border-black/[0.04] dark:border-white/[0.06]">
-          <GitBranch size={13} className="text-gray-500 flex-shrink-0" />
+        <div className="flex items-center gap-1.5 px-2 py-1.5 text-[12px] font-medium text-foreground border-b border-border">
+          <GitBranch size={13} className="text-muted-foreground flex-shrink-0" />
           <span className="truncate" title={repo.relRoot || repo.name}>
             {repo.name}
           </span>
-          <span className="text-gray-400 flex-shrink-0">·</span>
-          <span className="text-gray-500 truncate flex-shrink-0" title={repo.branch}>
+          <span className="text-muted-foreground flex-shrink-0">·</span>
+          <span
+            className="text-muted-foreground truncate flex-shrink-0"
+            title={repo.branch}
+          >
             {repo.branch}
           </span>
           {(repo.additions > 0 || repo.deletions > 0) && (
             <span className="ml-auto flex-shrink-0 text-[10.5px] tabular-nums">
               {repo.additions > 0 && (
-                <span className="text-green-500 dark:text-green-400">
-                  +{repo.additions}
-                </span>
+                <span className="text-status-running">+{repo.additions}</span>
               )}
               {repo.additions > 0 && repo.deletions > 0 && ' '}
               {repo.deletions > 0 && (
-                <span className="text-red-500 dark:text-red-400">−{repo.deletions}</span>
+                <span className="text-destructive">−{repo.deletions}</span>
               )}
             </span>
           )}
@@ -1090,7 +1089,7 @@ function ChangesSection({ id, title, count, foldSignal, action, children }) {
       <div className="flex items-center pr-2">
         <button
           onClick={() => setOpen((v) => !v)}
-          className="flex-1 min-w-0 flex items-center gap-1 px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500 hover:text-gray-900"
+          className="flex-1 min-w-0 flex items-center gap-1 px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground hover:text-foreground"
         >
           {open ? (
             <ChevronDown size={12} className="flex-shrink-0" />
@@ -1098,7 +1097,7 @@ function ChangesSection({ id, title, count, foldSignal, action, children }) {
             <ChevronRight size={12} className="flex-shrink-0" />
           )}
           <span className="truncate">{title}</span>
-          <span className="min-w-[16px] px-1 text-center rounded-full bg-black/10 dark:bg-white/15 text-[10px] font-semibold text-gray-500 normal-case">
+          <span className="min-w-[16px] px-1 text-center rounded-full bg-foreground/10 text-[10px] font-semibold text-muted-foreground normal-case">
             {count}
           </span>
         </button>
@@ -1118,7 +1117,7 @@ function SectionAction({ icon: Icon, label, onClick }) {
   return (
     <button
       onClick={onClick}
-      className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] text-gray-500 hover:text-gray-900 hover:bg-black/[0.05] dark:hover:bg-white/[0.07]"
+      className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] text-muted-foreground hover:text-foreground hover:bg-accent"
     >
       <Icon size={12} className="flex-shrink-0" />
       {label}
@@ -1185,7 +1184,7 @@ function FolderGroup({ dir, files, foldSignal, handlers }) {
       <button
         onClick={() => setOpen((v) => !v)}
         title={dir}
-        className="w-full flex items-center gap-1 pl-3 pr-3 py-0.5 text-[11.5px] text-gray-500 hover:bg-black/[0.03] dark:hover:bg-white/[0.05]"
+        className="w-full flex items-center gap-1 pl-3 pr-3 py-0.5 text-[11.5px] text-muted-foreground hover:bg-accent"
       >
         {open ? (
           <ChevronDown size={12} className="flex-shrink-0" />
@@ -1270,7 +1269,7 @@ function TreeDir({ node, depth, foldSignal, handlers }) {
         onClick={() => setOpen((v) => !v)}
         title={name}
         style={{ paddingLeft: 12 + depth * 12 }}
-        className="w-full flex items-center gap-1 pr-3 py-0.5 text-[12px] text-gray-600 hover:bg-black/[0.03] dark:hover:bg-white/[0.05]"
+        className="w-full flex items-center gap-1 pr-3 py-0.5 text-[12px] text-muted-foreground hover:bg-accent"
       >
         {open ? (
           <ChevronDown size={12} className="flex-shrink-0" />
@@ -1324,7 +1323,7 @@ function ChangeRow({ file, hideDir, depth = 0, handlers }) {
 
   return (
     <div
-      className="group/row relative hover:bg-black/[0.05] dark:hover:bg-white/[0.07]"
+      className="group/row relative hover:bg-accent"
       onContextMenu={(e) => handlers?.onContext(e, file)}
     >
       <button
@@ -1335,15 +1334,15 @@ function ChangeRow({ file, hideDir, depth = 0, handlers }) {
       >
         <FileGlyph name={file.name} className="flex-shrink-0" />
         <span className="flex min-w-0 flex-1 items-baseline overflow-hidden">
-          {dir && <span className="truncate text-gray-500">{dir}/</span>}
+          {dir && <span className="truncate text-muted-foreground">{dir}/</span>}
           {oldName && (
-            <span className="truncate text-gray-400 flex-shrink-0">
+            <span className="truncate text-muted-foreground flex-shrink-0">
               {oldName}
               <span className="px-1">→</span>
             </span>
           )}
           <span
-            className={`min-w-[80px] truncate font-medium text-gray-800 ${
+            className={`min-w-[80px] truncate font-medium text-foreground ${
               deleted ? 'line-through' : ''
             }`}
           >
@@ -1354,13 +1353,11 @@ function ChangeRow({ file, hideDir, depth = 0, handlers }) {
           {(file.additions > 0 || file.deletions > 0) && (
             <span className="text-[10.5px] tabular-nums">
               {file.additions > 0 && (
-                <span className="text-green-500 dark:text-green-400">
-                  +{file.additions}
-                </span>
+                <span className="text-status-running">+{file.additions}</span>
               )}
               {file.additions > 0 && file.deletions > 0 && ' '}
               {file.deletions > 0 && (
-                <span className="text-red-500 dark:text-red-400">−{file.deletions}</span>
+                <span className="text-destructive">−{file.deletions}</span>
               )}
             </span>
           )}
@@ -1405,8 +1402,8 @@ function RowAction({ icon: Icon, label, onClick, danger }) {
       <button
         onClick={onClick}
         aria-label={label}
-        className={`flex w-5 h-5 items-center justify-center rounded text-gray-500 hover:bg-black/10 dark:hover:bg-white/15 ${
-          danger ? 'hover:text-red-600 dark:hover:text-red-400' : 'hover:text-gray-900'
+        className={`flex w-5 h-5 items-center justify-center rounded text-muted-foreground hover:bg-accent ${
+          danger ? 'hover:text-destructive' : 'hover:text-foreground'
         }`}
       >
         <Icon size={13} className="flex-shrink-0" />

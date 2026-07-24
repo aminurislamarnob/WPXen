@@ -5,9 +5,9 @@ import { PanelResizeHandle } from 'react-resizable-panels';
 // hover and while dragging.
 export default function ResizeHandle() {
   return (
-    <PanelResizeHandle className="group relative w-px flex-shrink-0 bg-black/[0.08] dark:bg-white/[0.1] outline-none">
+    <PanelResizeHandle className="group relative w-px flex-shrink-0 bg-muted outline-none">
       <div className="absolute inset-y-0 -left-1 -right-1 z-10 cursor-col-resize" />
-      <div className="absolute inset-y-0 left-0 w-px bg-blue-500 opacity-0 transition-opacity group-hover:opacity-100 group-data-[resize-handle-state=drag]:opacity-100" />
+      <div className="absolute inset-y-0 left-0 w-px bg-highlight/10 opacity-0 transition-opacity group-hover:opacity-100 group-data-[resize-handle-state=drag]:opacity-100" />
     </PanelResizeHandle>
   );
 }

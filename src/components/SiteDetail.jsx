@@ -219,7 +219,7 @@ function Overview({ site, onSaved }) {
 
   return (
     <div>
-      <h2 className="text-[15px] font-bold text-gray-900 mb-4">Overview</h2>
+      <h2 className="text-[15px] font-bold text-foreground mb-4">Overview</h2>
 
       {/* Quick actions */}
       <div className="settings-card p-3 mb-4">
@@ -231,8 +231,8 @@ function Overview({ site, onSaved }) {
               disabled={disabled}
               className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs transition-colors font-medium disabled:opacity-50 justify-start ${
                 active
-                  ? 'bg-wp-blue/10 text-wp-blue hover:bg-wp-blue/15'
-                  : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+                  ? 'bg-highlight/10 text-highlight hover:bg-highlight/15'
+                  : 'text-muted-foreground hover:bg-accent hover:text-foreground'
               }`}
             >
               <Icon size={12} className={spinning ? 'animate-spin' : ''} />
@@ -243,10 +243,10 @@ function Overview({ site, onSaved }) {
 
         {/* Live tunnel state */}
         {tunnel?.status === 'running' && (
-          <div className="mt-2 px-2.5 py-2 bg-gray-50 rounded-lg flex items-center gap-1.5 animate-fade-in">
+          <div className="mt-2 px-2.5 py-2 bg-muted rounded-lg flex items-center gap-1.5 animate-fade-in">
             <button
               onClick={() => window.electronAPI.openSiteInBrowser(tunnel.url)}
-              className="flex-1 min-w-0 text-left text-xs text-wp-blue font-mono truncate hover:underline"
+              className="flex-1 min-w-0 text-left text-xs text-highlight font-mono truncate hover:underline"
               title={tunnel.url}
             >
               {tunnel.url}
@@ -255,10 +255,10 @@ function Overview({ site, onSaved }) {
               <button
                 onClick={copyTunnelUrl}
                 aria-label="Copy URL"
-                className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-200"
+                className="p-1.5 rounded-lg text-muted-foreground hover:bg-border"
               >
                 {copied ? (
-                  <Check size={13} className="text-wp-green" />
+                  <Check size={13} className="text-status-running" />
                 ) : (
                   <Copy size={13} />
                 )}
@@ -268,7 +268,7 @@ function Overview({ site, onSaved }) {
               <button
                 onClick={handleStopTunnel}
                 aria-label="Stop sharing"
-                className="p-1.5 rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10"
+                className="p-1.5 rounded-lg text-destructive hover:bg-destructive/10"
               >
                 <X size={13} />
               </button>
@@ -276,14 +276,12 @@ function Overview({ site, onSaved }) {
           </div>
         )}
         {tunnel?.status === 'error' && (
-          <p className="mt-2 px-2.5 text-xs text-red-600 dark:text-red-400">
+          <p className="mt-2 px-2.5 text-xs text-destructive">
             {tunnel.error || 'Failed to start the tunnel.'}
           </p>
         )}
         {actionError && (
-          <p className="mt-2 px-2.5 text-xs text-red-600 dark:text-red-400">
-            {actionError}
-          </p>
+          <p className="mt-2 px-2.5 text-xs text-destructive">{actionError}</p>
         )}
       </div>
 
@@ -294,13 +292,13 @@ function Overview({ site, onSaved }) {
             <KeyRound size={15} />
           </span>
           <div className="flex-1 min-w-0">
-            <p className="text-[13px] text-gray-900">Magic Login</p>
-            <p className="text-xs text-gray-500 mt-0.5">
+            <p className="text-[13px] text-foreground">Magic Login</p>
+            <p className="text-xs text-muted-foreground mt-0.5">
               Log into wp-admin without a password. Local access only.
             </p>
           </div>
           {ocaBusy ? (
-            <Loader size={14} className="animate-spin text-gray-400" />
+            <Loader size={14} className="animate-spin text-muted-foreground" />
           ) : (
             <Toggle
               checked={!!oca.enabled}
@@ -310,9 +308,9 @@ function Overview({ site, onSaved }) {
           )}
         </div>
         {oca.enabled && (
-          <div className="flex items-center gap-3 px-4 py-3 border-t border-surface-hairline animate-fade-in">
+          <div className="flex items-center gap-3 px-4 py-3 border-t border-border animate-fade-in">
             <span className="w-7 flex-shrink-0" />
-            <label className="text-[13px] text-gray-500 flex-1">Log in as</label>
+            <label className="text-[13px] text-muted-foreground flex-1">Log in as</label>
             <select
               value={selectedUser}
               onChange={(e) => handleChangeUser(Number(e.target.value))}
@@ -328,20 +326,18 @@ function Overview({ site, onSaved }) {
             </select>
           </div>
         )}
-        {ocaError && (
-          <p className="px-4 pb-3 text-xs text-red-600 dark:text-red-400">{ocaError}</p>
-        )}
+        {ocaError && <p className="px-4 pb-3 text-xs text-destructive">{ocaError}</p>}
       </div>
 
-      <div className="settings-card divide-y divide-surface-hairline">
+      <div className="settings-card divide-y divide-border">
         {rows.map(({ icon: Icon, label, value }) => (
           <div key={label} className="flex items-center gap-4 px-4 py-3">
-            <span className="flex items-center gap-2 w-32 flex-shrink-0 text-[13px] text-gray-500">
+            <span className="flex items-center gap-2 w-32 flex-shrink-0 text-[13px] text-muted-foreground">
               <Icon size={13} />
               {label}
             </span>
             <span
-              className="text-[13px] text-gray-900 font-mono truncate flex-1"
+              className="text-[13px] text-foreground font-mono truncate flex-1"
               title={value}
             >
               {value}
@@ -349,7 +345,7 @@ function Overview({ site, onSaved }) {
             {label === 'Domain' && (
               <button
                 onClick={() => setChangingUrl(true)}
-                className="flex items-center gap-1.5 text-xs text-wp-blue hover:underline flex-shrink-0"
+                className="flex items-center gap-1.5 text-xs text-highlight hover:underline flex-shrink-0"
               >
                 <Pencil size={12} />
                 Change
@@ -387,7 +383,7 @@ export default function SiteDetail({ sites, refreshSites }) {
           <ChevronLeft size={15} className="mr-1.5" />
           Back to Sites
         </button>
-        <p className="text-sm text-gray-500">Site not found.</p>
+        <p className="text-sm text-muted-foreground">Site not found.</p>
       </div>
     );
   }
@@ -395,22 +391,22 @@ export default function SiteDetail({ sites, refreshSites }) {
   return (
     <div className="animate-fade-in">
       {/* Detail header — System Settings back chevron + title */}
-      <div className="sticky top-0 z-10 bg-surface/80 backdrop-macos border-b border-surface-border px-4 py-2.5">
+      <div className="sticky top-0 z-10 bg-background border-b border-border px-4 py-2.5">
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-1 min-w-0">
             <Tooltip label="Back to Sites">
               <button
                 onClick={() => navigate('/sites')}
                 aria-label="Back to Sites"
-                className="p-1.5 rounded-lg hover:bg-black/5 dark:hover:bg-white/10 text-gray-500 flex-shrink-0"
+                className="p-1.5 rounded-lg hover:bg-accent text-muted-foreground flex-shrink-0"
               >
                 <ChevronLeft size={17} />
               </button>
             </Tooltip>
-            <span className="text-[15px] font-bold text-gray-900 truncate">
+            <span className="text-[15px] font-bold text-foreground truncate">
               {site.name}
             </span>
-            <span className="text-[13px] text-gray-400 truncate ml-1.5">
+            <span className="text-[13px] text-muted-foreground truncate ml-1.5">
               {site.domain}
             </span>
           </div>
@@ -439,7 +435,7 @@ export default function SiteDetail({ sites, refreshSites }) {
           {NAV.map((item) =>
             item.group ? (
               <div key={item.label} className="pt-2">
-                <div className="flex items-center gap-2 px-3 py-1.5 text-xs font-semibold text-gray-400 uppercase tracking-wide">
+                <div className="flex items-center gap-2 px-3 py-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
                   <item.icon size={13} />
                   {item.label}
                 </div>
@@ -450,8 +446,8 @@ export default function SiteDetail({ sites, refreshSites }) {
                       onClick={() => setActive(child.id)}
                       className={`w-full text-left pl-9 pr-3 py-1.5 rounded-md text-[13px] transition-colors ${
                         active === child.id
-                          ? 'bg-accent text-white font-medium'
-                          : 'text-gray-600 hover:bg-black/5 dark:hover:bg-white/10'
+                          ? 'bg-highlight text-highlight-foreground font-medium'
+                          : 'text-muted-foreground hover:bg-accent'
                       }`}
                     >
                       {child.label}
@@ -465,8 +461,8 @@ export default function SiteDetail({ sites, refreshSites }) {
                 onClick={() => setActive(item.id)}
                 className={`w-full flex items-center gap-2.5 px-3 py-1.5 rounded-md text-[13px] transition-colors ${
                   active === item.id
-                    ? 'bg-accent text-white font-medium'
-                    : 'text-gray-600 hover:bg-black/5 dark:hover:bg-white/10'
+                    ? 'bg-highlight text-highlight-foreground font-medium'
+                    : 'text-muted-foreground hover:bg-accent'
                 }`}
               >
                 <item.icon size={14} />

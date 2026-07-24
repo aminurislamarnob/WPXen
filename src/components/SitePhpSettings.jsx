@@ -12,7 +12,7 @@ function UnitInput({ value, unit, onChange }) {
         className={`form-input text-sm ${unit ? 'pr-16' : ''}`}
       />
       {unit && (
-        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400 pointer-events-none">
+        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground pointer-events-none">
           {unit}
         </span>
       )}
@@ -23,10 +23,10 @@ function UnitInput({ value, unit, onChange }) {
 function Field({ setting, value, onChange, customized }) {
   return (
     <div>
-      <label className="flex items-center gap-2 text-sm font-semibold text-gray-900 mb-1.5">
+      <label className="flex items-center gap-2 text-sm font-semibold text-foreground mb-1.5">
         {setting.label}
         {customized && (
-          <span className="px-1.5 py-0.5 bg-wp-blue/10 text-wp-blue rounded-full text-[10px] font-medium">
+          <span className="px-1.5 py-0.5 bg-highlight/10 text-highlight rounded-full text-[10px] font-medium">
             Customized
           </span>
         )}
@@ -36,7 +36,7 @@ function Field({ setting, value, onChange, customized }) {
         unit={setting.unit}
         onChange={(v) => onChange(setting.key, v)}
       />
-      <p className="text-xs text-gray-500 mt-1.5 leading-relaxed">
+      <p className="text-xs text-muted-foreground mt-1.5 leading-relaxed">
         {setting.description}
       </p>
     </div>
@@ -116,8 +116,8 @@ export default function SitePhpSettings({ site, onSaved }) {
     <div>
       <div className="flex items-start justify-between mb-5">
         <div>
-          <h2 className="text-lg font-bold text-gray-900">PHP Settings</h2>
-          <p className="text-sm text-gray-500 mt-0.5">
+          <h2 className="text-lg font-bold text-foreground">PHP Settings</h2>
+          <p className="text-sm text-muted-foreground mt-0.5">
             PHP version and ini overrides for this site only.
           </p>
         </div>
@@ -139,8 +139,8 @@ export default function SitePhpSettings({ site, onSaved }) {
         <div
           className={`flex items-center gap-2 px-4 py-3 rounded-xl mb-4 text-sm ${
             message.type === 'error'
-              ? 'bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400'
-              : 'bg-green-50 text-green-700 dark:bg-green-500/10 dark:text-green-400'
+              ? 'bg-destructive/10 text-destructive'
+              : 'bg-status-running/10 text-status-running'
           }`}
         >
           {message.type === 'error' ? <AlertTriangle size={15} /> : <Check size={15} />}
@@ -150,13 +150,13 @@ export default function SitePhpSettings({ site, onSaved }) {
 
       {loading ? (
         <div className="flex items-center justify-center py-16">
-          <Loader size={22} className="animate-spin text-wp-blue" />
+          <Loader size={22} className="animate-spin text-highlight" />
         </div>
       ) : (
         <div className="settings-card p-5 space-y-5">
           {/* PHP Version */}
           <div>
-            <label className="block text-sm font-semibold text-gray-900 mb-1.5">
+            <label className="block text-sm font-semibold text-foreground mb-1.5">
               PHP Version
             </label>
             <select
@@ -174,7 +174,7 @@ export default function SitePhpSettings({ site, onSaved }) {
                 </option>
               ))}
             </select>
-            <p className="text-xs text-gray-500 mt-1.5">
+            <p className="text-xs text-muted-foreground mt-1.5">
               The PHP-FPM version this site&apos;s requests are routed to.
             </p>
           </div>
@@ -205,7 +205,7 @@ export default function SitePhpSettings({ site, onSaved }) {
       )}
 
       {!loading && (
-        <p className="text-xs text-gray-400 mt-3">
+        <p className="text-xs text-muted-foreground mt-3">
           Fields show the global PHP configuration until you change them here. Only values
           that differ from the global settings are saved as site overrides (applied via{' '}
           <span className="font-mono">PHP_VALUE</span> in this site&apos;s vhost) — set a

@@ -37,8 +37,8 @@ function SettingInput({ value, onSave, disabled, placeholder }) {
         className="form-input w-28 text-right text-sm"
       />
       <span className="w-4">
-        {saving && <Loader size={13} className="animate-spin text-gray-400" />}
-        {saved && <Check size={13} className="text-wp-green" />}
+        {saving && <Loader size={13} className="animate-spin text-muted-foreground" />}
+        {saved && <Check size={13} className="text-status-running" />}
       </span>
     </div>
   );
@@ -61,7 +61,7 @@ function SettingGroup({ setting, versions, onSaveOne, onSaveAll }) {
           className="flex items-center gap-2 text-left"
         >
           {open ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
-          <span className="text-sm font-semibold text-gray-900">{setting.label}</span>
+          <span className="text-sm font-semibold text-foreground">{setting.label}</span>
         </button>
         <SettingInput
           value={masterValue}
@@ -69,16 +69,18 @@ function SettingGroup({ setting, versions, onSaveOne, onSaveAll }) {
           onSave={(v) => onSaveAll(setting.key, v)}
         />
       </div>
-      <p className="px-4 -mt-2 pb-3 text-xs text-gray-400">{setting.description}</p>
+      <p className="px-4 -mt-2 pb-3 text-xs text-muted-foreground">
+        {setting.description}
+      </p>
 
       {open && (
-        <div className="border-t border-gray-100">
+        <div className="border-t border-border">
           {versions.map((v) => (
             <div
               key={v.version}
               className="flex items-center justify-between px-4 py-2.5 border-b border-gray-50 last:border-b-0"
             >
-              <span className="text-sm text-gray-700 font-mono">{v.version}</span>
+              <span className="text-sm text-foreground font-mono">{v.version}</span>
               <SettingInput
                 value={v.values[setting.key]}
                 onSave={(val) => onSaveOne(v.version, setting.key, val)}
@@ -134,12 +136,12 @@ export default function PhpSettings() {
   return (
     <div id="php-settings" className="mt-8 scroll-mt-4">
       <div className="flex items-center gap-2 mb-3">
-        <Sliders size={16} className="text-gray-500" />
-        <h2 className="text-sm font-semibold text-gray-900">PHP Configuration</h2>
+        <Sliders size={16} className="text-muted-foreground" />
+        <h2 className="text-sm font-semibold text-foreground">PHP Configuration</h2>
       </div>
 
       {error && (
-        <div className="mb-3 px-4 py-2.5 rounded-xl bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400 text-sm">
+        <div className="mb-3 px-4 py-2.5 rounded-xl bg-destructive/10 text-destructive text-sm">
           {error}
         </div>
       )}
@@ -155,7 +157,7 @@ export default function PhpSettings() {
           />
         ))}
       </div>
-      <p className="text-xs text-gray-400 mt-3">
+      <p className="text-xs text-muted-foreground mt-3">
         Changes are written to a WPHerd-managed <span className="font-mono">.ini</span>{' '}
         and applied by restarting each version&apos;s PHP-FPM.
       </p>

@@ -164,8 +164,8 @@ export default function AgentsPane() {
         <div className="icon-tile w-12 h-12 bg-[#af52de] mb-4">
           <TerminalIcon size={24} strokeWidth={2} />
         </div>
-        <p className="text-[15px] font-semibold text-gray-900">Agents</p>
-        <p className="mt-1 max-w-sm text-[13px] text-gray-500">
+        <p className="text-[15px] font-semibold text-foreground">Agents</p>
+        <p className="mt-1 max-w-sm text-[13px] text-muted-foreground">
           Pick a site in the sidebar, expand it, and choose an AI agent to open it in that
           site&rsquo;s directory.
         </p>
@@ -192,7 +192,7 @@ export default function AgentsPane() {
       {sitePath && (
         <>
           <Panel id="explorer" order={1} defaultSize={20} minSize={12}>
-            <div className="h-full border-r border-black/[0.06] dark:border-white/[0.08]">
+            <div className="h-full border-r border-border">
               <FileExplorer
                 rootPath={sitePath}
                 rootName={meta.siteName}
@@ -219,8 +219,8 @@ export default function AgentsPane() {
                   onClick={() => setActiveTab(tab.sessionId)}
                   className={`group flex items-center gap-1.5 pl-2.5 pr-1.5 h-7 rounded-lg text-[12.5px] cursor-pointer whitespace-nowrap ${
                     isActive
-                      ? 'bg-black/[0.06] dark:bg-white/[0.1] text-gray-900 font-medium'
-                      : 'text-gray-500 hover:bg-black/[0.04] dark:hover:bg-white/[0.06]'
+                      ? 'bg-muted text-foreground font-medium'
+                      : 'text-muted-foreground hover:bg-accent'
                   }`}
                 >
                   <TerminalIcon size={12} strokeWidth={2.2} className="flex-shrink-0" />
@@ -235,7 +235,7 @@ export default function AgentsPane() {
                         closeTab(tab.sessionId);
                       }}
                       aria-label="Close session"
-                      className="p-0.5 rounded hover:bg-black/10 dark:hover:bg-white/15 text-gray-400 hover:text-gray-900"
+                      className="p-0.5 rounded hover:bg-accent text-muted-foreground hover:text-foreground"
                     >
                       <X size={12} />
                     </button>
@@ -251,7 +251,7 @@ export default function AgentsPane() {
                 onClick={openAddMenu}
                 disabled={detected.length === 0}
                 aria-label="New session"
-                className="flex-shrink-0 p-1 rounded-md text-gray-500 hover:text-gray-900 hover:bg-black/[0.05] dark:hover:bg-white/[0.07] disabled:opacity-40"
+                className="flex-shrink-0 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent disabled:opacity-40"
               >
                 <Plus size={16} />
               </button>
@@ -269,7 +269,7 @@ export default function AgentsPane() {
                   <button
                     key={a.id}
                     onClick={() => spawn(a.id)}
-                    className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[13px] text-gray-800 hover:bg-black/[0.06] dark:hover:bg-white/[0.08]"
+                    className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[13px] text-foreground hover:bg-accent"
                   >
                     <TerminalIcon size={13} strokeWidth={2.2} />
                     {a.name}
@@ -279,11 +279,7 @@ export default function AgentsPane() {
             </>
           )}
 
-          {error && (
-            <div className="px-3 py-1 text-[12px] text-red-600 dark:text-red-400">
-              {error}
-            </div>
-          )}
+          {error && <div className="px-3 py-1 text-[12px] text-destructive">{error}</div>}
 
           {/* Active terminal (only the active tab is mounted; switching remounts
               and replays that Session's ring buffer). */}
@@ -296,7 +292,7 @@ export default function AgentsPane() {
               />
             ) : (
               <div className="h-full flex flex-col items-center justify-center text-center">
-                <p className="text-[13px] text-gray-500">
+                <p className="text-[13px] text-muted-foreground">
                   No sessions yet for {meta.siteName}.
                 </p>
                 {detected.length > 0 && (
@@ -324,7 +320,7 @@ export default function AgentsPane() {
         <>
           <ResizeHandle />
           <Panel id="editor" order={3} minSize={20} defaultSize={30}>
-            <div className="h-full min-w-0 border-l border-black/[0.06] dark:border-white/[0.08]">
+            <div className="h-full min-w-0 border-l border-border">
               <CodeEditor
                 rootPath={sitePath}
                 files={openFiles}
