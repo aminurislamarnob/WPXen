@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, ChevronDown, Globe, Terminal } from 'lucide-react';
+import { ChevronRight, ChevronDown, Globe, Terminal } from 'lucide-react';
 
-// The Agents-mode sidebar: a back button over a Sites tree. Each Site collapses
-// to its available providers (Agents); clicking one opens that Agent's terminal
-// in the selected Site's directory (route /agents/<siteId>/<agentId>).
-export default function AgentsSidebar({ onBack }) {
+// The Agents-mode sidebar: a Sites tree. Each Site collapses to its available
+// providers (Agents); clicking one opens that Agent's terminal in the selected
+// Site's directory (route /agents/<siteId>/<agentId>). Leaving Agents mode goes
+// through the window-control back arrow (⌘[), same as anywhere else.
+export default function AgentsSidebar() {
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -43,16 +44,6 @@ export default function AgentsSidebar({ onBack }) {
 
   return (
     <div className="flex-1 flex flex-col min-h-0 no-drag">
-      <div className="px-3 pb-2">
-        <button
-          onClick={onBack}
-          className="flex items-center gap-1 px-2 py-1 rounded-md text-[13px] text-muted-foreground hover:text-foreground hover:bg-sidebar-accent"
-        >
-          <ChevronLeft size={15} strokeWidth={2.4} />
-          Menu
-        </button>
-      </div>
-
       <div className="px-4 pb-1 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
         Sites
       </div>

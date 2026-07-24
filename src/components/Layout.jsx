@@ -86,9 +86,9 @@ export default function Layout() {
         <div className="drag-region h-12 flex-shrink-0" />
 
         {agentsMode ? (
-          // Agents mode: the sidebar becomes a Sites → providers tree with a
-          // back button, in place of the main menu.
-          <AgentsSidebar onBack={() => navigate('/sites')} />
+          // Agents mode: the sidebar becomes a Sites → providers tree, in place
+          // of the main menu.
+          <AgentsSidebar />
         ) : (
           <>
             {/* Search */}
@@ -174,35 +174,48 @@ export default function Layout() {
           region by walking the DOM in order, adding `drag` rects and
           subtracting `no-drag` ones. The sidebar/content drag strips overlap
           this cluster, so if they were processed afterwards they'd re-cover it
-          and the OS would swallow every click as a title-bar drag. */}
-      <div className="no-drag absolute top-2 left-[84px] z-30 flex items-center gap-1.5">
+          and the OS would swallow every click as a title-bar drag.
+
+          Horizontal geometry matches Superset's TopBar: the cluster starts
+          12px past the last traffic light (which ends at x=68).
+
+          Vertically, the 12px lights render centered on y=26 — macOS insets
+          them ~2px below the configured trafficLightPosition y=18, so don't
+          derive this from that value. top-2.5 puts the 32px toggle's center on
+          the same line (10 + 16 = 26). Fixed square hit targets (32px toggle,
+          28px arrows) rather than padding keep every glyph optically centered,
+          so resizing an icon never shifts the row off the lights. */}
+      <div className="no-drag absolute top-2.5 left-20 z-30 flex items-center gap-1.5">
         <Tooltip label="Toggle sidebar" keys={['⌘', 'B']}>
           <button
             onClick={() => setSidebarCollapsed((v) => !v)}
             aria-label={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
-            className="no-drag p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+            className="no-drag flex items-center justify-center size-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors"
           >
-            <PanelLeft size={18} strokeWidth={1.8} />
+            <PanelLeft size={17} strokeWidth={1.7} />
           </button>
         </Tooltip>
-        <Tooltip label="Go back" keys={['⌘', '[']}>
-          <button
-            onClick={() => navigate(-1)}
-            aria-label="Back"
-            className="no-drag p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-          >
-            <ArrowLeft size={18} strokeWidth={1.8} />
-          </button>
-        </Tooltip>
-        <Tooltip label="Go forward" keys={['⌘', ']']}>
-          <button
-            onClick={() => navigate(1)}
-            aria-label="Forward"
-            className="no-drag p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-          >
-            <ArrowRight size={18} strokeWidth={1.8} />
-          </button>
-        </Tooltip>
+        {/* The arrows are a pair: no gap between them, the hit targets space them. */}
+        <div className="flex items-center">
+          <Tooltip label="Go back" keys={['⌘', '[']}>
+            <button
+              onClick={() => navigate(-1)}
+              aria-label="Back"
+              className="no-drag flex items-center justify-center size-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors"
+            >
+              <ArrowLeft size={17} strokeWidth={1.7} />
+            </button>
+          </Tooltip>
+          <Tooltip label="Go forward" keys={['⌘', ']']}>
+            <button
+              onClick={() => navigate(1)}
+              aria-label="Forward"
+              className="no-drag flex items-center justify-center size-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors"
+            >
+              <ArrowRight size={17} strokeWidth={1.7} />
+            </button>
+          </Tooltip>
+        </div>
       </div>
     </div>
   );
