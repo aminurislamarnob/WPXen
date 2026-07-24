@@ -198,11 +198,13 @@ export default function FileExplorer({
     [loadChanges]
   );
   const doStage = useCallback(
-    (rels) => runChangeMutation(() => window.electronAPI.gitStage(rootPath, rels)),
+    (repoRoot, rels) =>
+      runChangeMutation(() => window.electronAPI.gitStage(rootPath, repoRoot, rels)),
     [runChangeMutation, rootPath]
   );
   const doUnstage = useCallback(
-    (rels) => runChangeMutation(() => window.electronAPI.gitUnstage(rootPath, rels)),
+    (repoRoot, rels) =>
+      runChangeMutation(() => window.electronAPI.gitUnstage(rootPath, repoRoot, rels)),
     [runChangeMutation, rootPath]
   );
   const confirmDiscard = () => {
@@ -210,7 +212,7 @@ export default function FileExplorer({
     setDiscardTarget(null);
     if (file) {
       runChangeMutation(() =>
-        window.electronAPI.gitDiscard(rootPath, file.rel, file.status)
+        window.electronAPI.gitDiscard(rootPath, file.repoRoot, file.rel, file.status)
       );
     }
   };
@@ -299,26 +301,31 @@ export default function FileExplorer({
     await reload(parentOf(entry.path));
   };
 
-  // Git decorations for the Files tree: which relative paths are changed (→
-  // tinted filenames) and which directories contain a change (→ trailing dot).
+  // Git decorations for the Files tree: which paths are changed (→ tinted
+  // filenames) and which directories contain a change (→ trailing dot). Keyed
+  // by site-root-relative path (from each file's absolute path) so it works
+  // across every discovered repo, not just one relative to the site root.
   const gitDecor = useMemo(() => {
     const fileStatus = new Map();
     const dirs = new Set();
     if (changes?.isRepo) {
-      for (const f of changes.files) {
-        // A file may appear staged + unstaged; the first (unstaged) status wins.
-        if (!fileStatus.has(f.rel)) fileStatus.set(f.rel, f.status);
-        const parts = f.rel.split('/');
-        parts.pop();
-        let acc = '';
-        for (const seg of parts) {
-          acc = acc ? `${acc}/${seg}` : seg;
-          dirs.add(acc);
+      for (const repo of changes.repos) {
+        for (const f of repo.files) {
+          const siteRel = relTo(rootPath, f.path);
+          // A file may appear staged + unstaged; the first (unstaged) status wins.
+          if (!fileStatus.has(siteRel)) fileStatus.set(siteRel, f.status);
+          const parts = siteRel.split('/');
+          parts.pop();
+          let acc = '';
+          for (const seg of parts) {
+            acc = acc ? `${acc}/${seg}` : seg;
+            dirs.add(acc);
+          }
         }
       }
     }
     return { fileStatus, dirs };
-  }, [changes]);
+  }, [changes, rootPath]);
 
   const copy = (text) => navigator.clipboard?.writeText(text);
 
@@ -514,7 +521,9 @@ export default function FileExplorer({
     return rows;
   };
 
-  const changeCount = changes?.isRepo ? changes.files.length : 0;
+  const changeCount = changes?.isRepo
+    ? changes.repos.reduce((n, r) => n + r.files.length, 0)
+    : 0;
 
   return (
     <div className="h-full flex flex-col">
@@ -848,49 +857,65 @@ function ChangesView({
     );
   }
 
-  const { branch, files, additions, deletions } = changes;
-  // Unstaged first, then Staged — matching Superset's ordering.
-  const unstaged = files.filter((f) => f.source === 'unstaged');
-  const staged = files.filter((f) => f.source === 'staged');
+  const repos = changes.repos || [];
+  const totalFiles = repos.reduce((n, r) => n + r.files.length, 0);
+  const totalAdd = repos.reduce((n, r) => n + r.additions, 0);
+  const totalDel = repos.reduce((n, r) => n + r.deletions, 0);
+  // Single repo at the project root → keep the flat, un-grouped look.
+  const singleRoot = repos.length === 1 && repos[0].relRoot === '';
 
   // A row opens a diff against the right base: unstaged edits diff against the
-  // index when the file also has staged edits, else against HEAD.
-  const stagedRels = new Set(staged.map((f) => f.rel));
+  // index when the file also has staged edits (in the same repo), else HEAD.
+  const stagedKeys = new Set();
+  for (const r of repos) {
+    for (const f of r.files) {
+      if (f.source === 'staged') stagedKeys.add(`${f.repoRoot} ${f.rel}`);
+    }
+  }
   const enrich = (file) => ({
     ...file,
-    hasStagedTwin: file.source === 'unstaged' && stagedRels.has(file.rel),
+    hasStagedTwin:
+      file.source === 'unstaged' && stagedKeys.has(`${file.repoRoot} ${file.rel}`),
   });
   const handlers = {
     onOpen: (file) => onOpenDiff?.(enrich(file)),
     onContext: (e, file) => onRowContext?.(e, enrich(file)),
-    onStage: (rels) => onStage?.(rels),
-    onUnstage: (rels) => onUnstage?.(rels),
+    onStage: (repoRoot, rels) => onStage?.(repoRoot, rels),
+    onUnstage: (repoRoot, rels) => onUnstage?.(repoRoot, rels),
     onDiscard: (file) => onDiscard?.(enrich(file)),
   };
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
-      {/* Branch header */}
-      <div className="flex items-center gap-1.5 px-3 py-2 text-[13px] font-medium text-gray-800 border-b border-black/[0.06] dark:border-white/[0.08]">
-        <GitBranch size={14} className="text-gray-500 flex-shrink-0" />
-        <span className="truncate" title={branch}>
-          {branch}
-        </span>
-      </div>
+      {/* Branch header — only for a single repo at the root; multi/nested repos
+          show their branch in each repo group header instead. */}
+      {singleRoot && (
+        <div className="flex items-center gap-1.5 px-3 py-2 text-[13px] font-medium text-gray-800 border-b border-black/[0.06] dark:border-white/[0.08]">
+          <GitBranch size={14} className="text-gray-500 flex-shrink-0" />
+          <span className="truncate" title={repos[0].branch}>
+            {repos[0].branch}
+          </span>
+        </div>
+      )}
 
       {/* Toolbar: totals + refresh + collapse-all */}
       <div className="flex items-center gap-2 px-3 py-1.5 text-[11px] text-gray-500 border-b border-black/[0.06] dark:border-white/[0.08]">
         <span className="whitespace-nowrap">
-          {files.length} {files.length === 1 ? 'file' : 'files'}
+          {totalFiles} {totalFiles === 1 ? 'file' : 'files'}
         </span>
-        {(additions > 0 || deletions > 0) && (
+        {!singleRoot && repos.length > 1 && (
+          <span className="whitespace-nowrap">
+            · {repos.length} repos
+          </span>
+        )}
+        {(totalAdd > 0 || totalDel > 0) && (
           <span className="whitespace-nowrap tabular-nums">
-            {additions > 0 && (
-              <span className="text-green-500 dark:text-green-400">+{additions}</span>
+            {totalAdd > 0 && (
+              <span className="text-green-500 dark:text-green-400">+{totalAdd}</span>
             )}
-            {additions > 0 && deletions > 0 && ' '}
-            {deletions > 0 && (
-              <span className="text-red-500 dark:text-red-400 ml-0.5">−{deletions}</span>
+            {totalAdd > 0 && totalDel > 0 && ' '}
+            {totalDel > 0 && (
+              <span className="text-red-500 dark:text-red-400 ml-0.5">−{totalDel}</span>
             )}
           </span>
         )}
@@ -915,56 +940,24 @@ function ChangesView({
         </div>
       </div>
 
-      {files.length === 0 ? (
+      {totalFiles === 0 ? (
         <div className="flex-1 flex items-center justify-center text-[12px] text-gray-500">
           No changes — working tree clean.
         </div>
       ) : (
         <div className="flex-1 overflow-auto py-1">
-          {unstaged.length > 0 && (
-            <ChangesSection
-              id="unstaged"
-              title="Unstaged"
-              count={unstaged.length}
-              foldSignal={foldSignal}
-              action={
-                <SectionAction
-                  icon={Plus}
-                  label="Stage all"
-                  onClick={() => handlers.onStage(unstaged.map((f) => f.rel))}
-                />
-              }
-            >
-              <SectionBody
-                files={unstaged}
+          {repos
+            .filter((r) => r.files.length > 0)
+            .map((repo) => (
+              <RepoGroup
+                key={repo.root}
+                repo={repo}
+                showHeader={!singleRoot}
                 viewMode={viewMode}
                 foldSignal={foldSignal}
                 handlers={handlers}
               />
-            </ChangesSection>
-          )}
-          {staged.length > 0 && (
-            <ChangesSection
-              id="staged"
-              title="Staged"
-              count={staged.length}
-              foldSignal={foldSignal}
-              action={
-                <SectionAction
-                  icon={Minus}
-                  label="Unstage all"
-                  onClick={() => handlers.onUnstage(staged.map((f) => f.rel))}
-                />
-              }
-            >
-              <SectionBody
-                files={staged}
-                viewMode={viewMode}
-                foldSignal={foldSignal}
-                handlers={handlers}
-              />
-            </ChangesSection>
-          )}
+            ))}
         </div>
       )}
 
@@ -975,6 +968,86 @@ function ChangesView({
         >
           {changesError}
         </div>
+      )}
+    </div>
+  );
+}
+
+// One git repository's changes: an optional header (repo name + branch +
+// totals) shown when the project has multiple or nested repos, then that
+// repo's Unstaged / Staged sections. Stage/unstage target this repo's root.
+function RepoGroup({ repo, showHeader, viewMode, foldSignal, handlers }) {
+  const unstaged = repo.files.filter((f) => f.source === 'unstaged');
+  const staged = repo.files.filter((f) => f.source === 'staged');
+
+  return (
+    <div className="mb-1">
+      {showHeader && (
+        <div className="flex items-center gap-1.5 px-2 py-1.5 text-[12px] font-medium text-gray-700 border-b border-black/[0.04] dark:border-white/[0.06]">
+          <GitBranch size={13} className="text-gray-500 flex-shrink-0" />
+          <span className="truncate" title={repo.relRoot || repo.name}>
+            {repo.name}
+          </span>
+          <span className="text-gray-400 flex-shrink-0">·</span>
+          <span className="text-gray-500 truncate flex-shrink-0" title={repo.branch}>
+            {repo.branch}
+          </span>
+          {(repo.additions > 0 || repo.deletions > 0) && (
+            <span className="ml-auto flex-shrink-0 text-[10.5px] tabular-nums">
+              {repo.additions > 0 && (
+                <span className="text-green-500 dark:text-green-400">+{repo.additions}</span>
+              )}
+              {repo.additions > 0 && repo.deletions > 0 && ' '}
+              {repo.deletions > 0 && (
+                <span className="text-red-500 dark:text-red-400">−{repo.deletions}</span>
+              )}
+            </span>
+          )}
+        </div>
+      )}
+      {unstaged.length > 0 && (
+        <ChangesSection
+          id={`${repo.relRoot}:unstaged`}
+          title="Unstaged"
+          count={unstaged.length}
+          foldSignal={foldSignal}
+          action={
+            <SectionAction
+              icon={Plus}
+              label="Stage all"
+              onClick={() => handlers.onStage(repo.root, unstaged.map((f) => f.rel))}
+            />
+          }
+        >
+          <SectionBody
+            files={unstaged}
+            viewMode={viewMode}
+            foldSignal={foldSignal}
+            handlers={handlers}
+          />
+        </ChangesSection>
+      )}
+      {staged.length > 0 && (
+        <ChangesSection
+          id={`${repo.relRoot}:staged`}
+          title="Staged"
+          count={staged.length}
+          foldSignal={foldSignal}
+          action={
+            <SectionAction
+              icon={Minus}
+              label="Unstage all"
+              onClick={() => handlers.onUnstage(repo.root, staged.map((f) => f.rel))}
+            />
+          }
+        >
+          <SectionBody
+            files={staged}
+            viewMode={viewMode}
+            foldSignal={foldSignal}
+            handlers={handlers}
+          />
+        </ChangesSection>
       )}
     </div>
   );
@@ -1282,7 +1355,7 @@ function ChangeRow({ file, hideDir, depth = 0, handlers }) {
             <RowAction
               icon={Plus}
               label="Stage"
-              onClick={act(() => handlers?.onStage([file.rel]))}
+              onClick={act(() => handlers?.onStage(file.repoRoot, [file.rel]))}
             />
             <RowAction
               icon={untracked ? Trash2 : Undo2}
@@ -1295,7 +1368,7 @@ function ChangeRow({ file, hideDir, depth = 0, handlers }) {
           <RowAction
             icon={Minus}
             label="Unstage"
-            onClick={act(() => handlers?.onUnstage([file.rel]))}
+            onClick={act(() => handlers?.onUnstage(file.repoRoot, [file.rel]))}
           />
         )}
       </div>

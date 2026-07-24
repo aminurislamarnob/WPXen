@@ -285,44 +285,50 @@ function registerHandlers(win, storeInstance) {
   });
 
   // Read a file's contents at a git revision (HEAD or index) for the diff
-  // viewer. Read-only; confined to the repo by git -C plus a path guard.
-  ipcMain.handle('git-file-at', async (_e, rootPath, rel, rev) => {
+  // viewer. Read-only; git runs in `repoRoot` (which may be a nested repo),
+  // confined to the site root by an assertInRoot guard plus a rel path check.
+  ipcMain.handle('git-file-at', async (_e, siteRoot, repoRoot, rel, rev) => {
     try {
-      return { ok: true, ...(await git.fileAt(rootPath, rel, rev)) };
+      files.assertInRoot(siteRoot, repoRoot);
+      return { ok: true, ...(await git.fileAt(repoRoot, rel, rev)) };
     } catch (err) {
       return { error: err.message };
     }
   });
 
-  // Stage / unstage changed paths from the Changes tab (git add / restore).
-  ipcMain.handle('git-stage', async (_e, rootPath, rels) => {
+  // Stage / unstage changed paths from the Changes tab (git add / restore),
+  // targeting the specific repo the files belong to.
+  ipcMain.handle('git-stage', async (_e, siteRoot, repoRoot, rels) => {
     try {
-      return await git.stage(rootPath, rels);
+      files.assertInRoot(siteRoot, repoRoot);
+      return await git.stage(repoRoot, rels);
     } catch (err) {
       return { ok: false, error: err.message };
     }
   });
-  ipcMain.handle('git-unstage', async (_e, rootPath, rels) => {
+  ipcMain.handle('git-unstage', async (_e, siteRoot, repoRoot, rels) => {
     try {
-      return await git.unstage(rootPath, rels);
+      files.assertInRoot(siteRoot, repoRoot);
+      return await git.unstage(repoRoot, rels);
     } catch (err) {
       return { ok: false, error: err.message };
     }
   });
 
-  // Discard a file's unstaged changes. Tracked files are reverted with git
-  // restore; untracked files are moved to the Trash (confined to the site
-  // root) — never `git clean`, so it's recoverable.
-  ipcMain.handle('git-discard', async (_e, rootPath, rel, status) => {
+  // Discard a file's unstaged changes in `repoRoot`. Tracked files are reverted
+  // with git restore; untracked files are moved to the Trash (confined to the
+  // site root) — never `git clean`, so it's recoverable.
+  ipcMain.handle('git-discard', async (_e, siteRoot, repoRoot, rel, status) => {
     try {
+      files.assertInRoot(siteRoot, repoRoot);
       if (status === '?') {
-        const abs = path.join(path.resolve(rootPath), rel);
-        const { root, resolved } = files.assertInRoot(rootPath, abs);
+        const abs = path.join(path.resolve(repoRoot), rel);
+        const { root, resolved } = files.assertInRoot(siteRoot, abs);
         if (resolved === root) throw new Error('Invalid path');
         await shell.trashItem(resolved);
         return { ok: true };
       }
-      return await git.discardTracked(rootPath, rel);
+      return await git.discardTracked(repoRoot, rel);
     } catch (err) {
       return { ok: false, error: err.message };
     }

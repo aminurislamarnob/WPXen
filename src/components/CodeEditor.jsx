@@ -63,8 +63,8 @@ function languageFor(name) {
 // the index when the file also has staged edits); modified is what the change
 // produced. Reads are confined to the repo/site root in the main process.
 async function loadDiff(rootPath, entry) {
-  const { rel, source, status, hasStagedTwin, path } = entry;
-  const gitAt = (rev) => window.electronAPI.gitFileAt(rootPath, rel, rev);
+  const { rel, source, status, hasStagedTwin, path, repoRoot } = entry;
+  const gitAt = (rev) => window.electronAPI.gitFileAt(rootPath, repoRoot, rel, rev);
 
   let original;
   let modified;

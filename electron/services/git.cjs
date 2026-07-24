@@ -147,14 +147,60 @@ function countUntrackedLines(absPath) {
   }
 }
 
-// Returns { isRepo, branch, files, additions, deletions } for the working tree
-// at `rootPath`. `files` is one entry per changed source (see parseStatus);
-// `additions`/`deletions` are the changeset totals. Non-repos → { isRepo:false }.
-async function gitStatus(rootPath) {
-  const root = path.resolve(rootPath);
+// Directories never worth descending into while hunting for nested repos.
+const SCAN_IGNORE = new Set([
+  'node_modules',
+  'vendor',
+  'bower_components',
+  '.svn',
+  '.hg',
+  '.cache',
+  'tmp',
+]);
+const MAX_SCAN_DEPTH = 4; // deep enough for wp-content/plugins/<name>
+const MAX_REPOS = 50; // safety cap for pathological trees
 
-  const inside = await run(root, ['rev-parse', '--is-inside-work-tree']);
-  if (!inside || inside.trim() !== 'true') return { isRepo: false };
+// Depth-first scan for git repos beneath `dir`. A directory containing a `.git`
+// (dir or file) is a repo root; we record it and stop descending into it.
+// Symlinks are not followed (avoids cycles and escaping the project root).
+function scanForRepos(dir, depth, found) {
+  if (found.length >= MAX_REPOS) return;
+  let entries;
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  if (entries.some((e) => e.name === '.git')) {
+    found.push(dir);
+    return;
+  }
+  if (depth >= MAX_SCAN_DEPTH) return;
+  for (const e of entries) {
+    if (!e.isDirectory()) continue;
+    if (SCAN_IGNORE.has(e.name) || e.name.startsWith('.')) continue;
+    scanForRepos(path.join(dir, e.name), depth + 1, found);
+  }
+}
+
+// Discover the git repositories relevant to `projectRoot`. If the project root
+// is itself a repo, that's the single repo. Otherwise (a WordPress webroot is
+// often not tracked, but individual themes/plugins are) scan subfolders for
+// nested repos. We never climb above the project root, so everything stays
+// confined to the site directory.
+function discoverRepos(projectRoot) {
+  const root = path.resolve(projectRoot);
+  if (fs.existsSync(path.join(root, '.git'))) return [root];
+  const found = [];
+  scanForRepos(root, 0, found);
+  return found;
+}
+
+// Read the changeset for one repository at `repoRoot`. Returns
+// { branch, files, additions, deletions }; `files` is one entry per changed
+// source (see parseStatus), each carrying its absolute path and repoRoot.
+async function statusForRepo(repoRoot) {
+  const root = path.resolve(repoRoot);
 
   const [branchOut, statusOut, unstagedOut, stagedOut] = await Promise.all([
     run(root, ['rev-parse', '--abbrev-ref', 'HEAD']),
@@ -179,10 +225,29 @@ async function gitStatus(rootPath) {
     if (e.status === '?' && a === 0) a = countUntrackedLines(path.join(root, e.rel));
     additions += a;
     deletions += d;
-    return { ...e, path: path.join(root, e.rel), additions: a, deletions: d };
+    return { ...e, path: path.join(root, e.rel), repoRoot: root, additions: a, deletions: d };
   });
 
-  return { isRepo: true, branch, files, additions, deletions };
+  return { branch, files, additions, deletions };
+}
+
+// Returns { isRepo, repos } for `projectRoot`. `repos` is one entry per git
+// repository found in the project (the root itself, or nested repos when the
+// root isn't tracked), each with its own branch/files/totals. `rel` on a file
+// is relative to that repo's root; `path` is absolute. Empty repos are kept so
+// their branch still shows. `relRoot` locates the repo under the project root.
+async function gitStatus(projectRoot) {
+  const root = path.resolve(projectRoot);
+  const repoRoots = discoverRepos(root);
+
+  const repos = [];
+  for (const repoRoot of repoRoots) {
+    const s = await statusForRepo(repoRoot);
+    const relRoot = repoRoot === root ? '' : path.relative(root, repoRoot).split(path.sep).join('/');
+    repos.push({ root: repoRoot, relRoot, name: relRoot || path.basename(repoRoot), ...s });
+  }
+
+  return { isRepo: repos.length > 0, repos };
 }
 
 // Reject a relative path that would escape the repo (defense in depth on top
@@ -261,6 +326,7 @@ async function discardTracked(rootPath, rel) {
 
 module.exports = {
   gitStatus,
+  discoverRepos,
   parseStatus,
   parseNumstat,
   fileAt,

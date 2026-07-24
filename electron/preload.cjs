@@ -191,12 +191,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   trashPath: (rootPath, targetPath) =>
     ipcRenderer.invoke('trash-path', rootPath, targetPath),
   gitStatus: (rootPath) => ipcRenderer.invoke('git-status', rootPath),
-  gitFileAt: (rootPath, rel, rev) =>
-    ipcRenderer.invoke('git-file-at', rootPath, rel, rev),
-  gitStage: (rootPath, rels) => ipcRenderer.invoke('git-stage', rootPath, rels),
-  gitUnstage: (rootPath, rels) => ipcRenderer.invoke('git-unstage', rootPath, rels),
-  gitDiscard: (rootPath, rel, status) =>
-    ipcRenderer.invoke('git-discard', rootPath, rel, status),
+  gitFileAt: (siteRoot, repoRoot, rel, rev) =>
+    ipcRenderer.invoke('git-file-at', siteRoot, repoRoot, rel, rev),
+  gitStage: (siteRoot, repoRoot, rels) =>
+    ipcRenderer.invoke('git-stage', siteRoot, repoRoot, rels),
+  gitUnstage: (siteRoot, repoRoot, rels) =>
+    ipcRenderer.invoke('git-unstage', siteRoot, repoRoot, rels),
+  gitDiscard: (siteRoot, repoRoot, rel, status) =>
+    ipcRenderer.invoke('git-discard', siteRoot, repoRoot, rel, status),
 
   // IPC Events (renderer listening to main)
   on: (channel, callback) => {

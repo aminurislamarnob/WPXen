@@ -1,7 +1,10 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import git from '../electron/services/git.cjs';
 
-const { parseStatus, parseNumstat } = git;
+const { parseStatus, parseNumstat, discoverRepos } = git;
 
 describe('parseNumstat', () => {
   it('parses plain add/delete counts', () => {
@@ -113,5 +116,55 @@ describe('parseStatus', () => {
   it('falls back to zero counts when numstat lacks the file', () => {
     const files = parseStatus(' M orphan.js', {}, {});
     expect(files[0]).toMatchObject({ additions: 0, deletions: 0 });
+  });
+});
+
+describe('discoverRepos', () => {
+  let root;
+  const mkGit = (p) => fs.mkdirSync(path.join(p, '.git'), { recursive: true });
+
+  beforeEach(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'wpherd-git-'));
+  });
+  afterEach(() => {
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('returns the root itself when it is a repo', () => {
+    mkGit(root);
+    expect(discoverRepos(root)).toEqual([path.resolve(root)]);
+  });
+
+  it('finds nested repos when the root is not a repo', () => {
+    const theme = path.join(root, 'wp-content/themes/mytheme');
+    const plugin = path.join(root, 'wp-content/plugins/myplugin');
+    fs.mkdirSync(theme, { recursive: true });
+    fs.mkdirSync(plugin, { recursive: true });
+    mkGit(theme);
+    mkGit(plugin);
+
+    const found = discoverRepos(root).sort();
+    expect(found).toEqual([path.resolve(plugin), path.resolve(theme)].sort());
+  });
+
+  it('does not descend into an ignored directory like node_modules', () => {
+    const buried = path.join(root, 'node_modules/pkg');
+    fs.mkdirSync(buried, { recursive: true });
+    mkGit(buried);
+    expect(discoverRepos(root)).toEqual([]);
+  });
+
+  it('stops descending once a repo is found (no repos within repos)', () => {
+    const outer = path.join(root, 'project');
+    const inner = path.join(outer, 'sub');
+    fs.mkdirSync(inner, { recursive: true });
+    mkGit(outer);
+    mkGit(inner);
+    expect(discoverRepos(root)).toEqual([path.resolve(outer)]);
+  });
+
+  it('returns nothing for a plain non-repo tree', () => {
+    fs.mkdirSync(path.join(root, 'a/b/c'), { recursive: true });
+    expect(discoverRepos(root)).toEqual([]);
   });
 });

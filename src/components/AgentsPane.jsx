@@ -122,9 +122,9 @@ export default function AgentsPane() {
   };
 
   // Open a read-only diff tab for a changed file, keyed so it can coexist with
-  // the file's editable tab (and with the same file's other-source diff).
+  // the file's editable tab (and with the same rel in a different repo/source).
   const openDiff = (entry) => {
-    const key = `diff:${entry.source}:${entry.rel}`;
+    const key = `diff:${entry.repoRoot}:${entry.source}:${entry.rel}`;
     setOpenFiles((prev) =>
       prev.some((f) => f.key === key)
         ? prev
@@ -136,6 +136,7 @@ export default function AgentsPane() {
               path: entry.path,
               name: entry.name,
               rel: entry.rel,
+              repoRoot: entry.repoRoot,
               source: entry.source,
               status: entry.status,
               hasStagedTwin: entry.hasStagedTwin,
