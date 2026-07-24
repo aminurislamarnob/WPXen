@@ -189,6 +189,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   trashPath: (rootPath, targetPath) =>
     ipcRenderer.invoke('trash-path', rootPath, targetPath),
   gitStatus: (rootPath) => ipcRenderer.invoke('git-status', rootPath),
+  gitFileAt: (rootPath, rel, rev) =>
+    ipcRenderer.invoke('git-file-at', rootPath, rel, rev),
 
   // IPC Events (renderer listening to main)
   on: (channel, callback) => {

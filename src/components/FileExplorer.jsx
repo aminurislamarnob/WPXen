@@ -18,6 +18,7 @@ import {
   Trash2,
   FileText,
   GitBranch,
+  GitCompare,
 } from 'lucide-react';
 import { FileGlyph } from '../lib/fileIcons';
 
@@ -47,7 +48,13 @@ const iconBtn =
 // filter, a toolbar (new file/folder, refresh, collapse all) and a right-click
 // context menu (open, reveal, copy path, rename, delete). Mirrors Superset's
 // file tree; all mutations are confined to the site root in the main process.
-export default function FileExplorer({ rootPath, rootName, onOpenFile, insetForControls }) {
+export default function FileExplorer({
+  rootPath,
+  rootName,
+  onOpenFile,
+  onOpenDiff,
+  insetForControls,
+}) {
   const [childrenByPath, setChildrenByPath] = useState({});
   const [expanded, setExpanded] = useState(() => new Set());
   const [query, setQuery] = useState('');
@@ -247,6 +254,13 @@ export default function FileExplorer({ rootPath, rootName, onOpenFile, insetForC
     setMenu({ x: e.clientX, y: e.clientY, entry });
   };
 
+  // Right-click menu for a Changes row (open diff/file, copy paths, reveal).
+  const openChangeMenu = (e, change) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setMenu({ x: e.clientX, y: e.clientY, change });
+  };
+
   // --- search: keep a node if its name matches, or (for dirs) if any loaded
   // descendant matches; matching dirs auto-expand so hits are visible. ---
   const q = query.trim().toLowerCase();
@@ -443,7 +457,8 @@ export default function FileExplorer({ rootPath, rootName, onOpenFile, insetForC
           state={changesState}
           refreshing={refreshing}
           onRefresh={() => loadChanges()}
-          onOpenFile={onOpenFile}
+          onOpenDiff={onOpenDiff}
+          onRowContext={openChangeMenu}
           foldSignal={foldSignal}
           allCollapsed={allCollapsed}
           onToggleFold={toggleFold}
@@ -452,8 +467,62 @@ export default function FileExplorer({ rootPath, rootName, onOpenFile, insetForC
         />
       )}
 
-      {/* Right-click context menu */}
-      {menu && (
+      {/* Right-click context menu — Changes row vs. file-tree entry. */}
+      {menu && menu.change && (
+        <div
+          className="panel fixed z-50 min-w-[190px] py-1 text-[13px]"
+          style={{ left: menu.x, top: menu.y }}
+          onClick={(e) => e.stopPropagation()}
+          onContextMenu={(e) => e.preventDefault()}
+        >
+          <MenuItem
+            icon={GitCompare}
+            label="Open Diff"
+            disabled={menu.change.status === 'D'}
+            onClick={() => {
+              if (menu.change.status !== 'D') onOpenDiff?.(menu.change);
+              setMenu(null);
+            }}
+          />
+          <MenuItem
+            icon={ExternalLink}
+            label="Open File"
+            disabled={menu.change.status === 'D'}
+            onClick={() => {
+              if (menu.change.status !== 'D') {
+                onOpenFile?.({ path: menu.change.path, name: menu.change.name });
+              }
+              setMenu(null);
+            }}
+          />
+          <div className="my-1 border-t border-black/[0.08] dark:border-white/[0.1]" />
+          <MenuItem
+            icon={Clipboard}
+            label="Copy Path"
+            onClick={() => {
+              copy(menu.change.path);
+              setMenu(null);
+            }}
+          />
+          <MenuItem
+            icon={Copy}
+            label="Copy Relative Path"
+            onClick={() => {
+              copy(menu.change.rel);
+              setMenu(null);
+            }}
+          />
+          <MenuItem
+            icon={Folder}
+            label="Reveal in Finder"
+            onClick={() => {
+              window.electronAPI.revealInFinder(rootPath, menu.change.path);
+              setMenu(null);
+            }}
+          />
+        </div>
+      )}
+      {menu && menu.entry && (
         <div
           className="panel fixed z-50 min-w-[190px] py-1 text-[13px]"
           style={{ left: menu.x, top: menu.y }}
@@ -518,13 +587,16 @@ export default function FileExplorer({ rootPath, rootName, onOpenFile, insetForC
   );
 }
 
-function MenuItem({ icon: Icon, label, onClick, danger }) {
+function MenuItem({ icon: Icon, label, onClick, danger, disabled }) {
   return (
     <button
       onClick={onClick}
-      className={`w-full flex items-center gap-2.5 px-3 py-1.5 text-left hover:bg-black/[0.06] dark:hover:bg-white/[0.08] ${
-        danger ? 'text-red-600 dark:text-red-400' : 'text-gray-800'
-      }`}
+      disabled={disabled}
+      className={`w-full flex items-center gap-2.5 px-3 py-1.5 text-left ${
+        disabled
+          ? 'opacity-40 cursor-default'
+          : 'hover:bg-black/[0.06] dark:hover:bg-white/[0.08]'
+      } ${danger ? 'text-red-600 dark:text-red-400' : 'text-gray-800'}`}
     >
       <Icon size={14} className="flex-shrink-0" />
       <span className="truncate">{label}</span>
@@ -563,7 +635,8 @@ function ChangesView({
   state,
   refreshing,
   onRefresh,
-  onOpenFile,
+  onOpenDiff,
+  onRowContext,
   foldSignal,
   allCollapsed,
   onToggleFold,
@@ -594,6 +667,18 @@ function ChangesView({
   // Unstaged first, then Staged — matching Superset's ordering.
   const unstaged = files.filter((f) => f.source === 'unstaged');
   const staged = files.filter((f) => f.source === 'staged');
+
+  // A row opens a diff against the right base: unstaged edits diff against the
+  // index when the file also has staged edits, else against HEAD.
+  const stagedRels = new Set(staged.map((f) => f.rel));
+  const enrich = (file) => ({
+    ...file,
+    hasStagedTwin: file.source === 'unstaged' && stagedRels.has(file.rel),
+  });
+  const handlers = {
+    onOpen: (file) => onOpenDiff?.(enrich(file)),
+    onContext: (e, file) => onRowContext?.(e, enrich(file)),
+  };
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
@@ -659,7 +744,7 @@ function ChangesView({
                 files={unstaged}
                 viewMode={viewMode}
                 foldSignal={foldSignal}
-                onOpenFile={onOpenFile}
+                handlers={handlers}
               />
             </ChangesSection>
           )}
@@ -674,7 +759,7 @@ function ChangesView({
                 files={staged}
                 viewMode={viewMode}
                 foldSignal={foldSignal}
-                onOpenFile={onOpenFile}
+                handlers={handlers}
               />
             </ChangesSection>
           )}
@@ -716,16 +801,16 @@ function ChangesSection({ id, title, count, foldSignal, children }) {
 
 // Section content in the selected view: folders (grouped by parent) or tree
 // (full hierarchy). Both indent their rows under collapsible headers.
-function SectionBody({ files, viewMode, foldSignal, onOpenFile }) {
+function SectionBody({ files, viewMode, foldSignal, handlers }) {
   if (viewMode === 'tree') {
-    return <TreeView files={files} foldSignal={foldSignal} onOpenFile={onOpenFile} />;
+    return <TreeView files={files} foldSignal={foldSignal} handlers={handlers} />;
   }
-  return <FoldersView files={files} foldSignal={foldSignal} onOpenFile={onOpenFile} />;
+  return <FoldersView files={files} foldSignal={foldSignal} handlers={handlers} />;
 }
 
 // Folders view: flat groups keyed by each file's parent directory. Root-level
 // files come first (no header); the rest are alphabetized, collapsible groups.
-function FoldersView({ files, foldSignal, onOpenFile }) {
+function FoldersView({ files, foldSignal, handlers }) {
   const groups = useMemo(() => {
     const m = new Map();
     for (const f of files) {
@@ -744,7 +829,7 @@ function FoldersView({ files, foldSignal, onOpenFile }) {
       {groups.map(([dir, groupFiles]) =>
         dir === '' ? (
           groupFiles.map((f) => (
-            <ChangeRow key={f.rel} file={f} hideDir onOpenFile={onOpenFile} />
+            <ChangeRow key={f.rel} file={f} hideDir handlers={handlers} />
           ))
         ) : (
           <FolderGroup
@@ -752,7 +837,7 @@ function FoldersView({ files, foldSignal, onOpenFile }) {
             dir={dir}
             files={groupFiles}
             foldSignal={foldSignal}
-            onOpenFile={onOpenFile}
+            handlers={handlers}
           />
         )
       )}
@@ -761,7 +846,7 @@ function FoldersView({ files, foldSignal, onOpenFile }) {
 }
 
 // One collapsible parent-directory group in folders view.
-function FolderGroup({ dir, files, foldSignal, onOpenFile }) {
+function FolderGroup({ dir, files, foldSignal, handlers }) {
   const [open, setOpen] = useState(true);
   useEffect(() => {
     if (foldSignal.epoch === 0) return;
@@ -785,7 +870,7 @@ function FolderGroup({ dir, files, foldSignal, onOpenFile }) {
       </button>
       {open &&
         files.map((f) => (
-          <ChangeRow key={f.rel} file={f} hideDir depth={1} onOpenFile={onOpenFile} />
+          <ChangeRow key={f.rel} file={f} hideDir depth={1} handlers={handlers} />
         ))}
     </div>
   );
@@ -811,7 +896,7 @@ function buildTree(files) {
 
 // Tree view: the full directory hierarchy, with single-child directory chains
 // compressed into one row (e.g. wp-content/plugins/foo) to keep WP paths shallow.
-function TreeView({ files, foldSignal, onOpenFile }) {
+function TreeView({ files, foldSignal, handlers }) {
   const root = useMemo(() => buildTree(files), [files]);
   const subdirs = [...root.dirs.values()].sort((a, b) => a.name.localeCompare(b.name));
   const rootFiles = [...root.files].sort((a, b) => a.name.localeCompare(b.name));
@@ -823,11 +908,11 @@ function TreeView({ files, foldSignal, onOpenFile }) {
           node={d}
           depth={0}
           foldSignal={foldSignal}
-          onOpenFile={onOpenFile}
+          handlers={handlers}
         />
       ))}
       {rootFiles.map((f) => (
-        <ChangeRow key={f.rel} file={f} hideDir depth={0} onOpenFile={onOpenFile} />
+        <ChangeRow key={f.rel} file={f} hideDir depth={0} handlers={handlers} />
       ))}
     </>
   );
@@ -835,7 +920,7 @@ function TreeView({ files, foldSignal, onOpenFile }) {
 
 // One directory node in tree view. Compresses single-child chains into its own
 // label so a deep path renders as a single collapsible row.
-function TreeDir({ node, depth, foldSignal, onOpenFile }) {
+function TreeDir({ node, depth, foldSignal, handlers }) {
   const [open, setOpen] = useState(true);
   useEffect(() => {
     if (foldSignal.epoch === 0) return;
@@ -876,7 +961,7 @@ function TreeDir({ node, depth, foldSignal, onOpenFile }) {
               node={d}
               depth={depth + 1}
               foldSignal={foldSignal}
-              onOpenFile={onOpenFile}
+              handlers={handlers}
             />
           ))}
           {files.map((f) => (
@@ -885,7 +970,7 @@ function TreeDir({ node, depth, foldSignal, onOpenFile }) {
               file={f}
               hideDir
               depth={depth + 1}
-              onOpenFile={onOpenFile}
+              handlers={handlers}
             />
           ))}
         </>
@@ -897,7 +982,7 @@ function TreeDir({ node, depth, foldSignal, onOpenFile }) {
 // A single changed-file row: type icon, muted directory prefix, bold basename
 // (with old→new for renames), +/- counts, and a colored status dot. `depth`
 // indents the row under a folder/tree header.
-function ChangeRow({ file, hideDir, depth = 0, onOpenFile }) {
+function ChangeRow({ file, hideDir, depth = 0, handlers }) {
   const meta = statusDot(file.status);
   const deleted = file.status === 'D';
   const dir = hideDir ? '' : dirOf(file.rel, file.name);
@@ -906,7 +991,8 @@ function ChangeRow({ file, hideDir, depth = 0, onOpenFile }) {
   return (
     <button
       disabled={deleted}
-      onClick={() => !deleted && onOpenFile?.({ path: file.path, name: file.name })}
+      onClick={() => !deleted && handlers?.onOpen(file)}
+      onContextMenu={(e) => handlers?.onContext(e, file)}
       title={file.rel}
       style={{ paddingLeft: 12 + depth * 12 }}
       className={`w-full flex items-center gap-1.5 pr-3 py-1 text-[12.5px] text-left ${

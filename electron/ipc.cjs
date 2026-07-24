@@ -274,6 +274,16 @@ function registerHandlers(win, storeInstance) {
     }
   });
 
+  // Read a file's contents at a git revision (HEAD or index) for the diff
+  // viewer. Read-only; confined to the repo by git -C plus a path guard.
+  ipcMain.handle('git-file-at', async (_e, rootPath, rel, rev) => {
+    try {
+      return { ok: true, ...(await git.fileAt(rootPath, rel, rev)) };
+    } catch (err) {
+      return { error: err.message };
+    }
+  });
+
   // Move a file/folder to the system Trash (confined to the site root).
   ipcMain.handle('trash-path', async (_e, rootPath, targetPath) => {
     try {

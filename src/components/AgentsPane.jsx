@@ -26,8 +26,8 @@ export default function AgentsPane() {
   const [activeTab, setActiveTab] = useState(null); // sessionId
   const [addMenu, setAddMenu] = useState(null); // { x, y } when the + menu is open
 
-  const [openFiles, setOpenFiles] = useState([]); // editor tabs [{ path, name }]
-  const [activeFile, setActiveFile] = useState(null);
+  const [openFiles, setOpenFiles] = useState([]); // editor tabs [{ key, kind, ... }]
+  const [activeKey, setActiveKey] = useState(null);
 
   // Load the Site, its live Sessions (restore tabs), and honour a pending spawn
   // request carried in navigation state. Runs on Site change and on every
@@ -79,7 +79,7 @@ export default function AgentsPane() {
   // Drop editor tabs when the Site changes.
   useEffect(() => {
     setOpenFiles([]);
-    setActiveFile(null);
+    setActiveKey(null);
   }, [siteId]);
 
   // Open the "+" menu anchored just below the button, in viewport coordinates.
@@ -110,21 +110,47 @@ export default function AgentsPane() {
     });
   };
 
+  // Open a plain (editable) file tab, keyed by its absolute path.
   const openFile = (entry) => {
+    const key = entry.path;
     setOpenFiles((prev) =>
-      prev.some((f) => f.path === entry.path)
+      prev.some((f) => f.key === key)
         ? prev
-        : [...prev, { path: entry.path, name: entry.name }]
+        : [...prev, { key, kind: 'file', path: entry.path, name: entry.name }]
     );
-    setActiveFile(entry.path);
+    setActiveKey(key);
   };
 
-  const closeFile = (path) => {
+  // Open a read-only diff tab for a changed file, keyed so it can coexist with
+  // the file's editable tab (and with the same file's other-source diff).
+  const openDiff = (entry) => {
+    const key = `diff:${entry.source}:${entry.rel}`;
+    setOpenFiles((prev) =>
+      prev.some((f) => f.key === key)
+        ? prev
+        : [
+            ...prev,
+            {
+              key,
+              kind: 'diff',
+              path: entry.path,
+              name: entry.name,
+              rel: entry.rel,
+              source: entry.source,
+              status: entry.status,
+              hasStagedTwin: entry.hasStagedTwin,
+            },
+          ]
+    );
+    setActiveKey(key);
+  };
+
+  const closeFile = (key) => {
     setOpenFiles((prev) => {
-      const idx = prev.findIndex((f) => f.path === path);
-      const next = prev.filter((f) => f.path !== path);
-      if (activeFile === path) {
-        setActiveFile((next[idx] || next[idx - 1])?.path || null);
+      const idx = prev.findIndex((f) => f.key === key);
+      const next = prev.filter((f) => f.key !== key);
+      if (activeKey === key) {
+        setActiveKey((next[idx] || next[idx - 1])?.key || null);
       }
       return next;
     });
@@ -171,6 +197,7 @@ export default function AgentsPane() {
                 rootPath={sitePath}
                 rootName={meta.siteName}
                 onOpenFile={openFile}
+                onOpenDiff={openDiff}
                 insetForControls={sidebarCollapsed}
               />
             </div>
@@ -297,8 +324,8 @@ export default function AgentsPane() {
               <CodeEditor
                 rootPath={sitePath}
                 files={openFiles}
-                activePath={activeFile}
-                onSelect={setActiveFile}
+                activeKey={activeKey}
+                onSelect={setActiveKey}
                 onClose={closeFile}
               />
             </div>
