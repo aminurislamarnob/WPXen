@@ -69,9 +69,12 @@ export default function FileExplorer({
   onOpenFile,
   onOpenDiff,
   insetForControls,
+  activeFilePath,
 }) {
   const [childrenByPath, setChildrenByPath] = useState({});
   const [expanded, setExpanded] = useState(() => new Set());
+  const [selectedPath, setSelectedPath] = useState(null);
+  const scrollerRef = useRef(null);
   const [query, setQuery] = useState('');
   const [menu, setMenu] = useState(null); // { x, y, entry }
   const [renaming, setRenaming] = useState(null); // { path, draft }
@@ -114,6 +117,7 @@ export default function FileExplorer({
   useEffect(() => {
     setChildrenByPath({});
     setExpanded(new Set([rootPath]));
+    setSelectedPath(null);
     setQuery('');
     setMenu(null);
     setRenaming(null);
@@ -403,6 +407,110 @@ export default function FileExplorer({
     return entry.isDir && subtreeMatches(entry.path);
   };
 
+  // Flat, in-render-order list of the currently visible tree rows — the model
+  // for keyboard navigation and reveal. Mirrors renderNodes' walk (same
+  // expand + search-visibility rules), so the two never diverge.
+  const visibleList = useMemo(() => {
+    const out = [];
+    const walk = (dirPath, depth) => {
+      const entries = childrenByPath[dirPath];
+      if (!entries) return;
+      for (const entry of entries) {
+        if (!visible(entry)) continue;
+        out.push({ path: entry.path, isDir: entry.isDir, depth, parentPath: dirPath });
+        const isOpen =
+          entry.isDir && (expanded.has(entry.path) || (q && subtreeMatches(entry.path)));
+        if (isOpen) walk(entry.path, depth + 1);
+      }
+    };
+    walk(rootPath, 0);
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [childrenByPath, expanded, q, rootPath]);
+
+  // Expand every ancestor of a file and select it — used to reveal the active
+  // editor file in the tree.
+  const reveal = useCallback(
+    async (filePath) => {
+      if (!filePath || !filePath.startsWith(rootPath)) return;
+      const rel = relTo(rootPath, filePath);
+      if (!rel) return;
+      const segs = rel.split('/');
+      let dir = rootPath;
+      const toExpand = [rootPath];
+      for (let i = 0; i < segs.length - 1; i++) {
+        dir = `${dir}/${segs[i]}`;
+        toExpand.push(dir);
+      }
+      for (const d of toExpand) {
+        if (!childrenByPath[d]) await load(d);
+      }
+      setExpanded((prev) => new Set([...prev, ...toExpand]));
+      setSelectedPath(filePath);
+    },
+    [rootPath, childrenByPath, load]
+  );
+
+  // Reveal the active editor file when it changes (only while the Files tab is
+  // showing, so we never yank the user's scroll during Changes work).
+  useEffect(() => {
+    if (tab !== 'files' || !activeFilePath) return;
+    reveal(activeFilePath);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeFilePath, tab]);
+
+  // Scroll the selected row into view once it's in the DOM.
+  useEffect(() => {
+    if (!selectedPath) return;
+    const el = scrollerRef.current?.querySelector(
+      `[data-path="${CSS.escape(selectedPath)}"]`
+    );
+    el?.scrollIntoView({ block: 'nearest' });
+  }, [selectedPath, visibleList]);
+
+  // Keyboard navigation over the visible rows (roving selection).
+  const onTreeKeyDown = (e) => {
+    // Don't hijack the inline rename/create inputs that live inside the tree.
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    if (visibleList.length === 0) return;
+    const idx = visibleList.findIndex((r) => r.path === selectedPath);
+    const cur = idx >= 0 ? visibleList[idx] : null;
+    const move = (i) => {
+      e.preventDefault();
+      setSelectedPath(visibleList[Math.max(0, Math.min(visibleList.length - 1, i))].path);
+    };
+    switch (e.key) {
+      case 'ArrowDown':
+        return move(idx < 0 ? 0 : idx + 1);
+      case 'ArrowUp':
+        return move(idx < 0 ? 0 : idx - 1);
+      case 'Home':
+        return move(0);
+      case 'End':
+        return move(visibleList.length - 1);
+      case 'ArrowRight':
+        if (!cur || !cur.isDir) return;
+        e.preventDefault();
+        if (!expanded.has(cur.path)) toggle(cur.path);
+        else if (idx + 1 < visibleList.length) setSelectedPath(visibleList[idx + 1].path);
+        return;
+      case 'ArrowLeft':
+        if (!cur) return;
+        e.preventDefault();
+        if (cur.isDir && expanded.has(cur.path)) toggle(cur.path);
+        else if (cur.parentPath && cur.parentPath !== rootPath)
+          setSelectedPath(cur.parentPath);
+        return;
+      case 'Enter':
+        if (!cur) return;
+        e.preventDefault();
+        if (cur.isDir) toggle(cur.path);
+        else onOpenFile?.({ path: cur.path, name: baseOf(cur.path) });
+        return;
+      default:
+    }
+  };
+
   const renderNodes = (dirPath, depth) => {
     const entries = childrenByPath[dirPath];
     if (!entries) return null;
@@ -448,8 +556,9 @@ export default function FileExplorer({
       const nameTint = entry.isDir ? '' : NAME_TINT[gitDecor.fileStatus.get(rel)] || '';
       const dirChanged = entry.isDir && gitDecor.dirs.has(rel);
       const isDropTarget = entry.isDir && dropTarget === entry.path;
+      const isSelected = entry.path === selectedPath;
       rows.push(
-        <div key={entry.path}>
+        <div key={entry.path} data-path={entry.path}>
           {isRenaming ? (
             <div
               className="flex items-center gap-1.5 py-[3px] pr-2"
@@ -475,7 +584,10 @@ export default function FileExplorer({
             </div>
           ) : (
             <button
-              onClick={() => (entry.isDir ? toggle(entry.path) : onOpenFile?.(entry))}
+              onClick={() => {
+                setSelectedPath(entry.path);
+                entry.isDir ? toggle(entry.path) : onOpenFile?.(entry);
+              }}
               onContextMenu={(e) => openMenu(e, entry)}
               onDragOver={
                 entry.isDir ? (e) => onFolderDragOver(e, entry.path) : undefined
@@ -489,7 +601,11 @@ export default function FileExplorer({
               }}
               title={entry.name}
               className={`w-full flex items-center gap-1.5 py-[3px] pr-2 rounded-md text-[12.5px] text-foreground ${
-                isDropTarget ? 'bg-highlight/10 ring-1 ring-highlight' : 'hover:bg-accent'
+                isDropTarget
+                  ? 'bg-highlight/10 ring-1 ring-highlight'
+                  : isSelected
+                    ? 'bg-accent'
+                    : 'hover:bg-accent'
               }`}
               style={{ paddingLeft: depth * 12 + 8 }}
             >
@@ -599,7 +715,10 @@ export default function FileExplorer({
           </div>
 
           <div
-            className={`relative flex-1 overflow-auto px-2 py-2 ${
+            ref={scrollerRef}
+            tabIndex={0}
+            onKeyDown={onTreeKeyDown}
+            className={`relative flex-1 overflow-auto px-2 py-2 outline-none ${
               dropTarget === rootPath
                 ? 'ring-1 ring-inset ring-highlight bg-highlight/10'
                 : ''

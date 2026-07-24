@@ -253,6 +253,10 @@ export default function AgentsPane() {
 
   const editorOpen = openFiles.length > 0;
   const detected = agents.filter((a) => a.detected);
+  // The active editor tab, when it's a real file (not a diff) — drives the
+  // "reveal in tree" behavior in the explorer.
+  const activeTabEntry = openFiles.find((f) => f.key === activeKey) || null;
+  const activeFileTab = activeTabEntry?.kind === 'file' ? activeTabEntry : null;
   // Ordinal suffix for duplicate providers, so identical tabs are tellable apart.
   const ordinal = (tab, i) => {
     const sameBefore = tabs.slice(0, i).filter((t) => t.agentId === tab.agentId).length;
@@ -278,6 +282,7 @@ export default function AgentsPane() {
                   onOpenFile={openFile}
                   onOpenDiff={openDiff}
                   insetForControls={sidebarCollapsed}
+                  activeFilePath={activeFileTab?.path}
                 />
               </div>
             </Panel>
