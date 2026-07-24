@@ -1,5 +1,9 @@
 # Plan: Terminal — Superset parity analysis
 
+> **Implementing?** Read `plans/superset-terminal-parity-implementation.md`
+> — the self-contained build spec for all phases (exact sequences, IPC
+> touchpoints, tests, acceptance). This document is the analysis behind it.
+
 Feature-by-feature analysis of the Superset desktop terminal (reference
 checkout at `reference/superset-main`) against WPHerd's Agents-screen
 terminal, and the recommended implementation list. Companion to
