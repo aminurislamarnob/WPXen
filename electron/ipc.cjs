@@ -41,6 +41,7 @@ const logs = require('./services/logs.cjs');
 const validation = require('./services/validation.cjs');
 const agents = require('./services/agents.cjs');
 const files = require('./services/files.cjs');
+const git = require('./services/git.cjs');
 const { humanize } = require('./services/errors.cjs');
 
 let store;
@@ -259,6 +260,15 @@ function registerHandlers(win, storeInstance) {
   ipcMain.handle('rename-path', (_e, rootPath, targetPath, newName) => {
     try {
       return { ok: true, ...files.renamePath(rootPath, targetPath, newName) };
+    } catch (err) {
+      return { error: err.message };
+    }
+  });
+
+  // Read-only git status for the explorer's Changes tab (source control view).
+  ipcMain.handle('git-status', async (_e, rootPath) => {
+    try {
+      return { ok: true, ...(await git.gitStatus(rootPath)) };
     } catch (err) {
       return { error: err.message };
     }

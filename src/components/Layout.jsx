@@ -8,8 +8,9 @@ import {
   Mail,
   Settings,
   Search,
-  ChevronLeft,
-  ChevronRight,
+  ArrowLeft,
+  ArrowRight,
+  PanelLeft,
   Terminal,
 } from 'lucide-react';
 import logo from '../assets/logo.png';
@@ -40,25 +41,11 @@ const TILE_COLORS = {
   purple: 'bg-[#af52de]',
 };
 
-const PAGE_TITLES = {
-  '/dashboard': 'Dashboard',
-  '/sites': 'Sites',
-  '/agents': 'Agents',
-  '/services': 'Services',
-  '/php': 'PHP',
-  '/mail': 'Mail',
-  '/settings': 'Settings',
-};
-
 export default function Layout() {
   const [filter, setFilter] = useState('');
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
-
-  const title =
-    PAGE_TITLES[
-      Object.keys(PAGE_TITLES).find((p) => location.pathname.startsWith(p)) || ''
-    ] || 'WPHerd';
 
   const agentsMode = location.pathname.startsWith('/agents');
 
@@ -70,10 +57,42 @@ export default function Layout() {
     : NAV_GROUPS;
 
   return (
-    <div className="h-screen flex overflow-hidden">
+    <div className="h-screen flex overflow-hidden relative">
+      {/* Window controls, docked just after the native macOS traffic lights.
+          Absolutely positioned so they stay put whether the sidebar is shown
+          or hidden — sidebar toggle, then thin back/forward arrows. */}
+      <div className="no-drag absolute top-2 left-[84px] z-30 flex items-center gap-1.5">
+        <button
+          onClick={() => setSidebarCollapsed((v) => !v)}
+          aria-label={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
+          title={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
+          className="p-1.5 rounded-lg text-gray-600 hover:text-gray-900 hover:bg-black/[0.06] active:bg-black/10 dark:text-gray-400 dark:hover:text-gray-100 dark:hover:bg-white/10 dark:active:bg-white/15 transition-colors"
+        >
+          <PanelLeft size={18} strokeWidth={1.8} />
+        </button>
+        <button
+          onClick={() => navigate(-1)}
+          aria-label="Back"
+          className="p-1.5 rounded-lg text-gray-700 hover:text-gray-900 hover:bg-black/[0.06] active:bg-black/10 dark:text-gray-300 dark:hover:text-gray-100 dark:hover:bg-white/10 dark:active:bg-white/15 transition-colors"
+        >
+          <ArrowLeft size={18} strokeWidth={1.8} />
+        </button>
+        <button
+          onClick={() => navigate(1)}
+          aria-label="Forward"
+          className="p-1.5 rounded-lg text-gray-400 hover:text-gray-900 hover:bg-black/[0.06] active:bg-black/10 dark:hover:text-gray-100 dark:hover:bg-white/10 dark:active:bg-white/15 transition-colors"
+        >
+          <ArrowRight size={18} strokeWidth={1.8} />
+        </button>
+      </div>
+
       {/* Sidebar — raw window vibrancy, one continuous glass sheet with the
-          content pane (macOS 26 System Settings) */}
-      <aside className="w-56 flex flex-col flex-shrink-0 border-r border-black/[0.06] dark:border-white/[0.06]">
+          content pane (macOS 26 System Settings). Collapsible from the top bar. */}
+      <aside
+        className={`flex flex-col flex-shrink-0 overflow-hidden border-r border-black/[0.06] dark:border-white/[0.06] transition-[width] duration-200 ease-out ${
+          sidebarCollapsed ? 'w-0 border-r-0' : 'w-56'
+        }`}
+      >
         {/* Title bar drag region (hosts the traffic lights) */}
         <div className="drag-region h-12 flex-shrink-0" />
 
@@ -150,31 +169,12 @@ export default function Layout() {
       {/* Main content — faint tint over the vibrancy, slightly lighter than
           the sidebar like System Settings */}
       <main className="flex-1 flex flex-col overflow-hidden bg-surface/55">
-        {/* Top bar: drag region + back/forward capsule + page title */}
-        <div className="drag-region h-[62px] flex items-center gap-3 px-4 flex-shrink-0">
-          {/* Back/forward capsule: one glass pill, hairline divider between
-              the chevrons, forward dimmed — like System Settings */}
-          <div className="no-drag flex items-stretch rounded-full glass overflow-hidden">
-            <button
-              onClick={() => navigate(-1)}
-              aria-label="Back"
-              className="pl-4 pr-3 py-3 text-gray-800 hover:bg-black/5 active:bg-black/10 dark:hover:bg-white/10 dark:active:bg-white/15 transition-colors"
-            >
-              <ChevronLeft size={16} strokeWidth={2.6} />
-            </button>
-            <span className="w-px my-2.5 bg-black/10 dark:bg-white/[0.14]" />
-            <button
-              onClick={() => navigate(1)}
-              aria-label="Forward"
-              className="pl-3 pr-4 py-3 text-gray-400 hover:bg-black/5 active:bg-black/10 dark:hover:bg-white/10 dark:active:bg-white/15 transition-colors"
-            >
-              <ChevronRight size={16} strokeWidth={2.6} />
-            </button>
-          </div>
-          <h1 className="text-[15px] font-bold text-gray-900">{title}</h1>
-        </div>
+        {/* Slim drag region so the window stays movable and content clears the
+            traffic-light controls. The Agents screens run their own top strip
+            (tabs) up against the controls, so drop the gap there. */}
+        <div className={`drag-region flex-shrink-0 ${agentsMode ? 'h-0' : 'h-11'}`} />
         <div className="flex-1 overflow-y-auto">
-          <Outlet />
+          <Outlet context={{ sidebarCollapsed, agentsMode }} />
         </div>
       </main>
     </div>

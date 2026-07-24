@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useParams, useLocation } from 'react-router-dom';
+import { useParams, useLocation, useOutletContext } from 'react-router-dom';
 import { Terminal as TerminalIcon, Plus, X } from 'lucide-react';
 import { Panel, PanelGroup } from 'react-resizable-panels';
 import Terminal from './Terminal';
@@ -13,6 +13,9 @@ import ResizeHandle from './ResizeHandle';
 export default function AgentsPane() {
   const { siteId } = useParams();
   const location = useLocation();
+  // When the sidebar is hidden the explorer sits under the floating window
+  // controls; inset its tab bar so they don't overlap.
+  const { sidebarCollapsed } = useOutletContext() || {};
 
   const [meta, setMeta] = useState({ siteName: siteId });
   const [sitePath, setSitePath] = useState(null);
@@ -168,6 +171,7 @@ export default function AgentsPane() {
                 rootPath={sitePath}
                 rootName={meta.siteName}
                 onOpenFile={openFile}
+                insetForControls={sidebarCollapsed}
               />
             </div>
           </Panel>
