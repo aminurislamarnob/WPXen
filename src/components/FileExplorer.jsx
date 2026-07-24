@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   ChevronRight,
   ChevronDown,
@@ -9,6 +9,7 @@ import {
   FolderPlus,
   RefreshCw,
   FoldVertical,
+  UnfoldVertical,
   ExternalLink,
   Clipboard,
   Copy,
@@ -19,21 +20,27 @@ import {
 } from 'lucide-react';
 import { FileGlyph } from '../lib/fileIcons';
 
-// Per-status glyph + color for the Changes list, mirroring source-control UIs.
-const STATUS_META = {
-  M: { label: 'M', cls: 'text-amber-500' },
-  A: { label: 'A', cls: 'text-green-500' },
-  D: { label: 'D', cls: 'text-red-500' },
-  R: { label: 'R', cls: 'text-blue-400' },
-  C: { label: 'C', cls: 'text-blue-400' },
-  '?': { label: 'U', cls: 'text-green-500' },
+// Per-status dot color + human label for the Changes list, mirroring
+// source-control UIs (a colored dot rather than a letter).
+const STATUS_DOT = {
+  M: { cls: 'bg-amber-500', label: 'Modified' },
+  A: { cls: 'bg-green-500', label: 'Added' },
+  D: { cls: 'bg-red-500', label: 'Deleted' },
+  R: { cls: 'bg-blue-400', label: 'Renamed' },
+  C: { cls: 'bg-blue-400', label: 'Copied' },
+  '?': { cls: 'bg-green-500', label: 'Untracked' },
 };
-const statusMeta = (s) => STATUS_META[s] || { label: s || '•', cls: 'text-gray-400' };
+const statusDot = (s) => STATUS_DOT[s] || { cls: 'bg-gray-400', label: s || 'Changed' };
 const dirOf = (rel, name) => rel.slice(0, rel.length - name.length).replace(/\/$/, '');
+const baseOf = (p) => p.slice(p.lastIndexOf('/') + 1);
 
 // The macOS path separator; the explorer is confined to a Site's webroot.
 const parentOf = (p) => p.slice(0, p.lastIndexOf('/')) || '/';
 const relTo = (root, p) => p.slice(root.length).replace(/^\/+/, '');
+
+// Shared toolbar icon-button styling (Files toolbar + Changes toolbar).
+const iconBtn =
+  'p-1 rounded-md text-gray-500 hover:text-gray-800 hover:bg-black/[0.05] dark:hover:text-gray-200 dark:hover:bg-white/[0.07]';
 
 // Lazy project explorer for the selected Site's directory, with a search
 // filter, a toolbar (new file/folder, refresh, collapse all) and a right-click
@@ -51,6 +58,11 @@ export default function FileExplorer({ rootPath, rootName, onOpenFile, insetForC
   const [tab, setTab] = useState('files'); // 'files' | 'changes'
   const [changes, setChanges] = useState(null); // git status result
   const [changesState, setChangesState] = useState('idle'); // idle|loading|error
+  const [refreshing, setRefreshing] = useState(false); // spinner during any refetch
+  const [foldSignal, setFoldSignal] = useState({ epoch: 0, action: 'collapse' });
+  const [allCollapsed, setAllCollapsed] = useState(false);
+  const changesRef = useRef(null); // last good result, to suppress the loading flash
+  const inFlightRef = useRef(false); // dedupe overlapping fetches
 
   const load = useCallback(
     async (dirPath) => {
@@ -73,26 +85,56 @@ export default function FileExplorer({ rootPath, rootName, onOpenFile, insetForC
     setError(null);
     setTab('files');
     setChanges(null);
+    changesRef.current = null;
     load(rootPath);
   }, [rootPath, load]);
 
-  // Git source-control status for the Changes tab.
-  const loadChanges = useCallback(async () => {
-    setChangesState('loading');
-    const res = await window.electronAPI.gitStatus(rootPath);
-    if (res?.error) {
-      setChanges(null);
-      setChangesState('error');
-      return;
-    }
-    setChanges(res);
-    setChangesState('idle');
-  }, [rootPath]);
+  // Git source-control status for the Changes tab. `silent` keeps the existing
+  // view in place during background polls (no loading flash); overlapping
+  // fetches are deduped so a slow git call can't stack up behind the poll.
+  const loadChanges = useCallback(
+    async (opts = {}) => {
+      if (inFlightRef.current) return;
+      inFlightRef.current = true;
+      if (!opts.silent && !changesRef.current) setChangesState('loading');
+      setRefreshing(true);
+      const res = await window.electronAPI.gitStatus(rootPath);
+      inFlightRef.current = false;
+      setRefreshing(false);
+      if (res?.error) {
+        changesRef.current = null;
+        setChanges(null);
+        setChangesState('error');
+        return;
+      }
+      changesRef.current = res;
+      setChanges(res);
+      setChangesState('idle');
+    },
+    [rootPath]
+  );
 
-  // Refetch whenever the Changes tab is shown (cheap; keeps the view live).
+  // Fetch when the Changes tab opens, then keep it live while it's visible:
+  // poll every 5s and refetch on window focus (agents edit files out-of-band).
   useEffect(() => {
-    if (tab === 'changes') loadChanges();
+    if (tab !== 'changes') return;
+    loadChanges();
+    const onFocus = () => loadChanges({ silent: true });
+    const id = setInterval(() => loadChanges({ silent: true }), 5000);
+    window.addEventListener('focus', onFocus);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener('focus', onFocus);
+    };
   }, [tab, loadChanges]);
+
+  // Collapse/expand every Changes section (and, in the grouped views, every
+  // folder/tree node) at once. `foldSignal.epoch` bumps so children re-apply.
+  const toggleFold = () => {
+    const action = allCollapsed ? 'expand' : 'collapse';
+    setAllCollapsed((v) => !v);
+    setFoldSignal((s) => ({ epoch: s.epoch + 1, action }));
+  };
 
   // Dismiss the context menu on any outside interaction.
   useEffect(() => {
@@ -308,9 +350,6 @@ export default function FileExplorer({ rootPath, rootName, onOpenFile, insetForC
     return rows;
   };
 
-  const iconBtn =
-    'p-1 rounded-md text-gray-500 hover:text-gray-800 hover:bg-black/[0.05] dark:hover:text-gray-200 dark:hover:bg-white/[0.07]';
-
   const changeCount = changes?.isRepo ? changes.files.length : 0;
 
   return (
@@ -381,8 +420,12 @@ export default function FileExplorer({ rootPath, rootName, onOpenFile, insetForC
         <ChangesView
           changes={changes}
           state={changesState}
-          onRefresh={loadChanges}
+          refreshing={refreshing}
+          onRefresh={() => loadChanges()}
           onOpenFile={onOpenFile}
+          foldSignal={foldSignal}
+          allCollapsed={allCollapsed}
+          onToggleFold={toggleFold}
         />
       )}
 
@@ -488,10 +531,20 @@ function TabButton({ icon: Icon, label, active, badge, onClick }) {
   );
 }
 
-// Source-control view: current branch, an additions/deletions summary, and the
-// list of changed files. Clicking a file opens it in the editor (deleted files
-// are shown but not openable).
-function ChangesView({ changes, state, onRefresh, onOpenFile }) {
+// Source-control view: current branch, a changeset toolbar (totals, refresh,
+// collapse-all), and the changed files split into Unstaged / Staged sections.
+// Clicking a file opens it in the editor (deleted files are shown but not
+// openable). Mirrors Superset's Changes tab.
+function ChangesView({
+  changes,
+  state,
+  refreshing,
+  onRefresh,
+  onOpenFile,
+  foldSignal,
+  allCollapsed,
+  onToggleFold,
+}) {
   if (state === 'loading' && !changes) {
     return (
       <div className="flex-1 flex items-center justify-center text-[12px] text-gray-500">
@@ -513,30 +566,47 @@ function ChangesView({ changes, state, onRefresh, onOpenFile }) {
   }
 
   const { branch, files, additions, deletions } = changes;
+  // Unstaged first, then Staged — matching Superset's ordering.
+  const unstaged = files.filter((f) => f.source === 'unstaged');
+  const staged = files.filter((f) => f.source === 'staged');
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
-      {/* Branch + summary header */}
-      <div className="px-3 py-2 border-b border-black/[0.06] dark:border-white/[0.08]">
-        <div className="flex items-center gap-1.5 text-[13px] font-medium text-gray-800">
-          <GitBranch size={14} className="text-gray-500 flex-shrink-0" />
-          <span className="truncate" title={branch}>
-            {branch}
+      {/* Branch header */}
+      <div className="flex items-center gap-1.5 px-3 py-2 text-[13px] font-medium text-gray-800 border-b border-black/[0.06] dark:border-white/[0.08]">
+        <GitBranch size={14} className="text-gray-500 flex-shrink-0" />
+        <span className="truncate" title={branch}>
+          {branch}
+        </span>
+      </div>
+
+      {/* Toolbar: totals + refresh + collapse-all */}
+      <div className="flex items-center gap-2 px-3 py-1.5 text-[11px] text-gray-500 border-b border-black/[0.06] dark:border-white/[0.08]">
+        <span className="whitespace-nowrap">
+          {files.length} {files.length === 1 ? 'file' : 'files'}
+        </span>
+        {(additions > 0 || deletions > 0) && (
+          <span className="whitespace-nowrap tabular-nums">
+            {additions > 0 && (
+              <span className="text-green-500 dark:text-green-400">+{additions}</span>
+            )}
+            {additions > 0 && deletions > 0 && ' '}
+            {deletions > 0 && (
+              <span className="text-red-500 dark:text-red-400 ml-0.5">−{deletions}</span>
+            )}
           </span>
-          <button
-            onClick={onRefresh}
-            title="Refresh"
-            className="ml-auto p-1 rounded-md text-gray-400 hover:text-gray-700 hover:bg-black/[0.05] dark:hover:text-gray-200 dark:hover:bg-white/[0.07]"
-          >
-            <RefreshCw size={12} className={state === 'loading' ? 'animate-spin' : ''} />
+        )}
+        <div className="ml-auto flex items-center gap-0.5">
+          <button className={iconBtn} title="Refresh" onClick={onRefresh}>
+            <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
           </button>
-        </div>
-        <div className="mt-1 flex items-center gap-2 text-[11.5px] text-gray-500">
-          <span>
-            {files.length} {files.length === 1 ? 'file' : 'files'}
-          </span>
-          {additions > 0 && <span className="text-green-500">+{additions}</span>}
-          {deletions > 0 && <span className="text-red-500">−{deletions}</span>}
+          <button
+            className={iconBtn}
+            title={allCollapsed ? 'Expand all' : 'Collapse all'}
+            onClick={onToggleFold}
+          >
+            {allCollapsed ? <UnfoldVertical size={14} /> : <FoldVertical size={14} />}
+          </button>
         </div>
       </div>
 
@@ -546,51 +616,117 @@ function ChangesView({ changes, state, onRefresh, onOpenFile }) {
         </div>
       ) : (
         <div className="flex-1 overflow-auto py-1">
-          {files.map((f) => {
-            const meta = statusMeta(f.status);
-            const deleted = f.status === 'D';
-            const dir = dirOf(f.rel, f.name);
-            return (
-              <button
-                key={f.path}
-                disabled={deleted}
-                onClick={() => !deleted && onOpenFile?.({ path: f.path, name: f.name })}
-                title={f.rel}
-                className={`w-full flex items-center gap-1.5 px-3 py-[3px] text-[12.5px] text-left ${
-                  deleted
-                    ? 'opacity-60 cursor-default'
-                    : 'hover:bg-black/[0.05] dark:hover:bg-white/[0.07]'
-                }`}
-              >
-                <span
-                  className={`w-3 text-center font-semibold text-[11px] flex-shrink-0 ${meta.cls}`}
-                >
-                  {meta.label}
-                </span>
-                <FileGlyph name={f.name} className="flex-shrink-0" />
-                <span
-                  className={`truncate text-gray-800 ${deleted ? 'line-through' : ''}`}
-                >
-                  {f.name}
-                </span>
-                {dir && (
-                  <span className="truncate text-[11px] text-gray-400 flex-1 min-w-0">
-                    {dir}
-                  </span>
-                )}
-                {(f.additions > 0 || f.deletions > 0) && (
-                  <span className="flex-shrink-0 ml-auto text-[10.5px] tabular-nums">
-                    {f.additions > 0 && <span className="text-green-500">+{f.additions}</span>}
-                    {f.deletions > 0 && (
-                      <span className="text-red-500 ml-1">−{f.deletions}</span>
-                    )}
-                  </span>
-                )}
-              </button>
-            );
-          })}
+          {unstaged.length > 0 && (
+            <ChangesSection
+              id="unstaged"
+              title="Unstaged"
+              count={unstaged.length}
+              foldSignal={foldSignal}
+            >
+              {unstaged.map((f) => (
+                <ChangeRow key={`u:${f.rel}`} file={f} onOpenFile={onOpenFile} />
+              ))}
+            </ChangesSection>
+          )}
+          {staged.length > 0 && (
+            <ChangesSection
+              id="staged"
+              title="Staged"
+              count={staged.length}
+              foldSignal={foldSignal}
+            >
+              {staged.map((f) => (
+                <ChangeRow key={`s:${f.rel}`} file={f} onOpenFile={onOpenFile} />
+              ))}
+            </ChangesSection>
+          )}
         </div>
       )}
     </div>
+  );
+}
+
+// One collapsible group in the Changes list (Unstaged / Staged). Responds to
+// the toolbar's collapse-all / expand-all signal.
+function ChangesSection({ id, title, count, foldSignal, children }) {
+  const [open, setOpen] = useState(true);
+  useEffect(() => {
+    if (foldSignal.epoch === 0) return; // ignore the initial (untriggered) value
+    setOpen(foldSignal.action === 'expand');
+  }, [foldSignal]);
+
+  return (
+    <div className="mb-1" data-section={id}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center gap-1 px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+      >
+        {open ? (
+          <ChevronDown size={12} className="flex-shrink-0" />
+        ) : (
+          <ChevronRight size={12} className="flex-shrink-0" />
+        )}
+        <span className="truncate">{title}</span>
+        <span className="min-w-[16px] px-1 text-center rounded-full bg-black/10 dark:bg-white/15 text-[10px] font-semibold text-gray-500 normal-case">
+          {count}
+        </span>
+      </button>
+      {open && <div>{children}</div>}
+    </div>
+  );
+}
+
+// A single changed-file row: type icon, muted directory prefix, bold basename
+// (with old→new for renames), +/- counts, and a colored status dot.
+function ChangeRow({ file, hideDir, onOpenFile }) {
+  const meta = statusDot(file.status);
+  const deleted = file.status === 'D';
+  const dir = hideDir ? '' : dirOf(file.rel, file.name);
+  const oldName = file.oldRel ? baseOf(file.oldRel) : null;
+
+  return (
+    <button
+      disabled={deleted}
+      onClick={() => !deleted && onOpenFile?.({ path: file.path, name: file.name })}
+      title={file.rel}
+      className={`w-full flex items-center gap-1.5 pl-3 pr-3 py-1 text-[12.5px] text-left ${
+        deleted
+          ? 'opacity-60 cursor-default'
+          : 'hover:bg-black/[0.05] dark:hover:bg-white/[0.07]'
+      }`}
+    >
+      <FileGlyph name={file.name} className="flex-shrink-0" />
+      <span className="flex min-w-0 flex-1 items-baseline overflow-hidden">
+        {dir && <span className="truncate text-gray-500">{dir}/</span>}
+        {oldName && (
+          <span className="truncate text-gray-400 flex-shrink-0">
+            {oldName}
+            <span className="px-1">→</span>
+          </span>
+        )}
+        <span
+          className={`min-w-[80px] truncate font-medium text-gray-800 ${
+            deleted ? 'line-through' : ''
+          }`}
+        >
+          {file.name}
+        </span>
+      </span>
+      {(file.additions > 0 || file.deletions > 0) && (
+        <span className="flex-shrink-0 text-[10.5px] tabular-nums">
+          {file.additions > 0 && (
+            <span className="text-green-500 dark:text-green-400">+{file.additions}</span>
+          )}
+          {file.additions > 0 && file.deletions > 0 && ' '}
+          {file.deletions > 0 && (
+            <span className="text-red-500 dark:text-red-400">−{file.deletions}</span>
+          )}
+        </span>
+      )}
+      <span
+        className={`w-2 h-2 rounded-full flex-shrink-0 ${meta.cls}`}
+        title={meta.label}
+      />
+    </button>
   );
 }
