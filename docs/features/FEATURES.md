@@ -53,6 +53,7 @@ spotting where WPHerd is already at parity and where it stands alone.
 - Export / import site: portable files+SQL zip; imports WPHerd, generic, and `.wpress` archives — _Also in: Local, Studio_
 - Site blueprints: save a full site snapshot and create new sites from it (Add Site → From Blueprint) — _Also in: Local, Herd (`herd.yml`), Studio_
 - HTTPS certificate trust automation: mkcert local CA install + per-site trusted cert — _Also in: Local, Studio_
+- Agent Launcher terminal: per-site AI-agent sessions in an embedded terminal with native clipboard/keys (Cmd+C/V, Shift+Enter multiline, line-edit chords), find (Cmd+F), clear (Cmd+K), WebGL rendering, Cmd+click file/URL links, drag-drop paths, OSC tab titles, and a session cache that survives tab switches — _WPHerd only (agentic coding: also in Studio Code)_
 
 ---
 
