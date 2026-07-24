@@ -1,31 +1,23 @@
 import { useEffect, useRef, useState } from 'react';
-import { Terminal as XTerm } from '@xterm/xterm';
-import { FitAddon } from '@xterm/addon-fit';
-import { ClipboardAddon } from '@xterm/addon-clipboard';
-import { SearchAddon } from '@xterm/addon-search';
-import { Unicode11Addon } from '@xterm/addon-unicode11';
-import { WebLinksAddon } from '@xterm/addon-web-links';
 import { ArrowDown } from 'lucide-react';
 import '@xterm/xterm/css/xterm.css';
-import { MONO_STACK, onThemeChange, terminalThemes, themeName } from '../lib/theme';
-import {
-  isSelectAllChord,
-  translateLineEditChord,
-  shouldBubbleChord,
-  trimSelection,
-  isNonTextPaste,
-} from '../lib/terminal/keys';
-import { Utf8Base64 } from '../lib/terminal/utf8Base64';
-import { attachWebgl } from '../lib/terminal/webgl';
+import { shellEscape } from '../lib/terminal/keys';
+import * as sessionCache from '../lib/terminal/sessionCache';
 import TerminalSearchBar from './TerminalSearchBar';
 
-// Cmd held, nothing else — for the terminal-local Cmd+F/K shortcuts.
-const metaOnly = (e) => e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey;
-
-// Embedded terminal pane bound to a single main-process Session (by sessionId).
-// Replays the ring buffer on attach, then streams live. Fills its parent, which
-// sets the height.
-export default function Terminal({ sessionId, onExited, onRestart }) {
+// Embedded view over a cached main-process Session (by sessionId). The xterm
+// instance lives in sessionCache and is re-parented here on mount, so switching
+// tabs never disposes it — this component is just the glue: it mounts the
+// cached wrapper, tracks scroll for the scroll-to-bottom button, owns the
+// find-bar UI state, and renders the session-ended overlay.
+export default function Terminal({
+  sessionId,
+  onExited,
+  onRestart,
+  rootPath,
+  onOpenFile,
+  onTitle,
+}) {
   const hostRef = useRef(null);
   const searchAddonRef = useRef(null);
   const termRef = useRef(null);
@@ -35,180 +27,89 @@ export default function Terminal({ sessionId, onExited, onRestart }) {
 
   useEffect(() => {
     const host = hostRef.current;
-    const api = window.electronAPI;
-    const term = new XTerm({
-      fontFamily: MONO_STACK,
-      fontSize: 13,
-      cursorBlink: true,
-      cursorStyle: 'block',
-      cursorInactiveStyle: 'outline',
-      allowProposedApi: true,
-      scrollback: 5000,
-      // Keep Option+key typing intl characters (e.g. Option+2 = @) instead of
-      // sending a Meta-escaped sequence.
-      macOptionIsMeta: false,
-      theme: terminalThemes[themeName()],
-    });
-    // The terminal blends into the page, so its palette has to flip with the
-    // macOS appearance rather than staying a fixed dark box.
-    const stopThemeWatch = onThemeChange((name) => {
-      term.options.theme = terminalThemes[name];
-    });
-    termRef.current = term;
-    const fit = new FitAddon();
-    term.loadAddon(fit);
-    // OSC 52 clipboard (tmux/vim/agents write the system clipboard). The
-    // UTF-8-safe codec fixes multi-byte mojibake in the addon's default.
-    term.loadAddon(new ClipboardAddon(new Utf8Base64()));
-    const searchAddon = new SearchAddon();
-    term.loadAddon(searchAddon);
-    searchAddonRef.current = searchAddon;
-    // Correct emoji/CJK cell widths — agents emit both constantly.
-    term.loadAddon(new Unicode11Addon());
-    term.unicode.activeVersion = '11';
-    // Cmd+click a URL in output → open in the default browser (plain click must
-    // not hijack the TUI).
-    term.loadAddon(
-      new WebLinksAddon((event, uri) => {
-        if (!event.metaKey) return;
-        api.openSiteInBrowser(uri);
-      })
-    );
-    term.open(host);
-    fit.fit();
-    const detachWebgl = attachWebgl(term);
+    setExit(sessionCache.isExited(sessionId) ? { code: null } : null);
+    setSearchOpen(false);
 
-    // Custom key handler — short-circuits xterm's key encoder so line-edit
-    // chords reach the shell, Cmd+A selects all, and every Cmd chord bubbles
-    // to the OS clipboard pipeline instead of leaking CSI-u into TUIs.
-    term.attachCustomKeyEventHandler((e) => {
-      const seq = translateLineEditChord(e);
-      if (seq !== null) {
-        if (e.type === 'keydown') {
-          e.preventDefault();
-          term.input(seq, true);
-        }
-        return false;
-      }
-      if (isSelectAllChord(e)) {
-        if (e.type === 'keydown') {
-          e.preventDefault();
-          term.selectAll();
-        }
-        return false;
-      }
-      // Cmd+F — toggle the find bar.
-      if (e.code === 'KeyF' && metaOnly(e)) {
-        if (e.type === 'keydown') {
-          e.preventDefault();
-          setSearchOpen((v) => !v);
-        }
-        return false;
-      }
-      // Cmd+K — clear the viewport and the session's ring buffer (so a later
-      // reattach doesn't replay the cleared content).
-      if (e.code === 'KeyK' && metaOnly(e)) {
-        if (e.type === 'keydown') {
-          e.preventDefault();
-          term.clear();
-          api.terminalClear(sessionId);
-        }
-        return false;
-      }
-      // Cmd+Shift+↓ — scroll to bottom.
-      if (e.code === 'ArrowDown' && e.metaKey && e.shiftKey && !e.ctrlKey && !e.altKey) {
-        if (e.type === 'keydown') {
-          e.preventDefault();
-          term.scrollToBottom();
-        }
-        return false;
-      }
-      // Do NOT preventDefault: the browser keydown → paste pipeline is what
-      // fires xterm's paste event; we only skip xterm's own key encoder.
-      if (shouldBubbleChord(e)) return false;
-      return true;
+    const entry = sessionCache.getOrCreate(sessionId, {
+      rootPath,
+      onOpenFile,
+      onTitle: (title) => onTitle?.(sessionId, title),
+      onToggleSearch: () => setSearchOpen((v) => !v),
+      onExit: (code) => setExit({ code }),
     });
+    termRef.current = entry.term;
+    searchAddonRef.current = entry.searchAddon;
 
-    const onData = term.onData((data) => api.terminalInput(sessionId, data));
+    sessionCache.attach(sessionId, host);
 
-    // Track scroll position to toggle the scroll-to-bottom button.
+    // Track scroll position to toggle the scroll-to-bottom button. These xterm
+    // listeners are cheap and per-mount (disposed on unmount).
     const checkAtBottom = () => {
-      const b = term.buffer.active;
+      const b = entry.term.buffer.active;
       setAtBottom(b.viewportY >= b.baseY);
     };
-    const writeParsed = term.onWriteParsed(checkAtBottom);
-    const scrolled = term.onScroll(checkAtBottom);
+    checkAtBottom();
+    const writeParsed = entry.term.onWriteParsed(checkAtBottom);
+    const scrolled = entry.term.onScroll(checkAtBottom);
 
-    // Copy trims trailing whitespace (terminals pad lines to grid width).
-    const onCopy = (e) => {
-      const sel = term.getSelection();
-      if (!sel) return;
-      const trimmed = trimSelection(sel);
-      if (e.clipboardData) {
-        e.preventDefault();
-        e.clipboardData.setData('text/plain', trimmed);
-      } else {
-        navigator.clipboard?.writeText(trimmed).catch(() => {});
-      }
-    };
-    term.element?.addEventListener('copy', onCopy);
-
-    // Image/file paste → forward literal ^V so agents attach the image, rather
-    // than xterm emitting empty bracketed-paste markers. Capture phase on the
-    // wrapper preempts xterm's own paste listeners.
-    const onPaste = (e) => {
-      if (!isNonTextPaste(e)) return;
-      e.preventDefault();
-      e.stopImmediatePropagation();
-      term.input('\x16', true);
-    };
-    host.addEventListener('paste', onPaste, { capture: true });
-
-    api.on('terminal-replay', (msg) => {
-      if (msg.sessionId !== sessionId) return;
-      if (msg.data) term.write(msg.data);
-      if (msg.exited) setExit({ code: null });
-      fit.fit();
-      api.terminalResize(sessionId, term.cols, term.rows);
-    });
-    api.on('terminal-data', (msg) => {
-      if (msg.sessionId === sessionId) term.write(msg.data);
-    });
-    api.on('terminal-exit', (msg) => {
-      if (msg.sessionId === sessionId) setExit({ code: msg.code });
-    });
-
-    // Attach: main binds this window to the Session and replays the buffer.
-    api.terminalReady(sessionId);
-    term.focus();
-
-    const onResize = () => {
-      fit.fit();
-      api.terminalResize(sessionId, term.cols, term.rows);
-    };
-    const ro = new ResizeObserver(onResize);
+    const ro = new ResizeObserver(() => sessionCache.fit(sessionId));
     ro.observe(host);
 
     return () => {
-      onData.dispose();
       writeParsed.dispose();
       scrolled.dispose();
-      stopThemeWatch();
-      detachWebgl();
       ro.disconnect();
-      term.element?.removeEventListener('copy', onCopy);
-      host?.removeEventListener('paste', onPaste, { capture: true });
-      api.off('terminal-replay');
-      api.off('terminal-data');
-      api.off('terminal-exit');
+      sessionCache.detach(sessionId);
       searchAddonRef.current = null;
       termRef.current = null;
-      term.dispose();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
 
+  // Keep the cached handlers pointed at the latest callbacks/props without
+  // remounting the terminal.
+  useEffect(() => {
+    const entry = sessionCache.getOrCreate(sessionId, {
+      rootPath,
+      onOpenFile,
+      onTitle: (title) => onTitle?.(sessionId, title),
+      onToggleSearch: () => setSearchOpen((v) => !v),
+      onExit: (code) => setExit({ code }),
+    });
+    // getOrCreate already replaced entry.handlers; nothing else to do.
+    void entry;
+  }, [sessionId, rootPath, onOpenFile, onTitle]);
+
+  const onDragOver = (e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+  };
+
+  const onDrop = (e) => {
+    e.preventDefault();
+    // Finder drops carry native files (Electron 28 still exposes File.path);
+    // internal Files-tree drags carry the path in text/plain.
+    const files = [...e.dataTransfer.files];
+    let paths;
+    if (files.length > 0) {
+      paths = files.map((f) => f.path).filter(Boolean);
+    } else {
+      const plain = e.dataTransfer.getData('text/plain');
+      if (!plain) return;
+      paths = [plain];
+    }
+    if (paths.length === 0) return;
+    if (!sessionCache.isExited(sessionId)) {
+      window.electronAPI.terminalInput(sessionId, shellEscape(paths));
+    }
+  };
+
   return (
-    <div className="relative h-full w-full overflow-hidden bg-background">
+    <div
+      className="relative h-full w-full overflow-hidden bg-background"
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+    >
       <div ref={hostRef} className="h-full w-full p-2" />
       {searchOpen && (
         <TerminalSearchBar
@@ -223,7 +124,7 @@ export default function Terminal({ sessionId, onExited, onRestart }) {
       <button
         onClick={() => termRef.current?.scrollToBottom()}
         aria-label="Scroll to bottom"
-        className={`panel absolute bottom-3 left-1/2 -translate-x-1/2 z-10 flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition-opacity hover:text-foreground ${
+        className={`panel absolute bottom-3 left-1/2 z-10 flex h-8 w-8 -translate-x-1/2 items-center justify-center rounded-full text-muted-foreground transition-opacity hover:text-foreground ${
           atBottom ? 'pointer-events-none opacity-0' : 'opacity-100'
         }`}
       >
@@ -231,7 +132,7 @@ export default function Terminal({ sessionId, onExited, onRestart }) {
       </button>
       {exit && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/50">
-          <div className="panel p-6 w-[320px] text-center">
+          <div className="panel w-[320px] p-6 text-center">
             <p className="text-sm font-medium text-foreground">Session ended</p>
             <p className="mt-1 text-xs text-muted-foreground">
               {exit.code == null

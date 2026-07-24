@@ -480,6 +480,13 @@ export default function FileExplorer({
               onDragOver={
                 entry.isDir ? (e) => onFolderDragOver(e, entry.path) : undefined
               }
+              draggable
+              onDragStart={(e) => {
+                // Internal drag → the terminal reads this as a path to insert.
+                // Carries no 'Files' type, so the tree's upload drop ignores it.
+                e.dataTransfer.setData('text/plain', entry.path);
+                e.dataTransfer.effectAllowed = 'copy';
+              }}
               title={entry.name}
               className={`w-full flex items-center gap-1.5 py-[3px] pr-2 rounded-md text-[12.5px] text-foreground ${
                 isDropTarget ? 'bg-highlight/10 ring-1 ring-highlight' : 'hover:bg-accent'

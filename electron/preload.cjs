@@ -174,6 +174,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   terminalStop: (sessionId) => ipcRenderer.invoke('terminal-stop', sessionId),
   listDirectory: (rootPath, dirPath) =>
     ipcRenderer.invoke('list-directory', rootPath, dirPath),
+  terminalStatPath: (rootPath, candidate) =>
+    ipcRenderer.invoke('terminal-stat-path', rootPath, candidate),
   openFilePath: (filePath) => ipcRenderer.invoke('open-file-path', filePath),
   readFile: (rootPath, filePath) =>
     ipcRenderer.invoke('read-file', rootPath, filePath),
@@ -201,11 +203,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   gitDiscard: (siteRoot, repoRoot, rel, status) =>
     ipcRenderer.invoke('git-discard', siteRoot, repoRoot, rel, status),
 
-  // IPC Events (renderer listening to main)
+  // IPC Events (renderer listening to main). `on` returns an unsubscribe that
+  // removes only its own listener — required when several subscribers share a
+  // channel (e.g. many live terminals on 'terminal-data'). `off` (remove all)
+  // stays for single-subscriber callers that use it in cleanup.
   on: (channel, callback) => {
-    if (VALID_EVENT_CHANNELS.includes(channel)) {
-      ipcRenderer.on(channel, (_, data) => callback(data));
-    }
+    if (!VALID_EVENT_CHANNELS.includes(channel)) return () => {};
+    const wrapped = (_, data) => callback(data);
+    ipcRenderer.on(channel, wrapped);
+    return () => ipcRenderer.removeListener(channel, wrapped);
   },
   off: (channel) => {
     if (VALID_EVENT_CHANNELS.includes(channel)) {

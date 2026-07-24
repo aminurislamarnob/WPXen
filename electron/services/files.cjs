@@ -18,6 +18,27 @@ function assertInRoot(rootPath, target) {
   return { root, resolved };
 }
 
+// Validate a candidate path from terminal output. Resolves relative candidates
+// against the site root, confines the result inside the root, and returns
+// { exists, isDirectory, resolved }. Never throws — an escape or error is just
+// { exists: false } (so links to /etc/hosts etc. simply don't linkify).
+function statPath(rootPath, candidate) {
+  try {
+    if (!candidate || candidate.includes('\0')) return { exists: false };
+    const root = path.resolve(rootPath);
+    const abs = path.isAbsolute(candidate)
+      ? path.resolve(candidate)
+      : path.resolve(root, candidate);
+    if (abs !== root && !abs.startsWith(root + path.sep)) {
+      return { exists: false };
+    }
+    const st = fs.statSync(abs);
+    return { exists: true, isDirectory: st.isDirectory(), resolved: abs };
+  } catch {
+    return { exists: false };
+  }
+}
+
 function listDirectory(rootPath, dirPath) {
   const { resolved: target } = assertInRoot(rootPath, dirPath);
 
@@ -153,6 +174,7 @@ function renamePath(rootPath, targetPath, newName) {
 
 module.exports = {
   assertInRoot,
+  statPath,
   listDirectory,
   readFile,
   writeFile,

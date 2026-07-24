@@ -206,6 +206,12 @@ function registerHandlers(win, storeInstance) {
     }
   });
 
+  // Validate a candidate path from terminal output for the file-link provider
+  // (confined to the site root; never throws).
+  ipcMain.handle('terminal-stat-path', (_e, rootPath, candidate) =>
+    files.statPath(rootPath, candidate)
+  );
+
   // Open a file in the OS default application.
   ipcMain.handle('open-file-path', (_e, filePath) => {
     shell.openPath(filePath);
