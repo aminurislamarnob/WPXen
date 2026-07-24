@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   ChevronRight,
   ChevronDown,
@@ -10,6 +10,7 @@ import {
   RefreshCw,
   FoldVertical,
   UnfoldVertical,
+  ListTree,
   ExternalLink,
   Clipboard,
   Copy,
@@ -61,6 +62,13 @@ export default function FileExplorer({ rootPath, rootName, onOpenFile, insetForC
   const [refreshing, setRefreshing] = useState(false); // spinner during any refetch
   const [foldSignal, setFoldSignal] = useState({ epoch: 0, action: 'collapse' });
   const [allCollapsed, setAllCollapsed] = useState(false);
+  const [viewMode, setViewMode] = useState(() => {
+    try {
+      return localStorage.getItem('wpherd.changesViewMode') === 'tree' ? 'tree' : 'folders';
+    } catch {
+      return 'folders';
+    }
+  });
   const changesRef = useRef(null); // last good result, to suppress the loading flash
   const inFlightRef = useRef(false); // dedupe overlapping fetches
 
@@ -135,6 +143,19 @@ export default function FileExplorer({ rootPath, rootName, onOpenFile, insetForC
     setAllCollapsed((v) => !v);
     setFoldSignal((s) => ({ epoch: s.epoch + 1, action }));
   };
+
+  // Switch the Changes list between the folders (grouped by parent) and tree
+  // (full hierarchy) views, persisting the choice across sessions.
+  const toggleViewMode = () =>
+    setViewMode((m) => {
+      const next = m === 'folders' ? 'tree' : 'folders';
+      try {
+        localStorage.setItem('wpherd.changesViewMode', next);
+      } catch {
+        /* private mode — fall back to session-only */
+      }
+      return next;
+    });
 
   // Dismiss the context menu on any outside interaction.
   useEffect(() => {
@@ -426,6 +447,8 @@ export default function FileExplorer({ rootPath, rootName, onOpenFile, insetForC
           foldSignal={foldSignal}
           allCollapsed={allCollapsed}
           onToggleFold={toggleFold}
+          viewMode={viewMode}
+          onToggleViewMode={toggleViewMode}
         />
       )}
 
@@ -544,6 +567,8 @@ function ChangesView({
   foldSignal,
   allCollapsed,
   onToggleFold,
+  viewMode,
+  onToggleViewMode,
 }) {
   if (state === 'loading' && !changes) {
     return (
@@ -597,6 +622,13 @@ function ChangesView({
           </span>
         )}
         <div className="ml-auto flex items-center gap-0.5">
+          <button
+            className={iconBtn}
+            title={viewMode === 'folders' ? 'Tree view' : 'Folder view'}
+            onClick={onToggleViewMode}
+          >
+            {viewMode === 'folders' ? <ListTree size={14} /> : <Folder size={14} />}
+          </button>
           <button className={iconBtn} title="Refresh" onClick={onRefresh}>
             <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
           </button>
@@ -623,9 +655,12 @@ function ChangesView({
               count={unstaged.length}
               foldSignal={foldSignal}
             >
-              {unstaged.map((f) => (
-                <ChangeRow key={`u:${f.rel}`} file={f} onOpenFile={onOpenFile} />
-              ))}
+              <SectionBody
+                files={unstaged}
+                viewMode={viewMode}
+                foldSignal={foldSignal}
+                onOpenFile={onOpenFile}
+              />
             </ChangesSection>
           )}
           {staged.length > 0 && (
@@ -635,9 +670,12 @@ function ChangesView({
               count={staged.length}
               foldSignal={foldSignal}
             >
-              {staged.map((f) => (
-                <ChangeRow key={`s:${f.rel}`} file={f} onOpenFile={onOpenFile} />
-              ))}
+              <SectionBody
+                files={staged}
+                viewMode={viewMode}
+                foldSignal={foldSignal}
+                onOpenFile={onOpenFile}
+              />
             </ChangesSection>
           )}
         </div>
@@ -676,9 +714,190 @@ function ChangesSection({ id, title, count, foldSignal, children }) {
   );
 }
 
+// Section content in the selected view: folders (grouped by parent) or tree
+// (full hierarchy). Both indent their rows under collapsible headers.
+function SectionBody({ files, viewMode, foldSignal, onOpenFile }) {
+  if (viewMode === 'tree') {
+    return <TreeView files={files} foldSignal={foldSignal} onOpenFile={onOpenFile} />;
+  }
+  return <FoldersView files={files} foldSignal={foldSignal} onOpenFile={onOpenFile} />;
+}
+
+// Folders view: flat groups keyed by each file's parent directory. Root-level
+// files come first (no header); the rest are alphabetized, collapsible groups.
+function FoldersView({ files, foldSignal, onOpenFile }) {
+  const groups = useMemo(() => {
+    const m = new Map();
+    for (const f of files) {
+      const dir = dirOf(f.rel, f.name);
+      if (!m.has(dir)) m.set(dir, []);
+      m.get(dir).push(f);
+    }
+    for (const arr of m.values()) arr.sort((a, b) => a.name.localeCompare(b.name));
+    return [...m.entries()].sort(([a], [b]) =>
+      a === '' ? -1 : b === '' ? 1 : a.localeCompare(b)
+    );
+  }, [files]);
+
+  return (
+    <>
+      {groups.map(([dir, groupFiles]) =>
+        dir === '' ? (
+          groupFiles.map((f) => (
+            <ChangeRow key={f.rel} file={f} hideDir onOpenFile={onOpenFile} />
+          ))
+        ) : (
+          <FolderGroup
+            key={dir}
+            dir={dir}
+            files={groupFiles}
+            foldSignal={foldSignal}
+            onOpenFile={onOpenFile}
+          />
+        )
+      )}
+    </>
+  );
+}
+
+// One collapsible parent-directory group in folders view.
+function FolderGroup({ dir, files, foldSignal, onOpenFile }) {
+  const [open, setOpen] = useState(true);
+  useEffect(() => {
+    if (foldSignal.epoch === 0) return;
+    setOpen(foldSignal.action === 'expand');
+  }, [foldSignal]);
+
+  return (
+    <div>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        title={dir}
+        className="w-full flex items-center gap-1 pl-3 pr-3 py-0.5 text-[11.5px] text-gray-500 hover:bg-black/[0.03] dark:hover:bg-white/[0.05]"
+      >
+        {open ? (
+          <ChevronDown size={12} className="flex-shrink-0" />
+        ) : (
+          <ChevronRight size={12} className="flex-shrink-0" />
+        )}
+        <Folder size={13} className="text-[#5ac8fa] flex-shrink-0" />
+        <span className="truncate">{dir}</span>
+      </button>
+      {open &&
+        files.map((f) => (
+          <ChangeRow key={f.rel} file={f} hideDir depth={1} onOpenFile={onOpenFile} />
+        ))}
+    </div>
+  );
+}
+
+// Build a nested { name, dirs: Map, files: [] } tree from a flat file list.
+function buildTree(files) {
+  const root = { name: '', dirs: new Map(), files: [] };
+  for (const f of files) {
+    const parts = f.rel.split('/');
+    parts.pop(); // drop the basename
+    let node = root;
+    for (const seg of parts) {
+      if (!node.dirs.has(seg)) {
+        node.dirs.set(seg, { name: seg, dirs: new Map(), files: [] });
+      }
+      node = node.dirs.get(seg);
+    }
+    node.files.push(f);
+  }
+  return root;
+}
+
+// Tree view: the full directory hierarchy, with single-child directory chains
+// compressed into one row (e.g. wp-content/plugins/foo) to keep WP paths shallow.
+function TreeView({ files, foldSignal, onOpenFile }) {
+  const root = useMemo(() => buildTree(files), [files]);
+  const subdirs = [...root.dirs.values()].sort((a, b) => a.name.localeCompare(b.name));
+  const rootFiles = [...root.files].sort((a, b) => a.name.localeCompare(b.name));
+  return (
+    <>
+      {subdirs.map((d) => (
+        <TreeDir
+          key={d.name}
+          node={d}
+          depth={0}
+          foldSignal={foldSignal}
+          onOpenFile={onOpenFile}
+        />
+      ))}
+      {rootFiles.map((f) => (
+        <ChangeRow key={f.rel} file={f} hideDir depth={0} onOpenFile={onOpenFile} />
+      ))}
+    </>
+  );
+}
+
+// One directory node in tree view. Compresses single-child chains into its own
+// label so a deep path renders as a single collapsible row.
+function TreeDir({ node, depth, foldSignal, onOpenFile }) {
+  const [open, setOpen] = useState(true);
+  useEffect(() => {
+    if (foldSignal.epoch === 0) return;
+    setOpen(foldSignal.action === 'expand');
+  }, [foldSignal]);
+
+  let name = node.name;
+  let cur = node;
+  while (cur.files.length === 0 && cur.dirs.size === 1) {
+    const [only] = cur.dirs.values();
+    name = `${name}/${only.name}`;
+    cur = only;
+  }
+  const subdirs = [...cur.dirs.values()].sort((a, b) => a.name.localeCompare(b.name));
+  const files = [...cur.files].sort((a, b) => a.name.localeCompare(b.name));
+
+  return (
+    <div>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        title={name}
+        style={{ paddingLeft: 12 + depth * 12 }}
+        className="w-full flex items-center gap-1 pr-3 py-0.5 text-[12px] text-gray-600 hover:bg-black/[0.03] dark:hover:bg-white/[0.05]"
+      >
+        {open ? (
+          <ChevronDown size={12} className="flex-shrink-0" />
+        ) : (
+          <ChevronRight size={12} className="flex-shrink-0" />
+        )}
+        <Folder size={13} className="text-[#5ac8fa] flex-shrink-0" />
+        <span className="truncate">{name}</span>
+      </button>
+      {open && (
+        <>
+          {subdirs.map((d) => (
+            <TreeDir
+              key={d.name}
+              node={d}
+              depth={depth + 1}
+              foldSignal={foldSignal}
+              onOpenFile={onOpenFile}
+            />
+          ))}
+          {files.map((f) => (
+            <ChangeRow
+              key={f.rel}
+              file={f}
+              hideDir
+              depth={depth + 1}
+              onOpenFile={onOpenFile}
+            />
+          ))}
+        </>
+      )}
+    </div>
+  );
+}
+
 // A single changed-file row: type icon, muted directory prefix, bold basename
-// (with old→new for renames), +/- counts, and a colored status dot.
-function ChangeRow({ file, hideDir, onOpenFile }) {
+// (with old→new for renames), +/- counts, and a colored status dot. `depth`
+// indents the row under a folder/tree header.
+function ChangeRow({ file, hideDir, depth = 0, onOpenFile }) {
   const meta = statusDot(file.status);
   const deleted = file.status === 'D';
   const dir = hideDir ? '' : dirOf(file.rel, file.name);
@@ -689,7 +908,8 @@ function ChangeRow({ file, hideDir, onOpenFile }) {
       disabled={deleted}
       onClick={() => !deleted && onOpenFile?.({ path: file.path, name: file.name })}
       title={file.rel}
-      className={`w-full flex items-center gap-1.5 pl-3 pr-3 py-1 text-[12.5px] text-left ${
+      style={{ paddingLeft: 12 + depth * 12 }}
+      className={`w-full flex items-center gap-1.5 pr-3 py-1 text-[12.5px] text-left ${
         deleted
           ? 'opacity-60 cursor-default'
           : 'hover:bg-black/[0.05] dark:hover:bg-white/[0.07]'
