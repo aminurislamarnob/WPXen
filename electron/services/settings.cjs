@@ -1,0 +1,262 @@
+'use strict';
+
+// Global settings: one schema, one validator, one place for side effects.
+//
+// Every user preference is declared once in SETTINGS below with its type, its
+// default and (optionally) its bounds. The renderer never writes the store
+// directly — it sends a patch to `settings-set`, which is validated here, so an
+// unknown or malformed key can never reach disk. Side effects (login item,
+// MySQL credentials, nginx reloads) hang off the `effects` map injected at
+// init, keeping this module free of electron imports and therefore testable.
+//
+// Values are addressed by dotted key ('app.confirmOnQuit') and persisted under
+// the `settings.` prefix in the JsonStore, so `app.confirmOnQuit` lands at
+// `settings.app.confirmOnQuit`.
+
+// ─── Schema ────────────────────────────────────────────────────────────────
+//
+// type: bool | string | int | float | enum | path | list | object
+//   int/float accept `min`/`max`; enum requires `values`; list is an array of
+//   non-empty strings; object is opaque and must bring its own `validate`.
+// default: a literal, or a function resolved lazily at read time (used where
+//   the default depends on the machine, e.g. the detected PHP version).
+// validate: (value) => true | string   — a string is the rejection reason.
+
+const SETTINGS = {
+  // ── Sites ────────────────────────────────────────────────────────────────
+  'sites.dir': { type: 'path' },
+
+  // ── PHP ──────────────────────────────────────────────────────────────────
+  'php.defaultVersion': { type: 'string', default: '' },
+
+  // ── App ──────────────────────────────────────────────────────────────────
+  'app.startAtLogin': { type: 'bool', default: false },
+
+  // ── Database ─────────────────────────────────────────────────────────────
+  'db.user': { type: 'string', default: 'root' },
+  'db.password': { type: 'string', default: '' },
+};
+
+// Legacy flat keys → new namespaced keys. Migrated once on init; the old keys
+// are deliberately left in place for one release so downgrading doesn't lose
+// data.
+const LEGACY_KEYS = {
+  sitesDir: 'sites.dir',
+  defaultPhpVersion: 'php.defaultVersion',
+  startAtLogin: 'app.startAtLogin',
+  dbUser: 'db.user',
+  dbPassword: 'db.password',
+};
+
+// ─── Validation ────────────────────────────────────────────────────────────
+
+function checkNumber(value, spec, integer) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return { ok: false, reason: `expected a ${integer ? 'whole number' : 'number'}` };
+  }
+  if (integer && !Number.isInteger(value)) {
+    return { ok: false, reason: 'expected a whole number' };
+  }
+  if (spec.min !== undefined && value < spec.min) {
+    return { ok: false, reason: `must be at least ${spec.min}` };
+  }
+  if (spec.max !== undefined && value > spec.max) {
+    return { ok: false, reason: `must be at most ${spec.max}` };
+  }
+  return { ok: true, value };
+}
+
+// Type-checks a single value against its spec. Returns {ok, value} or
+// {ok: false, reason}. Deliberately strict: no coercion, because a silently
+// coerced '' → 0 is worse than a visible rejection.
+function coerce(spec, value) {
+  switch (spec.type) {
+    case 'bool':
+      return typeof value === 'boolean'
+        ? { ok: true, value }
+        : { ok: false, reason: 'expected true or false' };
+
+    case 'string':
+      return typeof value === 'string'
+        ? { ok: true, value }
+        : { ok: false, reason: 'expected a string' };
+
+    case 'path':
+      if (typeof value !== 'string') return { ok: false, reason: 'expected a path' };
+      if (!value.trim()) return { ok: false, reason: 'path cannot be empty' };
+      return { ok: true, value };
+
+    case 'int':
+      return checkNumber(value, spec, true);
+
+    case 'float':
+      return checkNumber(value, spec, false);
+
+    case 'enum':
+      return spec.values.includes(value)
+        ? { ok: true, value }
+        : { ok: false, reason: `must be one of: ${spec.values.join(', ')}` };
+
+    case 'list':
+      if (!Array.isArray(value)) return { ok: false, reason: 'expected a list' };
+      if (!value.every((v) => typeof v === 'string' && v.trim())) {
+        return { ok: false, reason: 'list entries must be non-empty strings' };
+      }
+      return { ok: true, value };
+
+    case 'object':
+      if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+        return { ok: false, reason: 'expected an object' };
+      }
+      return { ok: true, value };
+
+    default:
+      return { ok: false, reason: `unknown setting type '${spec.type}'` };
+  }
+}
+
+// ─── Instance ──────────────────────────────────────────────────────────────
+
+/**
+ * Binds the schema to a store.
+ *
+ * @param {object} opts.store      JsonStore (needs get/set with dotted paths)
+ * @param {object} opts.effects    { [key]: (value, all) => void } run after a
+ *                                 key is persisted. Throwing is contained: the
+ *                                 value stays written and the error surfaces on
+ *                                 the result so the UI can say so.
+ * @param {object} opts.defaults   { [key]: value | () => value } machine-derived
+ *                                 defaults overriding the schema's.
+ * @param {object} opts.schema     override for tests
+ */
+function createSettings({ store, effects = {}, defaults = {}, schema = SETTINGS }) {
+  function specFor(key) {
+    return Object.prototype.hasOwnProperty.call(schema, key) ? schema[key] : null;
+  }
+
+  function defaultFor(key, spec) {
+    const override = Object.prototype.hasOwnProperty.call(defaults, key)
+      ? defaults[key]
+      : undefined;
+    const raw = override !== undefined ? override : spec.default;
+    return typeof raw === 'function' ? raw() : raw;
+  }
+
+  // Flat dotted map of every known setting, store value or default. Flat rather
+  // than nested because that's what the registry-driven UI and the search index
+  // both want.
+  function read() {
+    const out = {};
+    for (const [key, spec] of Object.entries(schema)) {
+      const stored = store.get(`settings.${key}`, undefined);
+      if (stored === undefined) {
+        out[key] = defaultFor(key, spec);
+        continue;
+      }
+      // A store hand-edited into an invalid state falls back to the default
+      // rather than propagating garbage into the app.
+      const checked = coerce(spec, stored);
+      out[key] = checked.ok ? checked.value : defaultFor(key, spec);
+    }
+    return out;
+  }
+
+  function get(key) {
+    const spec = specFor(key);
+    if (!spec) return undefined;
+    const stored = store.get(`settings.${key}`, undefined);
+    if (stored === undefined) return defaultFor(key, spec);
+    const checked = coerce(spec, stored);
+    return checked.ok ? checked.value : defaultFor(key, spec);
+  }
+
+  /**
+   * Validates and persists a patch of dotted keys.
+   * @returns {{ok: boolean, applied: string[], rejected: {key, reason}[]}}
+   *
+   * Rejections are always reported, never silent — a typo'd key that persisted
+   * nothing and said nothing would be a debugging trap.
+   */
+  function write(patch) {
+    const applied = [];
+    const rejected = [];
+
+    if (patch === null || typeof patch !== 'object' || Array.isArray(patch)) {
+      return {
+        ok: false,
+        applied,
+        rejected: [{ key: '(patch)', reason: 'expected an object' }],
+      };
+    }
+
+    for (const [key, value] of Object.entries(patch)) {
+      const spec = specFor(key);
+      if (!spec) {
+        rejected.push({ key, reason: 'unknown setting' });
+        continue;
+      }
+      const checked = coerce(spec, value);
+      if (!checked.ok) {
+        rejected.push({ key, reason: checked.reason });
+        continue;
+      }
+      if (spec.validate) {
+        const verdict = spec.validate(checked.value);
+        if (verdict !== true) {
+          rejected.push({
+            key,
+            reason: typeof verdict === 'string' ? verdict : 'invalid value',
+          });
+          continue;
+        }
+      }
+      store.set(`settings.${key}`, checked.value);
+      applied.push(key);
+    }
+
+    // Effects run after every value in the patch is persisted, so a handler
+    // that reads a sibling key (db.user reading db.password) sees the new
+    // state, not a half-applied one.
+    const all = read();
+    const failed = [];
+    for (const key of applied) {
+      const effect = effects[key];
+      if (!effect) continue;
+      try {
+        effect(all[key], all);
+      } catch (err) {
+        failed.push({ key, reason: err?.message || String(err) });
+      }
+    }
+
+    return {
+      ok: rejected.length === 0 && failed.length === 0,
+      applied,
+      rejected: [...rejected, ...failed],
+      settings: all,
+    };
+  }
+
+  // Copies legacy flat keys onto their namespaced homes. Idempotent: a key
+  // already present in its new location is never overwritten, so this can run
+  // on every launch.
+  function migrateLegacy() {
+    const migrated = [];
+    for (const [oldKey, newKey] of Object.entries(LEGACY_KEYS)) {
+      const spec = specFor(newKey);
+      if (!spec) continue;
+      if (store.get(`settings.${newKey}`, undefined) !== undefined) continue;
+      const legacy = store.get(`settings.${oldKey}`, undefined);
+      if (legacy === undefined) continue;
+      const checked = coerce(spec, legacy);
+      if (!checked.ok) continue;
+      store.set(`settings.${newKey}`, checked.value);
+      migrated.push(newKey);
+    }
+    return migrated;
+  }
+
+  return { read, get, write, migrateLegacy, schema };
+}
+
+module.exports = { SETTINGS, LEGACY_KEYS, createSettings, coerce };

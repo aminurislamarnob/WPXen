@@ -42,10 +42,13 @@ const validation = require('./services/validation.cjs');
 const agents = require('./services/agents.cjs');
 const files = require('./services/files.cjs');
 const git = require('./services/git.cjs');
+const settingsService = require('./services/settings.cjs');
 const { humanize } = require('./services/errors.cjs');
 
 let store;
 let mainWindow;
+// Schema-backed settings, bound to the store in registerHandlers().
+let settings;
 let serviceStatusCache = {
   nginx: { running: false, name: 'nginx' },
   php: { running: false, name: 'PHP-FPM', version: null },
@@ -53,6 +56,16 @@ let serviceStatusCache = {
   dnsmasq: { running: false, name: 'dnsmasq' },
   mailpit: { running: false, name: 'Mailpit', installed: false },
 };
+
+// Pushes the full resolved settings to every open window so a change made in
+// one place (tray, Mail page, Settings) lands everywhere.
+function broadcastSettings(all) {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed() && win.webContents) {
+      win.webContents.send('settings-updated', all);
+    }
+  }
+}
 
 // Synchronous, instant — returns the last computed snapshot. Used by the tray
 // and the get-service-status IPC reply so neither blocks on subprocesses.
@@ -141,10 +154,29 @@ function registerHandlers(win, storeInstance) {
   mainWindow = win;
   store = storeInstance;
 
+  // Bind the settings schema to the store. Side effects that used to live in
+  // the save-settings ladder hang off `effects` — one place per key, run only
+  // when that key actually changed.
+  settings = settingsService.createSettings({
+    store,
+    defaults: {
+      'sites.dir': () => wordpress.DEFAULT_SITES_DIR,
+      'php.defaultVersion': () => brew.getActivePhpVersion() || '',
+    },
+    effects: {
+      'app.startAtLogin': (value) => app.setLoginItemSettings({ openAtLogin: value }),
+      'db.user': (_v, all) =>
+        mysql.setCredentials({ user: all['db.user'], password: all['db.password'] }),
+      'db.password': (_v, all) =>
+        mysql.setCredentials({ user: all['db.user'], password: all['db.password'] }),
+    },
+  });
+  settings.migrateLegacy();
+
   // Apply persisted DB credentials so MySQL operations authenticate correctly.
   mysql.setCredentials({
-    user: store.get('settings.dbUser', 'root'),
-    password: store.get('settings.dbPassword', ''),
+    user: settings.get('db.user'),
+    password: settings.get('db.password'),
   });
 
   // Populate the status cache once at startup (non-blocking).
@@ -1820,42 +1852,59 @@ function registerHandlers(win, storeInstance) {
 
   // ─── Settings ────────────────────────────────────────────────────────
 
+  // Flat dotted map of every known setting. The renderer's useSettings() hook
+  // holds this and re-reads it on 'settings-updated'.
+  ipcMain.handle('settings-get-all', () => settings.read());
+
+  // Validated shallow patch. Always resolves — rejections come back on the
+  // result so the UI can roll the control back and say why.
+  ipcMain.handle('settings-set', (_e, patch) => {
+    try {
+      const result = settings.write(patch);
+      broadcastSettings(result.settings);
+      return result;
+    } catch (err) {
+      return {
+        ok: false,
+        applied: [],
+        rejected: [{ key: '(patch)', reason: humanize(err) }],
+      };
+    }
+  });
+
+  // Deprecated shape kept for one release so nothing breaks mid-refactor.
+  // New code should use settings-get-all / settings-set.
   ipcMain.handle('get-settings', () => {
+    const all = settings.read();
     return {
-      sitesDir: store.get('settings.sitesDir', wordpress.DEFAULT_SITES_DIR),
-      defaultPhpVersion: store.get(
-        'settings.defaultPhpVersion',
-        brew.getActivePhpVersion()
-      ),
-      startAtLogin: store.get('settings.startAtLogin', false),
-      dbUser: store.get('settings.dbUser', 'root'),
-      dbPassword: store.get('settings.dbPassword', ''),
+      sitesDir: all['sites.dir'],
+      defaultPhpVersion: all['php.defaultVersion'],
+      startAtLogin: all['app.startAtLogin'],
+      dbUser: all['db.user'],
+      dbPassword: all['db.password'],
       brewPrefix: brew.getBrewPrefix() || 'Not detected',
     };
   });
 
-  ipcMain.handle('save-settings', async (_, settings) => {
-    try {
-      if (settings.sitesDir) store.set('settings.sitesDir', settings.sitesDir);
-      if (settings.defaultPhpVersion)
-        store.set('settings.defaultPhpVersion', settings.defaultPhpVersion);
-      if (typeof settings.startAtLogin === 'boolean') {
-        store.set('settings.startAtLogin', settings.startAtLogin);
-        app.setLoginItemSettings({ openAtLogin: settings.startAtLogin });
-      }
-      if (typeof settings.dbUser === 'string')
-        store.set('settings.dbUser', settings.dbUser);
-      if (typeof settings.dbPassword === 'string')
-        store.set('settings.dbPassword', settings.dbPassword);
-      // Re-apply credentials immediately so the running session uses them.
-      mysql.setCredentials({
-        user: store.get('settings.dbUser', 'root'),
-        password: store.get('settings.dbPassword', ''),
-      });
-      return { success: true };
-    } catch (err) {
-      return { success: false, error: humanize(err) };
-    }
+  ipcMain.handle('save-settings', async (_, incoming) => {
+    const patch = {};
+    if (incoming.sitesDir) patch['sites.dir'] = incoming.sitesDir;
+    if (incoming.defaultPhpVersion)
+      patch['php.defaultVersion'] = incoming.defaultPhpVersion;
+    if (typeof incoming.startAtLogin === 'boolean')
+      patch['app.startAtLogin'] = incoming.startAtLogin;
+    if (typeof incoming.dbUser === 'string') patch['db.user'] = incoming.dbUser;
+    if (typeof incoming.dbPassword === 'string')
+      patch['db.password'] = incoming.dbPassword;
+
+    const result = settings.write(patch);
+    broadcastSettings(result.settings);
+    return result.ok
+      ? { success: true }
+      : {
+          success: false,
+          error: result.rejected.map((r) => `${r.key}: ${r.reason}`).join(', '),
+        };
   });
 
   // ─── File dialogs ────────────────────────────────────────────────────
