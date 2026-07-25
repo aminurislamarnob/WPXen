@@ -99,6 +99,35 @@ const SETTINGS = {
     default: 'system',
   },
 
+  // ── Agents ───────────────────────────────────────────────────────────────
+  // An empty list means "every agent" rather than "none" — a user who has not
+  // touched this setting should see the full launcher.
+  'agents.enabled': { type: 'list', default: [] },
+  // { [agentId]: 'claude --resume' } — overrides the built-in launch command.
+  'agents.commands': {
+    type: 'object',
+    default: {},
+    validate: (v) =>
+      Object.values(v).every((c) => typeof c === 'string') ||
+      'each command must be a string',
+  },
+  // User-defined agents: [{ id, name, cmd }]
+  'agents.custom': {
+    type: 'object',
+    default: { list: [] },
+    validate: (v) =>
+      (Array.isArray(v.list) &&
+        v.list.every(
+          (a) =>
+            a &&
+            typeof a.id === 'string' &&
+            /^[a-z0-9-]+$/.test(a.id) &&
+            typeof a.cmd === 'string' &&
+            a.cmd.trim().length > 0
+        )) ||
+      'each agent needs a slug id and a command',
+  },
+
   // ── Database ─────────────────────────────────────────────────────────────
   'db.user': { type: 'string', default: 'root' },
   'db.password': { type: 'string', default: '' },

@@ -44,6 +44,41 @@ const REGISTRY = [
   },
 ];
 
+// ── User configuration (Settings → Agents) ──────────────────────────────────
+// The registry above is the default set. Users can hide agents they don't use,
+// override the command a built-in agent launches with, and add their own. The
+// config is injected rather than read from the store directly so this module
+// stays free of electron/store imports.
+let config = { enabled: null, commands: {}, custom: [] };
+
+function setConfig(next) {
+  config = {
+    enabled: Array.isArray(next?.enabled) ? next.enabled : null,
+    commands: next?.commands && typeof next.commands === 'object' ? next.commands : {},
+    custom: Array.isArray(next?.custom) ? next.custom : [],
+  };
+}
+
+// Built-ins plus user-defined agents, with per-agent command overrides applied.
+// A custom entry sharing an id with a built-in replaces it.
+function effectiveRegistry() {
+  const byId = new Map(REGISTRY.map((a) => [a.id, a]));
+  for (const entry of config.custom) {
+    if (!entry?.id || !entry?.cmd) continue;
+    byId.set(entry.id, {
+      id: entry.id,
+      name: entry.name || entry.id,
+      cmd: entry.cmd,
+      install: entry.install || '',
+      isCustom: true,
+    });
+  }
+  return [...byId.values()].map((a) => ({
+    ...a,
+    cmd: config.commands[a.id]?.trim() || a.cmd,
+  }));
+}
+
 // ── Login-shell environment snapshot (Q6) ────────────────────────────────────
 // Electron launches from launchd with a stripped PATH, so agent binaries (npm
 // globals, Homebrew, pipx) aren't visible. Resolve the user's real login-shell
@@ -117,19 +152,27 @@ function resolveBin(cmd, env) {
 }
 
 // The registry with a resolved `detected` flag + path for each Agent (Q5/Q7).
-function listAgents() {
+// Agents offered in the launcher. `all: true` ignores the enabled filter —
+// Settings needs the full list to render its toggles.
+function listAgents({ all = false } = {}) {
   const env = resolveShellEnv();
-  return REGISTRY.map((a) => {
-    const bin = resolveBin(a.cmd, env);
-    return {
-      id: a.id,
-      name: a.name,
-      cmd: a.cmd,
-      install: a.install,
-      detected: Boolean(bin),
-      path: bin,
-    };
-  });
+  // A command override can carry arguments ('claude --resume'); only the first
+  // token is a binary to detect on PATH.
+  return effectiveRegistry()
+    .filter((a) => all || !config.enabled || config.enabled.includes(a.id))
+    .map((a) => {
+      const bin = resolveBin(a.cmd.split(/\s+/)[0], env);
+      return {
+        id: a.id,
+        name: a.name,
+        cmd: a.cmd,
+        install: a.install,
+        isCustom: !!a.isCustom,
+        enabled: !config.enabled || config.enabled.includes(a.id),
+        detected: Boolean(bin),
+        path: bin,
+      };
+    });
 }
 
 // ── Sessions ─────────────────────────────────────────────────────────────────
@@ -158,7 +201,9 @@ function listSessions(siteId) {
 // Launch an Agent for a Site. Always creates a NEW Session so multiple can run
 // per directory. Returns { ok, sessionId } or { error }.
 function launch({ site, agentId }) {
-  const agent = listAgents().find((a) => a.id === agentId);
+  // `all` so launching by id still works for an agent hidden from the
+  // launcher (e.g. a saved session being restored).
+  const agent = listAgents({ all: true }).find((a) => a.id === agentId);
   if (!agent) return { error: `Unknown agent: ${agentId}` };
   if (!agent.detected) return { error: `${agent.name} is not installed` };
 
@@ -308,6 +353,8 @@ function stopAll() {
 }
 
 module.exports = {
+  setConfig,
+  effectiveRegistry,
   listAgents,
   listSessions,
   launch,

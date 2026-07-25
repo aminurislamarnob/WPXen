@@ -13,6 +13,7 @@ import {
   X,
   Wrench,
   Server,
+  Cpu,
 } from 'lucide-react';
 import { SECTIONS } from '../../lib/settingsRegistry';
 
@@ -28,6 +29,7 @@ const ICONS = {
   info: Info,
   wrench: Wrench,
   server: Server,
+  cpu: Cpu,
 };
 
 // Left rail of the settings surface: search on top, then the section groups.

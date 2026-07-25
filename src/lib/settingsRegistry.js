@@ -18,6 +18,7 @@ export const SECTIONS = [
     group: 'App',
     items: [
       { id: 'general', label: 'General', icon: 'sliders' },
+      { id: 'agents', label: 'Agents', icon: 'cpu' },
       { id: 'tools', label: 'External Tools', icon: 'wrench' },
     ],
   },
@@ -288,6 +289,49 @@ export const SETTINGS_ITEMS = [
       'background',
       'minimize',
     ],
+  },
+
+  // ── Agents ───────────────────────────────────────────────────────────────
+  {
+    id: 'agents.enabled',
+    section: 'agents',
+    title: 'Available agents',
+    description: 'Which agents appear in a site\u2019s launcher',
+    keywords: [
+      'agents',
+      'enabled',
+      'claude',
+      'codex',
+      'gemini',
+      'opencode',
+      'launcher',
+      'ai',
+      'show',
+      'hide',
+    ],
+  },
+  {
+    id: 'agents.commands',
+    section: 'agents',
+    title: 'Launch commands',
+    description: 'Override the command an agent starts with',
+    keywords: [
+      'agents',
+      'command',
+      'launch',
+      'arguments',
+      'flags',
+      'cli',
+      'override',
+      'resume',
+    ],
+  },
+  {
+    id: 'agents.custom',
+    section: 'agents',
+    title: 'Add an agent',
+    description: 'Define your own agent CLI',
+    keywords: ['agents', 'custom', 'add', 'new', 'own', 'cli', 'define', 'user'],
   },
 
   // ── External tools ───────────────────────────────────────────────────────

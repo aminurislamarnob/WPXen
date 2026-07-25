@@ -93,6 +93,17 @@ function applyHttps(site, enabled) {
   return updated;
 }
 
+// Hands the agent launcher its user configuration. An empty enabled list means
+// "all agents", not "none" — see the schema note.
+function applyAgentConfig(all) {
+  const enabled = all['agents.enabled'];
+  agents.setConfig({
+    enabled: enabled && enabled.length ? enabled : null,
+    commands: all['agents.commands'],
+    custom: all['agents.custom']?.list || [],
+  });
+}
+
 // Pushes the full resolved settings to every open window so a change made in
 // one place (tray, Mail page, Settings) lands everywhere.
 function broadcastSettings(all) {
@@ -212,6 +223,9 @@ function registerHandlers(win, storeInstance) {
       'appearance.themeMode': (value) => {
         nativeTheme.themeSource = value;
       },
+      'agents.enabled': (_v, all) => applyAgentConfig(all),
+      'agents.commands': (_v, all) => applyAgentConfig(all),
+      'agents.custom': (_v, all) => applyAgentConfig(all),
     },
   });
   settings.migrateLegacy();
@@ -219,6 +233,7 @@ function registerHandlers(win, storeInstance) {
   // Apply settings that configure a module at startup rather than on change.
   procman.setMaxLogSizeMb(settings.get('services.logMaxSizeMb'));
   nativeTheme.themeSource = settings.get('appearance.themeMode');
+  applyAgentConfig(settings.read());
 
   // Apply persisted DB credentials so MySQL operations authenticate correctly.
   mysql.setCredentials({
@@ -242,6 +257,10 @@ function registerHandlers(win, storeInstance) {
   // ── Agent Launcher (see services/agents.cjs) ──────────────────────────────
   // (findSite is declared below in this same function scope — hoisted.)
   ipcMain.handle('agent-list', () => agents.listAgents());
+
+  // Every agent including hidden ones — the Agents settings section needs the
+  // full list to render its enable/disable toggles.
+  ipcMain.handle('agent-list-all', () => agents.listAgents({ all: true }));
 
   // The live Sessions for a Site — the renderer restores its terminal tabs.
   ipcMain.handle('agent-sessions', (_e, siteId) => agents.listSessions(siteId));
