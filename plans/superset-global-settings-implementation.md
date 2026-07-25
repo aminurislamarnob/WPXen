@@ -9,6 +9,53 @@ Reference implementation: `superset-sh/superset`,
 
 ---
 
+## Status
+
+| Phase                                            | State              | Notes                                                                                                                                   |
+| ------------------------------------------------ | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
+| 1 — Settings shell                               | **done**           | `electron/services/settings.cjs`, `useSettings`, routed sections, Save button removed                                                   |
+| 2 — Settings search                              | **done**           | registry + `settingsSearch.js`, sidebar match counts, per-row filtering                                                                 |
+| 3 — Tier-1 settings                              | **mostly done**    | General, External Tools, Mail, Sites, Services shipped. **Notifications not built** — see below                                         |
+| 4 — Terminal & agents                            | **agents done**    | enable/disable, command overrides, custom agents. **Terminal presets + sessions list not built**                                        |
+| 5 — Appearance                                   | **done, deviated** | theme mode + full typography. The `darkMode: 'class'` migration turned out to be unnecessary — see below. Named/custom themes not built |
+| 6 — Keyboard, Permissions, Sharing, Experimental | **not started**    |                                                                                                                                         |
+| 7 — Polish                                       | **not started**    |                                                                                                                                         |
+
+### Deviations from the plan as written
+
+- **The Tailwind `darkMode: 'class'` migration was avoided entirely.** The plan
+  treated it as a hard prerequisite for any in-app theme override. It isn't:
+  Electron's `nativeTheme.themeSource` forces `prefers-color-scheme` in the
+  renderer, so System/Light/Dark drives the existing `darkMode: 'media'` tokens
+  _and_ the opaque window backdrop with a one-line effect. `index.css` was not
+  touched. This does mean **named themes** (Monokai, custom JSON import) still
+  need the theme-record refactor — `themeSource` only distinguishes light from
+  dark, not which light or dark palette.
+- **`services.logRetentionDays` became `services.logMaxSizeMb`.** procman
+  rotates a service log by size, not age (`MAX_LOG_BYTES`); there was no
+  dated-file retention to configure, so the plan's setting had no mechanism
+  behind it.
+- **PHP defaults**: as the plan already noted, global and per-site php.ini
+  settings existed. Neither the new-site PHP defaults nor the "inherited from
+  global" affordance on `SitePhpSettings.jsx` has been built yet.
+- **Two settings were cut for having no consumer.** `mail.autoOpenInbox` was
+  removed; `tools.terminalApp` was kept only because the existing
+  "Open in Terminal" action was rewired through it. A settings row that
+  silently does nothing is worse than an absent one.
+
+### Not yet built (the honest remainder)
+
+- Notifications section (sound on long-running task completion) — Tier 1.
+- Terminal presets and the live-sessions list.
+- Named + custom themes.
+- New-site PHP defaults and the inherited-from-global affordance.
+- Keyboard shortcuts, macOS Permissions, Sharing/cloudflared defaults,
+  Experimental flags.
+- Polish: tray deep links, diagnostics copy, reset app data.
+- `docs/features/FEATURES.md` has not been updated.
+
+---
+
 ## 0. Goal, non-goals, and the shape of the change
 
 **Goal.** Turn `src/components/Settings.jsx` — one 491-line scroll with a trailing
