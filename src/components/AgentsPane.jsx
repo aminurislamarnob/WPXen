@@ -1,12 +1,19 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, useLocation, useOutletContext } from 'react-router-dom';
-import { Terminal as TerminalIcon, Plus, X } from 'lucide-react';
+import {
+  Terminal as TerminalIcon,
+  Plus,
+  X,
+  Settings2,
+  CornerDownRight,
+} from 'lucide-react';
 import { ProviderIcon } from './providerIcons';
 import { Panel, PanelGroup } from 'react-resizable-panels';
 import Terminal from './Terminal';
 import FileExplorer from './FileExplorer';
 import CodeEditor from './CodeEditor';
 import ResizeHandle from './ResizeHandle';
+import LaunchTargetsDialog from './LaunchTargetsDialog';
 import { ConfirmDialog, Tooltip } from './ui';
 import * as sessionCache from '../lib/terminal/sessionCache';
 
@@ -29,6 +36,8 @@ export default function AgentsPane() {
   const [meta, setMeta] = useState({ siteName: siteId });
   const [sitePath, setSitePath] = useState(null);
   const [agents, setAgents] = useState([]); // registry, for the "+" menu
+  const [targets, setTargets] = useState([]); // saved Launch Targets for this Site
+  const [settingsOpen, setSettingsOpen] = useState(false); // launch-settings dialog
   const [error, setError] = useState(null);
 
   const [tabs, setTabs] = useState([]); // [{ sessionId, agentId, agentName }]
@@ -55,15 +64,17 @@ export default function AgentsPane() {
     setError(null);
 
     (async () => {
-      const [sites, agentList] = await Promise.all([
+      const [sites, agentList, targetList] = await Promise.all([
         window.electronAPI.getSites(),
         window.electronAPI.listAgents(),
+        window.electronAPI.listLaunchTargets(siteId),
       ]);
       if (cancelled) return;
       const site = (sites || []).find((s) => s.id === siteId);
       setMeta({ siteName: site?.name || siteId });
       setSitePath(site?.path || null);
       setAgents(agentList || []);
+      setTargets(targetList || []);
 
       // Honour a pending spawn from the sidebar (create the Session first, so the
       // subsequent listSessions below includes it).
@@ -100,13 +111,17 @@ export default function AgentsPane() {
     setAddMenu((m) => (m ? null : { x: r.left, y: r.bottom + 4 }));
   };
 
-  const spawn = async (agentId) => {
+  const spawn = async (agentId, targetId = null) => {
     setAddMenu(null);
-    const res = await window.electronAPI.launchAgent(siteId, agentId);
+    const res = await window.electronAPI.launchAgent(siteId, agentId, targetId);
     if (res?.error) return setError(res.error);
     if (!res?.sessionId) return;
     const name = agents.find((a) => a.id === agentId)?.name || agentId;
-    setTabs((prev) => [...prev, { sessionId: res.sessionId, agentId, agentName: name }]);
+    const label = targetId ? targets.find((t) => t.id === targetId)?.label || null : null;
+    setTabs((prev) => [
+      ...prev,
+      { sessionId: res.sessionId, agentId, agentName: name, targetId, label },
+    ]);
     setActiveTab(res.sessionId);
   };
 
@@ -156,7 +171,7 @@ export default function AgentsPane() {
   const respawn = async (sessionId) => {
     const tab = tabs.find((t) => t.sessionId === sessionId);
     if (!tab) return;
-    const res = await window.electronAPI.launchAgent(siteId, tab.agentId);
+    const res = await window.electronAPI.launchAgent(siteId, tab.agentId, tab.targetId);
     if (res?.error) return setError(res.error);
     if (!res?.sessionId) return;
     window.electronAPI.terminalStop(sessionId);
@@ -315,7 +330,9 @@ export default function AgentsPane() {
                       className="flex-shrink-0"
                     />
                     <span className="truncate max-w-[140px]">
-                      {titles[tab.sessionId] || `${tab.agentName}${ordinal(tab, i)}`}
+                      {titles[tab.sessionId] ||
+                        tab.label ||
+                        `${tab.agentName}${ordinal(tab, i)}`}
                     </span>
                     <Tooltip label="Close session">
                       <button
@@ -345,25 +362,63 @@ export default function AgentsPane() {
                   <Plus size={16} />
                 </button>
               </Tooltip>
+              <Tooltip label="Launch settings">
+                <button
+                  onClick={() => setSettingsOpen(true)}
+                  disabled={detected.length === 0}
+                  aria-label="Launch settings"
+                  className="flex-shrink-0 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent disabled:opacity-40"
+                >
+                  <Settings2 size={15} />
+                </button>
+              </Tooltip>
             </div>
 
             {addMenu && (
               <>
                 <div className="fixed inset-0 z-40" onClick={() => setAddMenu(null)} />
                 <div
-                  className="panel fixed z-50 min-w-[170px] py-1"
+                  className="panel fixed z-50 min-w-[200px] max-w-[280px] py-1"
                   style={{ left: addMenu.x, top: addMenu.y }}
                 >
-                  {detected.map((a) => (
-                    <button
-                      key={a.id}
-                      onClick={() => spawn(a.id)}
-                      className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[13px] text-foreground hover:bg-accent"
-                    >
-                      <ProviderIcon agentId={a.id} brand size={14} />
-                      {a.name}
-                    </button>
-                  ))}
+                  {detected.map((a) => {
+                    const agentTargets = targets.filter((t) => t.agentId === a.id);
+                    return (
+                      <div key={a.id}>
+                        {/* Default launch: webroot + the agent's global flags. */}
+                        <button
+                          onClick={() => spawn(a.id)}
+                          className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[13px] text-foreground hover:bg-accent"
+                        >
+                          <ProviderIcon agentId={a.id} brand size={14} />
+                          {a.name}
+                        </button>
+                        {/* Saved targets: a pinned directory (+ optional flags). */}
+                        {agentTargets.map((t) => (
+                          <button
+                            key={t.id}
+                            onClick={() => spawn(a.id, t.id)}
+                            title={t.cwd}
+                            className="w-full flex items-center gap-1.5 pl-7 pr-3 py-1 text-left text-[12px] text-muted-foreground hover:bg-accent hover:text-foreground"
+                          >
+                            <CornerDownRight size={11} className="flex-shrink-0" />
+                            <span className="truncate">{t.label || t.cwd}</span>
+                          </button>
+                        ))}
+                      </div>
+                    );
+                  })}
+                  <div className="my-1 h-px bg-border" />
+                  <button
+                    onClick={() => {
+                      setAddMenu(null);
+                      setSettingsOpen(true);
+                    }}
+                    className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[13px] text-muted-foreground hover:bg-accent hover:text-foreground"
+                  >
+                    <Settings2 size={14} />
+                    Launch settings…
+                  </button>
                 </div>
               </>
             )}
@@ -450,6 +505,16 @@ export default function AgentsPane() {
           Don&rsquo;t ask again
         </label>
       </ConfirmDialog>
+      <LaunchTargetsDialog
+        open={settingsOpen}
+        siteId={siteId}
+        sitePath={sitePath}
+        agents={detected}
+        onClose={() => setSettingsOpen(false)}
+        onChanged={() =>
+          window.electronAPI.listLaunchTargets(siteId).then((t) => setTargets(t || []))
+        }
+      />
     </>
   );
 }

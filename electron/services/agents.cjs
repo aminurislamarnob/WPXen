@@ -148,6 +148,40 @@ function listAgents() {
   });
 }
 
+// ── Launch resolution (Launch Presets & Targets) ─────────────────────────────
+// A launch is more than "the provider name". Two axes shape it, kept
+// deliberately small (see the Superset preset analysis — we take the two that
+// earn their keep and leave the workspace/automation machinery alone):
+//
+//   • command / flags — usually stable per provider, so they live as a GLOBAL
+//     default per Agent (e.g. `claude --dangerously-skip-permissions`).
+//   • directory — varies per Site (a plugin/theme subfolder, a git worktree),
+//     so a Site owns a LIST of saved Targets, each pinning a cwd.
+//
+// `resolveLaunch` is a pure function of primitives — no store, no fs — so it is
+// trivially unit-testable and both callers (default launch, saved Target) go
+// through the same rules:
+//
+//   args : target.args when set (incl. "" = explicit none) else the global
+//          default. `null`/`undefined` on a Target means "inherit global".
+//   cwd  : target.cwd absolute → as-is; relative → resolved against the
+//          webroot (so `../feature-worktree` and `wp-content/plugins/foo` both
+//          work); absent → the webroot itself.
+function resolveLaunch({ cmd, sitePath, globalArgs = '', target = null }) {
+  const rawArgs = target && target.args != null ? target.args : globalArgs || '';
+  const args = String(rawArgs).trim();
+  const command = args ? `${cmd} ${args}` : cmd;
+
+  let cwd = sitePath;
+  if (target && target.cwd) {
+    cwd = path.isAbsolute(target.cwd)
+      ? path.normalize(target.cwd)
+      : path.resolve(sitePath, target.cwd);
+  }
+
+  return { command, cwd, label: target?.label || null };
+}
+
 // ── Sessions ─────────────────────────────────────────────────────────────────
 // A Site may host MANY concurrent Sessions (any mix of Agents, incl. several of
 // the same provider). Sessions are therefore keyed by a unique sessionId, not by
@@ -165,18 +199,43 @@ function listSessions(siteId) {
   const out = [];
   for (const s of sessions.values()) {
     if (s.siteId === siteId && !s.exited) {
-      out.push({ sessionId: s.sessionId, agentId: s.agentId, agentName: s.agentName });
+      out.push({
+        sessionId: s.sessionId,
+        agentId: s.agentId,
+        agentName: s.agentName,
+        targetId: s.targetId,
+        label: s.label,
+      });
     }
   }
   return out;
 }
 
 // Launch an Agent for a Site. Always creates a NEW Session so multiple can run
-// per directory. Returns { ok, sessionId } or { error }.
-function launch({ site, agentId }) {
+// per directory. `target` (a saved Launch Target) and `globalArgs` (the Agent's
+// global default flags) are optional; both flow through `resolveLaunch` to
+// decide the cwd and the command line typed into the shell.
+// Returns { ok, sessionId } or { error }.
+function launch({ site, agentId, target = null, globalArgs = '' }) {
   const agent = listAgents().find((a) => a.id === agentId);
   if (!agent) return { error: `Unknown agent: ${agentId}` };
   if (!agent.detected) return { error: `${agent.name} is not installed` };
+
+  const { command, cwd, label } = resolveLaunch({
+    cmd: agent.cmd,
+    sitePath: site.path,
+    globalArgs,
+    target,
+  });
+
+  // A Target's directory can go stale (a deleted worktree, a moved plugin).
+  // Fail loudly before spawning a shell in a bad cwd rather than dropping the
+  // user into their home dir with no explanation.
+  try {
+    if (!fs.statSync(cwd).isDirectory()) throw new Error('not a directory');
+  } catch {
+    return { error: `Directory not found: ${cwd}` };
+  }
 
   const sessionId = randomUUID();
   const env = resolveShellEnv();
@@ -191,8 +250,19 @@ function launch({ site, agentId }) {
       name: 'xterm-256color',
       cols: 80,
       rows: 24,
-      cwd: site.path,
-      env: { ...env, TERM: 'xterm-256color', TERM_PROGRAM: 'WPHerd' },
+      cwd,
+      env: {
+        ...env,
+        TERM: 'xterm-256color',
+        TERM_PROGRAM: 'WPHerd',
+        // Suppress oh-my-zsh's auto-update check. It fires during rc sourcing and
+        // blocks on an interactive `[Y/n]` prompt (a single-char `read`); the
+        // settle-window that types the agent command can't reliably out-wait it,
+        // so the first char gets eaten by the prompt and the rest runs as a bad
+        // command. `DISABLE_AUTO_UPDATE=true` maps to omz `update_mode=disabled`,
+        // so the prompt never appears. Only affects this agent shell.
+        DISABLE_AUTO_UPDATE: 'true',
+      },
     });
   } catch (err) {
     return { error: `Failed to launch ${agent.name}: ${err.message}` };
@@ -203,6 +273,9 @@ function launch({ site, agentId }) {
     siteId: site.id,
     agentId: agent.id,
     agentName: agent.name,
+    targetId: target?.id || null,
+    label,
+    cwd,
     pty: term,
     buffer: '',
     window: null,
@@ -219,7 +292,7 @@ function launch({ site, agentId }) {
     if (session.started || session.exited) return;
     session.started = true;
     try {
-      term.write(`${agent.cmd}\r`);
+      term.write(`${command}\r`);
     } catch {}
   };
   const scheduleRun = () => {
@@ -326,6 +399,7 @@ function stopAll() {
 module.exports = {
   listAgents,
   listSessions,
+  resolveLaunch,
   launch,
   attach,
   write,
