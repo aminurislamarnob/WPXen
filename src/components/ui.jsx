@@ -444,6 +444,7 @@ export function ConfirmDialog({
   danger = true,
   onConfirm,
   onCancel,
+  children,
 }) {
   useEffect(() => {
     if (!open) return;
@@ -471,6 +472,7 @@ export function ConfirmDialog({
             {description}
           </p>
         )}
+        {children}
         <div className="mt-4 flex justify-end gap-2">
           <Button variant="secondary" onClick={onCancel}>
             {cancelLabel}

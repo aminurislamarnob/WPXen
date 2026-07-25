@@ -255,6 +255,13 @@ function write(sessionId, data) {
   if (session && !session.exited) session.pty.write(data);
 }
 
+// Clear a Session's ring buffer so a later reattach doesn't replay content the
+// user cleared with Cmd+K. No-op if the session is gone.
+function clearBuffer(sessionId) {
+  const session = sessions.get(sessionId);
+  if (session) session.buffer = '';
+}
+
 function resize(sessionId, cols, rows) {
   const session = sessions.get(sessionId);
   if (session && !session.exited && cols > 0 && rows > 0) {
@@ -306,6 +313,7 @@ module.exports = {
   launch,
   attach,
   write,
+  clearBuffer,
   resize,
   stop,
   getSession,

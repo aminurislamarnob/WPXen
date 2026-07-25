@@ -60,8 +60,18 @@ describe('parseStatus', () => {
       { 'a.js': { additions: 4, deletions: 2 } }
     );
     expect(files).toHaveLength(2);
-    expect(files[0]).toMatchObject({ status: 'M', source: 'staged', additions: 4, deletions: 2 });
-    expect(files[1]).toMatchObject({ status: 'M', source: 'unstaged', additions: 1, deletions: 0 });
+    expect(files[0]).toMatchObject({
+      status: 'M',
+      source: 'staged',
+      additions: 4,
+      deletions: 2,
+    });
+    expect(files[1]).toMatchObject({
+      status: 'M',
+      source: 'unstaged',
+      additions: 1,
+      deletions: 0,
+    });
   });
 
   it('marks untracked files as unstaged with status "?"', () => {
@@ -80,7 +90,11 @@ describe('parseStatus', () => {
   });
 
   it('captures the old path for a staged rename', () => {
-    const files = parseStatus('R  old.js -> new.js', {}, { 'new.js': { additions: 0, deletions: 0 } });
+    const files = parseStatus(
+      'R  old.js -> new.js',
+      {},
+      { 'new.js': { additions: 0, deletions: 0 } }
+    );
     expect(files).toEqual([
       {
         rel: 'new.js',
@@ -95,17 +109,29 @@ describe('parseStatus', () => {
   });
 
   it('unquotes paths with unusual bytes', () => {
-    const files = parseStatus(' M "a b.js"', { 'a b.js': { additions: 1, deletions: 0 } }, {});
+    const files = parseStatus(
+      ' M "a b.js"',
+      { 'a b.js': { additions: 1, deletions: 0 } },
+      {}
+    );
     expect(files[0].rel).toBe('a b.js');
   });
 
   it('handles a staged addition', () => {
-    const files = parseStatus('A  added.txt', {}, { 'added.txt': { additions: 7, deletions: 0 } });
+    const files = parseStatus(
+      'A  added.txt',
+      {},
+      { 'added.txt': { additions: 7, deletions: 0 } }
+    );
     expect(files[0]).toMatchObject({ status: 'A', source: 'staged', additions: 7 });
   });
 
   it('handles a staged deletion', () => {
-    const files = parseStatus('D  gone.txt', {}, { 'gone.txt': { additions: 0, deletions: 9 } });
+    const files = parseStatus(
+      'D  gone.txt',
+      {},
+      { 'gone.txt': { additions: 0, deletions: 9 } }
+    );
     expect(files[0]).toMatchObject({ status: 'D', source: 'staged', deletions: 9 });
   });
 

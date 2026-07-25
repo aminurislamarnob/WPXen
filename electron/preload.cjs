@@ -163,19 +163,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Agent Launcher / Terminal
   listAgents: () => ipcRenderer.invoke('agent-list'),
   listSessions: (siteId) => ipcRenderer.invoke('agent-sessions', siteId),
-  launchAgent: (siteId, agentId) =>
-    ipcRenderer.invoke('agent-launch', siteId, agentId),
+  launchAgent: (siteId, agentId) => ipcRenderer.invoke('agent-launch', siteId, agentId),
   terminalReady: (sessionId) => ipcRenderer.invoke('terminal-ready', sessionId),
-  terminalInput: (sessionId, data) =>
-    ipcRenderer.send('terminal-input', sessionId, data),
+  terminalInput: (sessionId, data) => ipcRenderer.send('terminal-input', sessionId, data),
   terminalResize: (sessionId, cols, rows) =>
     ipcRenderer.send('terminal-resize', sessionId, cols, rows),
+  terminalClear: (sessionId) => ipcRenderer.send('terminal-clear', sessionId),
   terminalStop: (sessionId) => ipcRenderer.invoke('terminal-stop', sessionId),
   listDirectory: (rootPath, dirPath) =>
     ipcRenderer.invoke('list-directory', rootPath, dirPath),
+  terminalStatPath: (rootPath, candidate) =>
+    ipcRenderer.invoke('terminal-stat-path', rootPath, candidate),
   openFilePath: (filePath) => ipcRenderer.invoke('open-file-path', filePath),
-  readFile: (rootPath, filePath) =>
-    ipcRenderer.invoke('read-file', rootPath, filePath),
+  readFile: (rootPath, filePath) => ipcRenderer.invoke('read-file', rootPath, filePath),
   writeFile: (rootPath, filePath, content) =>
     ipcRenderer.invoke('write-file', rootPath, filePath, content),
   revealInFinder: (rootPath, targetPath) =>
@@ -200,11 +200,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   gitDiscard: (siteRoot, repoRoot, rel, status) =>
     ipcRenderer.invoke('git-discard', siteRoot, repoRoot, rel, status),
 
-  // IPC Events (renderer listening to main)
+  // IPC Events (renderer listening to main). `on` returns an unsubscribe that
+  // removes only its own listener — required when several subscribers share a
+  // channel (e.g. many live terminals on 'terminal-data'). `off` (remove all)
+  // stays for single-subscriber callers that use it in cleanup.
   on: (channel, callback) => {
-    if (VALID_EVENT_CHANNELS.includes(channel)) {
-      ipcRenderer.on(channel, (_, data) => callback(data));
-    }
+    if (!VALID_EVENT_CHANNELS.includes(channel)) return () => {};
+    const wrapped = (_, data) => callback(data);
+    ipcRenderer.on(channel, wrapped);
+    return () => ipcRenderer.removeListener(channel, wrapped);
   },
   off: (channel) => {
     if (VALID_EVENT_CHANNELS.includes(channel)) {

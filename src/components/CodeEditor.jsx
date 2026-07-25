@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import CodeMirror from '@uiw/react-codemirror';
-import { keymap } from '@codemirror/view';
+import { keymap, EditorView } from '@codemirror/view';
 import { unifiedMergeView } from '@codemirror/merge';
 import { editorMetrics, editorThemes } from '../lib/editorTheme';
 import { onThemeChange, themeName } from '../lib/theme';
@@ -109,9 +109,25 @@ export default function CodeEditor({ rootPath, files, activeKey, onSelect, onClo
   useEffect(() => onThemeChange(setAppearance), []);
   const theme = editorThemes[appearance];
 
+  const viewRef = useRef(null);
+
   const active = files.find((f) => f.key === activeKey) || null;
   const data = activeKey ? cache[activeKey] : null;
   const isDiff = active?.kind === 'diff';
+
+  // Jump to a requested line (from a terminal file-path link) once the editor
+  // and its content exist. Re-runs when the tab is re-opened at a new line.
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view || isDiff || !active?.line || data?.text === undefined) return;
+    const lineNo = Math.min(Math.max(1, active.line), view.state.doc.lines);
+    const pos = view.state.doc.line(lineNo).from;
+    view.dispatch({
+      selection: { anchor: pos },
+      effects: EditorView.scrollIntoView(pos, { y: 'center' }),
+    });
+    view.focus();
+  }, [activeKey, active?.line, isDiff, data?.text]);
   const editable = !isDiff && !!data && data.text !== undefined;
   const dirty = editable && data.text !== data.original;
 
@@ -368,6 +384,7 @@ export default function CodeEditor({ rootPath, files, activeKey, onSelect, onClo
                   theme={theme}
                   extensions={extensions}
                   onChange={onChange}
+                  onCreateEditor={(view) => (viewRef.current = view)}
                   className="flex-1 min-h-0"
                   basicSetup={{ tabSize: 2 }}
                 />

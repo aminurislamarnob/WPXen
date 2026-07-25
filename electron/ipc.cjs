@@ -183,12 +183,11 @@ function registerHandlers(win, storeInstance) {
     return agents.attach(sessionId, win);
   });
 
-  ipcMain.on('terminal-input', (_e, sessionId, data) =>
-    agents.write(sessionId, data)
-  );
+  ipcMain.on('terminal-input', (_e, sessionId, data) => agents.write(sessionId, data));
   ipcMain.on('terminal-resize', (_e, sessionId, cols, rows) =>
     agents.resize(sessionId, cols, rows)
   );
+  ipcMain.on('terminal-clear', (_e, sessionId) => agents.clearBuffer(sessionId));
   ipcMain.handle('terminal-stop', (_e, sessionId) => {
     agents.stop(sessionId);
     return { ok: true };
@@ -202,6 +201,12 @@ function registerHandlers(win, storeInstance) {
       return { error: err.message };
     }
   });
+
+  // Validate a candidate path from terminal output for the file-link provider
+  // (confined to the site root; never throws).
+  ipcMain.handle('terminal-stat-path', (_e, rootPath, candidate) =>
+    files.statPath(rootPath, candidate)
+  );
 
   // Open a file in the OS default application.
   ipcMain.handle('open-file-path', (_e, filePath) => {

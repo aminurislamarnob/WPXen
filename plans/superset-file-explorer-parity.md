@@ -55,11 +55,11 @@ editing them:
   `window.confirm`).
 - Changes tab: `gitStatus(rootPath)` IPC → flat file list with branch header,
   refresh button, `N files +x −y` totals, per-file status letter (M/A/D/R/C/U)
-  + `+/-` counts. Deleted files struck through and disabled. Fetches only
-  when the tab is opened.
+  - `+/-` counts. Deleted files struck through and disabled. Fetches only
+    when the tab is opened.
 - `git.cjs` returns
   `{ isRepo, branch, files: [{ path, rel, name, status, staged, additions,
-  deletions }], additions, deletions }` — one entry per file, staged and
+deletions }], additions, deletions }` — one entry per file, staged and
   unstaged merged.
 
 ---
@@ -69,7 +69,7 @@ editing them:
 ### 1a. Rework `electron/services/git.cjs` → per-source entries
 
 Superset groups the changeset into **Unstaged** and **Staged** sections; a
-partially-staged file appears in *both*. Replace the merged-entry model:
+partially-staged file appears in _both_. Replace the merged-entry model:
 
 ```
 gitStatus(rootPath) → {
@@ -110,8 +110,7 @@ renames).
 
 Untracked files get `additions` = the file's line count (read the file,
 `content.split('\n').length`, but return 0 if the buffer contains a NUL byte
-in the first 8000 bytes — binary). Cap reads at ~2 MB; larger/unreadable →
-0. This matches Superset showing `+N` for new files.
+in the first 8000 bytes — binary). Cap reads at ~2 MB; larger/unreadable → 0. This matches Superset showing `+N` for new files.
 
 Keep `run()` resolving `null` on error and the whole function never throwing.
 **Update `test/` vitest coverage**: pure-parse the porcelain/numstat handling
@@ -267,8 +266,8 @@ let `@codemirror/merge` compute chunks:
   tabs as `diff:<source>:<rel>` so a file tab and its diff coexist; opening
   the same diff twice focuses the existing tab.
 - `CodeEditor` diff-tab branch:
-  - **Unstaged diff:** original = `gitFileAt(rel,'index')` *if the file is
-    also staged*, else `gitFileAt(rel,'HEAD')`; modified = `readFile`
+  - **Unstaged diff:** original = `gitFileAt(rel,'index')` _if the file is
+    also staged_, else `gitFileAt(rel,'HEAD')`; modified = `readFile`
     worktree content. (Simplification: always diff against `'HEAD'` unless
     a staged entry for the same `rel` exists — pass a `hasStagedTwin` flag
     from the changes list.)
@@ -279,8 +278,8 @@ let `@codemirror/merge` compute chunks:
     rows become clickable again (they open a diff, not a file).
   - Render CodeMirror read-only with
     `unifiedMergeView({ original, mergeControls: false, highlightChanges: true })`
-    + the existing `languageFor(name)` extensions and theme. Binary or
-    >2 MB → centered "Binary file / too large to diff" placeholder.
+    - the existing `languageFor(name)` extensions and theme. Binary or
+    > 2 MB → centered "Binary file / too large to diff" placeholder.
   - Tab strip: diff tabs show the file icon + name + a small `±` or
     GitCompare glyph to distinguish them from plain file tabs; no dirty-dot
     logic (read-only).
@@ -331,7 +330,7 @@ Do **not** implement alongside 1–3. When approved:
 - Replace the `window.confirm` delete in the Files tree with a `.panel`
   confirm dialog (same component as Phase 4's, so build it standalone:
   `ConfirmDialog({ title, description, confirmLabel, danger, onConfirm,
-  onCancel })` in `src/components/ui.jsx`).
+onCancel })` in `src/components/ui.jsx`).
 
 ## Explicitly out of scope (Superset features tied to their worktree/PR product)
 
