@@ -366,8 +366,10 @@ export default function AgentsPane() {
               <div className="px-3 py-1 text-[12px] text-destructive">{error}</div>
             )}
 
-            {/* Active terminal (only the active tab is mounted; switching remounts
-              and replays that Session's ring buffer). */}
+            {/* Active terminal. Only the active tab is mounted, but its xterm
+              lives in sessionCache and is re-parented on mount — so switching
+              tabs keeps scroll, selection and background output instead of
+              replaying the ring buffer. */}
             <div className="flex-1 min-h-0 px-4 pb-4">
               {activeTab ? (
                 <Terminal

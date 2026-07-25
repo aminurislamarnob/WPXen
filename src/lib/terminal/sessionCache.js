@@ -96,14 +96,14 @@ function createEntry(sessionId, handlers) {
   entry.detachWebgl = attachWebgl(term);
   registerQuerySuppression(term);
 
-  // File-path links → open in the editor at line:col (Cmd+click).
-  term.registerLinkProvider(
-    createFileLinkProvider(term, {
-      getRootPath: () => entry.handlers.rootPath,
-      onOpen: (resolved, line, col, isDir) =>
-        entry.handlers.onOpenFile?.(resolved, line, col, isDir),
-    })
-  );
+  // File-path links → open in the editor at line:col (Cmd+click). The provider
+  // owns its stat cache, so it is disposed with the terminal (see cleanup).
+  const linkProvider = createFileLinkProvider(term, {
+    getRootPath: () => entry.handlers.rootPath,
+    onOpen: (resolved, line, col, isDir) =>
+      entry.handlers.onOpenFile?.(resolved, line, col, isDir),
+  });
+  const linkRegistration = term.registerLinkProvider(linkProvider);
 
   // Custom key handler — bubbles Cmd chords, runs line-edit chords, and wires
   // the terminal-local Cmd+F/K/Shift+Down shortcuts.
@@ -204,6 +204,8 @@ function createEntry(sessionId, handlers) {
     offData();
     offExit();
     entry.detachWebgl();
+    linkRegistration.dispose();
+    linkProvider.dispose();
     term.element?.removeEventListener('copy', onCopy);
     wrapper.removeEventListener('paste', onPaste, { capture: true });
   };
