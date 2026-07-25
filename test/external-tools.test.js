@@ -114,20 +114,73 @@ describe('openInEditor', () => {
 });
 
 describe('openInTerminal', () => {
-  it('falls back when the terminal app is not installed', () => {
+  // Terminal.app and iTerm2 are scripted rather than just opened, so the new
+  // session starts already cd'd into the site directory.
+  it("scripts Terminal.app for 'system', preserving the historical behaviour", () => {
+    withBins();
+    const result = tools.openInTerminal('/site', { terminalApp: 'system' }, vi.fn());
+    expect(result).toMatchObject({ ok: true, via: 'Terminal' });
+    const [cmd, args] = execFile.mock.calls[0];
+    expect(cmd).toBe('osascript');
+    expect(args[1]).toContain('tell application "Terminal"');
+    expect(args[1]).toContain('/site');
+  });
+
+  it('scripts iTerm with its own API', () => {
+    withBins();
+    tools.openInTerminal('/site', { terminalApp: 'iterm' }, vi.fn());
+    expect(execFile.mock.calls[0][1][1]).toContain('tell application "iTerm"');
+  });
+
+  it('opens a non-scriptable terminal with the directory as its cwd', () => {
+    // mdfind reports the bundle exists.
+    execFileSync.mockImplementation((cmd) => {
+      if (cmd === '/usr/bin/mdfind') return '/Applications/Ghostty.app\n';
+      throw new Error('not found');
+    });
+    const result = tools.openInTerminal('/site', { terminalApp: 'ghostty' }, vi.fn());
+    expect(result).toMatchObject({ ok: true, via: 'Ghostty' });
+    expect(execFile).toHaveBeenCalledWith(
+      '/usr/bin/open',
+      ['-a', 'Ghostty', '/site'],
+      expect.anything(),
+      expect.any(Function)
+    );
+  });
+
+  it('falls back when a non-scriptable terminal is not installed', () => {
     withBins();
     const fallback = vi.fn();
-    const result = tools.openInTerminal('/site', { terminalApp: 'iterm' }, fallback);
+    const result = tools.openInTerminal('/site', { terminalApp: 'warp' }, fallback);
     expect(result.via).toBe('system');
     expect(fallback).toHaveBeenCalledWith('/site');
   });
 
-  it("falls back for 'system'", () => {
+  it('falls back asynchronously when the AppleScript fails', () => {
     withBins();
     const fallback = vi.fn();
-    expect(tools.openInTerminal('/site', { terminalApp: 'system' }, fallback).via).toBe(
-      'system'
-    );
+    tools.openInTerminal('/site', { terminalApp: 'terminal' }, fallback);
+    // Invoke the execFile callback the way a failed osascript would. The
+    // osascript call is (cmd, args, cb) — no options object.
+    execFile.mock.calls[0][2](new Error('app not running'));
+    expect(fallback).toHaveBeenCalledWith('/site');
+  });
+
+  it('rejects a path carrying a newline or NUL rather than scripting it', () => {
+    withBins();
+    const fallback = vi.fn();
+    for (const bad of ['/site\nrm -rf /', '/site\r', '/site\0']) {
+      const result = tools.openInTerminal(bad, { terminalApp: 'terminal' }, fallback);
+      expect(result).toEqual({ ok: false, error: 'Invalid path' });
+    }
+    expect(execFile).not.toHaveBeenCalled();
+    expect(fallback).not.toHaveBeenCalled();
+  });
+
+  it('escapes quotes and backslashes for the AppleScript literal', () => {
+    withBins();
+    tools.openInTerminal('/site/a"b\\c', { terminalApp: 'terminal' }, vi.fn());
+    expect(execFile.mock.calls[0][1][1]).toContain('/site/a\\"b\\\\c');
   });
 });
 

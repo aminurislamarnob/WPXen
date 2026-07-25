@@ -160,7 +160,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   listExternalTools: () => ipcRenderer.invoke('list-external-tools'),
   // Every agent including ones hidden from the launcher (settings only).
   listAllAgents: () => ipcRenderer.invoke('agent-list-all'),
-  openInTerminal: (dirPath) => ipcRenderer.invoke('open-in-terminal', dirPath),
   // Deprecated flat shape, kept for one release. Prefer the two above.
   getSettings: () => ipcRenderer.invoke('get-settings'),
   saveSettings: (settings) => ipcRenderer.invoke('save-settings', settings),

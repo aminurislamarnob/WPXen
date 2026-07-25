@@ -5,7 +5,7 @@ import { useSettings } from '../../../lib/useSettings';
 import { useSettingsContext } from '../SettingsLayout';
 
 export default function MailSection() {
-  const { settings, setSetting } = useSettings();
+  const { settings } = useSettings();
   const { visible } = useSettingsContext();
   const [status, setStatus] = useState(null);
 
@@ -38,19 +38,6 @@ export default function MailSection() {
             onChange={toggleCatch}
             disabled={status?.installed === false}
             label="Catch outgoing mail"
-          />
-        </SettingsRow>
-
-        <SettingsRow
-          id="mail.autoOpenInbox"
-          visible={visible}
-          title="Open the inbox on new mail"
-          subtitle="Jump to the Mail page when a caught message arrives"
-        >
-          <Toggle
-            checked={!!settings['mail.autoOpenInbox']}
-            onChange={(v) => setSetting('mail.autoOpenInbox', v)}
-            label="Open the inbox on new mail"
           />
         </SettingsRow>
       </Card>

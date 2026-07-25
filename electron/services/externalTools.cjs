@@ -141,11 +141,54 @@ function openInEditor(target, { editor = 'system', customCommand = '' } = {}, fa
   return fallbackOpen(target, fallback, `${entry.label} not found`);
 }
 
-/** Opens a directory in the configured terminal app. */
+// Builds the AppleScript that opens a new session already cd'd into `dir`.
+// The path is escaped for the AppleScript string literal; `quoted form of`
+// then shell-escapes it for `cd`, so a path with spaces or quotes can't inject
+// commands.
+function buildCdScript(app, dir) {
+  const escaped = dir.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  if (app === 'iterm') {
+    return [
+      'tell application "iTerm"',
+      '  activate',
+      '  set newWindow to (create window with default profile)',
+      '  tell current session of newWindow',
+      `    write text "cd " & quoted form of "${escaped}"`,
+      '  end tell',
+      'end tell',
+    ].join('\n');
+  }
+  return [
+    'tell application "Terminal"',
+    '  activate',
+    `  do script "cd " & quoted form of "${escaped}"`,
+    'end tell',
+  ].join('\n');
+}
+
+/**
+ * Opens a directory in the configured terminal app.
+ * Terminal.app and iTerm2 are scripted so the new session starts in `dir`;
+ * the others are launched with the directory as their working directory.
+ */
 function openInTerminal(dir, { terminalApp = 'system' } = {}, fallback) {
-  const entry = TERMINALS[terminalApp];
-  if (!entry || !appExists(entry.app)) {
-    return fallbackOpen(dir, fallback, entry ? `${entry.label} not found` : undefined);
+  if (typeof dir !== 'string' || /[\n\r\0]/.test(dir)) {
+    return { ok: false, error: 'Invalid path' };
+  }
+  // 'system' keeps the historical behaviour: Terminal.app.
+  const choice = terminalApp === 'system' ? 'terminal' : terminalApp;
+  const entry = TERMINALS[choice];
+  if (!entry) return fallbackOpen(dir, fallback);
+
+  if (choice === 'terminal' || choice === 'iterm') {
+    deps.execFile('osascript', ['-e', buildCdScript(choice, dir)], (err) => {
+      if (err) fallbackOpen(dir, fallback, `${entry.label} could not be scripted`);
+    });
+    return { ok: true, via: entry.app };
+  }
+
+  if (!appExists(entry.app)) {
+    return fallbackOpen(dir, fallback, `${entry.label} not found`);
   }
   spawnDetached('/usr/bin/open', ['-a', entry.app, dir]);
   return { ok: true, via: entry.app };

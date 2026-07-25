@@ -1,7 +1,6 @@
 'use strict';
 
 const { ipcMain, shell, dialog, app, BrowserWindow, nativeTheme } = require('electron');
-const { execFile } = require('child_process');
 const crypto = require('crypto');
 const path = require('path');
 const os = require('os');
@@ -315,15 +314,6 @@ function registerHandlers(win, storeInstance) {
         editor: settings.get('tools.editor'),
         customCommand: settings.get('tools.editorCustomCommand'),
       },
-      (p) => shell.openPath(p)
-    );
-  });
-
-  // Open a directory in the user's configured terminal app.
-  ipcMain.handle('open-in-terminal', (_e, dirPath) => {
-    return externalTools.openInTerminal(
-      dirPath,
-      { terminalApp: settings.get('tools.terminalApp') },
       (p) => shell.openPath(p)
     );
   });
@@ -1590,24 +1580,15 @@ function registerHandlers(win, storeInstance) {
     return { success: true };
   });
 
+  // Opens the site folder in the terminal app chosen in Settings → External
+  // Tools, falling back to revealing it in Finder if that can't be scripted.
   ipcMain.handle('open-in-terminal', (_, sitePath) => {
-    // Build the AppleScript with execFile (no shell) and escape the path for
-    // the AppleScript string literal; `quoted form of` then shell-escapes it
-    // for `cd`. This keeps a path with spaces/quotes from injecting commands.
-    if (typeof sitePath !== 'string' || /[\n\r\0]/.test(sitePath)) {
-      return { success: false, error: 'Invalid path' };
-    }
-    const escaped = sitePath.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-    const script = [
-      'tell application "Terminal"',
-      '  activate',
-      `  do script "cd " & quoted form of "${escaped}"`,
-      'end tell',
-    ].join('\n');
-    execFile('osascript', ['-e', script], (err) => {
-      if (err) shell.showItemInFolder(sitePath);
-    });
-    return { success: true };
+    const result = externalTools.openInTerminal(
+      sitePath,
+      { terminalApp: settings.get('tools.terminalApp') },
+      (p) => shell.showItemInFolder(p)
+    );
+    return result.ok ? { success: true } : { success: false, error: result.error };
   });
 
   // ─── Services ────────────────────────────────────────────────────────

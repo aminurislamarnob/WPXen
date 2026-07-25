@@ -134,7 +134,6 @@ const SETTINGS = {
 
   // ── Mail ─────────────────────────────────────────────────────────────────
   'mail.catch': { type: 'bool', default: false },
-  'mail.autoOpenInbox': { type: 'bool', default: false },
 
   // ── Services ─────────────────────────────────────────────────────────────
   // Mailpit is in the default set to match the pre-settings behaviour; it is

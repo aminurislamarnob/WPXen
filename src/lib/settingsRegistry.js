@@ -378,13 +378,6 @@ export const SETTINGS_ITEMS = [
       'php',
     ],
   },
-  {
-    id: 'mail.autoOpenInbox',
-    section: 'mail',
-    title: 'Open the inbox on new mail',
-    description: 'Jump to the Mail page when a caught message arrives',
-    keywords: ['mail', 'inbox', 'open', 'notification', 'jump', 'auto', 'message'],
-  },
 
   // ── Services ─────────────────────────────────────────────────────────────
   {
