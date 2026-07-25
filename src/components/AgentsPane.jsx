@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, useLocation, useOutletContext } from 'react-router-dom';
 import { Terminal as TerminalIcon, Plus, X } from 'lucide-react';
+import { ProviderIcon } from './providerIcons';
 import { Panel, PanelGroup } from 'react-resizable-panels';
 import Terminal from './Terminal';
 import FileExplorer from './FileExplorer';
@@ -307,7 +308,12 @@ export default function AgentsPane() {
                         : 'text-muted-foreground hover:bg-accent'
                     }`}
                   >
-                    <TerminalIcon size={12} strokeWidth={2.2} className="flex-shrink-0" />
+                    <ProviderIcon
+                      agentId={tab.agentId}
+                      brand
+                      size={13}
+                      className="flex-shrink-0"
+                    />
                     <span className="truncate max-w-[140px]">
                       {titles[tab.sessionId] || `${tab.agentName}${ordinal(tab, i)}`}
                     </span>
@@ -354,7 +360,7 @@ export default function AgentsPane() {
                       onClick={() => spawn(a.id)}
                       className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[13px] text-foreground hover:bg-accent"
                     >
-                      <TerminalIcon size={13} strokeWidth={2.2} />
+                      <ProviderIcon agentId={a.id} brand size={14} />
                       {a.name}
                     </button>
                   ))}
@@ -394,7 +400,7 @@ export default function AgentsPane() {
                           className="btn btn-secondary"
                           onClick={() => spawn(a.id)}
                         >
-                          <TerminalIcon size={12} strokeWidth={2.5} />
+                          <ProviderIcon agentId={a.id} brand size={14} />
                           {a.name}
                         </button>
                       ))}

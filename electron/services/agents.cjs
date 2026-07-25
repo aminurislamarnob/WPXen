@@ -25,22 +25,38 @@ const REGISTRY = [
     install: 'npm install -g @anthropic-ai/claude-code',
   },
   {
+    // command-code installs four aliases for one entry point: cmd, cmdc,
+    // command-code, commandcode. `cmd` is the short one users type, but it's
+    // generic enough that an unrelated binary could shadow it — switch to
+    // `command-code` if that ever turns into a false positive.
+    id: 'commandcode',
+    name: 'Command Code',
+    cmd: 'cmd',
+    install: 'npm install -g command-code',
+  },
+  // Antigravity and MiMo Code ship as standalone binaries rather than npm
+  // globals, so `install` describes the source instead of giving a
+  // copy-pasteable command. They also land outside the usual bin dirs
+  // (~/.local/bin, ~/.mimocode/bin), which detection handles fine —
+  // resolveShellEnv snapshots the login shell's PATH, so anything the user's
+  // rc files add is visible here too.
+  {
+    id: 'antigravity',
+    name: 'Antigravity',
+    cmd: 'agy',
+    install: 'Bundled with the Antigravity IDE',
+  },
+  {
+    id: 'mimo',
+    name: 'MiMo Code',
+    cmd: 'mimo',
+    install: 'Install the MiMo Code CLI',
+  },
+  {
     id: 'codex',
     name: 'Codex',
     cmd: 'codex',
     install: 'npm install -g @openai/codex',
-  },
-  {
-    id: 'gemini',
-    name: 'Gemini CLI',
-    cmd: 'gemini',
-    install: 'npm install -g @google/gemini-cli',
-  },
-  {
-    id: 'opencode',
-    name: 'opencode',
-    cmd: 'opencode',
-    install: 'npm install -g opencode-ai',
   },
 ];
 
