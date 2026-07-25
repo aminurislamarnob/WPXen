@@ -11,6 +11,8 @@ import {
   Info,
   Search,
   X,
+  Wrench,
+  Server,
 } from 'lucide-react';
 import { SECTIONS } from '../../lib/settingsRegistry';
 
@@ -24,6 +26,8 @@ const ICONS = {
   wifi: Wifi,
   package: Package,
   info: Info,
+  wrench: Wrench,
+  server: Server,
 };
 
 // Left rail of the settings surface: search on top, then the section groups.

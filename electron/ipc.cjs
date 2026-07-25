@@ -43,6 +43,7 @@ const agents = require('./services/agents.cjs');
 const files = require('./services/files.cjs');
 const git = require('./services/git.cjs');
 const settingsService = require('./services/settings.cjs');
+const externalTools = require('./services/externalTools.cjs');
 const { humanize } = require('./services/errors.cjs');
 
 let store;
@@ -56,6 +57,41 @@ let serviceStatusCache = {
   dnsmasq: { running: false, name: 'dnsmasq' },
   mailpit: { running: false, name: 'Mailpit', installed: false },
 };
+
+// Switches a site between http and https: mints a cert (via the local CA) when
+// enabling, rewrites the vhost, reloads nginx and repoints WordPress at the new
+// URL. Returns the updated site record; the caller persists it. Shared by the
+// set-site-https handler and HTTPS-on-create.
+function applyHttps(site, enabled) {
+  let updated;
+  if (enabled) {
+    // Ensure mkcert + a trusted local CA, then mint a cert for this domain.
+    mkcert.ensureInstalled();
+    mkcert.ensureCA();
+    const { certPath, keyPath } = mkcert.generateCert(site.domain);
+    updated = {
+      ...site,
+      https: true,
+      certPath,
+      keyPath,
+      url: `https://${site.domain}`,
+    };
+  } else {
+    updated = { ...site, https: false, url: `http://${site.domain}` };
+  }
+
+  // Rewrite the vhost for the new scheme and reload nginx.
+  nginx.createSiteConfig(updated);
+  nginx.reload();
+
+  // Point WordPress at the new URL so it stops redirecting to the old
+  // scheme. Best-effort — nginx already serves the right scheme regardless.
+  try {
+    wordpress.setSiteUrl(site.path, updated.url);
+  } catch {}
+
+  return updated;
+}
 
 // Pushes the full resolved settings to every open window so a change made in
 // one place (tray, Mail page, Settings) lands everywhere.
@@ -169,9 +205,14 @@ function registerHandlers(win, storeInstance) {
         mysql.setCredentials({ user: all['db.user'], password: all['db.password'] }),
       'db.password': (_v, all) =>
         mysql.setCredentials({ user: all['db.user'], password: all['db.password'] }),
+      'mail.catch': (value) => mailpit.setCatchEnabled(value),
+      'services.logMaxSizeMb': (value) => procman.setMaxLogSizeMb(value),
     },
   });
   settings.migrateLegacy();
+
+  // Apply settings that configure a module at startup rather than on change.
+  procman.setMaxLogSizeMb(settings.get('services.logMaxSizeMb'));
 
   // Apply persisted DB credentials so MySQL operations authenticate correctly.
   mysql.setCredentials({
@@ -240,11 +281,30 @@ function registerHandlers(win, storeInstance) {
     files.statPath(rootPath, candidate)
   );
 
-  // Open a file in the OS default application.
+  // Open a file in the user's configured editor, falling back to the OS
+  // default when none is set or the chosen one isn't installed.
   ipcMain.handle('open-file-path', (_e, filePath) => {
-    shell.openPath(filePath);
-    return { ok: true };
+    return externalTools.openInEditor(
+      filePath,
+      {
+        editor: settings.get('tools.editor'),
+        customCommand: settings.get('tools.editorCustomCommand'),
+      },
+      (p) => shell.openPath(p)
+    );
   });
+
+  // Open a directory in the user's configured terminal app.
+  ipcMain.handle('open-in-terminal', (_e, dirPath) => {
+    return externalTools.openInTerminal(
+      dirPath,
+      { terminalApp: settings.get('tools.terminalApp') },
+      (p) => shell.openPath(p)
+    );
+  });
+
+  // Editors/terminals installed on this machine, for the settings pickers.
+  ipcMain.handle('list-external-tools', () => externalTools.listTools());
 
   // Read a text file for the in-app code editor (confined to the site root).
   ipcMain.handle('read-file', (_e, rootPath, filePath) => {
@@ -418,7 +478,7 @@ function registerHandlers(win, storeInstance) {
   // Mailpit. Idempotent — only rewrites/reloads when something differs.
   setTimeout(() => {
     try {
-      if (store.get('settings.mailCatch', false) && mailpit.isInstalled()) {
+      if (settings.get('mail.catch') && mailpit.isInstalled()) {
         mailpit.setCatchEnabled(true);
       }
     } catch {}
@@ -497,7 +557,19 @@ function registerHandlers(win, storeInstance) {
         };
       }
 
-      const site = await wordpress.createWordPressSite(siteData, progress);
+      let site = await wordpress.createWordPressSite(siteData, progress);
+
+      // Optional HTTPS-on-create (Settings → Sites). Best-effort: a failure to
+      // mint a certificate must not lose a site that was otherwise created, so
+      // it degrades to plain HTTP with the reason surfaced in the progress log.
+      if (siteData.https) {
+        try {
+          progress({ message: 'Enabling HTTPS…' });
+          site = applyHttps(site, true);
+        } catch (err) {
+          progress({ message: `HTTPS setup failed (${humanize(err)}); serving HTTP.` });
+        }
+      }
 
       const updatedSites = [...sites, site];
       store.set('sites', updatedSites);
@@ -535,39 +607,12 @@ function registerHandlers(win, storeInstance) {
       const sites = store.get('sites', []);
       const idx = sites.findIndex((s) => s.id === id);
       if (idx === -1) return { success: false, error: 'Site not found' };
-      const site = sites[idx];
 
       // Switching scheme rewrites the vhost; drop any live tunnel first so its
       // server_name alias isn't silently lost (the user can re-share after).
       cloudflared.stopTunnel(id);
 
-      let updated;
-      if (enabled) {
-        // Ensure mkcert + a trusted local CA, then mint a cert for this domain.
-        mkcert.ensureInstalled();
-        mkcert.ensureCA();
-        const { certPath, keyPath } = mkcert.generateCert(site.domain);
-        updated = {
-          ...site,
-          https: true,
-          certPath,
-          keyPath,
-          url: `https://${site.domain}`,
-        };
-      } else {
-        updated = { ...site, https: false, url: `http://${site.domain}` };
-      }
-
-      // Rewrite the vhost for the new scheme and reload nginx.
-      nginx.createSiteConfig(updated);
-      nginx.reload();
-
-      // Point WordPress at the new URL so it stops redirecting to the old
-      // scheme. Best-effort — nginx already serves the right scheme regardless.
-      try {
-        wordpress.setSiteUrl(site.path, updated.url);
-      } catch {}
-
+      const updated = applyHttps(sites[idx], enabled);
       sites[idx] = updated;
       store.set('sites', sites);
       return { success: true, site: updated };
@@ -1370,7 +1415,7 @@ function registerHandlers(win, storeInstance) {
     return {
       installed,
       running: installed ? await mailpit.isRunningAsync() : false,
-      catching: !!store.get('settings.mailCatch', false),
+      catching: !!settings.get('mail.catch'),
       url: mailpit.getUrl(),
     };
   });
@@ -1391,8 +1436,14 @@ function registerHandlers(win, storeInstance) {
 
   ipcMain.handle('set-mail-catching', async (_, enabled) => {
     try {
-      mailpit.setCatchEnabled(!!enabled);
-      store.set('settings.mailCatch', !!enabled);
+      // Through the schema, not the store directly, so the Settings page and
+      // the Mail page never disagree. The 'mail.catch' effect is what writes
+      // the sendmail_path override into each PHP version's conf.d.
+      const result = settings.write({ 'mail.catch': !!enabled });
+      if (!result.ok) {
+        return { success: false, error: result.rejected.map((r) => r.reason).join(', ') };
+      }
+      broadcastSettings(result.settings);
       // Catching without the sink running would black-hole mail — bring it up.
       if (enabled && !(await mailpit.isRunningAsync())) {
         try {
@@ -1745,7 +1796,7 @@ function registerHandlers(win, storeInstance) {
       // The new version's conf.d starts empty — re-apply the Mailpit sendmail
       // override so its mail() is caught like the others.
       try {
-        if (store.get('settings.mailCatch', false) && mailpit.isInstalled()) {
+        if (settings.get('mail.catch') && mailpit.isInstalled()) {
           mailpit.setCatchEnabled(true);
         }
       } catch {}
@@ -1948,4 +1999,10 @@ function startStatusPoller(win) {
   tick();
 }
 
-module.exports = { registerHandlers, startStatusPoller, getServiceStatus };
+// Read a setting from the main process (main.cjs uses this for window and quit
+// behaviour). Returns undefined before registerHandlers() has bound the store.
+function getSetting(key) {
+  return settings ? settings.get(key) : undefined;
+}
+
+module.exports = { registerHandlers, startStatusPoller, getServiceStatus, getSetting };

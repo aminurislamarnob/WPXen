@@ -156,6 +156,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // resolves with { ok, applied, rejected } — it never throws on a bad value.
   getAllSettings: () => ipcRenderer.invoke('settings-get-all'),
   setSettings: (patch) => ipcRenderer.invoke('settings-set', patch),
+  // Editors/terminals detected on this machine, for the settings pickers.
+  listExternalTools: () => ipcRenderer.invoke('list-external-tools'),
+  openInTerminal: (dirPath) => ipcRenderer.invoke('open-in-terminal', dirPath),
   // Deprecated flat shape, kept for one release. Prefer the two above.
   getSettings: () => ipcRenderer.invoke('get-settings'),
   saveSettings: (settings) => ipcRenderer.invoke('save-settings', settings),

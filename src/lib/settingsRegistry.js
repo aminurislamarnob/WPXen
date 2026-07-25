@@ -12,19 +12,24 @@
 export const SECTIONS = [
   {
     group: 'App',
-    items: [{ id: 'general', label: 'General', icon: 'sliders' }],
+    items: [
+      { id: 'general', label: 'General', icon: 'sliders' },
+      { id: 'tools', label: 'External Tools', icon: 'wrench' },
+    ],
   },
   {
     group: 'WordPress',
     items: [
       { id: 'sites', label: 'Sites', icon: 'globe' },
       { id: 'database', label: 'Database', icon: 'database' },
+      { id: 'mail', label: 'Mail', icon: 'mail' },
       { id: 'blueprints', label: 'Blueprints', icon: 'layers' },
     ],
   },
   {
     group: 'System',
     items: [
+      { id: 'services', label: 'Services', icon: 'server' },
       { id: 'dns', label: 'DNS & HTTPS', icon: 'wifi' },
       { id: 'dependencies', label: 'Dependencies', icon: 'package' },
       { id: 'about', label: 'About', icon: 'info' },
@@ -58,6 +63,51 @@ export const SETTINGS_ITEMS = [
     keywords: ['php', 'version', 'default', 'new sites', '8.2', '8.3', 'runtime'],
   },
 
+  {
+    id: 'sites.defaultWpVersion',
+    section: 'sites',
+    title: 'Default WordPress Version',
+    description: 'WordPress version new installs download',
+    keywords: ['wordpress', 'version', 'wp', 'core', 'default', 'latest', 'download'],
+  },
+  {
+    id: 'sites.defaultLocale',
+    section: 'sites',
+    title: 'Default Locale',
+    description: 'Language pack new installs download',
+    keywords: ['locale', 'language', 'translation', 'i18n', 'default', 'english'],
+  },
+  {
+    id: 'sites.defaultAdminUser',
+    section: 'sites',
+    title: 'Default Admin Username',
+    description: 'WordPress admin account new sites are created with',
+    keywords: ['admin', 'user', 'username', 'wordpress', 'login', 'account', 'default'],
+  },
+  {
+    id: 'sites.defaultAdminEmail',
+    section: 'sites',
+    title: 'Default Admin Email',
+    description: 'Leave blank to derive one from the site domain',
+    keywords: ['admin', 'email', 'address', 'wordpress', 'account', 'default', 'mail'],
+  },
+  {
+    id: 'sites.httpsOnCreate',
+    section: 'sites',
+    title: 'Enable HTTPS on create',
+    description: 'Mint a locally-trusted certificate as part of site creation',
+    keywords: [
+      'https',
+      'ssl',
+      'tls',
+      'certificate',
+      'secure',
+      'create',
+      'default',
+      'mkcert',
+    ],
+  },
+
   // ── General ──────────────────────────────────────────────────────────────
   {
     id: 'app.startAtLogin',
@@ -65,6 +115,116 @@ export const SETTINGS_ITEMS = [
     title: 'Start at Login',
     description: 'Launch WPHerd when you log into macOS',
     keywords: ['start', 'login', 'launch', 'startup', 'boot', 'auto', 'open', 'macos'],
+  },
+  {
+    id: 'app.confirmOnQuit',
+    section: 'general',
+    title: 'Confirm before quitting',
+    description: 'Ask before quitting when services are running',
+    keywords: ['quit', 'confirm', 'exit', 'close', 'dialog', 'warning', 'prompt', 'ask'],
+  },
+  {
+    id: 'app.closeAction',
+    section: 'general',
+    title: 'When the window is closed',
+    description: 'Hide to the menu bar, or quit WPHerd entirely',
+    keywords: [
+      'close',
+      'window',
+      'tray',
+      'menu bar',
+      'quit',
+      'hide',
+      'background',
+      'minimize',
+    ],
+  },
+
+  // ── External tools ───────────────────────────────────────────────────────
+  {
+    id: 'tools.editor',
+    section: 'tools',
+    title: 'Open files with',
+    description: 'Editor used by “Open in editor” across the app',
+    keywords: [
+      'editor',
+      'vscode',
+      'code',
+      'cursor',
+      'phpstorm',
+      'sublime',
+      'zed',
+      'ide',
+      'open',
+    ],
+  },
+  {
+    id: 'tools.terminalApp',
+    section: 'tools',
+    title: 'Open terminals with',
+    description: 'Terminal app used by “Open in Terminal”',
+    keywords: ['terminal', 'iterm', 'warp', 'ghostty', 'shell', 'console', 'open'],
+  },
+
+  // ── Mail ─────────────────────────────────────────────────────────────────
+  {
+    id: 'mail.catch',
+    section: 'mail',
+    title: 'Catch outgoing mail',
+    description: 'Route PHP mail() into Mailpit instead of sending it for real',
+    keywords: [
+      'mail',
+      'email',
+      'catch',
+      'mailpit',
+      'smtp',
+      'sink',
+      'inbox',
+      'intercept',
+      'php',
+    ],
+  },
+  {
+    id: 'mail.autoOpenInbox',
+    section: 'mail',
+    title: 'Open the inbox on new mail',
+    description: 'Jump to the Mail page when a caught message arrives',
+    keywords: ['mail', 'inbox', 'open', 'notification', 'jump', 'auto', 'message'],
+  },
+
+  // ── Services ─────────────────────────────────────────────────────────────
+  {
+    id: 'services.autoStart',
+    section: 'services',
+    title: 'Start on Launch',
+    description: 'Which services WPHerd brings up when it starts',
+    keywords: [
+      'services',
+      'start',
+      'launch',
+      'auto',
+      'nginx',
+      'php',
+      'mysql',
+      'mailpit',
+      'boot',
+    ],
+  },
+  {
+    id: 'services.logMaxSizeMb',
+    section: 'services',
+    title: 'Rotate service logs at',
+    description: 'Size past which a service log is moved aside',
+    keywords: [
+      'logs',
+      'rotate',
+      'size',
+      'disk',
+      'cleanup',
+      'truncate',
+      'services',
+      'storage',
+    ],
   },
 
   // ── Database ─────────────────────────────────────────────────────────────

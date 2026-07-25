@@ -12,6 +12,9 @@ import SettingsLayout from './components/settings/SettingsLayout';
 import GeneralSection from './components/settings/sections/GeneralSection';
 import SitesSection from './components/settings/sections/SitesSection';
 import DatabaseSection from './components/settings/sections/DatabaseSection';
+import ToolsSection from './components/settings/sections/ToolsSection';
+import MailSection from './components/settings/sections/MailSection';
+import ServicesSection from './components/settings/sections/ServicesSection';
 import DnsSection from './components/settings/sections/DnsSection';
 import BlueprintsSection from './components/settings/sections/BlueprintsSection';
 import DependenciesSection from './components/settings/sections/DependenciesSection';
@@ -141,9 +144,12 @@ export default function App() {
             <Route path="settings" element={<SettingsLayout {...sharedProps} />}>
               <Route index element={<Navigate to="/settings/general" replace />} />
               <Route path="general" element={<GeneralSection />} />
+              <Route path="tools" element={<ToolsSection />} />
               <Route path="sites" element={<SitesSection />} />
               <Route path="database" element={<DatabaseSection />} />
+              <Route path="mail" element={<MailSection />} />
               <Route path="blueprints" element={<BlueprintsSection />} />
+              <Route path="services" element={<ServicesSection />} />
               <Route path="dns" element={<DnsSection />} />
               <Route path="dependencies" element={<DependenciesSection />} />
               <Route path="about" element={<AboutSection />} />

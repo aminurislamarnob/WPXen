@@ -25,16 +25,67 @@
 const SETTINGS = {
   // ── Sites ────────────────────────────────────────────────────────────────
   'sites.dir': { type: 'path' },
+  // Prefills for the Add Site sheet. These are starting points, not overrides:
+  // the sheet still lets any individual site deviate.
+  'sites.defaultWpVersion': { type: 'string', default: 'latest' },
+  'sites.defaultLocale': { type: 'string', default: 'en_US' },
+  'sites.defaultAdminUser': { type: 'string', default: 'admin' },
+  // Blank means "derive admin@<site-domain>", which is what the Add Site sheet
+  // did before this setting existed.
+  'sites.defaultAdminEmail': {
+    type: 'string',
+    default: '',
+    validate: (v) =>
+      v === '' || /^[^@\s]+@[^@\s]+$/.test(v) || 'not a valid email address',
+  },
+  'sites.httpsOnCreate': { type: 'bool', default: false },
 
   // ── PHP ──────────────────────────────────────────────────────────────────
   'php.defaultVersion': { type: 'string', default: '' },
 
   // ── App ──────────────────────────────────────────────────────────────────
   'app.startAtLogin': { type: 'bool', default: false },
+  // Quitting stops nginx, PHP-FPM and MySQL for every site at once, so the
+  // confirmation defaults on.
+  'app.confirmOnQuit': { type: 'bool', default: true },
+  'app.closeAction': { type: 'enum', values: ['tray', 'quit'], default: 'tray' },
+
+  // ── External tools ───────────────────────────────────────────────────────
+  // 'system' means "whatever macOS opens this with" — the behaviour before
+  // these settings existed.
+  'tools.editor': {
+    type: 'enum',
+    values: ['system', 'vscode', 'cursor', 'phpstorm', 'sublime', 'zed', 'custom'],
+    default: 'system',
+  },
+  'tools.editorCustomCommand': { type: 'string', default: '' },
+  'tools.terminalApp': {
+    type: 'enum',
+    values: ['system', 'terminal', 'iterm', 'warp', 'ghostty'],
+    default: 'system',
+  },
 
   // ── Database ─────────────────────────────────────────────────────────────
   'db.user': { type: 'string', default: 'root' },
   'db.password': { type: 'string', default: '' },
+
+  // ── Mail ─────────────────────────────────────────────────────────────────
+  'mail.catch': { type: 'bool', default: false },
+  'mail.autoOpenInbox': { type: 'bool', default: false },
+
+  // ── Services ─────────────────────────────────────────────────────────────
+  // Mailpit is in the default set to match the pre-settings behaviour; it is
+  // skipped at launch when not installed.
+  'services.autoStart': {
+    type: 'list',
+    default: ['nginx', 'php', 'mysql', 'mailpit'],
+    validate: (v) =>
+      v.every((n) => ['nginx', 'php', 'mysql', 'mailpit'].includes(n)) ||
+      'unknown service name',
+  },
+  // procman truncates a service log once it passes this size (it rotates by
+  // size, not by age — there is no dated-file retention to configure).
+  'services.logMaxSizeMb': { type: 'int', default: 5, min: 1, max: 200 },
 };
 
 // Legacy flat keys → new namespaced keys. Migrated once on init; the old keys
@@ -46,6 +97,7 @@ const LEGACY_KEYS = {
   startAtLogin: 'app.startAtLogin',
   dbUser: 'db.user',
   dbPassword: 'db.password',
+  mailCatch: 'mail.catch',
 };
 
 // ─── Validation ────────────────────────────────────────────────────────────

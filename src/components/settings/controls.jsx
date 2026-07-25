@@ -1,5 +1,68 @@
 import { useEffect, useRef, useState } from 'react';
 
+// Dropdown bound to a setting. Enums commit immediately — there's no partial
+// state to protect the way there is with a half-typed string.
+export function SelectSetting({ value, onChange, options, ariaLabel, className = '' }) {
+  return (
+    <select
+      aria-label={ariaLabel}
+      className={`form-input !text-xs !py-1 ${className}`.trim()}
+      value={value ?? ''}
+      onChange={(e) => onChange(e.target.value)}
+    >
+      {options.map((o) => (
+        <option key={o.value} value={o.value} disabled={o.disabled}>
+          {o.label}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+// Whole-number field bound to a setting. Commits on blur/Enter like TextSetting,
+// and refuses to send a non-number so the main process never has to reject one.
+export function NumberSetting({ value, onCommit, min, max, ariaLabel, className = '' }) {
+  const [draft, setDraft] = useState(String(value ?? ''));
+  const committed = useRef(String(value ?? ''));
+
+  useEffect(() => {
+    if (draft === committed.current) setDraft(String(value ?? ''));
+    committed.current = String(value ?? '');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+
+  function commit() {
+    if (draft === committed.current) return;
+    const parsed = Number(draft);
+    if (!Number.isInteger(parsed)) {
+      setDraft(committed.current);
+      return;
+    }
+    committed.current = draft;
+    onCommit(parsed);
+  }
+
+  return (
+    <input
+      type="number"
+      min={min}
+      max={max}
+      aria-label={ariaLabel}
+      className={`form-input font-mono !text-xs ${className}`.trim()}
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') e.currentTarget.blur();
+        else if (e.key === 'Escape') {
+          setDraft(committed.current);
+          e.currentTarget.blur();
+        }
+      }}
+    />
+  );
+}
+
 // Text field bound to a setting.
 //
 // Auto-save doesn't mean save-per-keystroke: that would write the store (and

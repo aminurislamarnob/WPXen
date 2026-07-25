@@ -5,7 +5,12 @@ const path = require('path');
 
 const JsonStore = require('./store.cjs');
 const { createTray } = require('./tray.cjs');
-const { registerHandlers, startStatusPoller, getServiceStatus } = require('./ipc.cjs');
+const {
+  registerHandlers,
+  startStatusPoller,
+  getServiceStatus,
+  getSetting,
+} = require('./ipc.cjs');
 
 const isDev = process.env.NODE_ENV === 'development';
 
@@ -58,8 +63,16 @@ function createWindow() {
   });
 
   mainWindow.on('close', (e) => {
-    // Hide to tray instead of closing
+    // Closing hides to the tray by default — services keep running, which is
+    // the point of a menu-bar app. Users who'd rather the close button really
+    // quit can say so in Settings → General.
     e.preventDefault();
+    if (getSetting('app.closeAction') === 'quit') {
+      // Route through app.quit() rather than letting the window close: quitting
+      // has to tear down the service children, and before-quit owns that.
+      app.quit();
+      return;
+    }
     mainWindow.hide();
     app.dock?.hide();
   });
@@ -121,16 +134,29 @@ app.whenReady().then(() => {
       await procman.reconcileOrphans();
     } catch {}
 
-    const starters = [
-      () => nginx.start(),
-      () => {
-        const activePhp = brew.getActivePhpVersion();
-        return activePhp ? phpService.startPhpFpm(activePhp) : null;
-      },
-      () => mysql.start(),
-      () => (mailpit.isInstalled() ? mailpit.start() : null),
+    // Which services come up on launch is a preference (Settings → Services);
+    // Mailpit additionally needs to be installed. Falls back to the historical
+    // set if the store hasn't been read yet.
+    const autoStart = getSetting('services.autoStart') || [
+      'nginx',
+      'php',
+      'mysql',
+      'mailpit',
     ];
-    for (const startService of starters) {
+    const starters = [
+      ['nginx', () => nginx.start()],
+      [
+        'php',
+        () => {
+          const activePhp = brew.getActivePhpVersion();
+          return activePhp ? phpService.startPhpFpm(activePhp) : null;
+        },
+      ],
+      ['mysql', () => mysql.start()],
+      ['mailpit', () => (mailpit.isInstalled() ? mailpit.start() : null)],
+    ];
+    for (const [name, startService] of starters) {
+      if (!autoStart.includes(name)) continue;
       try {
         await startService();
       } catch (err) {
@@ -202,6 +228,28 @@ app.on('before-quit', (e) => {
     if (choice === 1) {
       e.preventDefault();
       return;
+    }
+  } else if (getSetting('app.confirmOnQuit') !== false) {
+    // Quitting stops every service, which takes all of the user's local sites
+    // offline at once. Only worth asking when something is actually running —
+    // an "are you sure?" over an idle app is pure noise.
+    const status = getServiceStatus();
+    const running = Object.values(status)
+      .filter((s) => s?.running)
+      .map((s) => s.name);
+    if (running.length > 0) {
+      const choice = dialog.showMessageBoxSync(mainWindow, {
+        type: 'question',
+        buttons: ['Quit', 'Cancel'],
+        defaultId: 1,
+        cancelId: 1,
+        message: 'Quit WPHerd?',
+        detail: `This stops ${running.join(', ')}, taking your local sites offline. You can turn this confirmation off in Settings → General.`,
+      });
+      if (choice === 1) {
+        e.preventDefault();
+        return;
+      }
     }
   }
 
