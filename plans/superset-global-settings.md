@@ -23,12 +23,12 @@ Five structural decisions matter more than any individual toggle.
 (`/settings/appearance`, `/settings/terminal`, …). `GeneralSettings.tsx` groups
 them under four headers:
 
-| Group             | Sections                                                                 |
-| ----------------- | ------------------------------------------------------------------------ |
-| Personal          | Account · Appearance · Notifications                                     |
-| Editor & Workflow | General · Keyboard · Git & Worktrees · Agents · Terminal · Links · Models |
+| Group             | Sections                                                                    |
+| ----------------- | --------------------------------------------------------------------------- |
+| Personal          | Account · Appearance · Notifications                                        |
+| Editor & Workflow | General · Keyboard · Git & Worktrees · Agents · Terminal · Links · Models   |
 | Organization      | Organization · Teams · Projects · Hosts · Integrations · Billing · API Keys |
-| System            | Security · Permissions (macOS only) · Experimental                        |
+| System            | Security · Permissions (macOS only) · Experimental                          |
 
 Platform-only sections are filtered at render (`macOnly`), so the nav never shows
 a dead route.
@@ -36,14 +36,14 @@ a dead route.
 **A searchable settings registry.** `utils/settings-search/settings-search.ts`
 (1556 lines) declares every individual setting as
 `{ id, section, title, description, keywords[] }` — ~60 entries. The sidebar
-search filters *sections* by match count and each section renders only its
+search filters _sections_ by match count and each section renders only its
 matching rows (`isItemVisible(SETTING_ITEM_ID.X, visibleItems)`). The same
 registry carries a `SETTING_ITEM_VARIANT` map (`v1` / `v2` / `shared`) so a
 setting can be hidden per UI variant without touching the page.
 
 **No Save button.** Every row is an independent tRPC query + optimistic mutation
 (`BehaviorSettings.tsx` — `onMutate` writes the cache, `onError` rolls back,
-`onSettled` invalidates). Changing a control *is* the commit.
+`onSettled` invalidates). Changing a control _is_ the commit.
 
 **Global default → per-entity override.** Worktree location exists at user level
 (`GIT_WORKTREE_LOCATION`), per project (`PROJECT_WORKTREE_LOCATION`), and per host
@@ -58,7 +58,7 @@ setting can be hidden per UI variant without touching the page.
 ## 2. Superset's actual setting inventory (the parts with a WPHerd analogue)
 
 - **Appearance** — theme picker (System / named light / named dark, each with a
-  colour swatch; System splits into *light theme* + *dark theme* pickers), custom
+  colour swatch; System splits into _light theme_ + _dark theme_ pickers), custom
   theme import from JSON (256 KB cap), markdown render style, and two typography
   blocks (editor, terminal): font family combobox, size, line height, letter
   spacing, weight, ligatures, plus terminal-only minimum contrast, cursor style
@@ -77,7 +77,7 @@ setting can be hidden per UI variant without touching the page.
 - **Agents** — which agents appear in launchers, per-agent launch commands
   (no-prompt and prompt variants), task-prompt templates.
 - **Links** — how file links, URL links, sidebar file rows and ports open.
-- **Models** — Anthropic / OpenAI auth via OAuth *or* API key, a status badge
+- **Models** — Anthropic / OpenAI auth via OAuth _or_ API key, a status badge
   (connected / needs auth), and a collapsed **Advanced** block for auth token,
   base URL and extra env vars, saved on blur.
 - **Permissions** (macOS) — Full Disk Access, Accessibility, Microphone, Apple
@@ -93,10 +93,10 @@ setting can be hidden per UI variant without touching the page.
 
 1. **Split Settings into routed sections with a settings sidebar.** Suggested
    groups, WPHerd-flavoured:
-   - *Personal* — Appearance · Notifications
-   - *App* — General · Keyboard · Terminal · Agents · External Tools
-   - *WordPress* — Sites · PHP · Database · Mail · Blueprints
-   - *System* — Services · DNS & HTTPS · Permissions · Sharing · Experimental ·
+   - _Personal_ — Appearance · Notifications
+   - _App_ — General · Keyboard · Terminal · Agents · External Tools
+   - _WordPress_ — Sites · PHP · Database · Mail · Blueprints
+   - _System_ — Services · DNS & HTTPS · Permissions · Sharing · Experimental ·
      Dependencies · About
 2. **Kill the Save button.** Persist per row on change (WPHerd's `JsonStore`
    already supports dotted-path `set`, and `save-settings` already re-inits the
@@ -111,29 +111,29 @@ setting can be hidden per UI variant without touching the page.
 
 ### Tier 1 — settings WPHerd is missing and clearly needs
 
-| Setting                                       | Section          | Why                                                                                        |
-| --------------------------------------------- | ---------------- | ------------------------------------------------------------------------------------------ |
-| **Confirm before quitting**                   | General          | Quitting stops nginx/PHP-FPM/MySQL for every site (`procman`). Superset's `BEHAVIOR_CONFIRM_QUIT` verbatim. |
-| **Close button: hide to tray / quit**         | General          | `main.cjs` hard-codes hide-to-tray; make it a preference.                                    |
-| **Catch outgoing mail**                       | Mail             | `settings.mailCatch` already exists in the store but is only reachable from the Mail page.    |
-| **External editor / browser / terminal app**  | External Tools   | Superset's Links section. WPHerd calls `shell.openPath` today, so "Open in editor" is whatever macOS decided. Offer VS Code / Cursor / PhpStorm / Sublime / custom command, plus which browser opens a site. |
-| **New-site defaults**                         | Sites            | Default WP version + locale, admin user/email/password, TLD, "enable HTTPS on create", multisite, and a default plugin/theme list. This is Superset's *project scripts / env vars* idea applied to site scaffolding. |
-| **Global PHP defaults**                       | PHP              | `memory_limit`, `max_execution_time`, `upload_max_filesize`, `post_max_size`, Xdebug — global default, per-site override. |
-| **Service auto-start + ports**                | Services         | Which of nginx / PHP-FPM / MySQL / Mailpit start on launch; nginx 80/443, MySQL 3306, Mailpit 8025. Currently implicit in `main.cjs`. |
-| **Log retention / rotation**                  | Services         | `logs.cjs` writes without a documented cap.                                                  |
-| **Notification sound on long tasks**          | Notifications    | Site create / clone / import / blueprint restore all take minutes. Superset's ringtone model (toggle + sound + volume) fits directly. |
+| Setting                                      | Section        | Why                                                                                                                                                                                                                  |
+| -------------------------------------------- | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Confirm before quitting**                  | General        | Quitting stops nginx/PHP-FPM/MySQL for every site (`procman`). Superset's `BEHAVIOR_CONFIRM_QUIT` verbatim.                                                                                                          |
+| **Close button: hide to tray / quit**        | General        | `main.cjs` hard-codes hide-to-tray; make it a preference.                                                                                                                                                            |
+| **Catch outgoing mail**                      | Mail           | `settings.mailCatch` already exists in the store but is only reachable from the Mail page.                                                                                                                           |
+| **External editor / browser / terminal app** | External Tools | Superset's Links section. WPHerd calls `shell.openPath` today, so "Open in editor" is whatever macOS decided. Offer VS Code / Cursor / PhpStorm / Sublime / custom command, plus which browser opens a site.         |
+| **New-site defaults**                        | Sites          | Default WP version + locale, admin user/email/password, TLD, "enable HTTPS on create", multisite, and a default plugin/theme list. This is Superset's _project scripts / env vars_ idea applied to site scaffolding. |
+| **Global PHP defaults**                      | PHP            | `memory_limit`, `max_execution_time`, `upload_max_filesize`, `post_max_size`, Xdebug — global default, per-site override.                                                                                            |
+| **Service auto-start + ports**               | Services       | Which of nginx / PHP-FPM / MySQL / Mailpit start on launch; nginx 80/443, MySQL 3306, Mailpit 8025. Currently implicit in `main.cjs`.                                                                                |
+| **Log retention / rotation**                 | Services       | `logs.cjs` writes without a documented cap.                                                                                                                                                                          |
+| **Notification sound on long tasks**         | Notifications  | Site create / clone / import / blueprint restore all take minutes. Superset's ringtone model (toggle + sound + volume) fits directly.                                                                                |
 
 ### Tier 2 — high value, larger builds
 
 - **Appearance section — colour scheme.** WPHerd deliberately follows the macOS
   appearance today (`darkMode: 'media'`, no switcher). Adopt Superset's shape
   rather than a plain toggle: **System / Light / Dark**, where System exposes
-  *which* light theme and *which* dark theme, each row showing a `ThemeSwatch`
+  _which_ light theme and _which_ dark theme, each row showing a `ThemeSwatch`
   preview.
 
   The important part is that **one theme drives every surface**. Superset's
   `Theme` (`shared/themes/types.ts`) is `{ id, name, author, type: 'dark'|'light',
-  ui: UIColors, terminal?: TerminalColors, editor?: EditorThemeOverrides }` —
+ui: UIColors, terminal?: TerminalColors, editor?: EditorThemeOverrides }` —
   there is deliberately no separate "terminal colour scheme" or "editor colour
   scheme" picker:
   - `ui` — the full chrome token set (background, card, popover, primary,
@@ -163,7 +163,7 @@ setting can be hidden per UI variant without touching the page.
   blocks (`packages/local-db` settings table):
   - terminal — `terminalFontFamily`, `terminalFontSize`, `terminalLineHeight`,
     `terminalLetterSpacing`, `terminalFontWeight`, `terminalLigatures`,
-    plus terminal-only `terminalMinimumContrast` (the one colour knob that is *not*
+    plus terminal-only `terminalMinimumContrast` (the one colour knob that is _not_
     part of the theme — it enforces legibility against whatever the theme picked),
     `terminalCursorStyle` (block / bar / underline) and `terminalCursorBlink`.
   - editor — `editorFontFamily`, `editorFontSize`, `editorLineHeight`,
@@ -180,6 +180,7 @@ setting can be hidden per UI variant without touching the page.
   CodeMirror editor. Users of a local-dev tool live in that terminal, and Nerd Font
   support matters the moment someone runs a themed shell prompt inside an agent
   session — this is worth taking close to verbatim, including the two-block split.
+
 - **Terminal presets.** Superset's preset = name + description + cwd + commands.
   WPHerd's version writes itself: per-site presets like `wp db cli`,
   `npm run dev` in the active theme dir, `wp cron event run --due-now` — launchable
@@ -201,7 +202,7 @@ setting can be hidden per UI variant without touching the page.
 
 - **Models.** Only meaningful once WPHerd itself calls a model (AI site naming,
   log explanation, error triage). If that happens, copy Superset's shape: OAuth
-  *or* API key, a status badge, and a collapsed Advanced block for base URL /
+  _or_ API key, a status badge, and a collapsed Advanced block for base URL /
   auth token / extra env, saved on blur.
 - **Account / Organization / Teams / Billing / Hosts / Integrations.** Superset is
   a multi-user cloud product; WPHerd is single-user and local. Skip.
