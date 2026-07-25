@@ -9,6 +9,7 @@ import Services from './components/Services';
 import PHPVersions from './components/PHPVersions';
 import Mail from './components/Mail';
 import SettingsLayout from './components/settings/SettingsLayout';
+import AppearanceSection from './components/settings/sections/AppearanceSection';
 import GeneralSection from './components/settings/sections/GeneralSection';
 import SitesSection from './components/settings/sections/SitesSection';
 import DatabaseSection from './components/settings/sections/DatabaseSection';
@@ -142,7 +143,8 @@ export default function App() {
             {/* Settings is a layout route: sidebar + one section per path, so
                 every section is deep-linkable (/settings/database). */}
             <Route path="settings" element={<SettingsLayout {...sharedProps} />}>
-              <Route index element={<Navigate to="/settings/general" replace />} />
+              <Route index element={<Navigate to="/settings/appearance" replace />} />
+              <Route path="appearance" element={<AppearanceSection />} />
               <Route path="general" element={<GeneralSection />} />
               <Route path="tools" element={<ToolsSection />} />
               <Route path="sites" element={<SitesSection />} />

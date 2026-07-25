@@ -1,6 +1,6 @@
 'use strict';
 
-const { ipcMain, shell, dialog, app, BrowserWindow } = require('electron');
+const { ipcMain, shell, dialog, app, BrowserWindow, nativeTheme } = require('electron');
 const { execFile } = require('child_process');
 const crypto = require('crypto');
 const path = require('path');
@@ -207,12 +207,18 @@ function registerHandlers(win, storeInstance) {
         mysql.setCredentials({ user: all['db.user'], password: all['db.password'] }),
       'mail.catch': (value) => mailpit.setCatchEnabled(value),
       'services.logMaxSizeMb': (value) => procman.setMaxLogSizeMb(value),
+      // themeSource forces prefers-color-scheme in the renderer, so the
+      // semantic tokens and the opaque window backdrop both follow.
+      'appearance.themeMode': (value) => {
+        nativeTheme.themeSource = value;
+      },
     },
   });
   settings.migrateLegacy();
 
   // Apply settings that configure a module at startup rather than on change.
   procman.setMaxLogSizeMb(settings.get('services.logMaxSizeMb'));
+  nativeTheme.themeSource = settings.get('appearance.themeMode');
 
   // Apply persisted DB credentials so MySQL operations authenticate correctly.
   mysql.setCredentials({

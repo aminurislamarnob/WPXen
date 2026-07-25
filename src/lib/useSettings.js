@@ -6,6 +6,7 @@ import {
   useEffect,
   useState,
 } from 'react';
+import { apply as applyTypography } from './typography';
 
 // Optimistic settings access.
 //
@@ -87,6 +88,12 @@ export function SettingsProvider({ children }) {
       });
     }
   }, []);
+
+  // The terminal and editor are created imperatively and can't read this
+  // context, so typography is pushed into a module they subscribe to.
+  useEffect(() => {
+    if (settings) applyTypography(settings);
+  }, [settings]);
 
   const value = {
     settings: settings || {},

@@ -2,6 +2,7 @@ import { createTheme } from '@uiw/codemirror-themes';
 import { EditorView } from '@codemirror/view';
 import { tags as t } from '@lezer/highlight';
 import { MONO_STACK, terminalThemes, uiColors } from './theme';
+import { editorTypography } from './typography';
 
 // Superset derives its editor theme from the app theme rather than shipping a
 // separate one: chrome comes from the UI tokens, syntax colors from the
@@ -81,16 +82,20 @@ function build(name) {
 export const editorThemes = { dark: build('dark'), light: build('light') };
 
 // Metrics createTheme's `settings` can't express: Superset pads the content
-// block vertically and each line horizontally, and sizes the line-height at
-// round(fontSize × 1.5).
-const FONT_SIZE = 13;
-
-export const editorMetrics = EditorView.theme({
-  '&': { fontSize: `${FONT_SIZE}px` },
-  '.cm-scroller': {
-    fontFamily: 'inherit',
-    lineHeight: `${Math.round(FONT_SIZE * 1.5)}px`,
-  },
-  '.cm-content': { padding: '8px 0' },
-  '.cm-line': { padding: '0 12px' },
-});
+// block vertically and each line horizontally. Font family, size, line height,
+// spacing, weight and ligatures all come from Settings → Appearance, so this
+// is built per-render rather than being a module constant.
+export function buildEditorMetrics(typography) {
+  const t = typography || editorTypography();
+  return EditorView.theme({
+    '&': { fontSize: t.fontSize, fontWeight: t.fontWeight },
+    '.cm-scroller': {
+      fontFamily: t.fontFamily,
+      lineHeight: t.lineHeight,
+      letterSpacing: t.letterSpacing,
+      fontVariantLigatures: t.fontVariantLigatures,
+    },
+    '.cm-content': { padding: '8px 0' },
+    '.cm-line': { padding: '0 12px' },
+  });
+}

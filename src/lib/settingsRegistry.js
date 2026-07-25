@@ -11,6 +11,10 @@
 
 export const SECTIONS = [
   {
+    group: 'Personal',
+    items: [{ id: 'appearance', label: 'Appearance', icon: 'palette' }],
+  },
+  {
     group: 'App',
     items: [
       { id: 'general', label: 'General', icon: 'sliders' },
@@ -38,6 +42,152 @@ export const SECTIONS = [
 ];
 
 export const SETTINGS_ITEMS = [
+  // ── Appearance ───────────────────────────────────────────────────────────
+  {
+    id: 'appearance.themeMode',
+    section: 'appearance',
+    title: 'Appearance',
+    description: 'Follow the macOS setting, or force light or dark',
+    keywords: [
+      'theme',
+      'dark',
+      'light',
+      'dark mode',
+      'light mode',
+      'appearance',
+      'colors',
+      'system',
+      'night',
+    ],
+  },
+  {
+    id: 'appearance.terminal.fontFamily',
+    section: 'appearance',
+    title: 'Terminal font family',
+    description: 'Typeface used by the embedded terminal',
+    keywords: [
+      'terminal',
+      'font',
+      'family',
+      'typeface',
+      'mono',
+      'nerd font',
+      'typography',
+    ],
+  },
+  {
+    id: 'appearance.terminal.fontSize',
+    section: 'appearance',
+    title: 'Terminal font size',
+    description: 'Text size in the embedded terminal',
+    keywords: ['terminal', 'font', 'size', 'text', 'bigger', 'smaller', 'typography'],
+  },
+  {
+    id: 'appearance.terminal.lineHeight',
+    section: 'appearance',
+    title: 'Terminal line height',
+    description: 'Vertical spacing between terminal rows',
+    keywords: ['terminal', 'line height', 'spacing', 'leading', 'rows', 'typography'],
+  },
+  {
+    id: 'appearance.terminal.letterSpacing',
+    section: 'appearance',
+    title: 'Terminal letter spacing',
+    description: 'Horizontal spacing between characters',
+    keywords: [
+      'terminal',
+      'letter spacing',
+      'tracking',
+      'kerning',
+      'spacing',
+      'typography',
+    ],
+  },
+  {
+    id: 'appearance.terminal.fontWeight',
+    section: 'appearance',
+    title: 'Terminal font weight',
+    description: 'Stroke weight of terminal text',
+    keywords: ['terminal', 'weight', 'bold', 'light', 'font', 'thickness', 'typography'],
+  },
+  {
+    id: 'appearance.terminal.ligatures',
+    section: 'appearance',
+    title: 'Terminal ligatures',
+    description: 'Render =>, !== and friends as single glyphs',
+    keywords: ['terminal', 'ligatures', 'glyphs', 'fira', 'arrows', 'font', 'typography'],
+  },
+  {
+    id: 'appearance.terminal.minimumContrast',
+    section: 'appearance',
+    title: 'Terminal minimum contrast',
+    description: 'Force legibility when a program picks a low-contrast colour',
+    keywords: [
+      'terminal',
+      'contrast',
+      'legibility',
+      'accessibility',
+      'colors',
+      'readable',
+    ],
+  },
+  {
+    id: 'appearance.terminal.cursorStyle',
+    section: 'appearance',
+    title: 'Terminal cursor style',
+    description: 'Block, bar or underline',
+    keywords: ['terminal', 'cursor', 'caret', 'block', 'bar', 'underline', 'style'],
+  },
+  {
+    id: 'appearance.terminal.cursorBlink',
+    section: 'appearance',
+    title: 'Terminal cursor blink',
+    description: 'Whether the terminal cursor blinks',
+    keywords: ['terminal', 'cursor', 'blink', 'flash', 'caret', 'animation'],
+  },
+  {
+    id: 'appearance.editor.fontFamily',
+    section: 'appearance',
+    title: 'Editor font family',
+    description: 'Typeface used by the code editor and diff views',
+    keywords: ['editor', 'font', 'family', 'typeface', 'mono', 'code', 'typography'],
+  },
+  {
+    id: 'appearance.editor.fontSize',
+    section: 'appearance',
+    title: 'Editor font size',
+    description: 'Text size in the code editor',
+    keywords: ['editor', 'font', 'size', 'text', 'code', 'bigger', 'typography'],
+  },
+  {
+    id: 'appearance.editor.lineHeight',
+    section: 'appearance',
+    title: 'Editor line height',
+    description: 'Vertical spacing between editor lines',
+    keywords: ['editor', 'line height', 'spacing', 'leading', 'code', 'typography'],
+  },
+  {
+    id: 'appearance.editor.letterSpacing',
+    section: 'appearance',
+    title: 'Editor letter spacing',
+    description: 'Horizontal spacing between characters',
+    keywords: ['editor', 'letter spacing', 'tracking', 'kerning', 'code', 'typography'],
+  },
+  {
+    id: 'appearance.editor.fontWeight',
+    section: 'appearance',
+    title: 'Editor font weight',
+    description: 'Stroke weight of editor text',
+    keywords: ['editor', 'weight', 'bold', 'light', 'font', 'code', 'typography'],
+  },
+  {
+    id: 'appearance.editor.ligatures',
+    section: 'appearance',
+    title: 'Editor ligatures',
+    description: 'Render =>, !== and friends as single glyphs',
+    keywords: ['editor', 'ligatures', 'glyphs', 'fira', 'code', 'font', 'typography'],
+  },
+
   // ── Sites ────────────────────────────────────────────────────────────────
   {
     id: 'sites.dir',

@@ -88,8 +88,10 @@ app.whenReady().then(() => {
   // Initialize store
   store = new JsonStore('wpherd-data');
 
-  // Light/dark follows the macOS system appearance: nativeTheme stays on its
-  // default 'system' source, which drives the renderer's prefers-color-scheme.
+  // Light/dark follows the macOS system appearance by default, but Settings →
+  // Appearance can force it: registerHandlers() sets nativeTheme.themeSource
+  // from `appearance.themeMode`, which drives the renderer's
+  // prefers-color-scheme.
   // The window's opaque backdrop has to be flipped by hand to stay in sync.
 
   // Create main window

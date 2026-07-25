@@ -50,6 +50,40 @@ const SETTINGS = {
   'app.confirmOnQuit': { type: 'bool', default: true },
   'app.closeAction': { type: 'enum', values: ['tray', 'quit'], default: 'tray' },
 
+  // ── Appearance ───────────────────────────────────────────────────────────
+  // Drives Electron's nativeTheme.themeSource, which forces the renderer's
+  // prefers-color-scheme — so the existing `darkMode: 'media'` tokens and the
+  // opaque window backdrop both follow it with no CSS changes.
+  'appearance.themeMode': {
+    type: 'enum',
+    values: ['system', 'light', 'dark'],
+    default: 'system',
+  },
+
+  // Typography, split into two independent blocks the way Superset does.
+  // A blank font family means "use the built-in mono stack".
+  'appearance.terminal.fontFamily': { type: 'string', default: '' },
+  'appearance.terminal.fontSize': { type: 'int', default: 13, min: 8, max: 32 },
+  'appearance.terminal.lineHeight': { type: 'float', default: 1.0, min: 0.8, max: 3 },
+  'appearance.terminal.letterSpacing': { type: 'float', default: 0, min: -2, max: 5 },
+  'appearance.terminal.fontWeight': { type: 'int', default: 400, min: 100, max: 900 },
+  'appearance.terminal.ligatures': { type: 'bool', default: false },
+  // 0 disables the check; xterm treats 1 as "no enforcement" and 21 as maximum.
+  'appearance.terminal.minimumContrast': { type: 'float', default: 1, min: 1, max: 21 },
+  'appearance.terminal.cursorStyle': {
+    type: 'enum',
+    values: ['block', 'bar', 'underline'],
+    default: 'block',
+  },
+  'appearance.terminal.cursorBlink': { type: 'bool', default: true },
+
+  'appearance.editor.fontFamily': { type: 'string', default: '' },
+  'appearance.editor.fontSize': { type: 'int', default: 13, min: 8, max: 32 },
+  'appearance.editor.lineHeight': { type: 'float', default: 1.5, min: 0.8, max: 3 },
+  'appearance.editor.letterSpacing': { type: 'float', default: 0, min: -2, max: 5 },
+  'appearance.editor.fontWeight': { type: 'int', default: 400, min: 100, max: 900 },
+  'appearance.editor.ligatures': { type: 'bool', default: false },
+
   // ── External tools ───────────────────────────────────────────────────────
   // 'system' means "whatever macOS opens this with" — the behaviour before
   // these settings existed.
