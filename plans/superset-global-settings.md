@@ -125,17 +125,61 @@ setting can be hidden per UI variant without touching the page.
 
 ### Tier 2 — high value, larger builds
 
-- **Appearance section.** WPHerd deliberately follows the macOS appearance today
-  (`darkMode: 'media'`, no switcher). Adopt Superset's shape rather than a plain
-  toggle: **System / Light / Dark**, where System exposes *which* light theme and
-  *which* dark theme. `src/lib/theme.js` already holds `terminalThemes` /
-  `uiColors`, and `src/index.css` already resolves everything through semantic
-  tokens, so multi-theme is mostly plumbing. Custom-theme JSON import is a natural
-  follow-on.
-- **Typography.** Font family / size / line height / letter spacing / weight /
-  ligatures for the terminal and the CodeMirror editor, plus terminal cursor style
-  and blink. WPHerd hardcodes `MONO_STACK`; users of a local-dev tool live in that
-  terminal.
+- **Appearance section — colour scheme.** WPHerd deliberately follows the macOS
+  appearance today (`darkMode: 'media'`, no switcher). Adopt Superset's shape
+  rather than a plain toggle: **System / Light / Dark**, where System exposes
+  *which* light theme and *which* dark theme, each row showing a `ThemeSwatch`
+  preview.
+
+  The important part is that **one theme drives every surface**. Superset's
+  `Theme` (`shared/themes/types.ts`) is `{ id, name, author, type: 'dark'|'light',
+  ui: UIColors, terminal?: TerminalColors, editor?: EditorThemeOverrides }` —
+  there is deliberately no separate "terminal colour scheme" or "editor colour
+  scheme" picker:
+  - `ui` — the full chrome token set (background, card, popover, primary,
+    secondary, muted, accent, tertiary, border/input/ring, sidebar…), the same
+    vocabulary as WPHerd's `src/index.css` variables.
+  - `terminal` — the complete xterm palette: background, foreground, cursor,
+    cursorAccent, selectionBackground + all 8 ANSI + 8 bright ANSI. Optional;
+    falls back to `getDefaultTerminalColors(theme.type)`.
+  - `editor` — CodeMirror/diff colours (gutter, active line, selection, search,
+    panel chrome, addition/deletion/modified) plus an `EditorSyntaxColors` set
+    (comment, keyword, string, number, functionCall, variableName, typeName,
+    className, constant…). Optional; otherwise **derived from the UI + terminal
+    tokens** — exactly what WPHerd's `src/lib/editorTheme.js` already does by
+    mapping the ANSI set onto CodeMirror highlight tags.
+
+  Built-ins ship as Ember (dark, default), Light, and Monokai. Custom themes are
+  imported from a JSON file (`parseThemeConfigFile`, 256 KB cap) and appear in a
+  "Custom" group in the same dropdown.
+
+  For WPHerd this is mostly plumbing: `src/lib/theme.js` already holds
+  `terminalThemes` (with the ANSI/bright set) and `uiColors`, and everything
+  themable already resolves through a CSS variable. The work is promoting those
+  two objects into a named-theme record, persisting a selected id, and letting the
+  System option pick a light/dark pair instead of being implicit.
+
+- **Typography — terminal and code editor fonts.** Superset stores two independent
+  blocks (`packages/local-db` settings table):
+  - terminal — `terminalFontFamily`, `terminalFontSize`, `terminalLineHeight`,
+    `terminalLetterSpacing`, `terminalFontWeight`, `terminalLigatures`,
+    plus terminal-only `terminalMinimumContrast` (the one colour knob that is *not*
+    part of the theme — it enforces legibility against whatever the theme picked),
+    `terminalCursorStyle` (block / bar / underline) and `terminalCursorBlink`.
+  - editor — `editorFontFamily`, `editorFontSize`, `editorLineHeight`,
+    `editorLetterSpacing`, `editorFontWeight`, `editorLigatures`.
+
+  Font family is a combobox backed by `useSystemFonts`, which probes a curated
+  list — Nerd Fonts, then well-known monos (JetBrains Mono, Fira Code, Menlo,
+  Iosevka, Geist Mono, …) — categorises them into Nerd / Mono / Other, adds
+  runtime-registered faces like SF Mono on macOS, and accepts a free-typed family
+  with a "font not found" banner if it doesn't resolve. Both blocks render live
+  preview surfaces.
+
+  WPHerd hardcodes a single `MONO_STACK` for both the xterm terminal and the
+  CodeMirror editor. Users of a local-dev tool live in that terminal, and Nerd Font
+  support matters the moment someone runs a themed shell prompt inside an agent
+  session — this is worth taking close to verbatim, including the two-block split.
 - **Terminal presets.** Superset's preset = name + description + cwd + commands.
   WPHerd's version writes itself: per-site presets like `wp db cli`,
   `npm run dev` in the active theme dir, `wp cron event run --due-now` — launchable
