@@ -28,9 +28,9 @@ describe('isSelectAllChord', () => {
     expect(isSelectAllChord(key({ code: 'KeyA', ctrlKey: true }))).toBe(false);
   });
   it('rejects Cmd+Shift+A', () => {
-    expect(
-      isSelectAllChord(key({ code: 'KeyA', metaKey: true, shiftKey: true }))
-    ).toBe(false);
+    expect(isSelectAllChord(key({ code: 'KeyA', metaKey: true, shiftKey: true }))).toBe(
+      false
+    );
   });
   it('rejects Cmd+B', () => {
     expect(isSelectAllChord(key({ code: 'KeyB', metaKey: true }))).toBe(false);
@@ -39,39 +39,29 @@ describe('isSelectAllChord', () => {
 
 describe('translateLineEditChord', () => {
   it('Shift+Enter → ESC CR', () => {
-    expect(translateLineEditChord(key({ key: 'Enter', shiftKey: true }))).toBe(
-      '\x1b\r'
-    );
+    expect(translateLineEditChord(key({ key: 'Enter', shiftKey: true }))).toBe('\x1b\r');
   });
   it('Cmd+Enter → ESC CR', () => {
-    expect(translateLineEditChord(key({ key: 'Enter', metaKey: true }))).toBe(
-      '\x1b\r'
-    );
+    expect(translateLineEditChord(key({ key: 'Enter', metaKey: true }))).toBe('\x1b\r');
   });
   it('Cmd+Backspace → ^U', () => {
-    expect(
-      translateLineEditChord(key({ key: 'Backspace', metaKey: true }))
-    ).toBe('\x15');
+    expect(translateLineEditChord(key({ key: 'Backspace', metaKey: true }))).toBe('\x15');
   });
   it('Cmd+Left → ^A', () => {
-    expect(
-      translateLineEditChord(key({ key: 'ArrowLeft', metaKey: true }))
-    ).toBe('\x01');
+    expect(translateLineEditChord(key({ key: 'ArrowLeft', metaKey: true }))).toBe('\x01');
   });
   it('Cmd+Right → ^E', () => {
-    expect(
-      translateLineEditChord(key({ key: 'ArrowRight', metaKey: true }))
-    ).toBe('\x05');
+    expect(translateLineEditChord(key({ key: 'ArrowRight', metaKey: true }))).toBe(
+      '\x05'
+    );
   });
   it('Option+Left → ESC b', () => {
-    expect(
-      translateLineEditChord(key({ key: 'ArrowLeft', altKey: true }))
-    ).toBe('\x1bb');
+    expect(translateLineEditChord(key({ key: 'ArrowLeft', altKey: true }))).toBe('\x1bb');
   });
   it('Option+Right → ESC f', () => {
-    expect(
-      translateLineEditChord(key({ key: 'ArrowRight', altKey: true }))
-    ).toBe('\x1bf');
+    expect(translateLineEditChord(key({ key: 'ArrowRight', altKey: true }))).toBe(
+      '\x1bf'
+    );
   });
   it('plain Enter → null', () => {
     expect(translateLineEditChord(key({ key: 'Enter' }))).toBeNull();
@@ -82,9 +72,7 @@ describe('translateLineEditChord', () => {
     ).toBeNull();
   });
   it('Ctrl+Left → null (Windows chord not implemented on mac-only app)', () => {
-    expect(
-      translateLineEditChord(key({ key: 'ArrowLeft', ctrlKey: true }))
-    ).toBeNull();
+    expect(translateLineEditChord(key({ key: 'ArrowLeft', ctrlKey: true }))).toBeNull();
   });
 });
 
@@ -112,7 +100,7 @@ describe('trimSelection', () => {
 describe('isNonTextPaste', () => {
   const clip = (over) => ({
     clipboardData: {
-      getData: (t) => (t === 'text/plain' ? over.text ?? '' : ''),
+      getData: (t) => (t === 'text/plain' ? (over.text ?? '') : ''),
       files: over.files ?? [],
     },
   });
@@ -132,9 +120,7 @@ describe('isNonTextPaste', () => {
 
 describe('shellEscape', () => {
   it('quotes a plain path', () => {
-    expect(shellEscape(['/Users/dev/Sites/my site'])).toBe(
-      "'/Users/dev/Sites/my site'"
-    );
+    expect(shellEscape(['/Users/dev/Sites/my site'])).toBe("'/Users/dev/Sites/my site'");
   });
   it('escapes embedded single quotes', () => {
     expect(shellEscape(["it's.txt"])).toBe("'it'\\''s.txt'");
@@ -150,9 +136,7 @@ describe('shellEscape', () => {
 describe('Utf8Base64', () => {
   const codec = new Utf8Base64();
   it('round-trips ASCII', () => {
-    expect(codec.decodeText(codec.encodeText('hello world'))).toBe(
-      'hello world'
-    );
+    expect(codec.decodeText(codec.encodeText('hello world'))).toBe('hello world');
   });
   it('round-trips multi-byte characters', () => {
     expect(codec.decodeText(codec.encodeText('héllo 日本'))).toBe('héllo 日本');

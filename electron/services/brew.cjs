@@ -43,7 +43,9 @@ function execBrew(command) {
 function isPackageInstalled(name) {
   const prefix = getBrewPrefix();
   if (!prefix) return false;
-  return fs.existsSync(`${prefix}/Cellar/${name}`) || fs.existsSync(`${prefix}/opt/${name}`);
+  return (
+    fs.existsSync(`${prefix}/Cellar/${name}`) || fs.existsSync(`${prefix}/opt/${name}`)
+  );
 }
 
 // Non-blocking `brew` runner for the dependency check (see asyncExec.cjs).

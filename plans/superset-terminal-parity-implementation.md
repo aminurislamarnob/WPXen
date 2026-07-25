@@ -22,8 +22,8 @@ Read first, in this order:
    tabs (`openFiles`/`activeKey`, `openFile()`).
 5. `electron/services/agents.cjs` — pty supervisor: `sessions` Map
    (`sessionId → { pty, buffer, window, exited, siteId, agentId,
-   agentName, started }`), `MAX_BUFFER` 1 MB, `launch/attach/write/resize/
-   stop`.
+agentName, started }`), `MAX_BUFFER` 1 MB, `launch/attach/write/resize/
+stop`.
 6. `electron/ipc.cjs` (terminal handlers ~line 165–195) and
    `electron/preload.cjs` (`VALID_EVENT_CHANNELS`, `terminal*` methods,
    `on`/`off` at the bottom).
@@ -62,13 +62,13 @@ Read first, in this order:
 
 ## New dependencies (renderer-side, install per phase as noted)
 
-| Package | Version | Phase |
-| ------- | ------- | ----- |
-| `@xterm/addon-clipboard` | `^0.1.0` | 1 |
-| `@xterm/addon-search` | `^0.15.0` | 2 |
-| `@xterm/addon-webgl` | `^0.18.0` | 2 |
-| `@xterm/addon-unicode11` | `^0.8.0` | 2 |
-| `@xterm/addon-web-links` | `^0.11.0` | 2 |
+| Package                  | Version   | Phase |
+| ------------------------ | --------- | ----- |
+| `@xterm/addon-clipboard` | `^0.1.0`  | 1     |
+| `@xterm/addon-search`    | `^0.15.0` | 2     |
+| `@xterm/addon-webgl`     | `^0.18.0` | 2     |
+| `@xterm/addon-unicode11` | `^0.8.0`  | 2     |
+| `@xterm/addon-web-links` | `^0.11.0` | 2     |
 
 No other new deps. (Image/ligature addons are explicitly out of scope —
 see "Not in scope".)
@@ -84,7 +84,7 @@ with the same fields — that's what the tests pass).
 
 ```js
 // Cmd+A → select all terminal contents (VS Code's mac binding).
-isSelectAllChord(e)
+isSelectAllChord(e);
 // e.code === 'KeyA' && e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey
 ```
 
@@ -92,18 +92,18 @@ isSelectAllChord(e)
 // Line-edit chords → the byte sequence to send to the pty, or null.
 // CONTRACT: match named keys via e.key (layout-stable); never match
 // printable characters via e.key (breaks non-US layouts) — use e.code.
-translateLineEditChord(e)
+translateLineEditChord(e);
 ```
 
-| Chord | Condition | Returns | Why |
-| ----- | --------- | ------- | --- |
-| Shift+Enter | `key==='Enter'`, shift only modifier | `'\x1b\r'` | ESC+CR — the insert-newline sequence Claude Code's `/terminal-setup` installs; Codex/Gemini/OpenCode parse it as Alt+Enter. Sent directly so multiline prompts never depend on a terminal handshake. |
-| Cmd+Enter | `key==='Enter'`, meta only | `'\x1b\r'` | same |
-| Cmd+Backspace | `key==='Backspace'`, meta only | `'\x15'` | `^U` kill-line |
-| Cmd+← | `key==='ArrowLeft'`, meta only | `'\x01'` | `^A` line start |
-| Cmd+→ | `key==='ArrowRight'`, meta only | `'\x05'` | `^E` line end |
-| Option+← | `key==='ArrowLeft'`, alt only | `'\x1bb'` | word back |
-| Option+→ | `key==='ArrowRight'`, alt only | `'\x1bf'` | word forward |
+| Chord         | Condition                            | Returns    | Why                                                                                                                                                                                                  |
+| ------------- | ------------------------------------ | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Shift+Enter   | `key==='Enter'`, shift only modifier | `'\x1b\r'` | ESC+CR — the insert-newline sequence Claude Code's `/terminal-setup` installs; Codex/Gemini/OpenCode parse it as Alt+Enter. Sent directly so multiline prompts never depend on a terminal handshake. |
+| Cmd+Enter     | `key==='Enter'`, meta only           | `'\x1b\r'` | same                                                                                                                                                                                                 |
+| Cmd+Backspace | `key==='Backspace'`, meta only       | `'\x15'`   | `^U` kill-line                                                                                                                                                                                       |
+| Cmd+←         | `key==='ArrowLeft'`, meta only       | `'\x01'`   | `^A` line start                                                                                                                                                                                      |
+| Cmd+→         | `key==='ArrowRight'`, meta only      | `'\x05'`   | `^E` line end                                                                                                                                                                                        |
+| Option+←      | `key==='ArrowLeft'`, alt only        | `'\x1bb'`  | word back                                                                                                                                                                                            |
+| Option+→      | `key==='ArrowRight'`, alt only       | `'\x1bf'`  | word forward                                                                                                                                                                                         |
 
 "meta only" = `metaKey && !ctrlKey && !altKey && !shiftKey`; "alt only"
 analogous. Anything else → `null`.
@@ -112,7 +112,7 @@ analogous. Anything else → `null`.
 // True when the chord must bubble past xterm to the browser/Electron
 // (clipboard pipeline, app shortcuts). Mac rule (Ghostty): every Cmd
 // chord bubbles — Cmd+keys never encode text into the pty.
-shouldBubbleChord(e)  // → e.metaKey
+shouldBubbleChord(e); // → e.metaKey
 ```
 
 ### 1b. Install the handler in `Terminal.jsx`
@@ -123,11 +123,17 @@ Right after `term.open(...)`, attach:
 term.attachCustomKeyEventHandler((e) => {
   const seq = translateLineEditChord(e);
   if (seq !== null) {
-    if (e.type === 'keydown') { e.preventDefault(); term.input(seq, true); }
+    if (e.type === 'keydown') {
+      e.preventDefault();
+      term.input(seq, true);
+    }
     return false;
   }
   if (isSelectAllChord(e)) {
-    if (e.type === 'keydown') { e.preventDefault(); term.selectAll(); }
+    if (e.type === 'keydown') {
+      e.preventDefault();
+      term.selectAll();
+    }
     return false;
   }
   if (shouldBubbleChord(e)) return false; // NO preventDefault — the browser
@@ -138,7 +144,7 @@ term.attachCustomKeyEventHandler((e) => {
 ```
 
 Order matters: translations run before the bubble check (they are Cmd/Option
-chords the terminal *does* want). Phase 2 inserts its Cmd+F/K/Shift+↓
+chords the terminal _does_ want). Phase 2 inserts its Cmd+F/K/Shift+↓
 branches between select-all and the bubble check.
 
 ### 1c. Copy trims trailing whitespace
@@ -147,7 +153,7 @@ Terminals pad lines to the grid width, so naive copy pastes trailing
 spaces. Add to `src/lib/terminal/keys.js` (or a small `clipboard.js`):
 
 ```js
-trimSelection(text) // text.split('\n').map((l) => l.replace(/\s+$/,'')).join('\n')
+trimSelection(text); // text.split('\n').map((l) => l.replace(/\s+$/,'')).join('\n')
 ```
 
 In `Terminal.jsx`, after open, register on `term.element`:
@@ -157,8 +163,10 @@ const onCopy = (e) => {
   const sel = term.getSelection();
   if (!sel) return;
   const trimmed = trimSelection(sel);
-  if (e.clipboardData) { e.preventDefault(); e.clipboardData.setData('text/plain', trimmed); }
-  else navigator.clipboard?.writeText(trimmed).catch(() => {});
+  if (e.clipboardData) {
+    e.preventDefault();
+    e.clipboardData.setData('text/plain', trimmed);
+  } else navigator.clipboard?.writeText(trimmed).catch(() => {});
 };
 term.element.addEventListener('copy', onCopy);
 ```
@@ -176,8 +184,8 @@ themselves.
 `src/lib/terminal/keys.js`:
 
 ```js
-isNonTextPaste(e) // e.clipboardData && !e.clipboardData.getData('text/plain')
-                  //   && (e.clipboardData.files?.length ?? 0) > 0
+isNonTextPaste(e); // e.clipboardData && !e.clipboardData.getData('text/plain')
+//   && (e.clipboardData.files?.length ?? 0) > 0
 ```
 
 `Terminal.jsx` — **capture-phase** listener on the outer wrapper div (must
@@ -187,7 +195,8 @@ the bracketed-paste wrap):
 ```js
 const onPaste = (e) => {
   if (!isNonTextPaste(e)) return;
-  e.preventDefault(); e.stopImmediatePropagation();
+  e.preventDefault();
+  e.stopImmediatePropagation();
   term.input('\x16', true);
 };
 wrapperEl.addEventListener('paste', onPaste, { capture: true });
@@ -265,14 +274,14 @@ right-2 z-10`), on `.panel` with `flex items-center gap-1 px-2 py-1`:
   `clearDecorations()`. Show a muted "No results" label when the last find
   returned false and the query is non-empty.
 - Buttons (icon-only, lucide 13px, `text-muted-foreground
-  hover:text-foreground`): case-toggle (`CaseSensitive` icon; active state
+hover:text-foreground`): case-toggle (`CaseSensitive` icon; active state
   `text-highlight`), prev (`ChevronUp`), next (`ChevronDown`), close (`X`),
   each in a `Tooltip`.
 - Keys on the input: Enter → next, Shift+Enter → prev, Esc → close.
 - Search options: `{ caseSensitive, regex: false, decorations: {
-  matchBackground: '#515c6a', matchBorder: '#74879f',
-  matchOverviewRuler: '#d186167e', activeMatchBackground: '#515c6a',
-  activeMatchBorder: '#ffd33d', activeMatchColorOverviewRuler: '#ffd33d' } }`
+matchBackground: '#515c6a', matchBorder: '#74879f',
+matchOverviewRuler: '#d186167e', activeMatchBackground: '#515c6a',
+activeMatchBorder: '#ffd33d', activeMatchColorOverviewRuler: '#ffd33d' } }`
   (canvas colors, not CSS — literals are fine here, same in both themes).
 - On close: `clearDecorations()` and refocus the terminal.
 
@@ -288,9 +297,9 @@ ring buffer must clear too:
 1. `agents.cjs`: `clearBuffer(sessionId)` → `session.buffer = ''` (no-op
    if no session). Export it.
 2. `ipc.cjs`: `ipcMain.on('terminal-clear', (_e, sessionId) =>
-   agents.clearBuffer(sessionId))` next to the other terminal channels.
+agents.clearBuffer(sessionId))` next to the other terminal channels.
 3. `preload.cjs`: `terminalClear: (sessionId) =>
-   ipcRenderer.send('terminal-clear', sessionId)`.
+ipcRenderer.send('terminal-clear', sessionId)`.
 4. `Terminal.jsx` key handler branch: `e.code === 'KeyA'`… no — `'KeyK'`
    meta-only → keydown: `term.clear(); api.terminalClear(sessionId)`;
    `return false`.
@@ -320,19 +329,21 @@ call `term.scrollToBottom()`.
   module-level `let webglFailed = false`. After `term.open()`, inside
   `requestAnimationFrame` (avoids racing xterm's post-open viewport sync):
   if `webglFailed` skip; else `try { addon = new WebglAddon();
-  addon.onContextLoss(() => { addon.dispose(); webglFailed = true;
-  term.refresh(0, term.rows - 1); }); term.loadAddon(addon); } catch {
-  webglFailed = true; }`. Dispose the addon and cancel the rAF in cleanup.
+addon.onContextLoss(() => { addon.dispose(); webglFailed = true;
+term.refresh(0, term.rows - 1); }); term.loadAddon(addon); } catch {
+webglFailed = true; }`. Dispose the addon and cancel the rAF in cleanup.
 
 ### 2e. URL links (Cmd+click)
 
 `npm i @xterm/addon-web-links@^0.11.0`.
 
 ```js
-term.loadAddon(new WebLinksAddon((event, uri) => {
-  if (!event.metaKey) return;            // Cmd+click only — plain click
-  window.electronAPI.openSiteInBrowser(uri); // must not hijack the TUI
-}));
+term.loadAddon(
+  new WebLinksAddon((event, uri) => {
+    if (!event.metaKey) return; // Cmd+click only — plain click
+    window.electronAPI.openSiteInBrowser(uri); // must not hijack the TUI
+  })
+);
 ```
 
 (`openSiteInBrowser` already exists → `open-in-browser` →
@@ -437,7 +448,7 @@ constantly, so this is the highest-leverage link feature.
 2. **`src/lib/terminal/fileLinkProvider.js`** — implements xterm's
    `registerLinkProvider` contract (`provideLinks(lineNo, cb)`):
    - Read the line via `term.buffer.active.getLine(lineNo - 1)
-     .translateToString(true)`; skip lines > 2000 chars.
+.translateToString(true)`; skip lines > 2000 chars.
    - Candidate regex (single line, global). Keep it deliberately simpler
      than VS Code's vendored parser:
      ```
@@ -463,7 +474,7 @@ constantly, so this is the highest-leverage link feature.
    (1-based). In `CodeEditor.jsx`, when the active file's content loads
    and `line` is set, move the selection and scroll:
    `view.dispatch({ selection: { anchor: view.state.doc.line(min(line,
-   lines)).from }, effects: EditorView.scrollIntoView(pos, { y: 'center' }) })`
+lines)).from }, effects: EditorView.scrollIntoView(pos, { y: 'center' }) })`
    — grab the `EditorView` from `@uiw/react-codemirror`'s
    `onCreateEditor`/ref. Re-opening an already-open tab with a new line
    re-jumps (update the entry's `line`, effect keys on it).
@@ -474,13 +485,13 @@ On the terminal wrapper in `Terminal.jsx`:
 
 - `onDragOver`: `preventDefault()`, `dropEffect = 'copy'`.
 - `onDrop`: `preventDefault()`. Finder drops: `[...e.dataTransfer.files]
-  .map((f) => f.path)` — Electron 28 still has `File.path` (do NOT use
+.map((f) => f.path)` — Electron 28 still has `File.path` (do NOT use
   `webUtils.getPathForFile`; that's Electron ≥ 32). Internal drags (Files
   tree): fall back to `e.dataTransfer.getData('text/plain')`. Shell-escape
   each path — new pure helper `shellEscape(paths)` in
   `src/lib/terminal/keys.js`: wrap each in single quotes with embedded
   `'` → `'\''`, join with spaces — and `api.terminalInput(sessionId,
-  escaped)`.
+escaped)`.
 - `FileExplorer.jsx`: make file rows `draggable` with
   `onDragStart={(e) => e.dataTransfer.setData('text/plain', entry.path)}`
   (folders too). This must not interfere with the existing drop-upload
@@ -490,7 +501,7 @@ On the terminal wrapper in `Terminal.jsx`:
 
 Tests: `shellEscape` (spaces, quotes, unicode).
 
-### 3d. Session tab titles (OSC) 
+### 3d. Session tab titles (OSC)
 
 `term.onTitleChange((title) => onTitle?.(title))` registered in the cache,
 forwarded to `AgentsPane` via ref-prop like `onOpenFile`. `AgentsPane`
@@ -527,9 +538,9 @@ so device-status replies never render as junk after replay/reattach
 
 ```js
 const p = term.parser;
-p.registerCsiHandler({ final: 'R' }, () => true);                    // CPR reply (query ends 'n')
-p.registerCsiHandler({ final: 'I' }, () => true);                    // focus-in report
-p.registerCsiHandler({ final: 'O' }, () => true);                    // focus-out report
+p.registerCsiHandler({ final: 'R' }, () => true); // CPR reply (query ends 'n')
+p.registerCsiHandler({ final: 'I' }, () => true); // focus-in report
+p.registerCsiHandler({ final: 'O' }, () => true); // focus-out report
 p.registerCsiHandler({ intermediates: '$', final: 'y' }, () => true); // DECRPM mode report
 ```
 
@@ -566,7 +577,7 @@ are in the Changes tab.
 
 ### 4b. Tree keyboard navigation
 
-Roving selection over the *visible* rows of the Files tree (flatten the
+Roving selection over the _visible_ rows of the Files tree (flatten the
 rendered tree order into an array):
 
 - ArrowDown/ArrowUp move the selection; Home/End jump.
@@ -582,7 +593,7 @@ rendered tree order into an array):
 ### 4c. Cosmetic (optional, only if time permits)
 
 Full-pane drop overlay while a Finder drag hovers the Files tree ("Drop
-to upload to *dir*", `.panel` inset overlay, `border-highlight` dashed) —
+to upload to _dir_", `.panel` inset overlay, `border-highlight` dashed) —
 the upload logic already shipped; this is presentation only.
 
 **Not doing** (unchanged from the analysis): virtualized rows (revisit

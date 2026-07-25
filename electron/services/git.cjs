@@ -225,7 +225,13 @@ async function statusForRepo(repoRoot) {
     if (e.status === '?' && a === 0) a = countUntrackedLines(path.join(root, e.rel));
     additions += a;
     deletions += d;
-    return { ...e, path: path.join(root, e.rel), repoRoot: root, additions: a, deletions: d };
+    return {
+      ...e,
+      path: path.join(root, e.rel),
+      repoRoot: root,
+      additions: a,
+      deletions: d,
+    };
   });
 
   return { branch, files, additions, deletions };
@@ -243,8 +249,14 @@ async function gitStatus(projectRoot) {
   const repos = [];
   for (const repoRoot of repoRoots) {
     const s = await statusForRepo(repoRoot);
-    const relRoot = repoRoot === root ? '' : path.relative(root, repoRoot).split(path.sep).join('/');
-    repos.push({ root: repoRoot, relRoot, name: relRoot || path.basename(repoRoot), ...s });
+    const relRoot =
+      repoRoot === root ? '' : path.relative(root, repoRoot).split(path.sep).join('/');
+    repos.push({
+      root: repoRoot,
+      relRoot,
+      name: relRoot || path.basename(repoRoot),
+      ...s,
+    });
   }
 
   return { isRepo: repos.length > 0, repos };

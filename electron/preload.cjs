@@ -163,11 +163,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Agent Launcher / Terminal
   listAgents: () => ipcRenderer.invoke('agent-list'),
   listSessions: (siteId) => ipcRenderer.invoke('agent-sessions', siteId),
-  launchAgent: (siteId, agentId) =>
-    ipcRenderer.invoke('agent-launch', siteId, agentId),
+  launchAgent: (siteId, agentId) => ipcRenderer.invoke('agent-launch', siteId, agentId),
   terminalReady: (sessionId) => ipcRenderer.invoke('terminal-ready', sessionId),
-  terminalInput: (sessionId, data) =>
-    ipcRenderer.send('terminal-input', sessionId, data),
+  terminalInput: (sessionId, data) => ipcRenderer.send('terminal-input', sessionId, data),
   terminalResize: (sessionId, cols, rows) =>
     ipcRenderer.send('terminal-resize', sessionId, cols, rows),
   terminalClear: (sessionId) => ipcRenderer.send('terminal-clear', sessionId),
@@ -177,8 +175,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   terminalStatPath: (rootPath, candidate) =>
     ipcRenderer.invoke('terminal-stat-path', rootPath, candidate),
   openFilePath: (filePath) => ipcRenderer.invoke('open-file-path', filePath),
-  readFile: (rootPath, filePath) =>
-    ipcRenderer.invoke('read-file', rootPath, filePath),
+  readFile: (rootPath, filePath) => ipcRenderer.invoke('read-file', rootPath, filePath),
   writeFile: (rootPath, filePath, content) =>
     ipcRenderer.invoke('write-file', rootPath, filePath, content),
   revealInFinder: (rootPath, targetPath) =>
