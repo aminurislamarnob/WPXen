@@ -1,7 +1,5 @@
 'use strict';
 
-const { shell } = require('electron');
-
 // Only ever hand these schemes to shell.openExternal — never file:// or a
 // custom URL handler that a tampered store, or a page loaded in the in-app
 // browser, could smuggle in.
@@ -13,7 +11,10 @@ function openExternalSafely(url) {
   try {
     const parsed = new URL(url);
     if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
-      shell.openExternal(url);
+      // Required here, not at module scope: services/browser.cjs pulls this in,
+      // and the test suite runs under ELECTRON_SKIP_BINARY_DOWNLOAD=1 where a
+      // top-level require throws on import.
+      require('electron').shell.openExternal(url);
       return true;
     }
   } catch {

@@ -12,21 +12,48 @@
 // and we must tear the previous guest's listeners down rather than stack a
 // second set on top.
 
-const electron = require('electron');
 const { openExternalSafely } = require('./safeUrl.cjs');
 
-// Swapped in tests — these .cjs services load through Node's CJS loader, where
-// `require('electron')` yields the binary path rather than the API surface, so
-// vi.mock never reaches them (same seam as externalTools.cjs).
-let deps = {
-  webContents: electron.webContents,
-  Menu: electron.Menu,
-  clipboard: electron.clipboard,
-  openExternalSafely,
+// electron is resolved on access rather than at module scope. CI installs with
+// ELECTRON_SKIP_BINARY_DOWNLOAD=1, where `require('electron')` throws instead of
+// handing back the API surface — at module scope that takes down the whole test
+// file at import time, before a single pure helper can run. Undefined is a fine
+// answer there; `guest()` already treats a missing registry as "no guest", and
+// off the runner these getters only ever fire inside a real main process.
+function fromElectron(name) {
+  try {
+    return require('electron')[name];
+  } catch {
+    return undefined;
+  }
+}
+
+// Swapped in tests — these .cjs services load through Node's CJS loader, so
+// vi.mock never reaches them (same seam as externalTools.cjs). An override wins
+// over the real module even when it is explicitly set to undefined.
+let overrides = {};
+
+const deps = {
+  get webContents() {
+    return 'webContents' in overrides
+      ? overrides.webContents
+      : fromElectron('webContents');
+  },
+  get Menu() {
+    return 'Menu' in overrides ? overrides.Menu : fromElectron('Menu');
+  },
+  get clipboard() {
+    return 'clipboard' in overrides ? overrides.clipboard : fromElectron('clipboard');
+  },
+  get openExternalSafely() {
+    return 'openExternalSafely' in overrides
+      ? overrides.openExternalSafely
+      : openExternalSafely;
+  },
 };
 
 function __setDeps(next) {
-  deps = { ...deps, ...next };
+  overrides = { ...overrides, ...next };
 }
 
 // The only schemes a browser tab may ever sit on. Everything else — file://,
