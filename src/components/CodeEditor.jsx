@@ -2,7 +2,8 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import CodeMirror from '@uiw/react-codemirror';
 import { keymap, EditorView } from '@codemirror/view';
 import { unifiedMergeView } from '@codemirror/merge';
-import { editorMetrics, editorThemes } from '../lib/editorTheme';
+import { buildEditorMetrics, editorThemes } from '../lib/editorTheme';
+import { editorTypography, onTypographyChange } from '../lib/typography';
 import { onThemeChange, themeName } from '../lib/theme';
 import { javascript } from '@codemirror/lang-javascript';
 import { css } from '@codemirror/lang-css';
@@ -109,6 +110,11 @@ export default function CodeEditor({ rootPath, files, activeKey, onSelect, onClo
   useEffect(() => onThemeChange(setAppearance), []);
   const theme = editorThemes[appearance];
 
+  // Font family/size/spacing come from Settings → Appearance and can change
+  // while the editor is open, so the metrics extension is rebuilt on each one.
+  const [typography, setTypography] = useState(editorTypography);
+  useEffect(() => onTypographyChange(() => setTypography(editorTypography())), []);
+
   const viewRef = useRef(null);
 
   const active = files.find((f) => f.key === activeKey) || null;
@@ -209,6 +215,7 @@ export default function CodeEditor({ rootPath, files, activeKey, onSelect, onClo
   };
 
   const extensions = useMemo(() => {
+    const editorMetrics = buildEditorMetrics(typography);
     const base = [
       editorMetrics,
       keymap.of([
@@ -224,7 +231,7 @@ export default function CodeEditor({ rootPath, files, activeKey, onSelect, onClo
       ];
     }
     return [...base, ...languageFor(active.name)];
-  }, [active, isDiff, data]);
+  }, [active, isDiff, data, typography]);
 
   return (
     <div className="h-full flex flex-col bg-background text-foreground">

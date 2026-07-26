@@ -91,6 +91,15 @@ export function Row({
   return <div className={`settings-row ${className}`}>{content}</div>;
 }
 
+// A settings row that knows about search. `id` ties it to an entry in
+// src/lib/settingsRegistry.js; when the settings search is active the section
+// passes down the visible id list and non-matching rows drop out. Everything
+// else is a plain Row, so the shared shape stays in one place.
+export function SettingsRow({ id, visible, ...props }) {
+  if (visible && !visible.includes(id)) return null;
+  return <Row {...props} />;
+}
+
 // Colored rounded-square icon tile. A deliberate WPHerd carve-out: Superset's
 // iconography is all-monochrome, but the colored tiles are part of this app's
 // identity, so they stay in the sidebar, page heroes and settings rows.

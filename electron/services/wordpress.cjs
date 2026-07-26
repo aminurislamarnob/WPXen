@@ -11,15 +11,9 @@ const { validateSiteInput } = require('./validation.cjs');
 
 const DEFAULT_SITES_DIR = path.join(os.homedir(), 'Sites');
 
-function getSitesDir() {
-  return DEFAULT_SITES_DIR;
-}
-
-function ensureSitesDir(dir = DEFAULT_SITES_DIR) {
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-}
+// NB: there is deliberately no getSitesDir() helper here. The sites directory
+// is a user setting ('sites.dir'); a module-local helper returning the constant
+// would silently ignore it. Callers receive the resolved path in siteData.
 
 function getWpCliBin() {
   const prefix = brew.getBrewPrefix();
@@ -141,6 +135,8 @@ async function createWordPressSite(siteData, progressCallback) {
     adminPassword = 'admin123',
     adminEmail,
     title,
+    wpVersion: wpVersionArg,
+    locale: localeArg,
   } = siteData;
 
   const progress = progressCallback || (() => {});
@@ -158,8 +154,28 @@ async function createWordPressSite(siteData, progressCallback) {
 
   // 2. Download WordPress core (with bundled default themes/plugins — no
   // --skip-content, so the Twenty* themes ship with the install).
+  //
+  // Version and locale come from the global new-site defaults. Both are
+  // pattern-checked before becoming argv so a tampered store can't smuggle an
+  // extra wp-cli flag through them; anything unrecognised falls back to the
+  // latest en_US build rather than failing the install.
   progress({ step: 'download', message: 'Downloading WordPress...' });
-  wp(['core', 'download'], sitePath);
+  const downloadArgs = ['core', 'download'];
+  if (
+    wpVersionArg &&
+    wpVersionArg !== 'latest' &&
+    /^\d+(\.\d+){0,2}$/.test(wpVersionArg)
+  ) {
+    downloadArgs.push(`--version=${wpVersionArg}`);
+  }
+  if (
+    localeArg &&
+    /^[a-z]{2,3}(_[A-Za-z]{2,4})?$/.test(localeArg) &&
+    localeArg !== 'en_US'
+  ) {
+    downloadArgs.push(`--locale=${localeArg}`);
+  }
+  wp(downloadArgs, sitePath);
 
   // 3. Create database
   progress({ step: 'database', message: 'Creating database...' });
@@ -963,8 +979,6 @@ function sanitizeDbName(name) {
 
 module.exports = {
   DEFAULT_SITES_DIR,
-  getSitesDir,
-  ensureSitesDir,
   getWpCliBin,
   wp,
   wpAsync,

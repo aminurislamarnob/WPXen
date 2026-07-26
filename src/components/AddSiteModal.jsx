@@ -36,6 +36,47 @@ export default function AddSiteModal({
   const [, setCreating] = useState(false);
   const [progressMessages, setProgressMessages] = useState([]);
   const [done, setDone] = useState(false);
+  // Carried from the global new-site defaults into the create payload. Not
+  // form fields (yet) — the defaults are configured in Settings → Sites.
+  const [https, setHttps] = useState(false);
+  // Set once the admin email is explicitly owned — either by the global default
+  // from Settings → Sites, or by the user typing in the field. Naming the site
+  // derives admin@<slug>.test only while it is still unowned, so a configured
+  // default isn't silently overwritten the moment a name is typed.
+  const [adminEmailPinned, setAdminEmailPinned] = useState(false);
+  const [wpVersion, setWpVersion] = useState('latest');
+  const [locale, setLocale] = useState('en_US');
+
+  // Prefill from the global new-site defaults (Settings → Sites). These are
+  // starting points only — anything the user has already typed wins, and every
+  // field stays editable.
+  useEffect(() => {
+    let cancelled = false;
+    window.electronAPI.getAllSettings().then((s) => {
+      if (cancelled) return;
+      // A configured address is owned from here on: naming the site must not
+      // overwrite it with the derived admin@<slug>.test.
+      if (s['sites.defaultAdminEmail']) setAdminEmailPinned(true);
+      setFormData((prev) => ({
+        ...prev,
+        adminUser:
+          prev.adminUser === 'admin' ? s['sites.defaultAdminUser'] : prev.adminUser,
+        adminEmail: s['sites.defaultAdminEmail'] || prev.adminEmail,
+        phpVersion:
+          s['php.defaultVersion'] &&
+          phpVersions?.some((v) => v.version === s['php.defaultVersion'])
+            ? s['php.defaultVersion']
+            : prev.phpVersion,
+      }));
+      setHttps(!!s['sites.httpsOnCreate']);
+      setWpVersion(s['sites.defaultWpVersion'] || 'latest');
+      setLocale(s['sites.defaultLocale'] || 'en_US');
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function chooseSource(next) {
     setSource(next);
@@ -56,6 +97,8 @@ export default function AddSiteModal({
   }, []);
 
   function updateField(field, value) {
+    // Typing in the field claims it; the site name stops driving it.
+    if (field === 'adminEmail') setAdminEmailPinned(true);
     setFormData((prev) => {
       const next = { ...prev, [field]: value };
       if (field === 'name') {
@@ -67,7 +110,7 @@ export default function AddSiteModal({
         next.domain = `${slug}.test`;
         next.dbName = slug.replace(/-/g, '_') + '_db';
         next.title = value;
-        next.adminEmail = `admin@${slug}.test`;
+        if (!adminEmailPinned) next.adminEmail = `admin@${slug}.test`;
         // Will be updated with actual path on step change
       }
       return next;
@@ -136,7 +179,7 @@ export default function AddSiteModal({
           phpVersion: formData.phpVersion,
           dbName: formData.dbName,
         })
-      : await window.electronAPI.addSite(formData);
+      : await window.electronAPI.addSite({ ...formData, https, wpVersion, locale });
 
     setCreating(false);
 

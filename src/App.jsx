@@ -8,8 +8,21 @@ import AgentsPane from './components/AgentsPane';
 import Services from './components/Services';
 import PHPVersions from './components/PHPVersions';
 import Mail from './components/Mail';
-import Settings from './components/Settings';
+import SettingsLayout from './components/settings/SettingsLayout';
+import AppearanceSection from './components/settings/sections/AppearanceSection';
+import GeneralSection from './components/settings/sections/GeneralSection';
+import SitesSection from './components/settings/sections/SitesSection';
+import DatabaseSection from './components/settings/sections/DatabaseSection';
+import AgentsSection from './components/settings/sections/AgentsSection';
+import ToolsSection from './components/settings/sections/ToolsSection';
+import MailSection from './components/settings/sections/MailSection';
+import ServicesSection from './components/settings/sections/ServicesSection';
+import DnsSection from './components/settings/sections/DnsSection';
+import BlueprintsSection from './components/settings/sections/BlueprintsSection';
+import DependenciesSection from './components/settings/sections/DependenciesSection';
+import AboutSection from './components/settings/sections/AboutSection';
 import Onboarding from './components/Onboarding';
+import { SettingsProvider } from './lib/useSettings';
 import logo from './assets/logo.png';
 
 // Core dependencies without which the app can't run — used to gate onboarding.
@@ -115,21 +128,39 @@ export default function App() {
   };
 
   return (
-    <HashRouter>
-      <Routes>
-        <Route path="/" element={<Layout />}>
-          <Route index element={<Navigate to="/dashboard" replace />} />
-          <Route path="dashboard" element={<Dashboard {...sharedProps} />} />
-          <Route path="sites" element={<Sites {...sharedProps} />} />
-          <Route path="sites/:id" element={<SiteDetail {...sharedProps} />} />
-          <Route path="agents" element={<AgentsPane />} />
-          <Route path="agents/:siteId" element={<AgentsPane />} />
-          <Route path="services" element={<Services {...sharedProps} />} />
-          <Route path="php" element={<PHPVersions {...sharedProps} />} />
-          <Route path="mail" element={<Mail {...sharedProps} />} />
-          <Route path="settings" element={<Settings {...sharedProps} />} />
-        </Route>
-      </Routes>
-    </HashRouter>
+    <SettingsProvider>
+      <HashRouter>
+        <Routes>
+          <Route path="/" element={<Layout />}>
+            <Route index element={<Navigate to="/dashboard" replace />} />
+            <Route path="dashboard" element={<Dashboard {...sharedProps} />} />
+            <Route path="sites" element={<Sites {...sharedProps} />} />
+            <Route path="sites/:id" element={<SiteDetail {...sharedProps} />} />
+            <Route path="agents" element={<AgentsPane />} />
+            <Route path="agents/:siteId" element={<AgentsPane />} />
+            <Route path="services" element={<Services {...sharedProps} />} />
+            <Route path="php" element={<PHPVersions {...sharedProps} />} />
+            <Route path="mail" element={<Mail {...sharedProps} />} />
+            {/* Settings is a layout route: sidebar + one section per path, so
+                every section is deep-linkable (/settings/database). */}
+            <Route path="settings" element={<SettingsLayout {...sharedProps} />}>
+              <Route index element={<Navigate to="/settings/appearance" replace />} />
+              <Route path="appearance" element={<AppearanceSection />} />
+              <Route path="general" element={<GeneralSection />} />
+              <Route path="agents" element={<AgentsSection />} />
+              <Route path="tools" element={<ToolsSection />} />
+              <Route path="sites" element={<SitesSection />} />
+              <Route path="database" element={<DatabaseSection />} />
+              <Route path="mail" element={<MailSection />} />
+              <Route path="blueprints" element={<BlueprintsSection />} />
+              <Route path="services" element={<ServicesSection />} />
+              <Route path="dns" element={<DnsSection />} />
+              <Route path="dependencies" element={<DependenciesSection />} />
+              <Route path="about" element={<AboutSection />} />
+            </Route>
+          </Route>
+        </Routes>
+      </HashRouter>
+    </SettingsProvider>
   );
 }

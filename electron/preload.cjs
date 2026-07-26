@@ -22,6 +22,7 @@ const VALID_EVENT_CHANNELS = [
   'terminal-data',
   'terminal-replay',
   'terminal-exit',
+  'settings-updated',
 ];
 
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -151,6 +152,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   uninstallSudoers: () => ipcRenderer.invoke('uninstall-sudoers'),
 
   // Settings
+  // Schema-backed settings. `setSettings` takes a patch of dotted keys and
+  // resolves with { ok, applied, rejected } — it never throws on a bad value.
+  getAllSettings: () => ipcRenderer.invoke('settings-get-all'),
+  setSettings: (patch) => ipcRenderer.invoke('settings-set', patch),
+  // Editors/terminals detected on this machine, for the settings pickers.
+  listExternalTools: () => ipcRenderer.invoke('list-external-tools'),
+  // Every agent including ones hidden from the launcher (settings only).
+  listAllAgents: () => ipcRenderer.invoke('agent-list-all'),
+  // Deprecated flat shape, kept for one release. Prefer the two above.
   getSettings: () => ipcRenderer.invoke('get-settings'),
   saveSettings: (settings) => ipcRenderer.invoke('save-settings', settings),
 

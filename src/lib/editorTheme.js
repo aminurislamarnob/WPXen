@@ -1,7 +1,8 @@
 import { createTheme } from '@uiw/codemirror-themes';
 import { EditorView } from '@codemirror/view';
 import { tags as t } from '@lezer/highlight';
-import { MONO_STACK, terminalThemes, uiColors } from './theme';
+import { terminalThemes, uiColors } from './theme';
+import { editorTypography } from './typography';
 
 // Superset derives its editor theme from the app theme rather than shipping a
 // separate one: chrome comes from the UI tokens, syntax colors from the
@@ -28,7 +29,11 @@ function build(name) {
       gutterForeground: ui.muted,
       gutterActiveForeground: ui.foreground,
       gutterBorder: ui.border,
-      fontFamily: MONO_STACK,
+      // Deliberately no fontFamily here. createTheme would emit it as
+      // `&.cm-editor .cm-scroller`, which outspecifies buildEditorMetrics's
+      // `.cm-scroller` and silently pins the font no matter what
+      // Settings → Appearance says. Typography has exactly one owner:
+      // buildEditorMetrics, which falls back to MONO_STACK on its own.
     },
     styles: [
       { tag: [t.comment, t.lineComment, t.blockComment], color: ui.comment },
@@ -81,16 +86,29 @@ function build(name) {
 export const editorThemes = { dark: build('dark'), light: build('light') };
 
 // Metrics createTheme's `settings` can't express: Superset pads the content
-// block vertically and each line horizontally, and sizes the line-height at
-// round(fontSize × 1.5).
-const FONT_SIZE = 13;
+// block vertically and each line horizontally. Font family, size, line height,
+// spacing, weight and ligatures all come from Settings → Appearance, so this
+// is built per-render rather than being a module constant.
+// The selector map, separate from the extension, so the rules can be asserted
+// without mounting an editor. The scroller selector carries a class more than
+// `.cm-scroller` on purpose: @uiw/codemirror-themes writes its own
+// `&.cm-editor .cm-scroller` rule, and anything less specific loses to it
+// silently — which is exactly how the font-family setting stopped applying.
+export function editorMetricsSpec(typography) {
+  const t = typography || editorTypography();
+  return {
+    '&': { fontSize: t.fontSize, fontWeight: t.fontWeight },
+    '&.cm-editor .cm-scroller': {
+      fontFamily: t.fontFamily,
+      lineHeight: t.lineHeight,
+      letterSpacing: t.letterSpacing,
+      fontVariantLigatures: t.fontVariantLigatures,
+    },
+    '.cm-content': { padding: '8px 0' },
+    '.cm-line': { padding: '0 12px' },
+  };
+}
 
-export const editorMetrics = EditorView.theme({
-  '&': { fontSize: `${FONT_SIZE}px` },
-  '.cm-scroller': {
-    fontFamily: 'inherit',
-    lineHeight: `${Math.round(FONT_SIZE * 1.5)}px`,
-  },
-  '.cm-content': { padding: '8px 0' },
-  '.cm-line': { padding: '0 12px' },
-});
+export function buildEditorMetrics(typography) {
+  return EditorView.theme(editorMetricsSpec(typography));
+}

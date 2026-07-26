@@ -4,7 +4,8 @@ import { ClipboardAddon } from '@xterm/addon-clipboard';
 import { SearchAddon } from '@xterm/addon-search';
 import { Unicode11Addon } from '@xterm/addon-unicode11';
 import { WebLinksAddon } from '@xterm/addon-web-links';
-import { MONO_STACK, onThemeChange, terminalThemes, themeName } from '../theme';
+import { onThemeChange, terminalThemes, themeName } from '../theme';
+import { onTypographyChange, terminalOptions } from '../typography';
 import {
   isSelectAllChord,
   translateLineEditChord,
@@ -36,6 +37,20 @@ onThemeChange((name) => {
   }
 });
 
+// Typography changes apply to every cached terminal too, then refit — font
+// metrics change the cell size, so the pty needs the new row/col count.
+onTypographyChange(() => {
+  const options = terminalOptions();
+  for (const entry of cache.values()) {
+    Object.assign(entry.term.options, options);
+    try {
+      entry.fit?.fit();
+    } catch {
+      // A hidden terminal has no measurable size yet; it refits on mount.
+    }
+  }
+});
+
 // handlers = { rootPath, onOpenFile, onToggleSearch, onTitle, onExit }
 // The object is replaced on every mount so cached xterm handlers always call
 // the current React component's callbacks via entry.handlers.
@@ -58,15 +73,13 @@ function createEntry(sessionId, handlers) {
   const entry = { sessionId, handlers, exited: false, exitCode: null };
 
   const term = new XTerm({
-    fontFamily: MONO_STACK,
-    fontSize: 13,
-    cursorBlink: true,
-    cursorStyle: 'block',
     cursorInactiveStyle: 'outline',
     allowProposedApi: true,
     scrollback: 5000,
     macOptionIsMeta: false,
     theme: terminalThemes[themeName()],
+    // Font, size, cursor and contrast come from Settings → Appearance.
+    ...terminalOptions(),
   });
   entry.term = term;
 
