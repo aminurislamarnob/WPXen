@@ -31,3 +31,19 @@ hiding to the tray and is torn down when its shell exits or WPHerd quits.
 Rendered inline in the Agents section's main pane (embedded, Superset-style —
 not a separate window).
 _Avoid_: Terminal, process
+
+**Launch Preset**:
+An Agent's **global** default flags, applied on every launch in any Site (e.g.
+`claude --dangerously-skip-permissions`). Stored per-Agent under `agentPresets`
+and appended to the command typed into the Session's shell. A Launch Target can
+override it.
+_Avoid_: Config, profile
+
+**Launch Target**:
+A **per-Site** saved launch recipe pinning a directory the Agent starts in — a
+webroot subfolder (`wp-content/plugins/foo`) or an absolute path such as a git
+worktree beside the webroot — plus optional flags that override the Agent's
+Launch Preset. Stored on the Site record (`launchTargets`) so it travels with
+the Site and is reclaimed on delete. Chosen from the Agents pane's "New session"
+menu; the webroot with the Launch Preset is the default when none is picked.
+_Avoid_: Preset (that's the global default), workspace, task

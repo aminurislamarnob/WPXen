@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { ChevronRight, ChevronDown, Globe, Terminal } from 'lucide-react';
+import { ChevronRight, ChevronDown, Globe } from 'lucide-react';
+import { ProviderIcon } from './providerIcons';
 
 // The Agents-mode sidebar: a Sites tree. Each Site collapses to its available
 // providers (Agents); clicking one opens that Agent's terminal in the selected
@@ -97,7 +98,12 @@ export default function AgentsSidebar() {
                             : 'text-muted-foreground/60 cursor-not-allowed'
                         }`}
                       >
-                        <Terminal size={12} strokeWidth={2.2} className="flex-shrink-0" />
+                        <ProviderIcon
+                          agentId={agent.id}
+                          brand={agent.detected}
+                          size={13}
+                          className="flex-shrink-0"
+                        />
                         <span className="truncate">{agent.name}</span>
                       </button>
                     );

@@ -169,10 +169,77 @@ function registerHandlers(win, storeInstance) {
 
   // Launch an Agent for a Site. Always spawns a NEW Session (many per Site are
   // allowed), returning its sessionId for the renderer to attach a terminal to.
-  ipcMain.handle('agent-launch', (_e, siteId, agentId) => {
+  // `targetId` (optional) selects a saved Launch Target on the Site; without it
+  // the Agent runs at the webroot with its global default flags applied.
+  ipcMain.handle('agent-launch', (_e, siteId, agentId, targetId) => {
     const site = findSite(siteId);
     if (!site) return { error: 'Site not found' };
-    return agents.launch({ site, agentId });
+    const globalArgs = store.get('agentPresets', {})[agentId]?.args || '';
+    let target = null;
+    if (targetId) {
+      target = (site.launchTargets || []).find((t) => t.id === targetId) || null;
+      if (!target) return { error: 'Launch target not found' };
+    }
+    return agents.launch({ site, agentId, target, globalArgs });
+  });
+
+  // ── Launch Presets (global, per-Agent) & Launch Targets (per-Site) ─────────
+  // Global default flags typed for an Agent on every launch, keyed by agentId:
+  // { [agentId]: { args } }. `resolveLaunch` treats an absent/empty entry as
+  // "just the bare command".
+  ipcMain.handle('agent-presets-get', () => store.get('agentPresets', {}));
+
+  ipcMain.handle('agent-preset-set', (_e, agentId, args) => {
+    if (!agentId || typeof agentId !== 'string') return { error: 'Invalid agent' };
+    const presets = { ...store.get('agentPresets', {}) };
+    const trimmed = String(args || '').trim();
+    if (trimmed) presets[agentId] = { args: trimmed };
+    else delete presets[agentId]; // empty = fall back to the bare command
+    store.set('agentPresets', presets);
+    return { ok: true, presets };
+  });
+
+  // Saved Launch Targets live on the Site record, so they travel with it and
+  // are reclaimed when the Site is deleted. Shape: { id, agentId, label, cwd,
+  // args }. `cwd` may be webroot-relative or absolute; `args: null` inherits the
+  // Agent's global default.
+  ipcMain.handle('agent-targets-list', (_e, siteId) => {
+    const site = findSite(siteId);
+    return site?.launchTargets || [];
+  });
+
+  ipcMain.handle('agent-target-save', (_e, siteId, target) => {
+    const sites = store.get('sites', []);
+    const site = sites.find((s) => s.id === siteId);
+    if (!site) return { error: 'Site not found' };
+    if (!target?.agentId) return { error: 'An agent is required' };
+    const cwd = String(target.cwd || '').trim();
+    if (!cwd) return { error: 'A directory is required' };
+
+    const clean = {
+      id: target.id || crypto.randomUUID(),
+      agentId: target.agentId,
+      label: String(target.label || '').trim(),
+      cwd,
+      // Empty string means "no override" → inherit the global default (null).
+      args: String(target.args || '').trim() || null,
+    };
+
+    const list = site.launchTargets || [];
+    const idx = list.findIndex((t) => t.id === clean.id);
+    site.launchTargets =
+      idx >= 0 ? list.map((t) => (t.id === clean.id ? clean : t)) : [...list, clean];
+    store.set('sites', sites);
+    return { ok: true, target: clean, targets: site.launchTargets };
+  });
+
+  ipcMain.handle('agent-target-delete', (_e, siteId, targetId) => {
+    const sites = store.get('sites', []);
+    const site = sites.find((s) => s.id === siteId);
+    if (!site) return { error: 'Site not found' };
+    site.launchTargets = (site.launchTargets || []).filter((t) => t.id !== targetId);
+    store.set('sites', sites);
+    return { ok: true, targets: site.launchTargets };
   });
 
   // The embedded terminal calls this once xterm is mounted; bind the sender's
@@ -1860,10 +1927,10 @@ function registerHandlers(win, storeInstance) {
 
   // ─── File dialogs ────────────────────────────────────────────────────
 
-  ipcMain.handle('select-folder', async () => {
+  ipcMain.handle('select-folder', async (_e, defaultPath) => {
     const result = await dialog.showOpenDialog(mainWindow, {
       properties: ['openDirectory', 'createDirectory'],
-      defaultPath: os.homedir(),
+      defaultPath: defaultPath || os.homedir(),
     });
     return result.canceled ? null : result.filePaths[0];
   });
