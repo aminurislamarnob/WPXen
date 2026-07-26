@@ -74,3 +74,42 @@ describe('setConfig', () => {
     expect(agents.effectiveRegistry()).toHaveLength(BUILT_IN.length);
   });
 });
+
+// The plain-shell entry is synthesised by listAgents rather than living in the
+// registry: there is no binary to detect and nothing to configure. listAgents
+// does resolve the login-shell environment, which is cached after the first
+// call, so these are kept to a handful.
+describe('plain shell entry', () => {
+  it('is offered first, and is always available', () => {
+    agents.setConfig({ enabled: null, commands: {}, custom: [] });
+    const list = agents.listAgents();
+    expect(list[0].id).toBe(agents.SHELL_ID);
+    expect(list[0]).toMatchObject({ isShell: true, detected: true, enabled: true });
+    expect(list[0].name).toBeTruthy();
+  });
+
+  it('has no binary to install and no command to override', () => {
+    const shell = agents.listAgents().find((a) => a.id === agents.SHELL_ID);
+    expect(shell.cmd).toBe('');
+    expect(shell.install).toBe('');
+    // A command override aimed at it must not take hold.
+    agents.setConfig({ commands: { [agents.SHELL_ID]: 'bash -l' } });
+    expect(agents.listAgents().find((a) => a.id === agents.SHELL_ID).cmd).toBe('');
+  });
+
+  it('survives an enabled list that predates it', () => {
+    // Anyone who toggled agents off before this existed has a saved list with
+    // no 'shell' in it; hiding the baseline terminal on upgrade would be wrong.
+    agents.setConfig({ enabled: ['claude'], commands: {}, custom: [] });
+    const ids = agents.listAgents().map((a) => a.id);
+    expect(ids).toContain(agents.SHELL_ID);
+    expect(ids).toEqual([agents.SHELL_ID, 'claude']);
+  });
+
+  it('is left out when the caller only wants configurable providers', () => {
+    agents.setConfig({ enabled: null, commands: {}, custom: [] });
+    const ids = agents.listAgents({ all: true, shell: false }).map((a) => a.id);
+    expect(ids).not.toContain(agents.SHELL_ID);
+    expect(ids).toContain('claude');
+  });
+});

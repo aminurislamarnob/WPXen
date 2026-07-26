@@ -259,8 +259,11 @@ function registerHandlers(win, storeInstance) {
   ipcMain.handle('agent-list', () => agents.listAgents());
 
   // Every agent including hidden ones — the Agents settings section needs the
-  // full list to render its enable/disable toggles.
-  ipcMain.handle('agent-list-all', () => agents.listAgents({ all: true }));
+  // full list to render its enable/disable toggles. The plain shell is left out:
+  // it has no binary to detect, no command to override, and is always available.
+  ipcMain.handle('agent-list-all', () =>
+    agents.listAgents({ all: true, shell: false })
+  );
 
   // The live Sessions for a Site — the renderer restores its terminal tabs.
   ipcMain.handle('agent-sessions', (_e, siteId) => agents.listSessions(siteId));
