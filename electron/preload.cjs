@@ -165,7 +165,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveSettings: (settings) => ipcRenderer.invoke('save-settings', settings),
 
   // File dialogs
-  selectFolder: () => ipcRenderer.invoke('select-folder'),
+  selectFolder: (defaultPath) => ipcRenderer.invoke('select-folder', defaultPath),
 
   // System info
   getSystemInfo: () => ipcRenderer.invoke('get-system-info'),
@@ -173,7 +173,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Agent Launcher / Terminal
   listAgents: () => ipcRenderer.invoke('agent-list'),
   listSessions: (siteId) => ipcRenderer.invoke('agent-sessions', siteId),
-  launchAgent: (siteId, agentId) => ipcRenderer.invoke('agent-launch', siteId, agentId),
+  launchAgent: (siteId, agentId, targetId) =>
+    ipcRenderer.invoke('agent-launch', siteId, agentId, targetId),
+
+  // Launch Presets (global, per-Agent) & Launch Targets (per-Site)
+  getAgentPresets: () => ipcRenderer.invoke('agent-presets-get'),
+  setAgentPreset: (agentId, args) =>
+    ipcRenderer.invoke('agent-preset-set', agentId, args),
+  listLaunchTargets: (siteId) => ipcRenderer.invoke('agent-targets-list', siteId),
+  saveLaunchTarget: (siteId, target) =>
+    ipcRenderer.invoke('agent-target-save', siteId, target),
+  deleteLaunchTarget: (siteId, targetId) =>
+    ipcRenderer.invoke('agent-target-delete', siteId, targetId),
   terminalReady: (sessionId) => ipcRenderer.invoke('terminal-ready', sessionId),
   terminalInput: (sessionId, data) => ipcRenderer.send('terminal-input', sessionId, data),
   terminalResize: (sessionId, cols, rows) =>

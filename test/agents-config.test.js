@@ -8,10 +8,19 @@ beforeEach(() => {
   agents.setConfig({ enabled: null, commands: {}, custom: [] });
 });
 
+// Derived, not hardcoded: which providers ship built in is the launcher's
+// business and changes as new CLIs appear — these tests are about what the
+// user's config does to that list, whatever it currently holds.
+agents.setConfig({ enabled: null, commands: {}, custom: [] });
+const BUILT_IN = agents.effectiveRegistry();
+
 describe('effectiveRegistry', () => {
-  it('returns the built-in agents by default', () => {
-    const ids = agents.effectiveRegistry().map((a) => a.id);
-    expect(ids).toEqual(['claude', 'codex', 'gemini', 'opencode']);
+  it('returns the built-in agents, unmodified, by default', () => {
+    const list = agents.effectiveRegistry();
+    expect(list).toHaveLength(BUILT_IN.length);
+    expect(list.map((a) => a.id)).toContain('claude');
+    expect(list.every((a) => a.id && a.cmd && a.name)).toBe(true);
+    expect(list.some((a) => a.isCustom)).toBe(false);
   });
 
   it('applies a command override without changing the agent id or name', () => {
@@ -53,15 +62,15 @@ describe('effectiveRegistry', () => {
     agents.setConfig({
       custom: [{ name: 'No id', cmd: 'x' }, { id: 'no-cmd' }, null],
     });
-    expect(agents.effectiveRegistry()).toHaveLength(4);
+    expect(agents.effectiveRegistry()).toHaveLength(BUILT_IN.length);
   });
 });
 
 describe('setConfig', () => {
   it('ignores malformed config rather than throwing', () => {
     agents.setConfig(undefined);
-    expect(agents.effectiveRegistry()).toHaveLength(4);
+    expect(agents.effectiveRegistry()).toHaveLength(BUILT_IN.length);
     agents.setConfig({ enabled: 'nope', commands: 'nope', custom: 'nope' });
-    expect(agents.effectiveRegistry()).toHaveLength(4);
+    expect(agents.effectiveRegistry()).toHaveLength(BUILT_IN.length);
   });
 });
