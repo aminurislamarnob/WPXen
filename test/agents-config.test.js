@@ -80,12 +80,13 @@ describe('setConfig', () => {
 // does resolve the login-shell environment, which is cached after the first
 // call, so these are kept to a handful.
 describe('plain shell entry', () => {
-  it('is offered first, and is always available', () => {
+  it('is offered last, and is always available', () => {
     agents.setConfig({ enabled: null, commands: {}, custom: [] });
     const list = agents.listAgents();
-    expect(list[0].id).toBe(agents.SHELL_ID);
-    expect(list[0]).toMatchObject({ isShell: true, detected: true, enabled: true });
-    expect(list[0].name).toBeTruthy();
+    const shell = list[list.length - 1];
+    expect(shell.id).toBe(agents.SHELL_ID);
+    expect(shell).toMatchObject({ isShell: true, detected: true, enabled: true });
+    expect(shell.name).toBeTruthy();
   });
 
   it('has no binary to install and no command to override', () => {
@@ -103,7 +104,7 @@ describe('plain shell entry', () => {
     agents.setConfig({ enabled: ['claude'], commands: {}, custom: [] });
     const ids = agents.listAgents().map((a) => a.id);
     expect(ids).toContain(agents.SHELL_ID);
-    expect(ids).toEqual([agents.SHELL_ID, 'claude']);
+    expect(ids).toEqual(['claude', agents.SHELL_ID]);
   });
 
   it('is left out when the caller only wants configurable providers', () => {

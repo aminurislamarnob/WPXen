@@ -213,8 +213,9 @@ function listAgents({ all = false, shell = true } = {}) {
 
   if (!shell) return providers;
 
-  // First: it's the baseline, and the one entry that always works.
+  // Last: it's the baseline, but providers are more useful to surface first.
   return [
+    ...providers,
     {
       ...SHELL_AGENT,
       isCustom: false,
@@ -222,7 +223,6 @@ function listAgents({ all = false, shell = true } = {}) {
       detected: true,
       path: getUserShell(),
     },
-    ...providers,
   ];
 }
 
