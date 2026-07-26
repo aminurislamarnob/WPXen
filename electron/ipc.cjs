@@ -1153,20 +1153,31 @@ function registerHandlers(win, storeInstance) {
   // Opens wp-admin — via the magic-login URL when one-click admin is enabled,
   // otherwise the plain /wp-admin. Kept in the main process so the secret is
   // never handed to the renderer.
-  ipcMain.handle('open-wp-admin', (_, id) => {
+  // wp-admin for a site, upgraded to a magic-login link when one-click admin is
+  // on. Shared so an in-app browser tab lands signed in just like the system
+  // browser does.
+  function resolveWpAdminUrl(id) {
     const site = store.get('sites', []).find((s) => s.id === id);
     if (!site) return { success: false, error: 'Site not found' };
     const base = site.url.replace(/\/+$/, '');
-    let target = `${base}/wp-admin`;
+    let url = `${base}/wp-admin`;
     if (site.oneClickAdmin?.enabled) {
       const secret = store.get(`magicLogin.${id}`, null);
-      if (secret) target = `${base}/?wpherd_magic_login=${secret}`;
+      if (secret) url = `${base}/?wpherd_magic_login=${secret}`;
     }
-    const ok = openExternalSafely(target);
+    return { success: true, url };
+  }
+
+  ipcMain.handle('open-wp-admin', (_, id) => {
+    const res = resolveWpAdminUrl(id);
+    if (!res.success) return res;
+    const ok = openExternalSafely(res.url);
     return ok
       ? { success: true }
       : { success: false, error: 'Refused to open unsafe URL' };
   });
+
+  ipcMain.handle('get-wp-admin-url', (_, id) => resolveWpAdminUrl(id));
 
   // ─── Site config (WP Config Manager) ───────────────────────────────────
 
@@ -1506,19 +1517,44 @@ function registerHandlers(win, storeInstance) {
     }
   });
 
+  // Install (first run only), configure and serve phpMyAdmin, then hand back
+  // the deep link for `dbName`. Shared by the two callers below: the quick
+  // actions open it in the system browser, the Agents screen loads it into an
+  // in-app browser tab.
+  async function resolvePhpMyAdminUrl(dbName) {
+    // Reject anything that isn't a valid DB name before it reaches the URL —
+    // same rule that gates site creation.
+    if (dbName != null && !validation.DB_NAME_RE.test(dbName)) {
+      return { success: false, error: 'Invalid database name.' };
+    }
+    await phpmyadmin.ensureReady();
+    return { success: true, url: phpmyadmin.getUrl(dbName) };
+  }
+
   ipcMain.handle('open-phpmyadmin', async (_, dbName) => {
     try {
-      // Reject anything that isn't a valid DB name before it reaches the URL.
-      if (dbName != null && !/^[a-zA-Z0-9_]{1,64}$/.test(dbName)) {
-        return { success: false, error: 'Invalid database name.' };
-      }
-      await phpmyadmin.ensureReady();
-      const url = phpmyadmin.getUrl(dbName);
-      openExternalSafely(url);
-      return { success: true, url };
+      const res = await resolvePhpMyAdminUrl(dbName);
+      if (res.success) openExternalSafely(res.url);
+      return res;
     } catch (err) {
       return { success: false, error: humanize(err) };
     }
+  });
+
+  ipcMain.handle('get-phpmyadmin-url', async (_, dbName) => {
+    try {
+      return await resolvePhpMyAdminUrl(dbName);
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  // The Mailpit inbox, for opening in an in-app browser tab.
+  ipcMain.handle('get-mailpit-url', () => {
+    if (!mailpit.isInstalled()) {
+      return { success: false, error: 'Mailpit is not installed.' };
+    }
+    return { success: true, url: mailpit.getUrl() };
   });
 
   // ─── Mailpit (email catching) ──────────────────────────────────────────

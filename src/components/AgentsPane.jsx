@@ -7,6 +7,10 @@ import {
   Settings2,
   CornerDownRight,
   Globe,
+  Gauge,
+  Database,
+  Mail,
+  Loader2,
 } from 'lucide-react';
 import { ProviderIcon } from './providerIcons';
 import { Panel, PanelGroup } from 'react-resizable-panels';
@@ -24,6 +28,15 @@ import * as webviewCache from '../lib/browser/webviewCache';
 const cleanTitle = (t) => t.trim().replace(/^[\p{Emoji}\p{Symbol}]\s*/u, '');
 
 const CLOSE_CONFIRM_KEY = 'wpherd.terminalCloseConfirmSuppressed';
+
+// The places you actually want to look at while an agent works on a site.
+// Order is by how often they're reached for, not alphabetical.
+const BROWSER_TARGETS = [
+  { id: 'site', label: 'Site', icon: Globe },
+  { id: 'wp-admin', label: 'WP Admin', icon: Gauge },
+  { id: 'phpmyadmin', label: 'phpMyAdmin', icon: Database },
+  { id: 'mailpit', label: 'Mail inbox', icon: Mail },
+];
 
 // Main pane for the Agents section. A Site can host MANY concurrent Sessions
 // (any mix of Agents, incl. several of the same provider); each is a terminal
@@ -45,6 +58,8 @@ export default function AgentsPane() {
   const [tabs, setTabs] = useState([]); // [{ sessionId, agentId, agentName }]
   const [activeTab, setActiveTab] = useState(null); // sessionId
   const [addMenu, setAddMenu] = useState(null); // { x, y } when the + menu is open
+  const [browserMenu, setBrowserMenu] = useState(null); // { x, y } for the browser targets
+  const [browserBusy, setBrowserBusy] = useState(null); // target id being resolved
 
   const [openFiles, setOpenFiles] = useState([]); // editor tabs [{ key, kind, ... }]
   const [activeKey, setActiveKey] = useState(null);
@@ -77,7 +92,12 @@ export default function AgentsPane() {
       ]);
       if (cancelled) return;
       const site = (sites || []).find((s) => s.id === siteId);
-      setMeta({ siteName: site?.name || siteId });
+      // url/dbName feed the browser target menu; keep them alongside the name.
+      setMeta({
+        siteName: site?.name || siteId,
+        url: site?.url || null,
+        dbName: site?.dbName || null,
+      });
       setSitePath(site?.path || null);
       setAgents(agentList || []);
       setTargets(targetList || []);
@@ -266,6 +286,41 @@ export default function AgentsPane() {
     setActiveKey(key);
   }, []);
 
+  // Resolve one of the site's well-known targets and open it in a browser tab.
+  // The service-backed ones (phpMyAdmin, Mailpit) install and configure
+  // themselves on first use, so they're async and can fail — hence the busy
+  // marker on the menu item and the shared error line below the tab strip.
+  const openBrowserTarget = async (target) => {
+    setError(null);
+    if (target === 'blank') {
+      setBrowserMenu(null);
+      return openBrowser();
+    }
+    if (target === 'site') {
+      setBrowserMenu(null);
+      if (!meta.url) return setError('This site has no URL yet.');
+      return openBrowser(meta.url);
+    }
+
+    setBrowserBusy(target);
+    let res;
+    if (target === 'wp-admin') {
+      res = await window.electronAPI.getWpAdminUrl(siteId);
+    } else if (target === 'phpmyadmin') {
+      if (!meta.dbName) {
+        setBrowserBusy(null);
+        return setError('This site has no database.');
+      }
+      res = await window.electronAPI.getPhpMyAdminUrl(meta.dbName);
+    } else {
+      res = await window.electronAPI.getMailpitUrl();
+    }
+    setBrowserBusy(null);
+    setBrowserMenu(null);
+    if (!res?.success) return setError(res?.error || 'Could not open that target.');
+    openBrowser(res.url);
+  };
+
   // Stable across renders — the cached webview holds onto this via a ref.
   const onBrowserStateChange = useCallback((key, patch) => {
     setBrowserState((prev) =>
@@ -417,7 +472,10 @@ export default function AgentsPane() {
               <div className="flex-1" />
               <Tooltip label="Open browser">
                 <button
-                  onClick={() => openBrowser()}
+                  onClick={(e) => {
+                    const r = e.currentTarget.getBoundingClientRect();
+                    setBrowserMenu((m) => (m ? null : { x: r.right - 220, y: r.bottom + 4 }));
+                  }}
                   aria-label="Open browser"
                   className="flex-shrink-0 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent"
                 >
@@ -425,6 +483,41 @@ export default function AgentsPane() {
                 </button>
               </Tooltip>
             </div>
+
+            {browserMenu && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setBrowserMenu(null)} />
+                <div
+                  className="panel fixed z-50 min-w-[220px] py-1"
+                  style={{ left: browserMenu.x, top: browserMenu.y }}
+                >
+                  {BROWSER_TARGETS.map((t) => (
+                    <button
+                      key={t.id}
+                      onClick={() => openBrowserTarget(t.id)}
+                      disabled={browserBusy != null}
+                      className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[13px] text-foreground hover:bg-accent disabled:opacity-50"
+                    >
+                      {browserBusy === t.id ? (
+                        <Loader2 size={14} className="animate-spin flex-shrink-0" />
+                      ) : (
+                        <t.icon size={14} className="flex-shrink-0 text-muted-foreground" />
+                      )}
+                      {t.label}
+                    </button>
+                  ))}
+                  <div className="my-1 h-px bg-border" />
+                  <button
+                    onClick={() => openBrowserTarget('blank')}
+                    disabled={browserBusy != null}
+                    className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[13px] text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
+                  >
+                    <Plus size={14} className="flex-shrink-0" />
+                    Blank tab
+                  </button>
+                </div>
+              </>
+            )}
 
             {addMenu && (
               <>

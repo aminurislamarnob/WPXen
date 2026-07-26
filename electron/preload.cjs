@@ -201,6 +201,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   browserNavigate: (tabKey, url) => ipcRenderer.invoke('browser-navigate', tabKey, url),
   browserReload: (tabKey, hard) => ipcRenderer.invoke('browser-reload', tabKey, hard),
   browserOpenDevTools: (tabKey) => ipcRenderer.invoke('browser-open-devtools', tabKey),
+  // Targets an in-app browser tab can be pointed at. These resolve a URL
+  // (installing/configuring the service on first use) instead of opening it.
+  getPhpMyAdminUrl: (dbName) => ipcRenderer.invoke('get-phpmyadmin-url', dbName),
+  getWpAdminUrl: (id) => ipcRenderer.invoke('get-wp-admin-url', id),
+  getMailpitUrl: () => ipcRenderer.invoke('get-mailpit-url'),
 
   listDirectory: (rootPath, dirPath) =>
     ipcRenderer.invoke('list-directory', rootPath, dirPath),
