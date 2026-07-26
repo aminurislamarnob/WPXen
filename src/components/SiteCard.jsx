@@ -173,14 +173,18 @@ export default function SiteCard({
   }
 
   // phpMyAdmin installs and configures itself on first use, so this resolves
-  // before it can be opened — hence the spinner. Where it opens (default
-  // browser or an in-app tab) is useOpenLink's call, not ours.
+  // before it can be opened. Always opens in the site detail's in-app browser.
   async function handlePhpMyAdmin() {
     setPmaBusy(true);
     setHttpsError(null);
     const result = await window.electronAPI.getPhpMyAdminUrl(site.dbName);
-    if (result?.success) openLink(result.url, site.id);
-    else setHttpsError(result?.error || 'Failed to open phpMyAdmin.');
+    if (result?.success) {
+      navigate(`/sites/${site.id}`, {
+        state: { pmaUrl: result.url, nonce: Date.now() },
+      });
+    } else {
+      setHttpsError(result?.error || 'Failed to open phpMyAdmin.');
+    }
     setPmaBusy(false);
   }
 
