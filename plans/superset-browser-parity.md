@@ -1,5 +1,26 @@
 # Plan: In-App Browser (Superset parity) + site-scoped phpMyAdmin
 
+> **Status: all five phases shipped** (`eef1f6f`, `633d133`, `3f8bf0d`,
+> `eb7fda5`, `7ba0b3a`). Deviations from the plan as written:
+>
+> - **Step 27 (console ring buffer) was dropped.** Nothing consumes it — the
+>   DevTools button already covers reading a page's console — so it would have
+>   shipped as dead code. The `browser-console` channel is not registered.
+> - **Step 22 (mkcert HTTPS `.test`) is unverified.** Whether mkcert-issued
+>   certificates validate inside the `persist:wpherd-browser` partition needs a
+>   running app and an HTTPS site. No bypass was written; `BrowserErrorOverlay`
+>   names the certificate case (codes -201/-501) so the failure is legible if it
+>   happens. If it does, the fix is the fingerprint-scoped `certificate-error`
+>   handler described in D6 — never a blanket `preventDefault()`.
+> - **Steps 29–30 merged.** Rather than adding external/in-app variants of every
+>   quick action, the actions resolve a URL and hand it to `useOpenLink`, which
+>   the `app.openLinksIn` setting steers. That collapsed `open-wp-admin` and
+>   `open-phpmyadmin` (each resolved _and_ opened) into their resolve halves.
+> - **Nothing here has been exercised against a running app.** Tests, lint and
+>   the renderer build pass; the webview lifecycle, key interception and drag
+>   passthrough are all main-process/Electron behaviour that unit tests cannot
+>   reach.
+
 Adds a built-in browser to WPHerd's Agents screen, modelled on Superset's
 browser pane (reference checkout at `reference/superset-main`), plus a
 site-specific "open phpMyAdmin in the app" action.
