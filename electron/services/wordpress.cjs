@@ -11,15 +11,9 @@ const { validateSiteInput } = require('./validation.cjs');
 
 const DEFAULT_SITES_DIR = path.join(os.homedir(), 'Sites');
 
-function getSitesDir() {
-  return DEFAULT_SITES_DIR;
-}
-
-function ensureSitesDir(dir = DEFAULT_SITES_DIR) {
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-}
+// NB: there is deliberately no getSitesDir() helper here. The sites directory
+// is a user setting ('sites.dir'); a module-local helper returning the constant
+// would silently ignore it. Callers receive the resolved path in siteData.
 
 function getWpCliBin() {
   const prefix = brew.getBrewPrefix();
@@ -985,8 +979,6 @@ function sanitizeDbName(name) {
 
 module.exports = {
   DEFAULT_SITES_DIR,
-  getSitesDir,
-  ensureSitesDir,
   getWpCliBin,
   wp,
   wpAsync,

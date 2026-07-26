@@ -112,13 +112,6 @@ export const SETTINGS_ITEMS = [
     keywords: ['terminal', 'weight', 'bold', 'light', 'font', 'thickness', 'typography'],
   },
   {
-    id: 'appearance.terminal.ligatures',
-    section: 'appearance',
-    title: 'Terminal ligatures',
-    description: 'Render =>, !== and friends as single glyphs',
-    keywords: ['terminal', 'ligatures', 'glyphs', 'fira', 'arrows', 'font', 'typography'],
-  },
-  {
     id: 'appearance.terminal.minimumContrast',
     section: 'appearance',
     title: 'Terminal minimum contrast',

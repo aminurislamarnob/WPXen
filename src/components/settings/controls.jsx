@@ -63,6 +63,67 @@ export function NumberSetting({ value, onCommit, min, max, ariaLabel, className 
   );
 }
 
+// Slider bound to a setting.
+//
+// For the same reason TextSetting doesn't save per keystroke, this doesn't save
+// per pixel: a drag fires a change event per step, and each one would be an IPC
+// round trip plus a full rewrite of the JSON store — and, for typography, a
+// refit of every live terminal. The slider therefore tracks a local draft while
+// the pointer is down and commits once on release.
+//
+// `onPreview` lets a caller mirror the in-flight value (a live font preview)
+// without paying for a write; the readout beside the slider always shows it.
+export function RangeSetting({
+  value,
+  onCommit,
+  onPreview,
+  min,
+  max,
+  step,
+  ariaLabel,
+  format = (v) => v,
+}) {
+  const [draft, setDraft] = useState(null); // non-null only mid-drag
+  const shown = draft === null ? value : draft;
+
+  // The committed value arriving back as a prop ends the drag. Nothing else
+  // changes `value` while the pointer is down, so this can't fight the drag.
+  useEffect(() => {
+    setDraft(null);
+  }, [value]);
+
+  function commit() {
+    if (draft === null) return;
+    if (draft === value) setDraft(null);
+    else onCommit(draft);
+  }
+
+  return (
+    <>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        aria-label={ariaLabel}
+        value={shown}
+        onChange={(e) => {
+          const next = Number(e.target.value);
+          setDraft(next);
+          onPreview?.(next);
+        }}
+        onPointerUp={commit}
+        onKeyUp={commit}
+        onBlur={commit}
+        className="w-40 accent-highlight"
+      />
+      <span className="text-xs text-muted-foreground tabular-nums w-8 text-right">
+        {format(shown)}
+      </span>
+    </>
+  );
+}
+
 // Text field bound to a setting.
 //
 // Auto-save doesn't mean save-per-keystroke: that would write the store (and

@@ -28,9 +28,17 @@ describe('apply', () => {
   });
 
   it('keeps the two blocks independent', () => {
-    apply({ 'appearance.terminal.ligatures': true });
-    expect(getTypography().terminal.ligatures).toBe(true);
-    expect(getTypography().editor.ligatures).toBe(false);
+    apply({ 'appearance.terminal.fontWeight': 700 });
+    expect(getTypography().terminal.fontWeight).toBe(700);
+    expect(getTypography().editor.fontWeight).toBe(400);
+  });
+
+  // The terminal block has no ligature knob: xterm can't honour one in this
+  // renderer, so the key is deliberately absent rather than a silent no-op.
+  it('exposes ligatures on the editor block only', () => {
+    apply({ 'appearance.editor.ligatures': true });
+    expect(getTypography().editor.ligatures).toBe(true);
+    expect(getTypography().terminal).not.toHaveProperty('ligatures');
   });
 
   it('ignores a null settings map rather than resetting', () => {

@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { createSettings, coerce } from '../electron/services/settings.cjs';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { createSettings, coerce, SETTINGS } from '../electron/services/settings.cjs';
 
 // Minimal stand-in for JsonStore: dotted get/set over a plain object, no disk.
 function fakeStore(initial = {}) {
@@ -268,5 +271,41 @@ describe('migrateLegacy', () => {
   it('does nothing on a fresh store', () => {
     const s = createSettings({ store: fakeStore(), schema: legacySchema });
     expect(s.migrateLegacy()).toEqual([]);
+  });
+});
+
+// The real schema's sites.dir guard: a path that isn't a usable folder is
+// rejected on write, so a typo surfaces inline instead of as a failed site
+// creation much later.
+describe('sites.dir validation', () => {
+  const spec = SETTINGS['sites.dir'];
+
+  it('accepts an existing directory', () => {
+    expect(spec.validate(os.tmpdir())).toBe(true);
+  });
+
+  it('rejects a path that does not exist', () => {
+    expect(spec.validate(path.join(os.tmpdir(), 'wpherd-no-such-dir-xyz'))).toBe(
+      'that folder does not exist'
+    );
+  });
+
+  it('rejects a file', () => {
+    const file = path.join(os.tmpdir(), `wpherd-settings-test-${Date.now()}`);
+    fs.writeFileSync(file, '');
+    try {
+      expect(spec.validate(file)).toBe('that path is not a folder');
+    } finally {
+      fs.unlinkSync(file);
+    }
+  });
+
+  it('rejects it through write(), leaving the store untouched', () => {
+    const store = fakeStore();
+    const s = createSettings({ store });
+    const result = s.write({ 'sites.dir': '/nope/not/here' });
+    expect(result.ok).toBe(false);
+    expect(result.rejected[0]).toMatchObject({ key: 'sites.dir' });
+    expect(store.get('settings.sites.dir', undefined)).toBeUndefined();
   });
 });

@@ -39,6 +39,11 @@ export default function AddSiteModal({
   // Carried from the global new-site defaults into the create payload. Not
   // form fields (yet) — the defaults are configured in Settings → Sites.
   const [https, setHttps] = useState(false);
+  // Set once the admin email is explicitly owned — either by the global default
+  // from Settings → Sites, or by the user typing in the field. Naming the site
+  // derives admin@<slug>.test only while it is still unowned, so a configured
+  // default isn't silently overwritten the moment a name is typed.
+  const [adminEmailPinned, setAdminEmailPinned] = useState(false);
   const [wpVersion, setWpVersion] = useState('latest');
   const [locale, setLocale] = useState('en_US');
 
@@ -49,12 +54,13 @@ export default function AddSiteModal({
     let cancelled = false;
     window.electronAPI.getAllSettings().then((s) => {
       if (cancelled) return;
+      // A configured address is owned from here on: naming the site must not
+      // overwrite it with the derived admin@<slug>.test.
+      if (s['sites.defaultAdminEmail']) setAdminEmailPinned(true);
       setFormData((prev) => ({
         ...prev,
         adminUser:
           prev.adminUser === 'admin' ? s['sites.defaultAdminUser'] : prev.adminUser,
-        // An explicitly configured address wins; otherwise keep the
-        // admin@<slug>.test address derived from the site name.
         adminEmail: s['sites.defaultAdminEmail'] || prev.adminEmail,
         phpVersion:
           s['php.defaultVersion'] &&
@@ -91,6 +97,8 @@ export default function AddSiteModal({
   }, []);
 
   function updateField(field, value) {
+    // Typing in the field claims it; the site name stops driving it.
+    if (field === 'adminEmail') setAdminEmailPinned(true);
     setFormData((prev) => {
       const next = { ...prev, [field]: value };
       if (field === 'name') {
@@ -102,7 +110,7 @@ export default function AddSiteModal({
         next.domain = `${slug}.test`;
         next.dbName = slug.replace(/-/g, '_') + '_db';
         next.title = value;
-        next.adminEmail = `admin@${slug}.test`;
+        if (!adminEmailPinned) next.adminEmail = `admin@${slug}.test`;
         // Will be updated with actual path on step change
       }
       return next;

@@ -1,5 +1,7 @@
 'use strict';
 
+const fs = require('fs');
+
 // Global settings: one schema, one validator, one place for side effects.
 //
 // Every user preference is declared once in SETTINGS below with its type, its
@@ -24,7 +26,21 @@
 
 const SETTINGS = {
   // ── Sites ────────────────────────────────────────────────────────────────
-  'sites.dir': { type: 'path' },
+  // Checked on write only (never on read): a folder on an unmounted volume
+  // should surface as a failed save when you try to change it, not silently
+  // reset itself to ~/Sites on the next launch.
+  'sites.dir': {
+    type: 'path',
+    validate: (v) => {
+      let stat;
+      try {
+        stat = fs.statSync(v);
+      } catch {
+        return 'that folder does not exist';
+      }
+      return stat.isDirectory() || 'that path is not a folder';
+    },
+  },
   // Prefills for the Add Site sheet. These are starting points, not overrides:
   // the sheet still lets any individual site deviate.
   'sites.defaultWpVersion': { type: 'string', default: 'latest' },
@@ -67,7 +83,10 @@ const SETTINGS = {
   'appearance.terminal.lineHeight': { type: 'float', default: 1.0, min: 0.8, max: 3 },
   'appearance.terminal.letterSpacing': { type: 'float', default: 0, min: -2, max: 5 },
   'appearance.terminal.fontWeight': { type: 'int', default: 400, min: 100, max: 900 },
-  'appearance.terminal.ligatures': { type: 'bool', default: false },
+  // NB: no terminal ligature setting. xterm renders through canvas/WebGL and
+  // its ligature addon needs Node filesystem access to parse font files, which
+  // the renderer deliberately lacks — the row would be a no-op. Editor
+  // ligatures below are real (plain CSS font-variant-ligatures).
   // 0 disables the check; xterm treats 1 as "no enforcement" and 21 as maximum.
   'appearance.terminal.minimumContrast': { type: 'float', default: 1, min: 1, max: 21 },
   'appearance.terminal.cursorStyle': {

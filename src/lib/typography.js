@@ -15,7 +15,9 @@ const DEFAULTS = {
     lineHeight: 1.0,
     letterSpacing: 0,
     fontWeight: 400,
-    ligatures: false,
+    // No `ligatures` here on purpose — see the note in electron/services/
+    // settings.cjs. xterm can't honour it in this renderer, so the terminal
+    // block deliberately has no such knob.
     minimumContrast: 1,
     cursorStyle: 'block',
     cursorBlink: true,

@@ -1,5 +1,6 @@
+import { useState } from 'react';
 import { Card, SectionLabel, SettingsRow, Toggle } from '../../ui';
-import { NumberSetting, SelectSetting, TextSetting } from '../controls';
+import { NumberSetting, RangeSetting, SelectSetting, TextSetting } from '../controls';
 import { useSettings } from '../../../lib/useSettings';
 import { useSettingsContext } from '../SettingsLayout';
 import { MONO_STACK } from '../../../lib/theme';
@@ -61,10 +62,20 @@ function FontPreview({ family, size, lineHeight, letterSpacing, weight, ligature
 
 // One typography block (terminal or editor). `prefix` is the settings
 // namespace; `extras` renders the terminal-only rows.
+//
+// `preview` holds the value of a slider currently being dragged so the sample
+// below tracks the drag without a write per step; it is dropped the moment the
+// value is committed.
 function TypographyBlock({ label, prefix, visible, extras }) {
   const { settings, setSetting } = useSettings();
+  const [preview, setPreview] = useState({});
   const key = (name) => `appearance.${prefix}.${name}`;
-  const get = (name, fallback) => settings[key(name)] ?? fallback;
+  const get = (name, fallback) => preview[name] ?? settings[key(name)] ?? fallback;
+
+  const commit = (name, value) => {
+    setPreview(({ [name]: _dropped, ...rest }) => rest);
+    setSetting(key(name), value);
+  };
 
   return (
     <div>
@@ -110,35 +121,29 @@ function TypographyBlock({ label, prefix, visible, extras }) {
         </SettingsRow>
 
         <SettingsRow id={key('lineHeight')} visible={visible} title="Line height">
-          <input
-            type="range"
+          <RangeSetting
+            value={get('lineHeight', prefix === 'editor' ? 1.5 : 1)}
+            onPreview={(v) => setPreview((p) => ({ ...p, lineHeight: v }))}
+            onCommit={(v) => commit('lineHeight', v)}
             min={0.8}
             max={3}
             step={0.05}
-            aria-label={`${label} line height`}
-            value={get('lineHeight', prefix === 'editor' ? 1.5 : 1)}
-            onChange={(e) => setSetting(key('lineHeight'), Number(e.target.value))}
-            className="w-40 accent-highlight"
+            ariaLabel={`${label} line height`}
+            format={(v) => Number(v).toFixed(2)}
           />
-          <span className="text-xs text-muted-foreground tabular-nums w-8 text-right">
-            {Number(get('lineHeight', prefix === 'editor' ? 1.5 : 1)).toFixed(2)}
-          </span>
         </SettingsRow>
 
         <SettingsRow id={key('letterSpacing')} visible={visible} title="Letter spacing">
-          <input
-            type="range"
+          <RangeSetting
+            value={get('letterSpacing', 0)}
+            onPreview={(v) => setPreview((p) => ({ ...p, letterSpacing: v }))}
+            onCommit={(v) => commit('letterSpacing', v)}
             min={-2}
             max={5}
             step={0.1}
-            aria-label={`${label} letter spacing`}
-            value={get('letterSpacing', 0)}
-            onChange={(e) => setSetting(key('letterSpacing'), Number(e.target.value))}
-            className="w-40 accent-highlight"
+            ariaLabel={`${label} letter spacing`}
+            format={(v) => Number(v).toFixed(1)}
           />
-          <span className="text-xs text-muted-foreground tabular-nums w-8 text-right">
-            {Number(get('letterSpacing', 0)).toFixed(1)}
-          </span>
         </SettingsRow>
 
         <SettingsRow id={key('fontWeight')} visible={visible} title="Font weight">
@@ -153,18 +158,24 @@ function TypographyBlock({ label, prefix, visible, extras }) {
           />
         </SettingsRow>
 
-        <SettingsRow
-          id={key('ligatures')}
-          visible={visible}
-          title="Ligatures"
-          subtitle="Render =>, !== and friends as single glyphs (font permitting)"
-        >
-          <Toggle
-            checked={!!get('ligatures', false)}
-            onChange={(v) => setSetting(key('ligatures'), v)}
-            label={`${label} ligatures`}
-          />
-        </SettingsRow>
+        {/* Editor only. xterm renders through canvas/WebGL, and its ligature
+            addon needs Node filesystem access to parse font files — which this
+            renderer deliberately doesn't have (contextIsolation, no
+            nodeIntegration). A terminal toggle here could only ever be a no-op. */}
+        {prefix === 'editor' && (
+          <SettingsRow
+            id={key('ligatures')}
+            visible={visible}
+            title="Ligatures"
+            subtitle="Render =>, !== and friends as single glyphs (font permitting)"
+          >
+            <Toggle
+              checked={!!get('ligatures', false)}
+              onChange={(v) => setSetting(key('ligatures'), v)}
+              label={`${label} ligatures`}
+            />
+          </SettingsRow>
+        )}
 
         {extras}
       </Card>
@@ -222,24 +233,15 @@ export default function AppearanceSection() {
               title="Minimum contrast"
               subtitle="Force legibility when a program picks a low-contrast colour (1 = off)"
             >
-              <input
-                type="range"
+              <RangeSetting
+                value={settings['appearance.terminal.minimumContrast'] ?? 1}
+                onCommit={(v) => setSetting('appearance.terminal.minimumContrast', v)}
                 min={1}
                 max={21}
                 step={0.5}
-                aria-label="Terminal minimum contrast"
-                value={settings['appearance.terminal.minimumContrast'] ?? 1}
-                onChange={(e) =>
-                  setSetting(
-                    'appearance.terminal.minimumContrast',
-                    Number(e.target.value)
-                  )
-                }
-                className="w-40 accent-highlight"
+                ariaLabel="Terminal minimum contrast"
+                format={(v) => Number(v).toFixed(1)}
               />
-              <span className="text-xs text-muted-foreground tabular-nums w-8 text-right">
-                {Number(settings['appearance.terminal.minimumContrast'] ?? 1).toFixed(1)}
-              </span>
             </SettingsRow>
 
             <SettingsRow
