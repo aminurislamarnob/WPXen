@@ -2,11 +2,18 @@ import { useEffect, useRef, useState } from 'react';
 
 // Dropdown bound to a setting. Enums commit immediately — there's no partial
 // state to protect the way there is with a half-typed string.
+//
+// `.form-input` is w-full, which in a SettingsRow makes the control eat the
+// whole row and push its title off — so unless the caller sizes it, the select
+// shrinks to its content and sits on the right like every other control.
 export function SelectSetting({ value, onChange, options, ariaLabel, className = '' }) {
+  const width = /(^|\s)!?w-/.test(className) ? '' : '!w-auto';
   return (
     <select
       aria-label={ariaLabel}
-      className={`form-input !text-xs !py-1 ${className}`.trim()}
+      className={`form-input !text-xs !py-1 ${width} ${className}`
+        .replace(/\s+/g, ' ')
+        .trim()}
       value={value ?? ''}
       onChange={(e) => onChange(e.target.value)}
     >

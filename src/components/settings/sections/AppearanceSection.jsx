@@ -1,9 +1,13 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import CodeMirror from '@uiw/react-codemirror';
+import { EditorView } from '@codemirror/view';
+import { php } from '@codemirror/lang-php';
 import { Card, SectionLabel, SettingsRow, Toggle } from '../../ui';
 import { NumberSetting, RangeSetting, SelectSetting, TextSetting } from '../controls';
 import { useSettings } from '../../../lib/useSettings';
 import { useSettingsContext } from '../SettingsLayout';
-import { MONO_STACK } from '../../../lib/theme';
+import { buildEditorMetrics, editorThemes } from '../../../lib/editorTheme';
+import { MONO_STACK, onThemeChange, themeName } from '../../../lib/theme';
 
 // Fonts worth offering by name. WPHerd can't enumerate installed families from
 // the renderer without the (Chromium-only, permission-gated) local font access
@@ -39,23 +43,90 @@ const FONT_OPTIONS = [
   ...NERD_FONTS.map((f) => ({ value: f, label: `${f} (Nerd Font)` })),
 ];
 
-// A live sample so a size or weight change is visible without leaving the page.
-function FontPreview({ family, size, lineHeight, letterSpacing, weight, ligatures }) {
+// Each block previews the language that surface actually shows: WP-CLI at a
+// prompt for the terminal, a WordPress shortcode class for the editor. Both
+// samples are picked to exercise the glyphs a mono font is judged on — =>, !==,
+// ->, $ and braces — so ligatures and weight have something to act on.
+const SAMPLES = {
+  terminal: `$ wp plugin list --status=active
+=> 0 !== $count && $x >= 1;`,
+  editor: `<?php
+final class WPHerd_Hello {
+    public function __construct() {
+        add_shortcode( 'wpherd_hello', [ $this, 'render' ] );
+    }
+
+    public function render( array $atts ): string {
+        $a = shortcode_atts( [ 'name' => 'world' ], $atts );
+        return $a['name'] !== '' ? esc_html( "Hi {$a['name']}" ) : '';
+    }
+}`,
+};
+
+// Turns the live control values into the shape editorTypography() produces, so
+// buildEditorMetrics can consume them unchanged.
+function asTypography({ family, size, lineHeight, letterSpacing, weight, ligatures }) {
+  return {
+    fontFamily: family ? `"${family}", ${MONO_STACK}` : MONO_STACK,
+    fontSize: `${size}px`,
+    lineHeight: String(lineHeight),
+    letterSpacing: letterSpacing ? `${letterSpacing}px` : 'normal',
+    fontWeight: String(weight),
+    fontVariantLigatures: ligatures ? 'normal' : 'none',
+  };
+}
+
+// The editor sample is a real read-only CodeMirror running the real PHP grammar
+// and the real editor theme, so the preview is the file editor rather than an
+// approximation of it — same tag→ANSI colours, same metrics, and it flips with
+// the macOS appearance the same way.
+function EditorPreview({ sample, ...values }) {
+  const [theme, setTheme] = useState(themeName);
+  useEffect(() => onThemeChange(setTheme), []);
+
+  const { family, size, lineHeight, letterSpacing, weight, ligatures } = values;
+  const extensions = useMemo(
+    () => [
+      php(),
+      buildEditorMetrics(
+        asTypography({ family, size, lineHeight, letterSpacing, weight, ligatures })
+      ),
+      EditorView.lineWrapping,
+    ],
+    [family, size, lineHeight, letterSpacing, weight, ligatures]
+  );
+
   return (
-    <div className="sheet-well px-3 py-2.5 mt-2 overflow-x-auto">
-      <pre
-        className="text-foreground"
-        style={{
-          fontFamily: family ? `"${family}", ${MONO_STACK}` : MONO_STACK,
-          fontSize: `${size}px`,
-          lineHeight: String(lineHeight),
-          letterSpacing: letterSpacing ? `${letterSpacing}px` : 'normal',
-          fontWeight: weight,
-          fontVariantLigatures: ligatures ? 'normal' : 'none',
-          margin: 0,
+    <div className="mt-2 overflow-hidden rounded-lg border border-border/60">
+      <CodeMirror
+        value={sample}
+        theme={editorThemes[theme]}
+        extensions={extensions}
+        editable={false}
+        basicSetup={{
+          lineNumbers: false,
+          foldGutter: false,
+          highlightActiveLine: false,
+          highlightActiveLineGutter: false,
+          dropCursor: false,
+          allowMultipleSelections: false,
+          autocompletion: false,
+          searchKeymap: false,
         }}
-      >{`$ wp plugin list --status=active
-=> 0 !== $count && $x >= 1;`}</pre>
+      />
+    </div>
+  );
+}
+
+// The terminal sample stays plain text on the terminal's own surface — it is a
+// shell transcript, not a document, so an editor chrome would misrepresent it.
+function TerminalPreview({ sample, ...values }) {
+  const t = asTypography(values);
+  return (
+    <div className="sheet-well mt-2 overflow-x-auto px-3 py-2.5">
+      <pre className="text-foreground" style={{ ...t, margin: 0 }}>
+        {sample}
+      </pre>
     </div>
   );
 }
@@ -69,6 +140,7 @@ function FontPreview({ family, size, lineHeight, letterSpacing, weight, ligature
 function TypographyBlock({ label, prefix, visible, extras }) {
   const { settings, setSetting } = useSettings();
   const [preview, setPreview] = useState({});
+  const Preview = prefix === 'editor' ? EditorPreview : TerminalPreview;
   const key = (name) => `appearance.${prefix}.${name}`;
   const get = (name, fallback) => preview[name] ?? settings[key(name)] ?? fallback;
 
@@ -180,7 +252,8 @@ function TypographyBlock({ label, prefix, visible, extras }) {
         {extras}
       </Card>
 
-      <FontPreview
+      <Preview
+        sample={SAMPLES[prefix]}
         family={get('fontFamily', '')}
         size={get('fontSize', 13)}
         lineHeight={get('lineHeight', prefix === 'editor' ? 1.5 : 1)}
