@@ -41,6 +41,7 @@ const validation = require('./services/validation.cjs');
 const agents = require('./services/agents.cjs');
 const files = require('./services/files.cjs');
 const git = require('./services/git.cjs');
+const browser = require('./services/browser.cjs');
 const settingsService = require('./services/settings.cjs');
 const externalTools = require('./services/externalTools.cjs');
 const { humanize } = require('./services/errors.cjs');
@@ -199,6 +200,9 @@ async function refreshDependencies(win, { minIntervalMs = 3000 } = {}) {
 function registerHandlers(win, storeInstance) {
   mainWindow = win;
   store = storeInstance;
+  // The in-app browser pushes guest events (new windows, and later console
+  // output) back to the renderer through this window.
+  browser.setWindow(win);
 
   // Bind the settings schema to the store. Side effects that used to live in
   // the save-settings ladder hang off `effects` — one place per key, run only
@@ -356,6 +360,33 @@ function registerHandlers(win, storeInstance) {
     agents.stop(sessionId);
     return { ok: true };
   });
+
+  // ─── In-app browser ───────────────────────────────────────────────────
+  // The renderer owns the <webview> element and re-registers its guest on
+  // every dom-ready (reparenting mints a new webContentsId); these handlers
+  // reach the guest for the things a renderer cannot do itself.
+
+  ipcMain.handle('browser-register', (_e, tabKey, webContentsId) => {
+    browser.register(tabKey, webContentsId);
+    return { ok: true };
+  });
+
+  ipcMain.handle('browser-unregister', (_e, tabKey) => {
+    browser.unregister(tabKey);
+    return { ok: true };
+  });
+
+  ipcMain.handle('browser-navigate', (_e, tabKey, url) => ({
+    ok: browser.navigate(tabKey, url),
+  }));
+
+  ipcMain.handle('browser-reload', (_e, tabKey, hard) => ({
+    ok: browser.reload(tabKey, !!hard),
+  }));
+
+  ipcMain.handle('browser-open-devtools', (_e, tabKey) => ({
+    ok: browser.openDevTools(tabKey),
+  }));
 
   // Project explorer: read-only directory listing confined to a Site's root.
   ipcMain.handle('list-directory', (_e, rootPath, dirPath) => {

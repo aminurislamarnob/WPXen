@@ -26,6 +26,29 @@ const windowBackground = () => (nativeTheme.shouldUseDarkColors ? BG_DARK : BG_L
 // macOS: Don't show in dock (menu bar app), show when window is active
 app.dock?.hide();
 
+// Enabling webviewTag widens what the renderer can mint, so clamp every guest
+// as it attaches: no preload, no Node, isolation on, and only real web schemes
+// as the source. Electron passes `params` by reference — mutating it is how the
+// clamp is applied.
+function hardenWebviews(contents) {
+  contents.on('will-attach-webview', (event, params, webPreferences) => {
+    delete webPreferences.preload;
+    webPreferences.nodeIntegration = false;
+    webPreferences.nodeIntegrationInSubFrames = false;
+    webPreferences.contextIsolation = true;
+    webPreferences.sandbox = true;
+
+    try {
+      const { protocol } = new URL(params.src);
+      if (protocol !== 'http:' && protocol !== 'https:' && protocol !== 'about:') {
+        event.preventDefault();
+      }
+    } catch {
+      event.preventDefault();
+    }
+  });
+}
+
 function createWindow() {
   // A roomy default window (fits the embedded terminal), centered and clamped
   // to the display so it never opens larger than the screen. Min floor matches
@@ -46,8 +69,13 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      // Powers the in-app browser (Agents screen). The guests it can mint are
+      // clamped by the will-attach-webview handler below.
+      webviewTag: true,
     },
   });
+
+  hardenWebviews(mainWindow.webContents);
 
   if (isDev) {
     mainWindow.loadURL('http://localhost:5173');
@@ -260,6 +288,9 @@ app.on('before-quit', (e) => {
 
   try {
     agents.stopAll();
+  } catch {}
+  try {
+    require('./services/browser.cjs').unregisterAll();
   } catch {}
 
   // Allow the window to actually close on quit

@@ -22,6 +22,7 @@ const VALID_EVENT_CHANNELS = [
   'terminal-data',
   'terminal-replay',
   'terminal-exit',
+  'browser-new-window',
   'settings-updated',
 ];
 
@@ -191,6 +192,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.send('terminal-resize', sessionId, cols, rows),
   terminalClear: (sessionId) => ipcRenderer.send('terminal-clear', sessionId),
   terminalStop: (sessionId) => ipcRenderer.invoke('terminal-stop', sessionId),
+
+  // In-app browser. The renderer owns the <webview>; these reach its guest in
+  // the main process, keyed by the browser tab's key.
+  browserRegister: (tabKey, webContentsId) =>
+    ipcRenderer.invoke('browser-register', tabKey, webContentsId),
+  browserUnregister: (tabKey) => ipcRenderer.invoke('browser-unregister', tabKey),
+  browserNavigate: (tabKey, url) => ipcRenderer.invoke('browser-navigate', tabKey, url),
+  browserReload: (tabKey, hard) => ipcRenderer.invoke('browser-reload', tabKey, hard),
+  browserOpenDevTools: (tabKey) => ipcRenderer.invoke('browser-open-devtools', tabKey),
+
   listDirectory: (rootPath, dirPath) =>
     ipcRenderer.invoke('list-directory', rootPath, dirPath),
   terminalStatPath: (rootPath, candidate) =>

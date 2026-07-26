@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useLocation, useOutletContext } from 'react-router-dom';
 import {
   Terminal as TerminalIcon,
@@ -6,6 +6,7 @@ import {
   X,
   Settings2,
   CornerDownRight,
+  Globe,
 } from 'lucide-react';
 import { ProviderIcon } from './providerIcons';
 import { Panel, PanelGroup } from 'react-resizable-panels';
@@ -16,6 +17,7 @@ import ResizeHandle from './ResizeHandle';
 import LaunchTargetsDialog from './LaunchTargetsDialog';
 import { ConfirmDialog, Tooltip } from './ui';
 import * as sessionCache from '../lib/terminal/sessionCache';
+import * as webviewCache from '../lib/browser/webviewCache';
 
 // Strip a leading emoji/symbol + space from an OSC title (agents like Claude
 // Code prefix a status glyph) so the tab label reads cleanly.
@@ -46,6 +48,10 @@ export default function AgentsPane() {
 
   const [openFiles, setOpenFiles] = useState([]); // editor tabs [{ key, kind, ... }]
   const [activeKey, setActiveKey] = useState(null);
+  // Per-browser-tab chrome state, fed by the webview's own events. The pages
+  // themselves live in webviewCache, not here.
+  const [browserState, setBrowserState] = useState({}); // key -> {url,title,loading,error}
+  const browserSeq = useRef(0);
   const [titles, setTitles] = useState({}); // sessionId -> OSC title
   const [closeConfirm, setCloseConfirm] = useState(null); // sessionId pending confirm
   const [suppressClose, setSuppressClose] = useState(false); // checkbox in dialog
@@ -99,11 +105,17 @@ export default function AgentsPane() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [siteId, location.key]);
 
-  // Drop editor tabs when the Site changes.
+  // Drop editor tabs when the Site changes. Browser tabs are site-scoped too,
+  // and their webviews would otherwise stay parked off-screen forever.
   useEffect(() => {
+    webviewCache.disposeAll();
+    setBrowserState({});
     setOpenFiles([]);
     setActiveKey(null);
   }, [siteId]);
+
+  // Same on unmount — leaving the Agents screen must not leak live pages.
+  useEffect(() => () => webviewCache.disposeAll(), []);
 
   // Open the "+" menu anchored just below the button, in viewport coordinates.
   const openAddMenu = (e) => {
@@ -241,7 +253,37 @@ export default function AgentsPane() {
     setActiveKey(key);
   };
 
+  // Open a browser tab in the editor column. Keys are sequential rather than
+  // URL-derived so the same URL can be open twice, and so navigating away from
+  // the initial URL doesn't orphan the webview in its cache.
+  const openBrowser = useCallback((url = 'about:blank') => {
+    const key = `browser:${++browserSeq.current}`;
+    setBrowserState((prev) => ({
+      ...prev,
+      [key]: { url, title: '', loading: true, error: null },
+    }));
+    setOpenFiles((prev) => [...prev, { key, kind: 'browser', name: 'Browser', url }]);
+    setActiveKey(key);
+  }, []);
+
+  // Stable across renders — the cached webview holds onto this via a ref.
+  const onBrowserStateChange = useCallback((key, patch) => {
+    setBrowserState((prev) =>
+      prev[key] ? { ...prev, [key]: { ...prev[key], ...patch } } : prev
+    );
+  }, []);
+
   const closeFile = (key) => {
+    // A browser tab's page outlives its React component by design, so closing
+    // the tab is the one moment it has to be torn down for real.
+    if (key.startsWith('browser:')) {
+      webviewCache.dispose(key);
+      setBrowserState((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+    }
     setOpenFiles((prev) => {
       const idx = prev.findIndex((f) => f.key === key);
       const next = prev.filter((f) => f.key !== key);
@@ -372,6 +414,16 @@ export default function AgentsPane() {
                   <Settings2 size={15} />
                 </button>
               </Tooltip>
+              <div className="flex-1" />
+              <Tooltip label="Open browser">
+                <button
+                  onClick={() => openBrowser()}
+                  aria-label="Open browser"
+                  className="flex-shrink-0 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent"
+                >
+                  <Globe size={15} />
+                </button>
+              </Tooltip>
             </div>
 
             {addMenu && (
@@ -479,6 +531,8 @@ export default function AgentsPane() {
                   activeKey={activeKey}
                   onSelect={setActiveKey}
                   onClose={closeFile}
+                  browserState={browserState}
+                  onBrowserStateChange={onBrowserStateChange}
                 />
               </div>
             </Panel>
