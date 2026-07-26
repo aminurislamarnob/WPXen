@@ -231,6 +231,63 @@ describe('navigation', () => {
   });
 });
 
+describe('isAllowedBrowserUrl', () => {
+  it('allows the web schemes a browser tab can sit on', () => {
+    for (const url of [
+      'http://wpherd.test',
+      'https://wpherd.test/wp-admin',
+      'about:blank',
+    ]) {
+      expect(browser.isAllowedBrowserUrl(url)).toBe(true);
+    }
+  });
+
+  it('refuses everything else', () => {
+    for (const url of [
+      'file:///etc/passwd',
+      'javascript:alert(1)',
+      'data:text/html,<script>',
+      'ftp://example.com',
+      'wpherd://open',
+      '',
+      'not a url',
+    ]) {
+      expect(browser.isAllowedBrowserUrl(url)).toBe(false);
+    }
+  });
+});
+
+describe('scheme guard', () => {
+  // will-attach-webview only ever sees the initial src, which is empty by the
+  // time it runs (the element must be in the DOM before src is assigned), so
+  // navigation is where the allowlist is actually enforced.
+  it('blocks a navigation to a non-web scheme', () => {
+    const { guest } = registered();
+    for (const event of ['will-navigate', 'will-redirect']) {
+      const e = { preventDefault: vi.fn() };
+      guest.emit(event, e, 'file:///etc/passwd');
+      expect(e.preventDefault).toHaveBeenCalled();
+    }
+  });
+
+  it('lets ordinary pages through', () => {
+    const { guest } = registered();
+    for (const event of ['will-navigate', 'will-redirect']) {
+      const e = { preventDefault: vi.fn() };
+      guest.emit(event, e, 'https://wpherd.test/wp-admin');
+      expect(e.preventDefault).not.toHaveBeenCalled();
+    }
+  });
+
+  it('stops guarding once the tab is unregistered', () => {
+    const { guest } = registered();
+    browser.unregister('browser:1');
+    const e = { preventDefault: vi.fn() };
+    guest.emit('will-navigate', e, 'file:///etc/passwd');
+    expect(e.preventDefault).not.toHaveBeenCalled();
+  });
+});
+
 const NO_EDIT = { canCopy: false, canPaste: false, canSelectAll: false };
 
 describe('context menu', () => {

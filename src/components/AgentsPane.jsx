@@ -73,6 +73,23 @@ export default function AgentsPane() {
   const [closeConfirm, setCloseConfirm] = useState(null); // sessionId pending confirm
   const [suppressClose, setSuppressClose] = useState(false); // checkbox in dialog
 
+  // Open a browser tab in the editor column. Keys are sequential rather than
+  // URL-derived so the same URL can be open twice, and so navigating away from
+  // the initial URL doesn't orphan the webview in its cache.
+  //
+  // Declared above the effects below because they name it in their dependency
+  // arrays, which are evaluated during render — a `const` declared further down
+  // would still be in its temporal dead zone at that point.
+  const openBrowser = useCallback((url = 'about:blank') => {
+    const key = `browser:${++browserSeq.current}`;
+    setBrowserState((prev) => ({
+      ...prev,
+      [key]: { url, title: '', loading: true, error: null },
+    }));
+    setOpenFiles((prev) => [...prev, { key, kind: 'browser', name: 'Browser', url }]);
+    setActiveKey(key);
+  }, []);
+
   // Load the Site, its live Sessions (restore tabs), and honour a pending spawn
   // request carried in navigation state. Runs on Site change and on every
   // navigation (location.key changes even for same-path spawns).
@@ -296,19 +313,6 @@ export default function AgentsPane() {
     );
     setActiveKey(key);
   };
-
-  // Open a browser tab in the editor column. Keys are sequential rather than
-  // URL-derived so the same URL can be open twice, and so navigating away from
-  // the initial URL doesn't orphan the webview in its cache.
-  const openBrowser = useCallback((url = 'about:blank') => {
-    const key = `browser:${++browserSeq.current}`;
-    setBrowserState((prev) => ({
-      ...prev,
-      [key]: { url, title: '', loading: true, error: null },
-    }));
-    setOpenFiles((prev) => [...prev, { key, kind: 'browser', name: 'Browser', url }]);
-    setActiveKey(key);
-  }, []);
 
   // Resolve one of the site's well-known targets and open it in a browser tab.
   // The service-backed ones (phpMyAdmin, Mailpit) install and configure

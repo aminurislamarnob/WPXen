@@ -29,6 +29,18 @@ function __setDeps(next) {
   deps = { ...deps, ...next };
 }
 
+// The only schemes a browser tab may ever sit on. Everything else — file://,
+// a custom protocol handler, javascript: — is refused, whether it arrives as a
+// <webview> src or as a navigation the page itself triggered.
+function isAllowedBrowserUrl(url) {
+  try {
+    const { protocol } = new URL(url);
+    return protocol === 'http:' || protocol === 'https:' || protocol === 'about:';
+  } catch {
+    return false;
+  }
+}
+
 // What a user types in the address bar isn't a URL yet. Mirrors the renderer's
 // copy in src/lib/browser/sanitizeUrl.js — keep the two in sync.
 function sanitizeUrl(url) {
@@ -103,8 +115,20 @@ function register(tabKey, webContentsId) {
   });
 
   teardowns.set(tabKey, []);
+  attachSchemeGuard(tabKey, wc);
   attachContextMenu(tabKey, wc);
   attachKeyInterception(tabKey, wc);
+}
+
+// Refuse a navigation to anything that isn't a web page. This is the real
+// enforcement point for the scheme allowlist — will-attach-webview only ever
+// sees the initial src, which is empty by the time it runs.
+function attachSchemeGuard(tabKey, wc) {
+  const guard = (event, url) => {
+    if (!isAllowedBrowserUrl(url)) event.preventDefault();
+  };
+  on(tabKey, wc, 'will-navigate', guard);
+  on(tabKey, wc, 'will-redirect', guard);
 }
 
 function on(tabKey, wc, event, handler) {
@@ -231,6 +255,7 @@ function openDevTools(tabKey) {
 module.exports = {
   PARTITION,
   sanitizeUrl,
+  isAllowedBrowserUrl,
   setWindow,
   register,
   unregister,

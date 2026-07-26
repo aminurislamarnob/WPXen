@@ -4,6 +4,7 @@ const { app, BrowserWindow, dialog, nativeTheme, screen } = require('electron');
 const path = require('path');
 
 const JsonStore = require('./store.cjs');
+const { isAllowedBrowserUrl } = require('./services/browser.cjs');
 const { createTray } = require('./tray.cjs');
 const {
   registerHandlers,
@@ -27,9 +28,14 @@ const windowBackground = () => (nativeTheme.shouldUseDarkColors ? BG_DARK : BG_L
 app.dock?.hide();
 
 // Enabling webviewTag widens what the renderer can mint, so clamp every guest
-// as it attaches: no preload, no Node, isolation on, and only real web schemes
-// as the source. Electron passes `params` by reference — mutating it is how the
-// clamp is applied.
+// as it attaches: no preload, no Node, isolation on. Electron passes `params`
+// by reference — mutating it is how the clamp is applied.
+//
+// The src is usually empty here: a <webview> only starts its guest once the
+// element is in the document, so webviewCache attaches first and assigns src
+// after. An empty src therefore has to be allowed, and the scheme allowlist
+// lives on navigation instead (services/browser.cjs), where it covers every
+// navigation rather than just the first.
 function hardenWebviews(contents) {
   contents.on('will-attach-webview', (event, params, webPreferences) => {
     delete webPreferences.preload;
@@ -38,14 +44,7 @@ function hardenWebviews(contents) {
     webPreferences.contextIsolation = true;
     webPreferences.sandbox = true;
 
-    try {
-      const { protocol } = new URL(params.src);
-      if (protocol !== 'http:' && protocol !== 'https:' && protocol !== 'about:') {
-        event.preventDefault();
-      }
-    } catch {
-      event.preventDefault();
-    }
+    if (params.src && !isAllowedBrowserUrl(params.src)) event.preventDefault();
   });
 }
 

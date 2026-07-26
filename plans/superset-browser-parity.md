@@ -6,20 +6,23 @@
 > - **Step 27 (console ring buffer) was dropped.** Nothing consumes it — the
 >   DevTools button already covers reading a page's console — so it would have
 >   shipped as dead code. The `browser-console` channel is not registered.
-> - **Step 22 (mkcert HTTPS `.test`) is unverified.** Whether mkcert-issued
->   certificates validate inside the `persist:wpherd-browser` partition needs a
->   running app and an HTTPS site. No bypass was written; `BrowserErrorOverlay`
->   names the certificate case (codes -201/-501) so the failure is legible if it
->   happens. If it does, the fix is the fingerprint-scoped `certificate-error`
->   handler described in D6 — never a blanket `preventDefault()`.
+> - **Step 22 (mkcert HTTPS `.test`) is verified working — no bypass needed.**
+>   Driving the running app over CDP loaded `https://wp-theme.test/` in a browser
+>   tab with no certificate error, so Chromium does consult the macOS trust store
+>   for the `persist:wpherd-browser` partition. The `certificate-error` handler
+>   contemplated in D6 was **not** written and should not be.
 > - **Steps 29–30 merged.** Rather than adding external/in-app variants of every
 >   quick action, the actions resolve a URL and hand it to `useOpenLink`, which
 >   the `app.openLinksIn` setting steers. That collapsed `open-wp-admin` and
 >   `open-phpmyadmin` (each resolved _and_ opened) into their resolve halves.
-> - **Nothing here has been exercised against a running app.** Tests, lint and
->   the renderer build pass; the webview lifecycle, key interception and drag
->   passthrough are all main-process/Electron behaviour that unit tests cannot
->   reach.
+> - **Verified against the running app over CDP** (`--remote-debugging-port`):
+>   the Agents screen renders, the target menu opens a tab, `https://wp-theme.test/`
+>   and the phpMyAdmin deep link both load, phpMyAdmin arrives already signed in
+>   on the right database, favicons and history are recorded, and two tabs stay
+>   alive at once. Three defects were found and fixed this way — see the
+>   follow-up commit. Still **not** exercised: key interception (Cmd+W/R),
+>   the native context menu, and drag passthrough, all of which need real input
+>   events rather than synthetic clicks.
 
 Adds a built-in browser to WPHerd's Agents screen, modelled on Superset's
 browser pane (reference checkout at `reference/superset-main`), plus a

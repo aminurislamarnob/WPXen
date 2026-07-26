@@ -54,14 +54,23 @@ export function getOrCreate(tabKey, initialUrl, handlers) {
 
 function createEntry(tabKey, initialUrl, handlers) {
   const api = window.electronAPI;
-  const entry = { tabKey, handlers, registeredId: null, favicon: null };
+  // `src` is deliberately NOT set here. A <webview> only spins up its guest
+  // once the element is in the document, and setting src beforehand leaves it
+  // in a state where dom-ready never fires. attach() sets it on first mount.
+  const entry = {
+    tabKey,
+    handlers,
+    registeredId: null,
+    favicon: null,
+    pendingUrl: sanitizeUrl(initialUrl),
+    started: false,
+  };
 
   const webview = document.createElement('webview');
   webview.setAttribute('partition', PARTITION);
   // Popups are denied in the main process and re-emitted as new tabs; the
   // attribute is still needed for setWindowOpenHandler to see them at all.
   webview.setAttribute('allowpopups', '');
-  webview.setAttribute('src', sanitizeUrl(initialUrl));
   Object.assign(webview.style, {
     display: 'flex',
     flex: '1',
@@ -157,9 +166,6 @@ function createEntry(tabKey, initialUrl, handlers) {
     webview.removeEventListener('did-fail-load', onFailLoad);
   };
 
-  // Park it immediately: React mounts the pane and calls attach() right after,
-  // but the element has to be in the document to start loading either way.
-  getHiddenContainer().appendChild(webview);
   return entry;
 }
 
@@ -173,11 +179,17 @@ export function setDragPassthrough(passthrough) {
   }
 }
 
-// Move the cached webview into a live container.
+// Move the cached webview into a live container, starting its first load if it
+// hasn't run yet. The element has to be in the document before `src` is
+// assigned, so this is the earliest the load can begin.
 export function attach(tabKey, container) {
   const entry = cache.get(tabKey);
   if (!entry || !container) return;
   container.appendChild(entry.webview);
+  if (!entry.started) {
+    entry.started = true;
+    entry.webview.src = entry.pendingUrl;
+  }
 }
 
 // Park on tab switch — the guest and its page stay alive in the cache.
@@ -189,10 +201,17 @@ export function detach(tabKey) {
 export function navigate(tabKey, url) {
   const entry = cache.get(tabKey);
   if (!entry) return;
+  const target = sanitizeUrl(url);
+  // Before the first attach there is no guest to talk to — redirect the
+  // pending first load instead of throwing it away.
+  if (!entry.started) {
+    entry.pendingUrl = target;
+    return;
+  }
   try {
-    entry.webview.loadURL(sanitizeUrl(url));
+    entry.webview.loadURL(target);
   } catch {
-    // Not attached yet; the initial src covers the first load.
+    // Guest still coming up; it will land on pendingUrl.
   }
 }
 
