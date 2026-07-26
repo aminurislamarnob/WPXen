@@ -5,20 +5,8 @@ const crypto = require('crypto');
 const path = require('path');
 const os = require('os');
 
-// Only ever hand these schemes to shell.openExternal — never file:// or a
-// custom URL handler that a tampered store could smuggle in.
-function openExternalSafely(url) {
-  try {
-    const parsed = new URL(url);
-    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
-      shell.openExternal(url);
-      return true;
-    }
-  } catch {
-    // fall through
-  }
-  return false;
-}
+// The single sanctioned way out of the app — see services/safeUrl.cjs.
+const { openExternalSafely } = require('./services/safeUrl.cjs');
 
 const fs = require('fs');
 const brew = require('./services/brew.cjs');

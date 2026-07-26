@@ -154,6 +154,16 @@ function createEntry(tabKey, initialUrl, handlers) {
   return entry;
 }
 
+// A <webview> is its own compositor layer and swallows pointer events before
+// they reach anything underneath — including the PanelGroup divider, which
+// would otherwise stick the moment the pointer crossed onto a loaded page.
+// Called from ResizeHandle's onDragging.
+export function setDragPassthrough(passthrough) {
+  for (const entry of cache.values()) {
+    entry.webview.style.pointerEvents = passthrough ? 'none' : '';
+  }
+}
+
 // Move the cached webview into a live container.
 export function attach(tabKey, container) {
   const entry = cache.get(tabKey);

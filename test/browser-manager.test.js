@@ -6,10 +6,23 @@ import browser from '../electron/services/browser.cjs';
 // never reaches them — swap the registry through the module's own seam instead
 // (same approach as external-tools.test.js).
 function fakeGuest(over = {}) {
+  const listeners = new Map();
   return {
     destroyed: false,
+    listeners,
     isDestroyed() {
       return this.destroyed;
+    },
+    on(event, handler) {
+      if (!listeners.has(event)) listeners.set(event, []);
+      listeners.get(event).push(handler);
+    },
+    off(event, handler) {
+      const next = (listeners.get(event) || []).filter((h) => h !== handler);
+      listeners.set(event, next);
+    },
+    emit(event, ...args) {
+      for (const h of [...(listeners.get(event) || [])]) h(...args);
     },
     setBackgroundThrottling: vi.fn(),
     setWindowOpenHandler: vi.fn(),
@@ -17,20 +30,55 @@ function fakeGuest(over = {}) {
     reload: vi.fn(),
     reloadIgnoringCache: vi.fn(),
     openDevTools: vi.fn(),
+    canGoBack: () => false,
+    canGoForward: () => false,
     ...over,
   };
 }
 
+// A keyDown chord as before-input-event delivers it.
+function chord(key, over = {}) {
+  return { type: 'keyDown', key, meta: true, control: false, shift: false, alt: false, ...over };
+}
+
 let registry;
+let menuTemplate;
 const fromId = vi.fn((id) => registry.get(id) ?? null);
+const popup = vi.fn();
+const buildFromTemplate = vi.fn((template) => {
+  menuTemplate = template;
+  return { popup };
+});
+const writeText = vi.fn();
+const openExternalSafely = vi.fn(() => true);
 
 beforeEach(() => {
   registry = new Map();
-  fromId.mockClear();
-  browser.__setDeps({ webContents: { fromId } });
+  menuTemplate = null;
+  for (const m of [fromId, popup, buildFromTemplate, writeText, openExternalSafely]) {
+    m.mockClear();
+  }
+  browser.__setDeps({
+    webContents: { fromId },
+    Menu: { buildFromTemplate },
+    clipboard: { writeText },
+    openExternalSafely,
+  });
   browser.unregisterAll();
   browser.setWindow(null);
 });
+
+// Register a guest and hand back both it and a send spy for renderer pushes.
+function registered(tabKey = 'browser:1', id = 1, guest = fakeGuest()) {
+  const send = vi.fn();
+  browser.setWindow({ isDestroyed: () => false, webContents: { send } });
+  registry.set(id, guest);
+  browser.register(tabKey, id);
+  return { guest, send };
+}
+
+const labels = () => menuTemplate.filter((i) => i.label).map((i) => i.label);
+const item = (label) => menuTemplate.find((i) => i.label === label);
 
 describe('register', () => {
   it('throttles background guests and denies popups', () => {
@@ -172,5 +220,144 @@ describe('navigation', () => {
     browser.register('browser:1', 1);
     browser.openDevTools('browser:1');
     expect(guest.openDevTools).toHaveBeenCalledWith({ mode: 'detach' });
+  });
+});
+
+const NO_EDIT = { canCopy: false, canPaste: false, canSelectAll: false };
+
+describe('context menu', () => {
+  it('offers link actions when the click was on a link', () => {
+    const { guest, send } = registered();
+    guest.emit('context-menu', {}, {
+      linkURL: 'https://example.com/docs',
+      pageURL: 'http://wpherd.test/',
+      selectionText: '',
+      editFlags: NO_EDIT,
+    });
+
+    expect(labels()).toContain('Open Link in Default Browser');
+    item('Open Link in Default Browser').click();
+    expect(openExternalSafely).toHaveBeenCalledWith('https://example.com/docs');
+
+    item('Open Link in New Tab').click();
+    expect(send).toHaveBeenCalledWith('browser-new-window', {
+      tabKey: 'browser:1',
+      url: 'https://example.com/docs',
+    });
+
+    item('Copy Link Address').click();
+    expect(writeText).toHaveBeenCalledWith('https://example.com/docs');
+
+    // Page-level actions belong to the page, not to a link.
+    expect(labels()).not.toContain('Copy Page URL');
+    expect(popup).toHaveBeenCalled();
+  });
+
+  it('offers page actions when the click was not on a link', () => {
+    const { guest } = registered();
+    guest.emit('context-menu', {}, {
+      linkURL: '',
+      pageURL: 'http://wpherd.test/',
+      selectionText: '',
+      editFlags: NO_EDIT,
+    });
+
+    expect(labels()).toContain('Copy Page URL');
+    item('Copy Page URL').click();
+    expect(writeText).toHaveBeenCalledWith('http://wpherd.test/');
+    expect(item('Open Page in Default Browser').enabled).toBe(true);
+  });
+
+  it('disables page actions on a blank tab', () => {
+    const { guest } = registered();
+    guest.emit('context-menu', {}, {
+      linkURL: '',
+      pageURL: 'about:blank',
+      selectionText: '',
+      editFlags: NO_EDIT,
+    });
+    expect(item('Copy Page URL').enabled).toBe(false);
+    expect(item('Open Page in Default Browser').enabled).toBe(false);
+  });
+
+  it('only offers edit actions the selection actually supports', () => {
+    const { guest } = registered();
+    guest.emit('context-menu', {}, {
+      linkURL: '',
+      pageURL: 'http://wpherd.test/',
+      selectionText: 'hello',
+      editFlags: { canCopy: true, canPaste: false, canSelectAll: true },
+    });
+    expect(labels()).toContain('Copy');
+    expect(labels()).toContain('Select All');
+    expect(labels()).not.toContain('Paste');
+  });
+
+  it('mirrors the real back/forward availability of the guest', () => {
+    const guest = fakeGuest({ canGoBack: () => true, canGoForward: () => false });
+    registered('browser:1', 1, guest);
+    guest.emit('context-menu', {}, {
+      linkURL: '',
+      pageURL: 'http://wpherd.test/',
+      selectionText: '',
+      editFlags: NO_EDIT,
+    });
+    expect(item('Back').enabled).toBe(true);
+    expect(item('Forward').enabled).toBe(false);
+  });
+});
+
+describe('key interception', () => {
+  it('forwards the chords a focused page would otherwise swallow', () => {
+    for (const key of ['w', 'r', 'b', '[', ']']) {
+      const { guest, send } = registered();
+      const event = { preventDefault: vi.fn() };
+      guest.emit('before-input-event', event, chord(key));
+
+      expect(event.preventDefault).toHaveBeenCalled();
+      expect(send).toHaveBeenCalledWith('browser-shortcut', { tabKey: 'browser:1', key });
+      browser.unregisterAll();
+    }
+  });
+
+  it('normalizes an uppercase key', () => {
+    const { guest, send } = registered();
+    guest.emit('before-input-event', { preventDefault: vi.fn() }, chord('W'));
+    expect(send).toHaveBeenCalledWith('browser-shortcut', { tabKey: 'browser:1', key: 'w' });
+  });
+
+  it('leaves everything else to the page', () => {
+    const { guest, send } = registered();
+    const cases = [
+      chord('c'), // not one of ours
+      chord('w', { type: 'keyUp' }), // would double-fire
+      chord('w', { shift: true }), // Cmd+Shift+W is a different chord
+      chord('w', { alt: true }),
+      chord('w', { meta: false }), // plain w is typing
+    ];
+    for (const input of cases) {
+      const event = { preventDefault: vi.fn() };
+      guest.emit('before-input-event', event, input);
+      expect(event.preventDefault).not.toHaveBeenCalled();
+    }
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('stops firing once the tab is unregistered', () => {
+    const { guest, send } = registered();
+    browser.unregister('browser:1');
+    guest.emit('before-input-event', { preventDefault: vi.fn() }, chord('w'));
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('does not stack listeners when a guest re-registers', () => {
+    const guest = fakeGuest();
+    const { send } = registered('browser:1', 1, guest);
+    // Same tab, new webContentsId — what reparenting the <webview> produces.
+    registry.set(2, guest);
+    browser.register('browser:1', 2);
+
+    guest.emit('before-input-event', { preventDefault: vi.fn() }, chord('w'));
+    expect(send).toHaveBeenCalledTimes(1);
   });
 });

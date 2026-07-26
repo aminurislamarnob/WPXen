@@ -3,6 +3,7 @@ import { Globe, TerminalSquare, X } from 'lucide-react';
 import * as webviewCache from '../../lib/browser/webviewCache';
 import { Tooltip } from '../ui';
 import BrowserToolbar from './BrowserToolbar';
+import BrowserErrorOverlay from './BrowserErrorOverlay';
 
 // One browser tab's chrome + viewport. The <webview> itself is not rendered by
 // React: webviewCache owns it and re-parents it into `containerRef` on mount,
@@ -84,7 +85,10 @@ export default function BrowserPane({ tabKey, initialUrl, state, onStateChange, 
 
       <div className="relative flex-1 min-h-0 flex bg-background">
         <div ref={containerRef} className="flex-1 flex min-w-0" />
-        {isBlank && !state.loading && (
+        {state.error && !state.loading && (
+          <BrowserErrorOverlay error={state.error} onRetry={reload} />
+        )}
+        {isBlank && !state.loading && !state.error && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-background pointer-events-none">
             <Globe size={36} className="text-muted-foreground/40" strokeWidth={1.5} />
             <div className="text-center">

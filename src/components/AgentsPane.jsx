@@ -137,6 +137,23 @@ export default function AgentsPane() {
   // Same on unmount — leaving the Agents screen must not leak live pages.
   useEffect(() => () => webviewCache.disposeAll(), []);
 
+  // Popups (target="_blank", window.open) are denied in the main process and
+  // re-emitted here, so they land as another tab rather than a chrome-less
+  // window. Link context-menu "Open in New Tab" arrives on the same channel.
+  useEffect(() => {
+    const api = window.electronAPI;
+    const offNewWindow = api.on('browser-new-window', ({ url }) => openBrowser(url));
+    // Chords the focused page would otherwise swallow (see browser.cjs).
+    const offShortcut = api.on('browser-shortcut', ({ tabKey, key }) => {
+      if (key === 'w') closeFileRef.current(tabKey);
+      else if (key === 'r') webviewCache.reload(tabKey);
+    });
+    return () => {
+      offNewWindow();
+      offShortcut();
+    };
+  }, [openBrowser]);
+
   // Open the "+" menu anchored just below the button, in viewport coordinates.
   const openAddMenu = (e) => {
     const r = e.currentTarget.getBoundingClientRect();
@@ -348,6 +365,11 @@ export default function AgentsPane() {
       return next;
     });
   };
+
+  // closeFile closes over activeKey, so the IPC subscription above reaches it
+  // through a ref rather than resubscribing on every tab switch.
+  const closeFileRef = useRef(closeFile);
+  closeFileRef.current = closeFile;
 
   if (!siteId) {
     return (

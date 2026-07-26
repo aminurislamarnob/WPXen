@@ -54,16 +54,29 @@ export default function Layout() {
   // ⌘[ / ⌘] are the macOS system bindings for history; ⌘B is the usual
   // sidebar toggle. Keep these in sync with the `keys` props below.
   useEffect(() => {
+    const run = (key) => {
+      if (key === 'b') setSidebarCollapsed((v) => !v);
+      else if (key === '[') navigate(-1);
+      else if (key === ']') navigate(1);
+      else return false;
+      return true;
+    };
+
     const onKey = (e) => {
       if (!e.metaKey || e.ctrlKey || e.altKey) return;
-      if (e.key === 'b' || e.key === 'B') setSidebarCollapsed((v) => !v);
-      else if (e.key === '[') navigate(-1);
-      else if (e.key === ']') navigate(1);
-      else return;
-      e.preventDefault();
+      if (run(e.key.toLowerCase())) e.preventDefault();
     };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+
+    // An in-app browser page has its own renderer and swallows keystrokes
+    // before this listener sees them, so the main process intercepts these
+    // chords and forwards them here (see electron/services/browser.cjs).
+    const offForwarded = window.electronAPI.on('browser-shortcut', ({ key }) => run(key));
+
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      offForwarded();
+    };
   }, [navigate]);
 
   const q = filter.trim().toLowerCase();

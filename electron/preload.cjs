@@ -23,6 +23,7 @@ const VALID_EVENT_CHANNELS = [
   'terminal-replay',
   'terminal-exit',
   'browser-new-window',
+  'browser-shortcut',
   'settings-updated',
 ];
 

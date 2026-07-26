@@ -13,12 +13,16 @@
 // second set on top.
 
 const electron = require('electron');
+const { openExternalSafely } = require('./safeUrl.cjs');
 
 // Swapped in tests — these .cjs services load through Node's CJS loader, where
 // `require('electron')` yields the binary path rather than the API surface, so
 // vi.mock never reaches them (same seam as externalTools.cjs).
 let deps = {
   webContents: electron.webContents,
+  Menu: electron.Menu,
+  clipboard: electron.clipboard,
+  openExternalSafely,
 };
 
 function __setDeps(next) {
@@ -94,6 +98,96 @@ function register(tabKey, webContentsId) {
   });
 
   teardowns.set(tabKey, []);
+  attachContextMenu(tabKey, wc);
+  attachKeyInterception(tabKey, wc);
+}
+
+function on(tabKey, wc, event, handler) {
+  wc.on(event, handler);
+  teardowns.get(tabKey)?.push(() => wc.off(event, handler));
+}
+
+// A guest renders its own page, so the renderer's React context menus can't
+// reach it — the native one has to be built here.
+function attachContextMenu(tabKey, wc) {
+  on(tabKey, wc, 'context-menu', (_event, params) => {
+    const { linkURL, pageURL, selectionText, editFlags } = params;
+    const items = [];
+
+    if (linkURL) {
+      items.push(
+        {
+          label: 'Open Link in Default Browser',
+          click: () => deps.openExternalSafely(linkURL),
+        },
+        {
+          label: 'Open Link in New Tab',
+          click: () => send('browser-new-window', { tabKey, url: linkURL }),
+        },
+        { label: 'Copy Link Address', click: () => deps.clipboard.writeText(linkURL) },
+        { type: 'separator' }
+      );
+    }
+
+    if (selectionText) {
+      items.push({ label: 'Copy', enabled: editFlags.canCopy, click: () => wc.copy() });
+    }
+    if (editFlags.canPaste) items.push({ label: 'Paste', click: () => wc.paste() });
+    if (editFlags.canSelectAll) {
+      items.push({ label: 'Select All', click: () => wc.selectAll() });
+    }
+    if (selectionText || editFlags.canPaste || editFlags.canSelectAll) {
+      items.push({ type: 'separator' });
+    }
+
+    items.push(
+      { label: 'Back', enabled: wc.canGoBack(), click: () => wc.goBack() },
+      { label: 'Forward', enabled: wc.canGoForward(), click: () => wc.goForward() },
+      { label: 'Reload', click: () => wc.reload() }
+    );
+
+    const hasPage = !!pageURL && pageURL !== 'about:blank';
+    if (!linkURL) {
+      items.push(
+        { type: 'separator' },
+        {
+          label: 'Open Page in Default Browser',
+          enabled: hasPage,
+          click: () => deps.openExternalSafely(pageURL),
+        },
+        {
+          label: 'Copy Page URL',
+          enabled: hasPage,
+          click: () => deps.clipboard.writeText(pageURL),
+        },
+        { type: 'separator' },
+        { label: 'Inspect Element', click: () => wc.inspectElement(params.x, params.y) }
+      );
+    }
+
+    deps.Menu.buildFromTemplate(items).popup();
+  });
+}
+
+// While a guest has focus its renderer sees keystrokes first, so neither the
+// app's window-level listeners nor the menu accelerators fire — Cmd+W would
+// hide the whole app and Cmd+R reload WPHerd itself. before-input-event runs
+// in the main process ahead of both, and preventDefault suppresses them.
+//
+// keyDown-only so the chord doesn't fire again on keyUp; Shift/Alt are left
+// alone so their variants still reach the page.
+function attachKeyInterception(tabKey, wc) {
+  on(tabKey, wc, 'before-input-event', (event, input) => {
+    if (input.type !== 'keyDown' || input.shift || input.alt) return;
+    if (!(input.meta || input.control)) return;
+
+    const key = String(input.key || '').toLowerCase();
+    // w/r act on the browser tab; the rest are app shortcuts (Layout.jsx) the
+    // user would otherwise lose the moment a page took focus.
+    if (!['w', 'r', 'b', '[', ']'].includes(key)) return;
+    event.preventDefault();
+    send('browser-shortcut', { tabKey, key });
+  });
 }
 
 function unregister(tabKey) {
