@@ -283,6 +283,41 @@ export const SETTINGS_ITEMS = [
       'minimize',
     ],
   },
+  {
+    id: 'browser.clearHistory',
+    section: 'general',
+    title: 'Clear browsing history',
+    description: 'Removes the address-bar suggestions in the Agents browser',
+    keywords: [
+      'browser',
+      'browsing',
+      'history',
+      'clear',
+      'delete',
+      'suggestions',
+      'autocomplete',
+      'address',
+      'url',
+    ],
+  },
+  {
+    id: 'browser.clearData',
+    section: 'general',
+    title: 'Clear cookies & cache',
+    description: 'Signs you out of every site you signed into in the in-app browser',
+    keywords: [
+      'browser',
+      'cookies',
+      'cache',
+      'clear',
+      'delete',
+      'storage',
+      'session',
+      'sign out',
+      'logout',
+      'privacy',
+    ],
+  },
 
   // ── Agents ───────────────────────────────────────────────────────────────
   {

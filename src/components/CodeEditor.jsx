@@ -276,7 +276,17 @@ export default function CodeEditor({
               }`}
             >
               {tabIsBrowser ? (
-                <Globe size={13} className="flex-shrink-0 text-muted-foreground" />
+                browserState?.[f.key]?.favicon ? (
+                  <img
+                    src={browserState[f.key].favicon}
+                    alt=""
+                    width={13}
+                    height={13}
+                    className="flex-shrink-0 rounded-sm"
+                  />
+                ) : (
+                  <Globe size={13} className="flex-shrink-0 text-muted-foreground" />
+                )
               ) : (
                 <FileGlyph name={f.name} size={13} className="flex-shrink-0" />
               )}

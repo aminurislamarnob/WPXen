@@ -41,6 +41,11 @@ function sanitizeUrl(url) {
   return `https://www.google.com/search?q=${encodeURIComponent(value)}`;
 }
 
+// Every browser tab shares one session, so signing into a site in one tab is
+// visible in the next. Must match PARTITION in src/lib/browser/webviewCache.js,
+// which is what actually sets it on the element (asserted in the tests).
+const PARTITION = 'persist:wpherd-browser';
+
 // tabKey -> webContentsId of the live guest
 const guests = new Map();
 // tabKey -> [teardown, …] for every listener/handler we attached to that guest
@@ -224,6 +229,7 @@ function openDevTools(tabKey) {
 }
 
 module.exports = {
+  PARTITION,
   sanitizeUrl,
   setWindow,
   register,

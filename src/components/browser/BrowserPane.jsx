@@ -53,6 +53,7 @@ export default function BrowserPane({ tabKey, initialUrl, state, onStateChange, 
         <BrowserToolbar
           url={state.url}
           title={state.title}
+          favicon={state.favicon}
           loading={state.loading}
           canGoBack={nav.canGoBack}
           canGoForward={nav.canGoForward}

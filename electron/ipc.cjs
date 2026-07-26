@@ -1,6 +1,14 @@
 'use strict';
 
-const { ipcMain, shell, dialog, app, BrowserWindow, nativeTheme } = require('electron');
+const {
+  ipcMain,
+  shell,
+  dialog,
+  app,
+  BrowserWindow,
+  nativeTheme,
+  session,
+} = require('electron');
 const crypto = require('crypto');
 const path = require('path');
 const os = require('os');
@@ -30,6 +38,7 @@ const agents = require('./services/agents.cjs');
 const files = require('./services/files.cjs');
 const git = require('./services/git.cjs');
 const browser = require('./services/browser.cjs');
+const browserHistory = require('./services/browserHistory.cjs');
 const settingsService = require('./services/settings.cjs');
 const externalTools = require('./services/externalTools.cjs');
 const { humanize } = require('./services/errors.cjs');
@@ -375,6 +384,34 @@ function registerHandlers(win, storeInstance) {
   ipcMain.handle('browser-open-devtools', (_e, tabKey) => ({
     ok: browser.openDevTools(tabKey),
   }));
+
+  // Address-bar autocomplete, backed by the JsonStore rather than a SQL layer.
+  ipcMain.handle('browser-history-record', (_e, visit) => {
+    browserHistory.record(store, visit || {});
+    return { ok: true };
+  });
+
+  ipcMain.handle('browser-history-search', (_e, query, limit) =>
+    browserHistory.search(store, query, limit)
+  );
+
+  ipcMain.handle('browser-history-clear', () => {
+    browserHistory.clear(store);
+    return { ok: true };
+  });
+
+  // Cookies, cache and site storage for the browser's partition. Wiping it logs
+  // the user out of every site they signed into in-app, so the UI confirms.
+  ipcMain.handle('browser-clear-data', async () => {
+    try {
+      const ses = session.fromPartition(browser.PARTITION);
+      await ses.clearStorageData();
+      await ses.clearCache();
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
 
   // Project explorer: read-only directory listing confined to a Site's root.
   ipcMain.handle('list-directory', (_e, rootPath, dirPath) => {

@@ -14,8 +14,9 @@ const cache = new Map(); // tabKey -> entry
 
 // Partition is shared by every browser tab, so a WordPress login in one tab is
 // visible in the next — which is the whole point when the agent and the user
-// are looking at the same site.
-const PARTITION = 'persist:wpherd-browser';
+// are looking at the same site. Must match PARTITION in
+// electron/services/browser.cjs, which is what "clear browsing data" wipes.
+export const PARTITION = 'persist:wpherd-browser';
 
 let hiddenContainer = null;
 
@@ -87,11 +88,12 @@ function createEntry(tabKey, initialUrl, handlers) {
   };
 
   const onStopLoading = () => {
-    state({
-      loading: false,
-      url: webview.getURL() || '',
-      title: webview.getTitle() || '',
-    });
+    const url = webview.getURL() || '';
+    const title = webview.getTitle() || '';
+    state({ loading: false, url, title });
+    // The favicon usually arrives after this, so record without one and let
+    // onFavicon refresh the entry rather than blocking on it.
+    api.browserHistoryRecord({ url, title, faviconUrl: entry.favicon });
   };
 
   const onNavigate = (e) => {
@@ -116,6 +118,13 @@ function createEntry(tabKey, initialUrl, handlers) {
     const favicon = e.favicons?.[0] || null;
     entry.favicon = favicon;
     state({ favicon });
+    if (favicon) {
+      api.browserHistoryRecord({
+        url: webview.getURL() || '',
+        title: webview.getTitle() || '',
+        faviconUrl: favicon,
+      });
+    }
   };
 
   const onFailLoad = (e) => {

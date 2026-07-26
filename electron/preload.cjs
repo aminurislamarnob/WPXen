@@ -207,6 +207,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getPhpMyAdminUrl: (dbName) => ipcRenderer.invoke('get-phpmyadmin-url', dbName),
   getWpAdminUrl: (id) => ipcRenderer.invoke('get-wp-admin-url', id),
   getMailpitUrl: () => ipcRenderer.invoke('get-mailpit-url'),
+  // Address-bar autocomplete + the Settings actions that wipe it.
+  browserHistoryRecord: (visit) => ipcRenderer.invoke('browser-history-record', visit),
+  browserHistorySearch: (query, limit) =>
+    ipcRenderer.invoke('browser-history-search', query, limit),
+  browserHistoryClear: () => ipcRenderer.invoke('browser-history-clear'),
+  browserClearData: () => ipcRenderer.invoke('browser-clear-data'),
 
   listDirectory: (rootPath, dirPath) =>
     ipcRenderer.invoke('list-directory', rootPath, dirPath),
