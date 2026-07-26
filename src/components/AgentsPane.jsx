@@ -22,6 +22,7 @@ import LaunchTargetsDialog from './LaunchTargetsDialog';
 import { ConfirmDialog, Tooltip } from './ui';
 import * as sessionCache from '../lib/terminal/sessionCache';
 import * as webviewCache from '../lib/browser/webviewCache';
+import { useSettings } from '../lib/useSettings';
 
 // Strip a leading emoji/symbol + space from an OSC title (agents like Claude
 // Code prefix a status glyph) so the tab label reads cleanly.
@@ -47,6 +48,7 @@ export default function AgentsPane() {
   // When the sidebar is hidden the explorer sits under the floating window
   // controls; inset its tab bar so they don't overlap.
   const { sidebarCollapsed } = useOutletContext() || {};
+  const { settings } = useSettings();
 
   const [meta, setMeta] = useState({ siteName: siteId });
   const [sitePath, setSitePath] = useState(null);
@@ -101,6 +103,11 @@ export default function AgentsPane() {
       setSitePath(site?.path || null);
       setAgents(agentList || []);
       setTargets(targetList || []);
+
+      // A site quick action asked for this URL in-app (see useOpenLink). The
+      // site-change effect clears browser tabs, so this has to run after the
+      // load above rather than in its own effect.
+      if (location.state?.openBrowser) openBrowser(location.state.openBrowser);
 
       // Honour a pending spawn from the sidebar (create the Session first, so the
       // subsequent listSessions below includes it).
@@ -345,6 +352,17 @@ export default function AgentsPane() {
     );
   }, []);
 
+  // Cmd+click on a URL in agent output. Unlike useOpenLink there's no
+  // navigation to do — we're already on the Agents screen — so the in-app case
+  // is just another tab.
+  const handleOpenLink = useCallback(
+    (url) => {
+      if (settings['app.openLinksIn'] === 'app') openBrowser(url);
+      else window.electronAPI.openSiteInBrowser(url);
+    },
+    [settings, openBrowser]
+  );
+
   const closeFile = (key) => {
     // A browser tab's page outlives its React component by design, so closing
     // the tab is the one moment it has to be torn down for real.
@@ -496,7 +514,9 @@ export default function AgentsPane() {
                 <button
                   onClick={(e) => {
                     const r = e.currentTarget.getBoundingClientRect();
-                    setBrowserMenu((m) => (m ? null : { x: r.right - 220, y: r.bottom + 4 }));
+                    setBrowserMenu((m) =>
+                      m ? null : { x: r.right - 220, y: r.bottom + 4 }
+                    );
                   }}
                   aria-label="Open browser"
                   className="flex-shrink-0 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent"
@@ -508,7 +528,10 @@ export default function AgentsPane() {
 
             {browserMenu && (
               <>
-                <div className="fixed inset-0 z-40" onClick={() => setBrowserMenu(null)} />
+                <div
+                  className="fixed inset-0 z-40"
+                  onClick={() => setBrowserMenu(null)}
+                />
                 <div
                   className="panel fixed z-50 min-w-[220px] py-1"
                   style={{ left: browserMenu.x, top: browserMenu.y }}
@@ -523,7 +546,10 @@ export default function AgentsPane() {
                       {browserBusy === t.id ? (
                         <Loader2 size={14} className="animate-spin flex-shrink-0" />
                       ) : (
-                        <t.icon size={14} className="flex-shrink-0 text-muted-foreground" />
+                        <t.icon
+                          size={14}
+                          className="flex-shrink-0 text-muted-foreground"
+                        />
                       )}
                       {t.label}
                     </button>
@@ -605,6 +631,7 @@ export default function AgentsPane() {
                   sessionId={activeTab}
                   rootPath={sitePath}
                   onOpenFile={openFileAtLine}
+                  onOpenLink={handleOpenLink}
                   onTitle={handleTitle}
                   onExited={() => destroyTab(activeTab)}
                   onRestart={() => respawn(activeTab)}

@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { WordPressIcon } from './icons';
 import { Tooltip } from './ui';
+import { useOpenLink } from '../lib/useOpenLink';
 
 function ContextMenu({
   site,
@@ -133,6 +134,7 @@ export default function SiteCard({
 }) {
   const navigate = useNavigate();
   const openDetail = () => navigate(`/sites/${site.id}`);
+  const openLink = useOpenLink();
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [httpsBusy, setHttpsBusy] = useState(false);
@@ -170,26 +172,34 @@ export default function SiteCard({
     setHttpsBusy(false);
   }
 
+  // phpMyAdmin installs and configures itself on first use, so this resolves
+  // before it can be opened — hence the spinner. Where it opens (default
+  // browser or an in-app tab) is useOpenLink's call, not ours.
   async function handlePhpMyAdmin() {
     setPmaBusy(true);
     setHttpsError(null);
-    const result = await window.electronAPI.openPhpMyAdmin(site.dbName);
-    if (!result?.success) {
-      setHttpsError(result?.error || 'Failed to open phpMyAdmin.');
-    }
+    const result = await window.electronAPI.getPhpMyAdminUrl(site.dbName);
+    if (result?.success) openLink(result.url, site.id);
+    else setHttpsError(result?.error || 'Failed to open phpMyAdmin.');
     setPmaBusy(false);
+  }
+
+  async function handleWpAdmin() {
+    const result = await window.electronAPI.getWpAdminUrl(site.id);
+    if (result?.success) openLink(result.url, site.id);
+    else setHttpsError(result?.error || 'Failed to open wp-admin.');
   }
 
   const actions = [
     {
       icon: ExternalLink,
       label: 'Open',
-      onClick: () => window.electronAPI.openSiteInBrowser(site.url),
+      onClick: () => openLink(site.url, site.id),
     },
     {
       icon: WordPressIcon,
       label: 'wp-admin',
-      onClick: () => window.electronAPI.openWpAdmin(site.id),
+      onClick: handleWpAdmin,
     },
     {
       icon: pmaBusy ? Loader : HardDrive,

@@ -1193,15 +1193,6 @@ function registerHandlers(win, storeInstance) {
     return { success: true, url };
   }
 
-  ipcMain.handle('open-wp-admin', (_, id) => {
-    const res = resolveWpAdminUrl(id);
-    if (!res.success) return res;
-    const ok = openExternalSafely(res.url);
-    return ok
-      ? { success: true }
-      : { success: false, error: 'Refused to open unsafe URL' };
-  });
-
   ipcMain.handle('get-wp-admin-url', (_, id) => resolveWpAdminUrl(id));
 
   // ─── Site config (WP Config Manager) ───────────────────────────────────
@@ -1543,9 +1534,8 @@ function registerHandlers(win, storeInstance) {
   });
 
   // Install (first run only), configure and serve phpMyAdmin, then hand back
-  // the deep link for `dbName`. Shared by the two callers below: the quick
-  // actions open it in the system browser, the Agents screen loads it into an
-  // in-app browser tab.
+  // the deep link for `dbName`. The renderer decides where it opens — the
+  // default browser or an in-app tab — via Settings → Open links in.
   async function resolvePhpMyAdminUrl(dbName) {
     // Reject anything that isn't a valid DB name before it reaches the URL —
     // same rule that gates site creation.
@@ -1555,16 +1545,6 @@ function registerHandlers(win, storeInstance) {
     await phpmyadmin.ensureReady();
     return { success: true, url: phpmyadmin.getUrl(dbName) };
   }
-
-  ipcMain.handle('open-phpmyadmin', async (_, dbName) => {
-    try {
-      const res = await resolvePhpMyAdminUrl(dbName);
-      if (res.success) openExternalSafely(res.url);
-      return res;
-    } catch (err) {
-      return { success: false, error: humanize(err) };
-    }
-  });
 
   ipcMain.handle('get-phpmyadmin-url', async (_, dbName) => {
     try {

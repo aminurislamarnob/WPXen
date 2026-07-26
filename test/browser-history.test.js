@@ -19,7 +19,11 @@ describe('upsertEntry', () => {
   it('prepends a new visit', () => {
     const next = upsertEntry([], { url: 'https://wpherd.test' }, 5);
     expect(next).toHaveLength(1);
-    expect(next[0]).toMatchObject({ url: 'https://wpherd.test', visits: 1, visitedAt: 5 });
+    expect(next[0]).toMatchObject({
+      url: 'https://wpherd.test',
+      visits: 1,
+      visitedAt: 5,
+    });
   });
 
   it('dedupes by URL, moving the entry to the front and counting the visit', () => {
@@ -66,7 +70,14 @@ describe('upsertEntry', () => {
   });
 
   it('ignores anything that is not a page you could return to', () => {
-    for (const url of ['about:blank', '', null, undefined, 'file:///etc/passwd', 'data:,x']) {
+    for (const url of [
+      'about:blank',
+      '',
+      null,
+      undefined,
+      'file:///etc/passwd',
+      'data:,x',
+    ]) {
       expect(upsertEntry([], { url })).toHaveLength(0);
     }
   });
@@ -83,7 +94,9 @@ describe('searchEntries', () => {
   ];
 
   it('returns the most recent entries for an empty query', () => {
-    expect(searchEntries(entries, '').map((e) => e.url)).toEqual(entries.map((e) => e.url));
+    expect(searchEntries(entries, '').map((e) => e.url)).toEqual(
+      entries.map((e) => e.url)
+    );
   });
 
   it('ranks a host prefix above a match buried in the URL', () => {
@@ -135,7 +148,8 @@ describe('store wrappers', () => {
         const keys = key.split('.');
         let obj = data;
         for (let i = 0; i < keys.length - 1; i++) {
-          if (typeof obj[keys[i]] !== 'object' || obj[keys[i]] === null) obj[keys[i]] = {};
+          if (typeof obj[keys[i]] !== 'object' || obj[keys[i]] === null)
+            obj[keys[i]] = {};
           obj = obj[keys[i]];
         }
         obj[keys[keys.length - 1]] = value;

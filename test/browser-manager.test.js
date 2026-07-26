@@ -38,7 +38,15 @@ function fakeGuest(over = {}) {
 
 // A keyDown chord as before-input-event delivers it.
 function chord(key, over = {}) {
-  return { type: 'keyDown', key, meta: true, control: false, shift: false, alt: false, ...over };
+  return {
+    type: 'keyDown',
+    key,
+    meta: true,
+    control: false,
+    shift: false,
+    alt: false,
+    ...over,
+  };
 }
 
 let registry;
@@ -228,12 +236,16 @@ const NO_EDIT = { canCopy: false, canPaste: false, canSelectAll: false };
 describe('context menu', () => {
   it('offers link actions when the click was on a link', () => {
     const { guest, send } = registered();
-    guest.emit('context-menu', {}, {
-      linkURL: 'https://example.com/docs',
-      pageURL: 'http://wpherd.test/',
-      selectionText: '',
-      editFlags: NO_EDIT,
-    });
+    guest.emit(
+      'context-menu',
+      {},
+      {
+        linkURL: 'https://example.com/docs',
+        pageURL: 'http://wpherd.test/',
+        selectionText: '',
+        editFlags: NO_EDIT,
+      }
+    );
 
     expect(labels()).toContain('Open Link in Default Browser');
     item('Open Link in Default Browser').click();
@@ -255,12 +267,16 @@ describe('context menu', () => {
 
   it('offers page actions when the click was not on a link', () => {
     const { guest } = registered();
-    guest.emit('context-menu', {}, {
-      linkURL: '',
-      pageURL: 'http://wpherd.test/',
-      selectionText: '',
-      editFlags: NO_EDIT,
-    });
+    guest.emit(
+      'context-menu',
+      {},
+      {
+        linkURL: '',
+        pageURL: 'http://wpherd.test/',
+        selectionText: '',
+        editFlags: NO_EDIT,
+      }
+    );
 
     expect(labels()).toContain('Copy Page URL');
     item('Copy Page URL').click();
@@ -270,24 +286,32 @@ describe('context menu', () => {
 
   it('disables page actions on a blank tab', () => {
     const { guest } = registered();
-    guest.emit('context-menu', {}, {
-      linkURL: '',
-      pageURL: 'about:blank',
-      selectionText: '',
-      editFlags: NO_EDIT,
-    });
+    guest.emit(
+      'context-menu',
+      {},
+      {
+        linkURL: '',
+        pageURL: 'about:blank',
+        selectionText: '',
+        editFlags: NO_EDIT,
+      }
+    );
     expect(item('Copy Page URL').enabled).toBe(false);
     expect(item('Open Page in Default Browser').enabled).toBe(false);
   });
 
   it('only offers edit actions the selection actually supports', () => {
     const { guest } = registered();
-    guest.emit('context-menu', {}, {
-      linkURL: '',
-      pageURL: 'http://wpherd.test/',
-      selectionText: 'hello',
-      editFlags: { canCopy: true, canPaste: false, canSelectAll: true },
-    });
+    guest.emit(
+      'context-menu',
+      {},
+      {
+        linkURL: '',
+        pageURL: 'http://wpherd.test/',
+        selectionText: 'hello',
+        editFlags: { canCopy: true, canPaste: false, canSelectAll: true },
+      }
+    );
     expect(labels()).toContain('Copy');
     expect(labels()).toContain('Select All');
     expect(labels()).not.toContain('Paste');
@@ -296,12 +320,16 @@ describe('context menu', () => {
   it('mirrors the real back/forward availability of the guest', () => {
     const guest = fakeGuest({ canGoBack: () => true, canGoForward: () => false });
     registered('browser:1', 1, guest);
-    guest.emit('context-menu', {}, {
-      linkURL: '',
-      pageURL: 'http://wpherd.test/',
-      selectionText: '',
-      editFlags: NO_EDIT,
-    });
+    guest.emit(
+      'context-menu',
+      {},
+      {
+        linkURL: '',
+        pageURL: 'http://wpherd.test/',
+        selectionText: '',
+        editFlags: NO_EDIT,
+      }
+    );
     expect(item('Back').enabled).toBe(true);
     expect(item('Forward').enabled).toBe(false);
   });
@@ -323,7 +351,10 @@ describe('key interception', () => {
   it('normalizes an uppercase key', () => {
     const { guest, send } = registered();
     guest.emit('before-input-event', { preventDefault: vi.fn() }, chord('W'));
-    expect(send).toHaveBeenCalledWith('browser-shortcut', { tabKey: 'browser:1', key: 'w' });
+    expect(send).toHaveBeenCalledWith('browser-shortcut', {
+      tabKey: 'browser:1',
+      key: 'w',
+    });
   });
 
   it('leaves everything else to the page', () => {

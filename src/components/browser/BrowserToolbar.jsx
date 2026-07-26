@@ -117,7 +117,8 @@ export default function BrowserToolbar({
     [stopEditing, suggestions.length]
   );
 
-  const navButton = 'p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-muted-foreground';
+  const navButton =
+    'p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-muted-foreground';
 
   return (
     <div className="flex items-center gap-1 flex-1 min-w-0">

@@ -18,7 +18,10 @@ const cases = [
   // No dot, or spaces, means it was never a host.
   ['wordpress', 'https://www.google.com/search?q=wordpress'],
   ['why is php slow', 'https://www.google.com/search?q=why%20is%20php%20slow'],
-  ['wp cli db.export help', 'https://www.google.com/search?q=wp%20cli%20db.export%20help'],
+  [
+    'wp cli db.export help',
+    'https://www.google.com/search?q=wp%20cli%20db.export%20help',
+  ],
   ['', 'about:blank'],
   ['   ', 'about:blank'],
 ];
@@ -56,6 +59,8 @@ describe('displayUrl', () => {
   });
 
   it('leaves a path alone', () => {
-    expect(displayUrl('https://wpherd.test/wp-admin')).toBe('https://wpherd.test/wp-admin');
+    expect(displayUrl('https://wpherd.test/wp-admin')).toBe(
+      'https://wpherd.test/wp-admin'
+    );
   });
 });

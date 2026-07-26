@@ -14,18 +14,18 @@ phased build spec.
 
 Superset reference paths (all under `apps/desktop/src/`):
 
-| Concern             | File                                                                                        |
-| ------------------- | ------------------------------------------------------------------------------------------- |
-| Enable webviews     | `main/windows/main.ts:124` — `webPreferences.webviewTag: true`                              |
-| Main-process owner  | `main/lib/browser/browser-manager.ts` (313 lines)                                           |
-| IPC surface         | `lib/trpc/routers/browser/browser.ts` (209 lines)                                           |
-| Renderer lifecycle  | `.../TabView/BrowserPane/hooks/usePersistentWebview/usePersistentWebview.ts`                 |
-| Pane component      | `.../TabView/BrowserPane/BrowserPane.tsx`                                                    |
-| Toolbar             | `.../BrowserPane/components/BrowserToolbar/BrowserToolbar.tsx` (+ `UrlSuggestions`)          |
-| Error overlay       | `.../BrowserPane/components/BrowserErrorOverlay/`                                            |
-| Teardown            | `.../WorkspaceView/hooks/useBrowserLifecycle/useBrowserLifecycle.ts`                         |
-| History persistence | `lib/trpc/routers/browser-history/`, `packages/local-db/drizzle/0026_browser_history.sql`    |
-| User docs           | `apps/docs/content/docs/browser.mdx`                                                        |
+| Concern             | File                                                                                      |
+| ------------------- | ----------------------------------------------------------------------------------------- |
+| Enable webviews     | `main/windows/main.ts:124` — `webPreferences.webviewTag: true`                            |
+| Main-process owner  | `main/lib/browser/browser-manager.ts` (313 lines)                                         |
+| IPC surface         | `lib/trpc/routers/browser/browser.ts` (209 lines)                                         |
+| Renderer lifecycle  | `.../TabView/BrowserPane/hooks/usePersistentWebview/usePersistentWebview.ts`              |
+| Pane component      | `.../TabView/BrowserPane/BrowserPane.tsx`                                                 |
+| Toolbar             | `.../BrowserPane/components/BrowserToolbar/BrowserToolbar.tsx` (+ `UrlSuggestions`)       |
+| Error overlay       | `.../BrowserPane/components/BrowserErrorOverlay/`                                         |
+| Teardown            | `.../WorkspaceView/hooks/useBrowserLifecycle/useBrowserLifecycle.ts`                      |
+| History persistence | `lib/trpc/routers/browser-history/`, `packages/local-db/drizzle/0026_browser_history.sql` |
+| User docs           | `apps/docs/content/docs/browser.mdx`                                                      |
 
 ### The architecture in one paragraph
 
@@ -54,12 +54,12 @@ resulting events don't push duplicate entries.
 
 ### Notable details worth copying
 
-- **`sanitizeUrl`** exists in *both* processes (identical logic): `http(s)://`
+- **`sanitizeUrl`** exists in _both_ processes (identical logic): `http(s)://`
   and `about:` pass through; bare `localhost`/`127.0.0.1` get `http://`;
   anything containing a `.` gets `https://`; everything else becomes a Google
   search. (`browser-manager.ts:13`, `usePersistentWebview.ts:78`.)
 - **`before-input-event`** (`browser-manager.ts:247`) — when a webview has
-  focus, keystrokes go to the guest renderer, so host key listeners *and* the
+  focus, keystrokes go to the guest renderer, so host key listeners _and_ the
   app menu's accelerators never see them. Intercepting in the main process is
   the only way to make Cmd+W close the pane instead of the window, and Cmd+R
   reload the page instead of the app. Guards on `keyDown` only, and skips when
@@ -129,11 +129,11 @@ body. This reuses the column, its `ResizeHandle`, the `editorOpen` conditional
 and the `autoSaveId` layout persistence — no new panel plumbing, and it lands
 the browser side-by-side with the agent terminal exactly like Superset.
 
-> *Alternative considered:* a dedicated 4th `Panel`. Rejected — it costs a new
+> _Alternative considered:_ a dedicated 4th `Panel`. Rejected — it costs a new
 > `autoSaveId` layout variant for every combination of explorer/editor/browser
 > visibility, and users would end up with three narrow columns on a laptop.
 
-Because the parked-webview registry keeps the page alive while a *different*
+Because the parked-webview registry keeps the page alive while a _different_
 editor tab is active, switching between a file and the browser is free.
 
 **D3 — Reuse the terminal cache pattern verbatim.**
@@ -256,9 +256,9 @@ the way `test/settings.test.js` stubs its deps.
     - **Mailpit inbox** → `http://localhost:8025`
     - separator
     - **Blank tab**
-    phpMyAdmin's entry shows a spinner while `ensureReady()` runs (first use
-    may `brew install phpmyadmin`), and surfaces failures through the existing
-    `error` state at `AgentsPane.jsx:426`.
+      phpMyAdmin's entry shows a spinner while `ensureReady()` runs (first use
+      may `brew install phpmyadmin`), and surfaces failures through the existing
+      `error` state at `AgentsPane.jsx:426`.
 
 **Acceptance:** on a site with a database, the phpMyAdmin menu item opens an
 in-app tab already sitting on that site's table list, with no login screen.
@@ -279,7 +279,7 @@ IPC-level validation regex rejects `foo;drop`, `../`, and >64 chars.
     Copy Page URL / Back / Forward / Reload). Route "Open in Default Browser"
     through the existing `openExternalSafely` in `ipc.cjs` — do not add a second
     external-open path.
-20. `before-input-event`: Cmd+W → close *this* browser tab, Cmd+R → reload the
+20. `before-input-event`: Cmd+W → close _this_ browser tab, Cmd+R → reload the
     page, and forward Cmd+B / Cmd+[ / Cmd+] so `Layout.jsx:58`'s shortcuts still
     fire while a webview has focus.
 21. Drag passthrough so the `ResizeHandle` between columns still works when a
@@ -298,7 +298,7 @@ overlay instead of a blank pane.
 
 23. `electron/services/settings.cjs` (or a small `browserHistory` section in
     `store.cjs`) — `browser.history` list per D7, with `upsert(url, title,
-    favicon)` and `clear()`. IPC: `browser-history-search`,
+favicon)` and `clear()`. IPC: `browser-history-search`,
     `browser-history-clear`.
 24. URL-field autocomplete dropdown (`UrlSuggestions`) — arrow keys, Enter,
     Escape, matching Superset's `useUrlAutocomplete`. Reuse the popover styling
@@ -339,14 +339,14 @@ ranking.
 
 ## 5. Risks
 
-| Risk                                                                                                     | Mitigation                                                                                                |
-| -------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| `webviewTag: true` widens the renderer's attack surface                                                  | D5 `will-attach-webview` hardening; scheme allowlist                                                       |
-| `<webview>` is officially discouraged by Electron and could be deprecated                                 | Isolated behind `webviewCache.js` + `BrowserPane.jsx`; a future `WebContentsView` port touches only those  |
-| Parked webviews keep pages (and their JS timers) alive → memory growth                                    | `setBackgroundThrottling(true)`; dispose on tab close and on site change; consider a cap on browser tabs   |
-| mkcert HTTPS `.test` certs rejected inside the `persist:wpherd` partition                                 | Verify first (Phase 3, step 22); only then a fingerprint-scoped `certificate-error` handler                |
-| First phpMyAdmin open runs `brew install phpmyadmin` and blocks                                           | Spinner in the menu item + error surfaced in the pane; `ensureReady()` is already idempotent               |
-| Webview swallows the column-resize drag                                                                   | Step 21 pointer-events passthrough                                                                         |
+| Risk                                                                      | Mitigation                                                                                                |
+| ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `webviewTag: true` widens the renderer's attack surface                   | D5 `will-attach-webview` hardening; scheme allowlist                                                      |
+| `<webview>` is officially discouraged by Electron and could be deprecated | Isolated behind `webviewCache.js` + `BrowserPane.jsx`; a future `WebContentsView` port touches only those |
+| Parked webviews keep pages (and their JS timers) alive → memory growth    | `setBackgroundThrottling(true)`; dispose on tab close and on site change; consider a cap on browser tabs  |
+| mkcert HTTPS `.test` certs rejected inside the `persist:wpherd` partition | Verify first (Phase 3, step 22); only then a fingerprint-scoped `certificate-error` handler               |
+| First phpMyAdmin open runs `brew install phpmyadmin` and blocks           | Spinner in the menu item + error surfaced in the pane; `ensureReady()` is already idempotent              |
+| Webview swallows the column-resize drag                                   | Step 21 pointer-events passthrough                                                                        |
 
 ---
 

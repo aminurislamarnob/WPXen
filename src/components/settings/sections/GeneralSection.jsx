@@ -70,6 +70,23 @@ export default function GeneralSection() {
       <SectionLabel>In-App Browser</SectionLabel>
       <Card>
         <SettingsRow
+          id="app.openLinksIn"
+          visible={visible}
+          title="Open links in"
+          subtitle="Where a site’s Open, wp-admin and phpMyAdmin actions land"
+        >
+          <SelectSetting
+            value={settings['app.openLinksIn']}
+            onChange={(v) => setSetting('app.openLinksIn', v)}
+            ariaLabel="Open links in"
+            options={[
+              { value: 'system', label: 'Default browser' },
+              { value: 'app', label: 'WPHerd' },
+            ]}
+          />
+        </SettingsRow>
+
+        <SettingsRow
           id="browser.clearHistory"
           visible={visible}
           title="Clear browsing history"
@@ -102,7 +119,9 @@ export default function GeneralSection() {
 
       <ConfirmDialog
         open={confirming != null}
-        title={confirming === 'data' ? 'Clear cookies & cache?' : 'Clear browsing history?'}
+        title={
+          confirming === 'data' ? 'Clear cookies & cache?' : 'Clear browsing history?'
+        }
         description={
           confirming === 'data'
             ? 'This signs you out of every site you signed into in the in-app browser, and empties its cache. Your sites and their data are untouched.'

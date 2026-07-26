@@ -36,8 +36,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openSiteInBrowser: (url) => ipcRenderer.invoke('open-in-browser', url),
   openSiteInFinder: (sitePath) => ipcRenderer.invoke('open-in-finder', sitePath),
   openSiteInTerminal: (sitePath) => ipcRenderer.invoke('open-in-terminal', sitePath),
-  openWpAdmin: (id) => ipcRenderer.invoke('open-wp-admin', id),
-  openPhpMyAdmin: (dbName) => ipcRenderer.invoke('open-phpmyadmin', dbName),
 
   // Export / Import
   exportSite: (id) => ipcRenderer.invoke('export-site', id),

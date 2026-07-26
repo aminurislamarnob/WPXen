@@ -10,7 +10,13 @@ import BrowserErrorOverlay from './BrowserErrorOverlay';
 // parking it off-screen on unmount so the page survives a tab switch. That's
 // why this component can be unmounted freely whenever another editor tab is
 // active — see src/lib/browser/webviewCache.js.
-export default function BrowserPane({ tabKey, initialUrl, state, onStateChange, onClose }) {
+export default function BrowserPane({
+  tabKey,
+  initialUrl,
+  state,
+  onStateChange,
+  onClose,
+}) {
   const containerRef = useRef(null);
   const [nav, setNav] = useState({ canGoBack: false, canGoForward: false });
 
@@ -19,10 +25,7 @@ export default function BrowserPane({ tabKey, initialUrl, state, onStateChange, 
   // sessionCache re-points `entry.handlers` on every mount.
   const changeRef = useRef(onStateChange);
   changeRef.current = onStateChange;
-  const onState = useCallback(
-    (patch) => changeRef.current(tabKey, patch),
-    [tabKey]
-  );
+  const onState = useCallback((patch) => changeRef.current(tabKey, patch), [tabKey]);
 
   // Create-or-reclaim the webview from wherever it was parked; park it again on
   // unmount rather than destroying it.

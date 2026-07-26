@@ -31,6 +31,7 @@ import WpPlugins from './WpPlugins';
 import WpThemes from './WpThemes';
 import SiteLogs from './SiteLogs';
 import { WordPressIcon } from './icons';
+import { useOpenLink } from '../lib/useOpenLink';
 
 const NAV = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard },
@@ -57,6 +58,7 @@ const NAV = [
 ];
 
 function Overview({ site, onSaved }) {
+  const openLink = useOpenLink();
   const [pmaBusy, setPmaBusy] = useState(false);
   const [tunnel, setTunnel] = useState(null);
   const [copied, setCopied] = useState(false);
@@ -137,12 +139,22 @@ function Overview({ site, onSaved }) {
     return () => window.electronAPI.off('tunnel-update');
   }, [site.id]);
 
+  // phpMyAdmin installs and configures itself on first use, so this resolves
+  // before it can be opened — hence the spinner. Where it opens (default
+  // browser or an in-app tab) is useOpenLink's call, not ours.
   async function handlePhpMyAdmin() {
     setPmaBusy(true);
     setActionError(null);
-    const result = await window.electronAPI.openPhpMyAdmin(site.dbName);
-    if (!result?.success) setActionError(result?.error || 'Failed to open phpMyAdmin.');
+    const result = await window.electronAPI.getPhpMyAdminUrl(site.dbName);
+    if (result?.success) openLink(result.url, site.id);
+    else setActionError(result?.error || 'Failed to open phpMyAdmin.');
     setPmaBusy(false);
+  }
+
+  async function handleWpAdmin() {
+    const result = await window.electronAPI.getWpAdminUrl(site.id);
+    if (result?.success) openLink(result.url, site.id);
+    else setActionError(result?.error || 'Failed to open wp-admin.');
   }
 
   async function handleExpose() {
@@ -175,12 +187,12 @@ function Overview({ site, onSaved }) {
     {
       icon: ExternalLink,
       label: 'Open',
-      onClick: () => window.electronAPI.openSiteInBrowser(site.url),
+      onClick: () => openLink(site.url, site.id),
     },
     {
       icon: WordPressIcon,
       label: 'wp-admin',
-      onClick: () => window.electronAPI.openWpAdmin(site.id),
+      onClick: handleWpAdmin,
     },
     {
       icon: pmaBusy ? Loader : HardDrive,
@@ -372,9 +384,18 @@ function Overview({ site, onSaved }) {
 export default function SiteDetail({ sites, refreshSites }) {
   const { id } = useParams();
   const navigate = useNavigate();
+  const openLink = useOpenLink();
   const [active, setActive] = useState('overview');
 
   const site = sites.find((s) => s.id === id);
+
+  // The header's WP Admin button, resolved through the same magic-login path
+  // the Overview quick action uses. Failures are silent here — the header has
+  // nowhere to put an error, and Overview surfaces the same call's reason.
+  const openWpAdmin = async () => {
+    const res = await window.electronAPI.getWpAdminUrl(site.id);
+    if (res?.success) openLink(res.url, site.id);
+  };
 
   if (!site) {
     return (
@@ -412,16 +433,13 @@ export default function SiteDetail({ sites, refreshSites }) {
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
             <button
-              onClick={() => window.electronAPI.openSiteInBrowser(site.url)}
+              onClick={() => openLink(site.url, site.id)}
               className="btn-secondary text-xs"
             >
               <ExternalLink size={12} className="mr-1.5" />
               Visit Site
             </button>
-            <button
-              onClick={() => window.electronAPI.openWpAdmin(site.id)}
-              className="btn-secondary text-xs"
-            >
+            <button onClick={openWpAdmin} className="btn-secondary text-xs">
               <Settings size={12} className="mr-1.5" />
               WP Admin
             </button>
