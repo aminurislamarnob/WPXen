@@ -301,7 +301,7 @@ export default function WpPlugins({ site, onSaved }) {
   const allChecked = filtered.length > 0 && filtered.every((p) => selected.has(p.name));
 
   function toggleAll() {
-    setSelected((prev) => {
+    setSelected(() => {
       if (allChecked) return new Set();
       return new Set(filtered.map((p) => p.name));
     });

@@ -139,10 +139,10 @@ function getActivePhpVersion() {
   try {
     const phpBin = `${prefix}/bin/php`;
     if (!fs.existsSync(phpBin)) return null;
-    const out = execSync(
-      `${phpBin} -r "echo PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;"`,
-      { stdio: ['ignore', 'pipe', 'pipe'], timeout: 5000 }
-    )
+    const out = execSync(`${phpBin} -r "echo PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;"`, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 5000,
+    })
       .toString()
       .trim();
     return out.match(/^\d+\.\d+$/) ? out : null;

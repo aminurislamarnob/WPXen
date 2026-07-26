@@ -398,14 +398,17 @@ export default function SiteDetail({ sites, refreshSites }) {
   const site = sites.find((s) => s.id === id);
 
   // Open phpMyAdmin in the embedded browser pane.
-  const openPma = useCallback((url) => {
-    // Dispose previous webview if the tab key changed
-    if (pmaTabKey) webviewCache.dispose(pmaTabKey);
-    const key = `pma:${id}:${++pmaSeq.current}`;
-    setPmaTabKey(key);
-    setPmaBrowserState({ url, title: '', loading: true, error: null });
-    setActive('phpmyadmin');
-  }, [id, pmaTabKey]);
+  const openPma = useCallback(
+    (url) => {
+      // Dispose previous webview if the tab key changed
+      if (pmaTabKey) webviewCache.dispose(pmaTabKey);
+      const key = `pma:${id}:${++pmaSeq.current}`;
+      setPmaTabKey(key);
+      setPmaBrowserState({ url, title: '', loading: true, error: null });
+      setActive('phpmyadmin');
+    },
+    [id, pmaTabKey]
+  );
 
   const closePma = useCallback(() => {
     if (pmaTabKey) webviewCache.dispose(pmaTabKey);
@@ -432,7 +435,10 @@ export default function SiteDetail({ sites, refreshSites }) {
   useEffect(() => {
     return () => {
       if (pmaSeq.current > 0) {
-        // Dispose all pma webviews created for this site
+        // Reading the ref during cleanup is the point: we need the count as it
+        // stands at unmount to know how many webviews to dispose. Snapshotting
+        // it when the effect runs would always read the pre-navigation value.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
         for (let i = 1; i <= pmaSeq.current; i++) {
           webviewCache.dispose(`pma:${id}:${i}`);
         }
@@ -556,10 +562,14 @@ export default function SiteDetail({ sites, refreshSites }) {
           </nav>
 
           <div className="flex-1 min-w-0 max-w-3xl">
-            {active === 'overview' && <Overview site={site} onSaved={refreshSites} onOpenPma={openPma} />}
+            {active === 'overview' && (
+              <Overview site={site} onSaved={refreshSites} onOpenPma={openPma} />
+            )}
             {active === 'wpconfig' && <WpConfigManager site={site} />}
             {active === 'php' && <SitePhpSettings site={site} onSaved={refreshSites} />}
-            {active === 'wp-overview' && <WpOverview site={site} onSaved={refreshSites} />}
+            {active === 'wp-overview' && (
+              <WpOverview site={site} onSaved={refreshSites} />
+            )}
             {active === 'wp-plugins' && <WpPlugins site={site} onSaved={refreshSites} />}
             {active === 'wp-themes' && <WpThemes site={site} onSaved={refreshSites} />}
             {active === 'logs' && <SiteLogs site={site} />}
