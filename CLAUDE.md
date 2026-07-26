@@ -5,17 +5,36 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-npm run dev      # Vite renderer (localhost:5173) + Electron in parallel (concurrently)
-npm run vite     # Renderer only
-npm run electron # Electron only against an already-running renderer
-npm run build    # vite build + electron-builder --mac → .dmg in release/ (arm64 + x64)
-npm run pack     # Unpacked build (electron-builder --dir), no installer
-npm run test     # vitest run (tests live in test/, cover electron/services logic)
-npm run lint     # eslint . (lint:fix to autofix)
-npm run format   # prettier --write .
+npm run dev          # Vite renderer (localhost:5173) + Electron in parallel (concurrently)
+npm run vite         # Renderer only
+npm run electron     # Electron only against an already-running renderer
+npm run build        # vite build + electron-builder --mac → .dmg in release/ (arm64 + x64)
+npm run build:renderer # vite build alone — what CI runs
+npm run pack         # Unpacked build (electron-builder --dir), no installer
+npm run test         # vitest run (tests live in test/, cover electron/services logic)
+npm run lint         # eslint . (lint:fix to autofix)
+npm run format       # prettier --write . (format:check to verify without writing)
 ```
 
 There is no typechecker; the codebase is plain JS/JSX.
+
+### CI
+
+`.github/workflows/ci.yml` runs four steps **in order, each gating the next**:
+`lint` → `format:check` → `test` → `build:renderer`. A formatting slip therefore
+hides every test failure behind it — when a run goes red, check which step
+stopped rather than assuming the first error is the only one. Run all four
+locally before pushing.
+
+⚠️ **CI installs with `ELECTRON_SKIP_BINARY_DOWNLOAD=1`.** Nothing in
+lint/test/build needs the ~100MB binary, but it means `node_modules/electron`
+has no `path.txt` and its `index.js` **throws from module scope** instead of
+exporting an API. So any `electron/**` module that a test imports — directly or
+transitively — must **not** `require('electron')` at the top level; resolve it
+lazily inside the function that uses it, the way `siteops.cjs`,
+`blueprints.cjs`, `procman.cjs`, `browser.cjs` and `safeUrl.cjs` do. A top-level
+require passes locally (where the binary exists) and fails only on the runner,
+so to reproduce, temporarily move `node_modules/electron/path.txt` aside.
 
 ## Architecture
 
@@ -56,17 +75,125 @@ Node directly. When adding a feature that crosses the boundary you must touch th
   `userData/wpherd-data.json`. Supports dotted key paths (`get('a.b', default)`).
   Sites and settings live here.
 - `tray.cjs` — menu-bar icon and context menu.
-- `services/` — one module per service, each wrapping CLI calls via `execSync`:
-  - `brew.cjs` — detects the Homebrew prefix (`/opt/homebrew` on Apple Silicon,
-    `/usr/local` on Intel) and discovers/switches installed PHP versions. Most other
-    service modules derive their config paths from `brew.getBrewPrefix()`.
-  - `nginx.cjs` — generates per-site vhosts in `{prefix}/etc/nginx/servers/<domain>.conf`.
-  - `php.cjs`, `mysql.cjs`, `dnsmasq.cjs`, `wordpress.cjs` (WP-CLI install flow).
-  - `mailpit.cjs` — email catching: runs Mailpit (SMTP sink + web inbox on
-    :8025) via `brew services` and routes PHP `mail()` into it by writing a
-    `sendmail_path` override (`zz-wpherd-mailpit.ini`) into every installed
-    PHP version's conf.d. Also wraps Mailpit's REST API for the in-app inbox
-    (Mail page in the renderer).
+- `services/` — one module per concern, most wrapping CLI calls via `execSync`:
+  - **Stack** — `brew.cjs` detects the Homebrew prefix (`/opt/homebrew` on Apple
+    Silicon, `/usr/local` on Intel) and discovers/switches installed PHP
+    versions; most other modules derive their config paths from
+    `brew.getBrewPrefix()`. `nginx.cjs` generates per-site vhosts in
+    `{prefix}/etc/nginx/servers/<domain>.conf`. Plus `php.cjs`, `mysql.cjs`,
+    `dnsmasq.cjs`, `wordpress.cjs` (WP-CLI install flow), `logs.cjs`,
+    `setup.cjs`.
+  - **Site lifecycle** — `siteops.cjs` is the shared engine behind Export,
+    Import, Clone and Blueprints; every entry point streams `{step, message}`
+    progress like `createWordPressSite` does, and long WP-CLI calls run through
+    `wpAsync` on a 10-minute budget. `archive.cjs` / `wpress.cjs` handle the
+    archive formats; `blueprints.cjs` stores full site snapshots at
+    `userData/blueprints/{id}.zip` and creating from one is just an import.
+  - **Extras** — `mailpit.cjs` (SMTP sink + web inbox on :8025; routes PHP
+    `mail()` in via a `sendmail_path` override written into every installed PHP
+    version's conf.d, and wraps Mailpit's REST API for the in-app Mail page),
+    `phpmyadmin.cjs` (serves phpmyadmin.test, auto-logs-in with the stored
+    credentials), `mkcert.cjs` (locally-trusted CA for per-site HTTPS),
+    `cloudflared.cjs` (public tunnels).
+  - **Privilege** — `admin.cjs` builds the osascript "with administrator
+    privileges" command; its prompt text is customizable, but the bold app name
+    in the macOS dialog is not, without shipping a signed privileged helper.
+    `sudoers.cjs` installs `/etc/sudoers.d/wpherd`.
+  - **Support** — `settings.cjs` (see below), `agents.cjs` (see below),
+    `browser.cjs` / `browserHistory.cjs` / `safeUrl.cjs` (see below),
+    `externalTools.cjs` (which app opens a file/folder/terminal — maps each
+    editor to its `$PATH` CLI shim, falling back to `shell.openPath`),
+    `files.cjs`, `git.cjs`, `validation.cjs`, `errors.cjs`, `asyncExec.cjs`.
+
+### Settings
+
+`services/settings.cjs` is the single source of truth: every preference is
+declared once in the `SETTINGS` schema with its type (`bool | string | int |
+float | enum | path | list | object`), default and bounds. The renderer never
+writes the store directly — it sends a patch to `settings-set`, validated
+there, so a malformed or unknown key can never reach disk. Side effects (login
+item, MySQL credentials, nginx reloads) hang off an `effects` map injected at
+init, which keeps the module free of electron imports and therefore testable.
+Values are addressed by dotted key and persisted under the `settings.` prefix
+(`app.confirmOnQuit` → `settings.app.confirmOnQuit`).
+
+Adding a setting means **two** places, not one: the schema in `settings.cjs`
+_and_ the presentation entry in `src/lib/settingsRegistry.js` (which drives the
+sections list and the search index in `settingsSearch.js`). They're parallel
+lists — a schema key with no registry entry is invisible in the UI.
+
+There is **no Save button**. `src/lib/useSettings.js` writes optimistically:
+local state updates immediately so the UI never lags the pointer, then
+persists, and rolls back with a reason if the main process rejects. The
+provider also listens for `settings-updated`, so a change made elsewhere (the
+Mail page's catch toggle, the tray) lands in an open Settings page without a
+refetch.
+
+### Agents
+
+`services/agents.cjs` runs an AI-provider CLI in a pseudo-terminal rooted at a
+site's webroot — one Session per Site. The pty lives in the **main process, with
+no daemon** (see `docs/adr/0001-main-process-pty-no-daemon.md`), so it survives
+the window hiding to the tray and is reaped on quit; reattach after a window
+reopen is served from an in-memory ring buffer. The provider registry is
+data-shaped: `cmd` is the binary detected on `$PATH` and spawned, `install` is
+the hint shown when it isn't found (WPHerd never auto-installs).
+
+### In-app browser
+
+The renderer owns the `<webview>` element (`src/lib/browser/webviewCache.js`);
+the main process (`services/browser.cjs`) only holds the guest's
+`webContentsId` and attaches what a renderer can't — window-open policy,
+DevTools, native context menus, key interception.
+
+- **Hide, don't destroy.** Each tab's `<webview>` is created once and
+  re-parented across React mount/unmount into an off-screen container, so
+  switching away and back keeps the page, scroll position, JS state and login.
+  Detaching from the DOM entirely would destroy the guest. Same pattern as
+  `src/lib/terminal/sessionCache.js`.
+- Re-parenting **mints a new `webContentsId`**, so the renderer re-registers on
+  every `dom-ready` and `register()` is deliberately idempotent — it tears the
+  previous guest's listeners down rather than stacking a second set.
+- `PARTITION` (`persist:wpherd-browser`) is duplicated in `webviewCache.js` and
+  `browser.cjs` and **must stay in sync** — the renderer sets it on the element,
+  the main process is what "clear browsing data" wipes. Asserted in the tests.
+- Only `http:`, `https:` and `about:` are allowed. The real enforcement point is
+  the `will-navigate` / `will-redirect` guard, not `will-attach-webview` (which
+  only ever sees the initial, empty src).
+- `sanitizeUrl` exists in both `src/lib/browser/sanitizeUrl.js` and
+  `browser.cjs` — keep the two in sync.
+- `services/safeUrl.cjs` is the **only** path out of the app; everything that
+  opens an external URL goes through `openExternalSafely`, which refuses
+  anything but http/https. `src/lib/useOpenLink.js` is the renderer-side
+  decision point for Settings → General → _Open links in_ (`system` vs `app`).
+
+### Testing
+
+Tests live in `test/`, run under vitest, and cover main-process logic plus pure
+renderer helpers.
+
+- **There is no DOM environment** — jsdom/happy-dom are not installed. Anything
+  that needs one is instead tested by extracting a pure, inspectable value: the
+  CodeMirror theme spec (`editorMetricsSpec`), the xterm option map
+  (`toTerminalOptions`), the history array transforms. Prefer that over adding a
+  DOM dependency.
+- **`vi.mock` does not reach `electron/**/*.cjs`.** These load through Node's
+  CJS loader, out of its reach. Modules that need a swappable dependency
+  therefore expose their own seam: a `deps` object plus a `__setDeps()` export
+  (`browser.cjs`, `externalTools.cjs`). Follow that pattern rather than
+  reaching for `vi.mock`.
+- Keep in mind the `ELECTRON_SKIP_BINARY_DOWNLOAD` constraint above when a new
+  test imports a main-process module.
+
+### Renderer layout
+
+`src/components/` is flat except where a feature owns several files:
+`settings/` (`SettingsLayout`, `SettingsSidebar`, shared `controls.jsx`, and one
+file per section under `sections/`) and `browser/` (`BrowserPane`,
+`BrowserToolbar`, `BrowserErrorOverlay`). `src/lib/` holds the non-React logic:
+`theme.js` / `editorTheme.js` / `typography.js` for appearance,
+`settingsRegistry.js` + `settingsSearch.js` for the settings index,
+`browser/` and `terminal/` for the two imperative surfaces.
 
 ### Renderer UI conventions
 
@@ -165,4 +292,19 @@ in-app switcher.
   on the machine — `runBrewStreaming` therefore extracts the real `Error:` line
   for rejections instead of the raw output tail.
 
-For service flow, DNS setup, and Homebrew path details, see `README.md`.
+- **Never `require('electron')` at module scope** in anything a test imports —
+  see the CI note at the top. This fails only on the runner.
+
+## Further reading
+
+- `README.md` — service flow, DNS setup, Homebrew path details.
+- `CONTEXT.md` — product framing and open questions.
+- `docs/adr/` — architecture decisions, with the reasoning that led to them
+  (e.g. `0001-main-process-pty-no-daemon.md`).
+- `docs/features/` — per-feature notes.
+- `plans/` — the implementation plans behind the Superset parity work (UI
+  redesign, terminal, file explorer, browser, global settings). Useful for
+  intent; they describe what _was_ planned, so treat the code as authoritative
+  where the two disagree.
+- `reference/superset-main` — the vendored Superset app the design system is
+  drawn from. Untracked and eslint-ignored; it is a reference, not a dependency.
