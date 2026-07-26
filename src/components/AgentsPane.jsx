@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useLocation, useOutletContext } from 'react-router-dom';
 import {
   Terminal as TerminalIcon,
@@ -6,6 +6,11 @@ import {
   X,
   Settings2,
   CornerDownRight,
+  Globe,
+  Gauge,
+  Database,
+  Mail,
+  Loader2,
 } from 'lucide-react';
 import { ProviderIcon } from './providerIcons';
 import { Panel, PanelGroup } from 'react-resizable-panels';
@@ -16,12 +21,23 @@ import ResizeHandle from './ResizeHandle';
 import LaunchTargetsDialog from './LaunchTargetsDialog';
 import { ConfirmDialog, Tooltip } from './ui';
 import * as sessionCache from '../lib/terminal/sessionCache';
+import * as webviewCache from '../lib/browser/webviewCache';
+import { useSettings } from '../lib/useSettings';
 
 // Strip a leading emoji/symbol + space from an OSC title (agents like Claude
 // Code prefix a status glyph) so the tab label reads cleanly.
 const cleanTitle = (t) => t.trim().replace(/^[\p{Emoji}\p{Symbol}]\s*/u, '');
 
 const CLOSE_CONFIRM_KEY = 'wpherd.terminalCloseConfirmSuppressed';
+
+// The places you actually want to look at while an agent works on a site.
+// Order is by how often they're reached for, not alphabetical.
+const BROWSER_TARGETS = [
+  { id: 'site', label: 'Site', icon: Globe },
+  { id: 'wp-admin', label: 'WP Admin', icon: Gauge },
+  { id: 'phpmyadmin', label: 'phpMyAdmin', icon: Database },
+  { id: 'mailpit', label: 'Mail inbox', icon: Mail },
+];
 
 // Main pane for the Agents section. A Site can host MANY concurrent Sessions
 // (any mix of Agents, incl. several of the same provider); each is a terminal
@@ -32,6 +48,7 @@ export default function AgentsPane() {
   // When the sidebar is hidden the explorer sits under the floating window
   // controls; inset its tab bar so they don't overlap.
   const { sidebarCollapsed } = useOutletContext() || {};
+  const { settings } = useSettings();
 
   const [meta, setMeta] = useState({ siteName: siteId });
   const [sitePath, setSitePath] = useState(null);
@@ -43,12 +60,35 @@ export default function AgentsPane() {
   const [tabs, setTabs] = useState([]); // [{ sessionId, agentId, agentName }]
   const [activeTab, setActiveTab] = useState(null); // sessionId
   const [addMenu, setAddMenu] = useState(null); // { x, y } when the + menu is open
+  const [browserMenu, setBrowserMenu] = useState(null); // { x, y } for the browser targets
+  const [browserBusy, setBrowserBusy] = useState(null); // target id being resolved
 
   const [openFiles, setOpenFiles] = useState([]); // editor tabs [{ key, kind, ... }]
   const [activeKey, setActiveKey] = useState(null);
+  // Per-browser-tab chrome state, fed by the webview's own events. The pages
+  // themselves live in webviewCache, not here.
+  const [browserState, setBrowserState] = useState({}); // key -> {url,title,loading,error}
+  const browserSeq = useRef(0);
   const [titles, setTitles] = useState({}); // sessionId -> OSC title
   const [closeConfirm, setCloseConfirm] = useState(null); // sessionId pending confirm
   const [suppressClose, setSuppressClose] = useState(false); // checkbox in dialog
+
+  // Open a browser tab in the editor column. Keys are sequential rather than
+  // URL-derived so the same URL can be open twice, and so navigating away from
+  // the initial URL doesn't orphan the webview in its cache.
+  //
+  // Declared above the effects below because they name it in their dependency
+  // arrays, which are evaluated during render — a `const` declared further down
+  // would still be in its temporal dead zone at that point.
+  const openBrowser = useCallback((url = 'about:blank') => {
+    const key = `browser:${++browserSeq.current}`;
+    setBrowserState((prev) => ({
+      ...prev,
+      [key]: { url, title: '', loading: true, error: null },
+    }));
+    setOpenFiles((prev) => [...prev, { key, kind: 'browser', name: 'Browser', url }]);
+    setActiveKey(key);
+  }, []);
 
   // Load the Site, its live Sessions (restore tabs), and honour a pending spawn
   // request carried in navigation state. Runs on Site change and on every
@@ -71,10 +111,20 @@ export default function AgentsPane() {
       ]);
       if (cancelled) return;
       const site = (sites || []).find((s) => s.id === siteId);
-      setMeta({ siteName: site?.name || siteId });
+      // url/dbName feed the browser target menu; keep them alongside the name.
+      setMeta({
+        siteName: site?.name || siteId,
+        url: site?.url || null,
+        dbName: site?.dbName || null,
+      });
       setSitePath(site?.path || null);
       setAgents(agentList || []);
       setTargets(targetList || []);
+
+      // A site quick action asked for this URL in-app (see useOpenLink). The
+      // site-change effect clears browser tabs, so this has to run after the
+      // load above rather than in its own effect.
+      if (location.state?.openBrowser) openBrowser(location.state.openBrowser);
 
       // Honour a pending spawn from the sidebar (create the Session first, so the
       // subsequent listSessions below includes it).
@@ -99,11 +149,34 @@ export default function AgentsPane() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [siteId, location.key]);
 
-  // Drop editor tabs when the Site changes.
+  // Drop editor tabs when the Site changes. Browser tabs are site-scoped too,
+  // and their webviews would otherwise stay parked off-screen forever.
   useEffect(() => {
+    webviewCache.disposeAll();
+    setBrowserState({});
     setOpenFiles([]);
     setActiveKey(null);
   }, [siteId]);
+
+  // Same on unmount — leaving the Agents screen must not leak live pages.
+  useEffect(() => () => webviewCache.disposeAll(), []);
+
+  // Popups (target="_blank", window.open) are denied in the main process and
+  // re-emitted here, so they land as another tab rather than a chrome-less
+  // window. Link context-menu "Open in New Tab" arrives on the same channel.
+  useEffect(() => {
+    const api = window.electronAPI;
+    const offNewWindow = api.on('browser-new-window', ({ url }) => openBrowser(url));
+    // Chords the focused page would otherwise swallow (see browser.cjs).
+    const offShortcut = api.on('browser-shortcut', ({ tabKey, key }) => {
+      if (key === 'w') closeFileRef.current(tabKey);
+      else if (key === 'r') webviewCache.reload(tabKey);
+    });
+    return () => {
+      offNewWindow();
+      offShortcut();
+    };
+  }, [openBrowser]);
 
   // Open the "+" menu anchored just below the button, in viewport coordinates.
   const openAddMenu = (e) => {
@@ -241,7 +314,70 @@ export default function AgentsPane() {
     setActiveKey(key);
   };
 
+  // Resolve one of the site's well-known targets and open it in a browser tab.
+  // The service-backed ones (phpMyAdmin, Mailpit) install and configure
+  // themselves on first use, so they're async and can fail — hence the busy
+  // marker on the menu item and the shared error line below the tab strip.
+  const openBrowserTarget = async (target) => {
+    setError(null);
+    if (target === 'blank') {
+      setBrowserMenu(null);
+      return openBrowser();
+    }
+    if (target === 'site') {
+      setBrowserMenu(null);
+      if (!meta.url) return setError('This site has no URL yet.');
+      return openBrowser(meta.url);
+    }
+
+    setBrowserBusy(target);
+    let res;
+    if (target === 'wp-admin') {
+      res = await window.electronAPI.getWpAdminUrl(siteId);
+    } else if (target === 'phpmyadmin') {
+      if (!meta.dbName) {
+        setBrowserBusy(null);
+        return setError('This site has no database.');
+      }
+      res = await window.electronAPI.getPhpMyAdminUrl(meta.dbName);
+    } else {
+      res = await window.electronAPI.getMailpitUrl();
+    }
+    setBrowserBusy(null);
+    setBrowserMenu(null);
+    if (!res?.success) return setError(res?.error || 'Could not open that target.');
+    openBrowser(res.url);
+  };
+
+  // Stable across renders — the cached webview holds onto this via a ref.
+  const onBrowserStateChange = useCallback((key, patch) => {
+    setBrowserState((prev) =>
+      prev[key] ? { ...prev, [key]: { ...prev[key], ...patch } } : prev
+    );
+  }, []);
+
+  // Cmd+click on a URL in agent output. Unlike useOpenLink there's no
+  // navigation to do — we're already on the Agents screen — so the in-app case
+  // is just another tab.
+  const handleOpenLink = useCallback(
+    (url) => {
+      if (settings['app.openLinksIn'] === 'app') openBrowser(url);
+      else window.electronAPI.openSiteInBrowser(url);
+    },
+    [settings, openBrowser]
+  );
+
   const closeFile = (key) => {
+    // A browser tab's page outlives its React component by design, so closing
+    // the tab is the one moment it has to be torn down for real.
+    if (key.startsWith('browser:')) {
+      webviewCache.dispose(key);
+      setBrowserState((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+    }
     setOpenFiles((prev) => {
       const idx = prev.findIndex((f) => f.key === key);
       const next = prev.filter((f) => f.key !== key);
@@ -251,6 +387,11 @@ export default function AgentsPane() {
       return next;
     });
   };
+
+  // closeFile closes over activeKey, so the IPC subscription above reaches it
+  // through a ref rather than resubscribing on every tab switch.
+  const closeFileRef = useRef(closeFile);
+  closeFileRef.current = closeFile;
 
   if (!siteId) {
     return (
@@ -372,7 +513,63 @@ export default function AgentsPane() {
                   <Settings2 size={15} />
                 </button>
               </Tooltip>
+              <div className="flex-1" />
+              <Tooltip label="Open browser">
+                <button
+                  onClick={(e) => {
+                    const r = e.currentTarget.getBoundingClientRect();
+                    setBrowserMenu((m) =>
+                      m ? null : { x: r.right - 220, y: r.bottom + 4 }
+                    );
+                  }}
+                  aria-label="Open browser"
+                  className="flex-shrink-0 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent"
+                >
+                  <Globe size={15} />
+                </button>
+              </Tooltip>
             </div>
+
+            {browserMenu && (
+              <>
+                <div
+                  className="fixed inset-0 z-40"
+                  onClick={() => setBrowserMenu(null)}
+                />
+                <div
+                  className="panel fixed z-50 min-w-[220px] py-1"
+                  style={{ left: browserMenu.x, top: browserMenu.y }}
+                >
+                  {BROWSER_TARGETS.map((t) => (
+                    <button
+                      key={t.id}
+                      onClick={() => openBrowserTarget(t.id)}
+                      disabled={browserBusy != null}
+                      className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[13px] text-foreground hover:bg-accent disabled:opacity-50"
+                    >
+                      {browserBusy === t.id ? (
+                        <Loader2 size={14} className="animate-spin flex-shrink-0" />
+                      ) : (
+                        <t.icon
+                          size={14}
+                          className="flex-shrink-0 text-muted-foreground"
+                        />
+                      )}
+                      {t.label}
+                    </button>
+                  ))}
+                  <div className="my-1 h-px bg-border" />
+                  <button
+                    onClick={() => openBrowserTarget('blank')}
+                    disabled={browserBusy != null}
+                    className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[13px] text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
+                  >
+                    <Plus size={14} className="flex-shrink-0" />
+                    Blank tab
+                  </button>
+                </div>
+              </>
+            )}
 
             {addMenu && (
               <>
@@ -438,6 +635,7 @@ export default function AgentsPane() {
                   sessionId={activeTab}
                   rootPath={sitePath}
                   onOpenFile={openFileAtLine}
+                  onOpenLink={handleOpenLink}
                   onTitle={handleTitle}
                   onExited={() => destroyTab(activeTab)}
                   onRestart={() => respawn(activeTab)}
@@ -479,6 +677,8 @@ export default function AgentsPane() {
                   activeKey={activeKey}
                   onSelect={setActiveKey}
                   onClose={closeFile}
+                  browserState={browserState}
+                  onBrowserStateChange={onBrowserStateChange}
                 />
               </div>
             </Panel>

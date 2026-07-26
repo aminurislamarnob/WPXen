@@ -16,6 +16,7 @@ export default function Terminal({
   onRestart,
   rootPath,
   onOpenFile,
+  onOpenLink,
   onTitle,
 }) {
   const hostRef = useRef(null);
@@ -33,6 +34,7 @@ export default function Terminal({
     const entry = sessionCache.getOrCreate(sessionId, {
       rootPath,
       onOpenFile,
+      onOpenLink,
       onTitle: (title) => onTitle?.(sessionId, title),
       onToggleSearch: () => setSearchOpen((v) => !v),
       onExit: (code) => setExit({ code }),
@@ -72,13 +74,14 @@ export default function Terminal({
     const entry = sessionCache.getOrCreate(sessionId, {
       rootPath,
       onOpenFile,
+      onOpenLink,
       onTitle: (title) => onTitle?.(sessionId, title),
       onToggleSearch: () => setSearchOpen((v) => !v),
       onExit: (code) => setExit({ code }),
     });
     // getOrCreate already replaced entry.handlers; nothing else to do.
     void entry;
-  }, [sessionId, rootPath, onOpenFile, onTitle]);
+  }, [sessionId, rootPath, onOpenFile, onOpenLink, onTitle]);
 
   const onDragOver = (e) => {
     e.preventDefault();

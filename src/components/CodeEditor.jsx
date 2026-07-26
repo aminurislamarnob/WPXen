@@ -14,9 +14,10 @@ import { python } from '@codemirror/lang-python';
 import { markdown } from '@codemirror/lang-markdown';
 import { yaml } from '@codemirror/lang-yaml';
 import { sql } from '@codemirror/lang-sql';
-import { Copy, ExternalLink, Save, X, GitCompare, RefreshCw } from 'lucide-react';
+import { Copy, ExternalLink, Save, X, GitCompare, RefreshCw, Globe } from 'lucide-react';
 import { FileGlyph } from '../lib/fileIcons';
 import { Tooltip } from './ui';
+import BrowserPane from './browser/BrowserPane';
 
 // Pick CodeMirror language extensions from a file's extension.
 function languageFor(name) {
@@ -96,11 +97,21 @@ async function loadDiff(rootPath, entry) {
 }
 
 // Editable, syntax-highlighted code editor (CodeMirror 6) with tabs. Handles
-// two tab kinds: 'file' (editable, dirty tracking + save) and 'diff' (a
-// read-only unified diff against a git revision). Tabs are keyed by `key`
-// (a path for files, `diff:<source>:<rel>` for diffs) so a file and its diff
-// can be open at once. `files` is the open-tab list owned by the parent.
-export default function CodeEditor({ rootPath, files, activeKey, onSelect, onClose }) {
+// three tab kinds: 'file' (editable, dirty tracking + save), 'diff' (a
+// read-only unified diff against a git revision), and 'browser' (an in-app
+// <webview> preview, which renders its own chrome). Tabs are keyed by `key`
+// (a path for files, `diff:<source>:<rel>` for diffs, `browser:<n>` for
+// browsers) so a file and its diff can be open at once. `files` is the open-tab
+// list owned by the parent.
+export default function CodeEditor({
+  rootPath,
+  files,
+  activeKey,
+  onSelect,
+  onClose,
+  browserState,
+  onBrowserStateChange,
+}) {
   // key -> { text, original } | { diff } | { binary } | { tooLarge } | { error }
   const [cache, setCache] = useState({});
   const [saving, setSaving] = useState(false);
@@ -137,11 +148,12 @@ export default function CodeEditor({ rootPath, files, activeKey, onSelect, onClo
   const editable = !isDiff && !!data && data.text !== undefined;
   const dirty = editable && data.text !== data.original;
 
-  // Load the active tab's contents on first open.
+  // Load the active tab's contents on first open. Browser tabs have no file
+  // behind them — they load themselves.
   useEffect(() => {
     if (!activeKey || cache[activeKey]) return;
     const entry = files.find((f) => f.key === activeKey);
-    if (!entry) return;
+    if (!entry || entry.kind === 'browser') return;
     let cancelled = false;
     (async () => {
       let normalized;
@@ -240,23 +252,47 @@ export default function CodeEditor({ rootPath, files, activeKey, onSelect, onClo
         {files.map((f) => {
           const isActive = f.key === activeKey;
           const tabIsDiff = f.kind === 'diff';
+          const tabIsBrowser = f.kind === 'browser';
           const isDirty =
             !tabIsDiff &&
+            !tabIsBrowser &&
             cache[f.key]?.text !== undefined &&
             cache[f.key].text !== cache[f.key].original;
           return (
             <div
               key={f.key}
               onClick={() => onSelect(f.key)}
-              title={tabIsDiff ? `${f.rel} — diff (${f.source})` : f.path}
+              title={
+                tabIsBrowser
+                  ? browserState?.[f.key]?.url || 'Browser'
+                  : tabIsDiff
+                    ? `${f.rel} — diff (${f.source})`
+                    : f.path
+              }
               className={`group flex items-center gap-2 pl-3 pr-2 text-[13px] cursor-pointer border-r border-border whitespace-nowrap transition-colors ${
                 isActive
                   ? 'bg-background text-foreground'
                   : 'text-muted-foreground hover:text-foreground'
               }`}
             >
-              <FileGlyph name={f.name} size={13} className="flex-shrink-0" />
-              <span className="truncate max-w-[160px]">{f.name}</span>
+              {tabIsBrowser ? (
+                browserState?.[f.key]?.favicon ? (
+                  <img
+                    src={browserState[f.key].favicon}
+                    alt=""
+                    width={13}
+                    height={13}
+                    className="flex-shrink-0 rounded-sm"
+                  />
+                ) : (
+                  <Globe size={13} className="flex-shrink-0 text-muted-foreground" />
+                )
+              ) : (
+                <FileGlyph name={f.name} size={13} className="flex-shrink-0" />
+              )}
+              <span className="truncate max-w-[160px]">
+                {tabIsBrowser ? browserState?.[f.key]?.title || f.name : f.name}
+              </span>
               {tabIsDiff && (
                 <GitCompare size={11} className="flex-shrink-0 text-muted-foreground" />
               )}
@@ -285,7 +321,18 @@ export default function CodeEditor({ rootPath, files, activeKey, onSelect, onClo
         })}
       </div>
 
-      {active && (
+      {active?.kind === 'browser' && (
+        <BrowserPane
+          key={active.key}
+          tabKey={active.key}
+          initialUrl={active.url}
+          state={browserState?.[active.key] || {}}
+          onStateChange={onBrowserStateChange}
+          onClose={onClose}
+        />
+      )}
+
+      {active && active.kind !== 'browser' && (
         <>
           {/* Header actions */}
           <div className="flex items-center justify-between h-8 px-3 border-b border-border flex-shrink-0">

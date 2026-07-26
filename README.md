@@ -12,6 +12,7 @@ Inspired by [Laravel Herd](https://herd.laravel.com).
 - **One-click service management** — start/stop nginx, PHP-FPM, MySQL, dnsmasq individually or all at once
 - **WordPress site wizard** — 3-step setup: name your site, pick a directory and PHP version, configure the DB — WPHerd handles the rest (downloads WordPress, creates the database, configures nginx, sets up your `.test` domain)
 - **Per-site quick actions** — open in browser, open wp-admin, reveal in Finder, open in Terminal
+- **In-app browser** — preview a site, wp-admin or phpMyAdmin in a tab beside the agent working on it
 - **PHP version switcher** — detects all Homebrew-installed PHP versions and switches between them
 - **`.test` domain support** — dnsmasq routes `*.test` to `127.0.0.1` automatically
 - **Settings panel** — configure sites directory, start at login, one-click dnsmasq setup
@@ -168,6 +169,41 @@ Sites are served under `.test` domains (e.g. `mysite.test`). WPHerd configures t
 3. Starting dnsmasq via Homebrew services
 
 Click *_Settings → Setup *.test DNS*_ to run this one-time setup.
+
+---
+
+## In-app browser
+
+The Agents screen can open a browser tab beside the terminal, so you can watch a
+page change while an agent edits it.
+
+**Opening a tab.** The globe button in the session tab strip offers the targets
+worth reaching for on a site:
+
+| Target         | Goes to                                                                  |
+| -------------- | ------------------------------------------------------------------------ |
+| **Site**       | the site's own URL                                                       |
+| **WP Admin**   | `wp-admin`, upgraded to a one-click magic-login link when that's enabled |
+| **phpMyAdmin** | straight to _this site's_ database, already signed in                    |
+| **Mail inbox** | the Mailpit inbox                                                        |
+| **Blank tab**  | an empty tab with an address bar                                         |
+
+phpMyAdmin installs itself through Homebrew the first time you ask for it, so
+that entry can take a moment on first use.
+
+**Where links open.** Settings → General → _Open links in_ decides whether a
+site's Open / wp-admin / phpMyAdmin actions — and Cmd+clicked URLs in agent
+output — go to your default browser (the default) or to an in-app tab.
+
+**Behaviour.** Tabs keep their page, scroll position and login session when you
+switch to a file tab and back. The address bar autocompletes from browsing
+history; Settings → General can clear that history, or the browser's cookies and
+cache. Cmd+W closes the browser tab (not the window) and Cmd+R reloads the page
+(not WPHerd). Right-click gives the usual navigation, copy and "open in default
+browser" actions, and the toolbar has a DevTools button.
+
+All browser tabs share one session, so signing into a site in one tab carries to
+the next.
 
 ---
 

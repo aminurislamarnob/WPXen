@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import {
   ChevronLeft,
   ExternalLink,
@@ -30,7 +30,10 @@ import WpOverview from './WpOverview';
 import WpPlugins from './WpPlugins';
 import WpThemes from './WpThemes';
 import SiteLogs from './SiteLogs';
+import BrowserPane from './browser/BrowserPane';
+import * as webviewCache from '../lib/browser/webviewCache';
 import { WordPressIcon } from './icons';
+import { useOpenLink } from '../lib/useOpenLink';
 
 const NAV = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard },
@@ -56,7 +59,8 @@ const NAV = [
   { id: 'logs', label: 'Logs', icon: FileText },
 ];
 
-function Overview({ site, onSaved }) {
+function Overview({ site, onSaved, onOpenPma }) {
+  const openLink = useOpenLink();
   const [pmaBusy, setPmaBusy] = useState(false);
   const [tunnel, setTunnel] = useState(null);
   const [copied, setCopied] = useState(false);
@@ -137,12 +141,22 @@ function Overview({ site, onSaved }) {
     return () => window.electronAPI.off('tunnel-update');
   }, [site.id]);
 
+  // phpMyAdmin installs and configures itself on first use, so this resolves
+  // before it can be opened — hence the spinner. Where it opens (default
+  // browser or an in-app tab) is useOpenLink's call, not ours.
   async function handlePhpMyAdmin() {
     setPmaBusy(true);
     setActionError(null);
-    const result = await window.electronAPI.openPhpMyAdmin(site.dbName);
-    if (!result?.success) setActionError(result?.error || 'Failed to open phpMyAdmin.');
+    const result = await window.electronAPI.getPhpMyAdminUrl(site.dbName);
+    if (result?.success) onOpenPma(result.url);
+    else setActionError(result?.error || 'Failed to open phpMyAdmin.');
     setPmaBusy(false);
+  }
+
+  async function handleWpAdmin() {
+    const result = await window.electronAPI.getWpAdminUrl(site.id);
+    if (result?.success) openLink(result.url, site.id);
+    else setActionError(result?.error || 'Failed to open wp-admin.');
   }
 
   async function handleExpose() {
@@ -175,12 +189,12 @@ function Overview({ site, onSaved }) {
     {
       icon: ExternalLink,
       label: 'Open',
-      onClick: () => window.electronAPI.openSiteInBrowser(site.url),
+      onClick: () => openLink(site.url, site.id),
     },
     {
       icon: WordPressIcon,
       label: 'wp-admin',
-      onClick: () => window.electronAPI.openWpAdmin(site.id),
+      onClick: handleWpAdmin,
     },
     {
       icon: pmaBusy ? Loader : HardDrive,
@@ -372,9 +386,73 @@ function Overview({ site, onSaved }) {
 export default function SiteDetail({ sites, refreshSites }) {
   const { id } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
+  const openLink = useOpenLink();
   const [active, setActive] = useState('overview');
 
+  // In-app phpMyAdmin browser state
+  const pmaSeq = useRef(0);
+  const [pmaTabKey, setPmaTabKey] = useState(null);
+  const [pmaBrowserState, setPmaBrowserState] = useState(null);
+
   const site = sites.find((s) => s.id === id);
+
+  // Open phpMyAdmin in the embedded browser pane.
+  const openPma = useCallback(
+    (url) => {
+      // Dispose previous webview if the tab key changed
+      if (pmaTabKey) webviewCache.dispose(pmaTabKey);
+      const key = `pma:${id}:${++pmaSeq.current}`;
+      setPmaTabKey(key);
+      setPmaBrowserState({ url, title: '', loading: true, error: null });
+      setActive('phpmyadmin');
+    },
+    [id, pmaTabKey]
+  );
+
+  const closePma = useCallback(() => {
+    if (pmaTabKey) webviewCache.dispose(pmaTabKey);
+    setPmaTabKey(null);
+    setPmaBrowserState(null);
+    setActive('overview');
+  }, [pmaTabKey]);
+
+  const handlePmaBrowserState = useCallback((_key, patch) => {
+    setPmaBrowserState((prev) => (prev ? { ...prev, ...patch } : prev));
+  }, []);
+
+  // If navigated here with a pmaUrl in state (from SiteCard), auto-open the
+  // in-app browser. The nonce ensures repeated clicks open fresh tabs.
+  useEffect(() => {
+    if (location.state?.pmaUrl) {
+      openPma(location.state.pmaUrl);
+    }
+    // Only run when location changes, not when openPma ref changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.key]);
+
+  // Dispose any leftover webview when the site changes or component unmounts.
+  useEffect(() => {
+    return () => {
+      if (pmaSeq.current > 0) {
+        // Reading the ref during cleanup is the point: we need the count as it
+        // stands at unmount to know how many webviews to dispose. Snapshotting
+        // it when the effect runs would always read the pre-navigation value.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        for (let i = 1; i <= pmaSeq.current; i++) {
+          webviewCache.dispose(`pma:${id}:${i}`);
+        }
+      }
+    };
+  }, [id]);
+
+  // The header's WP Admin button, resolved through the same magic-login path
+  // the Overview quick action uses. Failures are silent here — the header has
+  // nowhere to put an error, and Overview surfaces the same call's reason.
+  const openWpAdmin = async () => {
+    const res = await window.electronAPI.getWpAdminUrl(site.id);
+    if (res?.success) openLink(res.url, site.id);
+  };
 
   if (!site) {
     return (
@@ -388,16 +466,18 @@ export default function SiteDetail({ sites, refreshSites }) {
     );
   }
 
+  const isPma = active === 'phpmyadmin' && pmaTabKey && pmaBrowserState;
+
   return (
-    <div className="animate-fade-in">
+    <div className="animate-fade-in flex flex-col h-full">
       {/* Detail header — System Settings back chevron + title */}
-      <div className="sticky top-0 z-10 bg-background border-b border-border px-4 py-2.5">
+      <div className="sticky top-0 z-10 bg-background border-b border-border px-4 py-2.5 flex-shrink-0">
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-1 min-w-0">
-            <Tooltip label="Back to Sites">
+            <Tooltip label={isPma ? 'Back to Site' : 'Back to Sites'}>
               <button
-                onClick={() => navigate('/sites')}
-                aria-label="Back to Sites"
+                onClick={isPma ? closePma : () => navigate('/sites')}
+                aria-label={isPma ? 'Back to Site' : 'Back to Sites'}
                 className="p-1.5 rounded-lg hover:bg-accent text-muted-foreground flex-shrink-0"
               >
                 <ChevronLeft size={17} />
@@ -412,16 +492,13 @@ export default function SiteDetail({ sites, refreshSites }) {
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
             <button
-              onClick={() => window.electronAPI.openSiteInBrowser(site.url)}
+              onClick={() => openLink(site.url, site.id)}
               className="btn-secondary text-xs"
             >
               <ExternalLink size={12} className="mr-1.5" />
               Visit Site
             </button>
-            <button
-              onClick={() => window.electronAPI.openWpAdmin(site.id)}
-              className="btn-secondary text-xs"
-            >
+            <button onClick={openWpAdmin} className="btn-secondary text-xs">
               <Settings size={12} className="mr-1.5" />
               WP Admin
             </button>
@@ -429,59 +506,76 @@ export default function SiteDetail({ sites, refreshSites }) {
         </div>
       </div>
 
-      {/* Body: subnav + content */}
-      <div className="flex gap-6 p-6">
-        <nav className="w-52 flex-shrink-0 space-y-1">
-          {NAV.map((item) =>
-            item.group ? (
-              <div key={item.label} className="pt-2">
-                <div className="flex items-center gap-2 px-3 py-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                  <item.icon size={13} />
-                  {item.label}
-                </div>
-                <div className="space-y-0.5">
-                  {item.children.map((child) => (
-                    <button
-                      key={child.id}
-                      onClick={() => setActive(child.id)}
-                      className={`w-full text-left pl-9 pr-3 py-1.5 rounded-md text-[13px] transition-colors ${
-                        active === child.id
-                          ? 'bg-highlight text-highlight-foreground font-medium'
-                          : 'text-muted-foreground hover:bg-accent'
-                      }`}
-                    >
-                      {child.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : (
-              <button
-                key={item.id}
-                onClick={() => setActive(item.id)}
-                className={`w-full flex items-center gap-2.5 px-3 py-1.5 rounded-md text-[13px] transition-colors ${
-                  active === item.id
-                    ? 'bg-highlight text-highlight-foreground font-medium'
-                    : 'text-muted-foreground hover:bg-accent'
-                }`}
-              >
-                <item.icon size={14} />
-                {item.label}
-              </button>
-            )
-          )}
-        </nav>
-
-        <div className="flex-1 min-w-0 max-w-3xl">
-          {active === 'overview' && <Overview site={site} onSaved={refreshSites} />}
-          {active === 'wpconfig' && <WpConfigManager site={site} />}
-          {active === 'php' && <SitePhpSettings site={site} onSaved={refreshSites} />}
-          {active === 'wp-overview' && <WpOverview site={site} onSaved={refreshSites} />}
-          {active === 'wp-plugins' && <WpPlugins site={site} onSaved={refreshSites} />}
-          {active === 'wp-themes' && <WpThemes site={site} onSaved={refreshSites} />}
-          {active === 'logs' && <SiteLogs site={site} />}
+      {/* phpMyAdmin in-app browser — full width, no sidebar */}
+      {isPma ? (
+        <div className="flex-1 flex flex-col min-h-0">
+          <BrowserPane
+            tabKey={pmaTabKey}
+            initialUrl={pmaBrowserState.url}
+            state={pmaBrowserState}
+            onStateChange={handlePmaBrowserState}
+            onClose={closePma}
+          />
         </div>
-      </div>
+      ) : (
+        /* Body: subnav + content */
+        <div className="flex gap-6 p-6">
+          <nav className="w-52 flex-shrink-0 space-y-1">
+            {NAV.map((item) =>
+              item.group ? (
+                <div key={item.label} className="pt-2">
+                  <div className="flex items-center gap-2 px-3 py-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                    <item.icon size={13} />
+                    {item.label}
+                  </div>
+                  <div className="space-y-0.5">
+                    {item.children.map((child) => (
+                      <button
+                        key={child.id}
+                        onClick={() => setActive(child.id)}
+                        className={`w-full text-left pl-9 pr-3 py-1.5 rounded-md text-[13px] transition-colors ${
+                          active === child.id
+                            ? 'bg-highlight text-highlight-foreground font-medium'
+                            : 'text-muted-foreground hover:bg-accent'
+                        }`}
+                      >
+                        {child.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <button
+                  key={item.id}
+                  onClick={() => setActive(item.id)}
+                  className={`w-full flex items-center gap-2.5 px-3 py-1.5 rounded-md text-[13px] transition-colors ${
+                    active === item.id
+                      ? 'bg-highlight text-highlight-foreground font-medium'
+                      : 'text-muted-foreground hover:bg-accent'
+                  }`}
+                >
+                  <item.icon size={14} />
+                  {item.label}
+                </button>
+              )
+            )}
+          </nav>
+
+          <div className="flex-1 min-w-0 max-w-3xl">
+            {active === 'overview' && (
+              <Overview site={site} onSaved={refreshSites} onOpenPma={openPma} />
+            )}
+            {active === 'wpconfig' && <WpConfigManager site={site} />}
+            {active === 'php' && <SitePhpSettings site={site} onSaved={refreshSites} />}
+            {active === 'wp-overview' && (
+              <WpOverview site={site} onSaved={refreshSites} />
+            )}
+            {active === 'wp-plugins' && <WpPlugins site={site} onSaved={refreshSites} />}
+            {active === 'wp-themes' && <WpThemes site={site} onSaved={refreshSites} />}
+            {active === 'logs' && <SiteLogs site={site} />}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

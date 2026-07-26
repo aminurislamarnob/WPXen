@@ -83,9 +83,11 @@ export default function AgentsSidebar() {
                         key={agent.id}
                         disabled={!agent.detected}
                         title={
-                          agent.detected
-                            ? 'Open a new session'
-                            : `Not installed · ${agent.install}`
+                          agent.isShell
+                            ? 'Open a shell in this site’s folder'
+                            : agent.detected
+                              ? 'Open a new session'
+                              : `Not installed · ${agent.install}`
                         }
                         onClick={() =>
                           navigate(`/agents/${encodeURIComponent(site.id)}`, {

@@ -22,6 +22,8 @@ const VALID_EVENT_CHANNELS = [
   'terminal-data',
   'terminal-replay',
   'terminal-exit',
+  'browser-new-window',
+  'browser-shortcut',
   'settings-updated',
 ];
 
@@ -34,8 +36,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openSiteInBrowser: (url) => ipcRenderer.invoke('open-in-browser', url),
   openSiteInFinder: (sitePath) => ipcRenderer.invoke('open-in-finder', sitePath),
   openSiteInTerminal: (sitePath) => ipcRenderer.invoke('open-in-terminal', sitePath),
-  openWpAdmin: (id) => ipcRenderer.invoke('open-wp-admin', id),
-  openPhpMyAdmin: (dbName) => ipcRenderer.invoke('open-phpmyadmin', dbName),
 
   // Export / Import
   exportSite: (id) => ipcRenderer.invoke('export-site', id),
@@ -191,6 +191,27 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.send('terminal-resize', sessionId, cols, rows),
   terminalClear: (sessionId) => ipcRenderer.send('terminal-clear', sessionId),
   terminalStop: (sessionId) => ipcRenderer.invoke('terminal-stop', sessionId),
+
+  // In-app browser. The renderer owns the <webview>; these reach its guest in
+  // the main process, keyed by the browser tab's key.
+  browserRegister: (tabKey, webContentsId) =>
+    ipcRenderer.invoke('browser-register', tabKey, webContentsId),
+  browserUnregister: (tabKey) => ipcRenderer.invoke('browser-unregister', tabKey),
+  browserNavigate: (tabKey, url) => ipcRenderer.invoke('browser-navigate', tabKey, url),
+  browserReload: (tabKey, hard) => ipcRenderer.invoke('browser-reload', tabKey, hard),
+  browserOpenDevTools: (tabKey) => ipcRenderer.invoke('browser-open-devtools', tabKey),
+  // Targets an in-app browser tab can be pointed at. These resolve a URL
+  // (installing/configuring the service on first use) instead of opening it.
+  getPhpMyAdminUrl: (dbName) => ipcRenderer.invoke('get-phpmyadmin-url', dbName),
+  getWpAdminUrl: (id) => ipcRenderer.invoke('get-wp-admin-url', id),
+  getMailpitUrl: () => ipcRenderer.invoke('get-mailpit-url'),
+  // Address-bar autocomplete + the Settings actions that wipe it.
+  browserHistoryRecord: (visit) => ipcRenderer.invoke('browser-history-record', visit),
+  browserHistorySearch: (query, limit) =>
+    ipcRenderer.invoke('browser-history-search', query, limit),
+  browserHistoryClear: () => ipcRenderer.invoke('browser-history-clear'),
+  browserClearData: () => ipcRenderer.invoke('browser-clear-data'),
+
   listDirectory: (rootPath, dirPath) =>
     ipcRenderer.invoke('list-directory', rootPath, dirPath),
   terminalStatPath: (rootPath, candidate) =>

@@ -60,6 +60,24 @@ const REGISTRY = [
   },
 ];
 
+// A plain login shell in the Site's directory — no agent, nothing typed. Every
+// launch already spawns the user's shell and types the agent command into it
+// (see `launch`), so this is that same flow with an empty command.
+//
+// Not a REGISTRY entry: there is no binary to detect (the login shell always
+// exists), no install hint to show, and nothing to override. It is also exempt
+// from the enabled filter — hiding the baseline terminal isn't a useful
+// setting, and folding it into `agents.enabled` would silently hide it from
+// anyone whose saved list predates it.
+const SHELL_ID = 'shell';
+const SHELL_AGENT = {
+  id: SHELL_ID,
+  name: 'Terminal',
+  cmd: '',
+  install: '',
+  isShell: true,
+};
+
 // ── User configuration (Settings → Agents) ──────────────────────────────────
 // The registry above is the default set. Users can hide agents they don't use,
 // override the command a built-in agent launches with, and add their own. The
@@ -170,12 +188,14 @@ function resolveBin(cmd, env) {
 // The Agents offered in the launcher, each with a resolved `detected` flag and
 // path (Q5/Q7). `all: true` ignores the enabled filter — Settings needs the
 // full list to render its toggles.
-function listAgents({ all = false } = {}) {
+// `agents: false` drops the providers and leaves only the plain shell; used by
+// Settings → Agents, which has nothing to configure for it.
+function listAgents({ all = false, shell = true } = {}) {
   const env = resolveShellEnv();
-  // A command override can carry arguments ('claude --resume'); only the first
-  // token is a binary to detect on PATH.
-  return effectiveRegistry()
+  const providers = effectiveRegistry()
     .filter((a) => all || !config.enabled || config.enabled.includes(a.id))
+    // A command override can carry arguments ('claude --resume'); only the
+    // first token is a binary to detect on PATH.
     .map((a) => {
       const bin = resolveBin(a.cmd.split(/\s+/)[0], env);
       return {
@@ -184,11 +204,26 @@ function listAgents({ all = false } = {}) {
         cmd: a.cmd,
         install: a.install,
         isCustom: !!a.isCustom,
+        isShell: false,
         enabled: !config.enabled || config.enabled.includes(a.id),
         detected: Boolean(bin),
         path: bin,
       };
     });
+
+  if (!shell) return providers;
+
+  // Last: it's the baseline, but providers are more useful to surface first.
+  return [
+    ...providers,
+    {
+      ...SHELL_AGENT,
+      isCustom: false,
+      enabled: true,
+      detected: true,
+      path: getUserShell(),
+    },
+  ];
 }
 
 // ── Launch resolution (Launch Presets & Targets) ─────────────────────────────
@@ -210,10 +245,13 @@ function listAgents({ all = false } = {}) {
 //   cwd  : target.cwd absolute → as-is; relative → resolved against the
 //          webroot (so `../feature-worktree` and `wp-content/plugins/foo` both
 //          work); absent → the webroot itself.
+//
+// A plain-shell launch passes `cmd: ''`, so `command` collapses to the args
+// alone — or to '' when there are none, which `launch` reads as "type nothing".
 function resolveLaunch({ cmd, sitePath, globalArgs = '', target = null }) {
   const rawArgs = target && target.args != null ? target.args : globalArgs || '';
   const args = String(rawArgs).trim();
-  const command = args ? `${cmd} ${args}` : cmd;
+  const command = [String(cmd || '').trim(), args].filter(Boolean).join(' ');
 
   let cwd = sitePath;
   if (target && target.cwd) {
@@ -264,6 +302,7 @@ function launch({ site, agentId, target = null, globalArgs = '' }) {
   // launcher (e.g. a saved session being restored).
   const agent = listAgents({ all: true }).find((a) => a.id === agentId);
   if (!agent) return { error: `Unknown agent: ${agentId}` };
+  // The shell is always present, so this only ever rejects a missing provider.
   if (!agent.detected) return { error: `${agent.name} is not installed` };
 
   const { command, cwd, label } = resolveLaunch({
@@ -313,6 +352,9 @@ function launch({ site, agentId, target = null, globalArgs = '' }) {
     return { error: `Failed to launch ${agent.name}: ${err.message}` };
   }
 
+  // A plain shell has nothing to type — the pty is already what was asked for.
+  const startsImmediately = !command;
+
   const session = {
     sessionId,
     siteId: site.id,
@@ -325,7 +367,9 @@ function launch({ site, agentId, target = null, globalArgs = '' }) {
     buffer: '',
     window: null,
     exited: false,
-    started: false,
+    // `started` gates the type-the-command step; a shell session has already
+    // arrived at what the user wanted, so it starts out done.
+    started: startsImmediately,
   };
   sessions.set(sessionId, session);
 
@@ -344,7 +388,7 @@ function launch({ site, agentId, target = null, globalArgs = '' }) {
     if (session.started || settleTimer) return;
     settleTimer = setTimeout(runAgent, 150);
   };
-  setTimeout(runAgent, 1200); // fallback: no output before the prompt
+  if (!startsImmediately) setTimeout(runAgent, 1200); // fallback: no output first
 
   term.onData((data) => {
     scheduleRun();
@@ -442,6 +486,7 @@ function stopAll() {
 }
 
 module.exports = {
+  SHELL_ID,
   setConfig,
   effectiveRegistry,
   listAgents,

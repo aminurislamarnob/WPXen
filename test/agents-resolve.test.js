@@ -4,6 +4,36 @@ import agents from '../electron/services/agents.cjs';
 const { resolveLaunch } = agents;
 const SITE = '/Users/me/Sites/foo';
 
+// A plain-shell launch passes an empty cmd, so the resolved command collapses
+// to the args alone — or to '' , which launch() reads as "type nothing".
+describe('agents.resolveLaunch — plain shell', () => {
+  it('resolves to an empty command at the webroot', () => {
+    expect(resolveLaunch({ cmd: '', sitePath: SITE })).toEqual({
+      command: '',
+      cwd: SITE,
+      label: null,
+    });
+  });
+
+  it('still honours a pinned directory', () => {
+    const r = resolveLaunch({
+      cmd: '',
+      sitePath: SITE,
+      target: { cwd: 'wp-content/plugins/foo', label: 'Plugin' },
+    });
+    expect(r).toEqual({
+      command: '',
+      cwd: `${SITE}/wp-content/plugins/foo`,
+      label: 'Plugin',
+    });
+  });
+
+  it('types just the args when a preset supplies them, with no stray space', () => {
+    const r = resolveLaunch({ cmd: '', sitePath: SITE, globalArgs: 'npm run dev' });
+    expect(r.command).toBe('npm run dev');
+  });
+});
+
 describe('agents.resolveLaunch', () => {
   it('bare command at the webroot when nothing is configured', () => {
     expect(resolveLaunch({ cmd: 'claude', sitePath: SITE })).toEqual({

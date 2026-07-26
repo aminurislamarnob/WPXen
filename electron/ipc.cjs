@@ -1,24 +1,20 @@
 'use strict';
 
-const { ipcMain, shell, dialog, app, BrowserWindow, nativeTheme } = require('electron');
+const {
+  ipcMain,
+  shell,
+  dialog,
+  app,
+  BrowserWindow,
+  nativeTheme,
+  session,
+} = require('electron');
 const crypto = require('crypto');
 const path = require('path');
 const os = require('os');
 
-// Only ever hand these schemes to shell.openExternal — never file:// or a
-// custom URL handler that a tampered store could smuggle in.
-function openExternalSafely(url) {
-  try {
-    const parsed = new URL(url);
-    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
-      shell.openExternal(url);
-      return true;
-    }
-  } catch {
-    // fall through
-  }
-  return false;
-}
+// The single sanctioned way out of the app — see services/safeUrl.cjs.
+const { openExternalSafely } = require('./services/safeUrl.cjs');
 
 const fs = require('fs');
 const brew = require('./services/brew.cjs');
@@ -41,6 +37,8 @@ const validation = require('./services/validation.cjs');
 const agents = require('./services/agents.cjs');
 const files = require('./services/files.cjs');
 const git = require('./services/git.cjs');
+const browser = require('./services/browser.cjs');
+const browserHistory = require('./services/browserHistory.cjs');
 const settingsService = require('./services/settings.cjs');
 const externalTools = require('./services/externalTools.cjs');
 const { humanize } = require('./services/errors.cjs');
@@ -199,6 +197,9 @@ async function refreshDependencies(win, { minIntervalMs = 3000 } = {}) {
 function registerHandlers(win, storeInstance) {
   mainWindow = win;
   store = storeInstance;
+  // The in-app browser pushes guest events (new windows, and later console
+  // output) back to the renderer through this window.
+  browser.setWindow(win);
 
   // Bind the settings schema to the store. Side effects that used to live in
   // the save-settings ladder hang off `effects` — one place per key, run only
@@ -258,8 +259,9 @@ function registerHandlers(win, storeInstance) {
   ipcMain.handle('agent-list', () => agents.listAgents());
 
   // Every agent including hidden ones — the Agents settings section needs the
-  // full list to render its enable/disable toggles.
-  ipcMain.handle('agent-list-all', () => agents.listAgents({ all: true }));
+  // full list to render its enable/disable toggles. The plain shell is left out:
+  // it has no binary to detect, no command to override, and is always available.
+  ipcMain.handle('agent-list-all', () => agents.listAgents({ all: true, shell: false }));
 
   // The live Sessions for a Site — the renderer restores its terminal tabs.
   ipcMain.handle('agent-sessions', (_e, siteId) => agents.listSessions(siteId));
@@ -355,6 +357,61 @@ function registerHandlers(win, storeInstance) {
   ipcMain.handle('terminal-stop', (_e, sessionId) => {
     agents.stop(sessionId);
     return { ok: true };
+  });
+
+  // ─── In-app browser ───────────────────────────────────────────────────
+  // The renderer owns the <webview> element and re-registers its guest on
+  // every dom-ready (reparenting mints a new webContentsId); these handlers
+  // reach the guest for the things a renderer cannot do itself.
+
+  ipcMain.handle('browser-register', (_e, tabKey, webContentsId) => {
+    browser.register(tabKey, webContentsId);
+    return { ok: true };
+  });
+
+  ipcMain.handle('browser-unregister', (_e, tabKey) => {
+    browser.unregister(tabKey);
+    return { ok: true };
+  });
+
+  ipcMain.handle('browser-navigate', (_e, tabKey, url) => ({
+    ok: browser.navigate(tabKey, url),
+  }));
+
+  ipcMain.handle('browser-reload', (_e, tabKey, hard) => ({
+    ok: browser.reload(tabKey, !!hard),
+  }));
+
+  ipcMain.handle('browser-open-devtools', (_e, tabKey) => ({
+    ok: browser.openDevTools(tabKey),
+  }));
+
+  // Address-bar autocomplete, backed by the JsonStore rather than a SQL layer.
+  ipcMain.handle('browser-history-record', (_e, visit) => {
+    browserHistory.record(store, visit || {});
+    return { ok: true };
+  });
+
+  ipcMain.handle('browser-history-search', (_e, query, limit) =>
+    browserHistory.search(store, query, limit)
+  );
+
+  ipcMain.handle('browser-history-clear', () => {
+    browserHistory.clear(store);
+    return { ok: true };
+  });
+
+  // Cookies, cache and site storage for the browser's partition. Wiping it logs
+  // the user out of every site they signed into in-app, so the UI confirms.
+  ipcMain.handle('browser-clear-data', async () => {
+    try {
+      const ses = session.fromPartition(browser.PARTITION);
+      await ses.clearStorageData();
+      await ses.clearCache();
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
   });
 
   // Project explorer: read-only directory listing confined to a Site's root.
@@ -1122,20 +1179,22 @@ function registerHandlers(win, storeInstance) {
   // Opens wp-admin — via the magic-login URL when one-click admin is enabled,
   // otherwise the plain /wp-admin. Kept in the main process so the secret is
   // never handed to the renderer.
-  ipcMain.handle('open-wp-admin', (_, id) => {
+  // wp-admin for a site, upgraded to a magic-login link when one-click admin is
+  // on. Shared so an in-app browser tab lands signed in just like the system
+  // browser does.
+  function resolveWpAdminUrl(id) {
     const site = store.get('sites', []).find((s) => s.id === id);
     if (!site) return { success: false, error: 'Site not found' };
     const base = site.url.replace(/\/+$/, '');
-    let target = `${base}/wp-admin`;
+    let url = `${base}/wp-admin`;
     if (site.oneClickAdmin?.enabled) {
       const secret = store.get(`magicLogin.${id}`, null);
-      if (secret) target = `${base}/?wpherd_magic_login=${secret}`;
+      if (secret) url = `${base}/?wpherd_magic_login=${secret}`;
     }
-    const ok = openExternalSafely(target);
-    return ok
-      ? { success: true }
-      : { success: false, error: 'Refused to open unsafe URL' };
-  });
+    return { success: true, url };
+  }
+
+  ipcMain.handle('get-wp-admin-url', (_, id) => resolveWpAdminUrl(id));
 
   // ─── Site config (WP Config Manager) ───────────────────────────────────
 
@@ -1475,19 +1534,33 @@ function registerHandlers(win, storeInstance) {
     }
   });
 
-  ipcMain.handle('open-phpmyadmin', async (_, dbName) => {
+  // Install (first run only), configure and serve phpMyAdmin, then hand back
+  // the deep link for `dbName`. The renderer decides where it opens — the
+  // default browser or an in-app tab — via Settings → Open links in.
+  async function resolvePhpMyAdminUrl(dbName) {
+    // Reject anything that isn't a valid DB name before it reaches the URL —
+    // same rule that gates site creation.
+    if (dbName != null && !validation.DB_NAME_RE.test(dbName)) {
+      return { success: false, error: 'Invalid database name.' };
+    }
+    await phpmyadmin.ensureReady();
+    return { success: true, url: phpmyadmin.getUrl(dbName) };
+  }
+
+  ipcMain.handle('get-phpmyadmin-url', async (_, dbName) => {
     try {
-      // Reject anything that isn't a valid DB name before it reaches the URL.
-      if (dbName != null && !/^[a-zA-Z0-9_]{1,64}$/.test(dbName)) {
-        return { success: false, error: 'Invalid database name.' };
-      }
-      await phpmyadmin.ensureReady();
-      const url = phpmyadmin.getUrl(dbName);
-      openExternalSafely(url);
-      return { success: true, url };
+      return await resolvePhpMyAdminUrl(dbName);
     } catch (err) {
       return { success: false, error: humanize(err) };
     }
+  });
+
+  // The Mailpit inbox, for opening in an in-app browser tab.
+  ipcMain.handle('get-mailpit-url', () => {
+    if (!mailpit.isInstalled()) {
+      return { success: false, error: 'Mailpit is not installed.' };
+    }
+    return { success: true, url: mailpit.getUrl() };
   });
 
   // ─── Mailpit (email catching) ──────────────────────────────────────────

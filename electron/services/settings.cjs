@@ -65,6 +65,11 @@ const SETTINGS = {
   // confirmation defaults on.
   'app.confirmOnQuit': { type: 'bool', default: true },
   'app.closeAction': { type: 'enum', values: ['tray', 'quit'], default: 'tray' },
+  // Where a site's Open / wp-admin / phpMyAdmin actions land. 'app' sends them
+  // to a browser tab on that site's Agents screen instead of the default
+  // browser. Defaults to 'system' so the actions keep behaving as they always
+  // have until someone opts in.
+  'app.openLinksIn': { type: 'enum', values: ['system', 'app'], default: 'system' },
 
   // ── Appearance ───────────────────────────────────────────────────────────
   // Drives Electron's nativeTheme.themeSource, which forces the renderer's
