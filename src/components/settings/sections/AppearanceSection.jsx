@@ -1,13 +1,16 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import CodeMirror from '@uiw/react-codemirror';
 import { EditorView } from '@codemirror/view';
 import { php } from '@codemirror/lang-php';
+import { Terminal as XTerm } from '@xterm/xterm';
+import '@xterm/xterm/css/xterm.css';
 import { Card, SectionLabel, SettingsRow, Toggle } from '../../ui';
 import { NumberSetting, RangeSetting, SelectSetting, TextSetting } from '../controls';
 import { useSettings } from '../../../lib/useSettings';
 import { useSettingsContext } from '../SettingsLayout';
 import { buildEditorMetrics, editorThemes } from '../../../lib/editorTheme';
-import { MONO_STACK, onThemeChange, themeName } from '../../../lib/theme';
+import { toTerminalOptions } from '../../../lib/typography';
+import { MONO_STACK, onThemeChange, terminalThemes, themeName } from '../../../lib/theme';
 
 // Fonts worth offering by name. WPHerd can't enumerate installed families from
 // the renderer without the (Chromium-only, permission-gated) local font access
@@ -48,8 +51,14 @@ const FONT_OPTIONS = [
 // samples are picked to exercise the glyphs a mono font is judged on — =>, !==,
 // ->, $ and braces — so ligatures and weight have something to act on.
 const SAMPLES = {
-  terminal: `$ wp plugin list --status=active
-=> 0 !== $count && $x >= 1;`,
+  // ANSI-coloured on purpose: it exercises the theme's palette, and the dim
+  // grey line is what the minimum-contrast floor acts on, so that row has
+  // something visible to do.
+  terminal: [
+    '\x1b[32m$\x1b[0m wp plugin list --status=active',
+    'woocommerce   \x1b[33m9.4.2\x1b[0m   \x1b[32mactive\x1b[0m',
+    '\x1b[90m=> 0 !== $count && $x >= 1;\x1b[0m',
+  ].join('\r\n'),
   editor: `<?php
 final class WPHerd_Hello {
     public function __construct() {
@@ -118,15 +127,78 @@ function EditorPreview({ sample, ...values }) {
   );
 }
 
-// The terminal sample stays plain text on the terminal's own surface — it is a
-// shell transcript, not a document, so an editor chrome would misrepresent it.
-function TerminalPreview({ sample, ...values }) {
-  const t = asTypography(values);
+// The terminal sample is a real xterm on the real terminal theme, driven
+// through the same toTerminalOptions() mapping a live session uses. A styled
+// <pre> could never show cursor style or the minimum-contrast floor at all —
+// those are renderer options, not CSS.
+function TerminalPreview({ sample, family, size, lineHeight, letterSpacing, weight }) {
+  const { settings } = useSettings();
+  const hostRef = useRef(null);
+  const termRef = useRef(null);
+  const [theme, setTheme] = useState(themeName);
+  useEffect(() => onThemeChange(setTheme), []);
+
+  const cursorStyle = settings['appearance.terminal.cursorStyle'] || 'block';
+  const options = useMemo(
+    () => ({
+      ...toTerminalOptions({
+        fontFamily: family,
+        fontSize: size,
+        lineHeight,
+        letterSpacing,
+        fontWeight: weight,
+        cursorStyle,
+        cursorBlink: settings['appearance.terminal.cursorBlink'] !== false,
+        minimumContrast: settings['appearance.terminal.minimumContrast'] ?? 1,
+      }),
+      // The preview never takes focus, so the *inactive* cursor has to carry
+      // the shape — otherwise the cursor-style row would look inert.
+      cursorInactiveStyle: cursorStyle,
+    }),
+    [family, size, lineHeight, letterSpacing, weight, cursorStyle, settings]
+  );
+
+  // Built once; later option and theme changes are pushed onto the live
+  // instance below, exactly as sessionCache does for real terminals. The
+  // current values are seeded here too so the first paint isn't xterm's
+  // defaults briefly flashing before the effects below run.
+  useEffect(() => {
+    const term = new XTerm({
+      rows: 3,
+      cols: 52,
+      disableStdin: true,
+      convertEol: true,
+      allowProposedApi: true,
+      scrollback: 0,
+      theme: terminalThemes[theme],
+      ...options,
+    });
+    term.open(hostRef.current);
+    term.write(sample);
+    termRef.current = term;
+    return () => {
+      termRef.current = null;
+      term.dispose();
+    };
+    // Options and theme are deliberately not deps — they are applied to the
+    // live instance rather than rebuilding the terminal.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sample]);
+
+  useEffect(() => {
+    if (termRef.current) Object.assign(termRef.current.options, options);
+  }, [options]);
+
+  useEffect(() => {
+    if (termRef.current) termRef.current.options.theme = terminalThemes[theme];
+  }, [theme]);
+
   return (
-    <div className="sheet-well mt-2 overflow-x-auto px-3 py-2.5">
-      <pre className="text-foreground" style={{ ...t, margin: 0 }}>
-        {sample}
-      </pre>
+    <div
+      className="mt-2 overflow-x-auto rounded-lg border border-border/60 p-3"
+      style={{ background: terminalThemes[theme].background }}
+    >
+      <div ref={hostRef} />
     </div>
   );
 }

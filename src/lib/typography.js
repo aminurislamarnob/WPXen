@@ -70,9 +70,13 @@ export function onTypographyChange(handler) {
   return () => subscribers.delete(handler);
 }
 
-/** xterm.js options derived from the terminal block. */
-export function terminalOptions() {
-  const t = current.terminal;
+/**
+ * Maps a terminal typography block onto xterm.js options. Exported separately
+ * from `terminalOptions()` so the Appearance preview can render arbitrary
+ * values — including a slider mid-drag — through exactly the same mapping a
+ * real session uses.
+ */
+export function toTerminalOptions(t) {
   return {
     fontFamily: resolveFamily(t.fontFamily),
     fontSize: t.fontSize,
@@ -86,6 +90,11 @@ export function terminalOptions() {
     cursorBlink: t.cursorBlink,
     minimumContrastRatio: t.minimumContrast,
   };
+}
+
+/** xterm.js options derived from the terminal block. */
+export function terminalOptions() {
+  return toTerminalOptions(current.terminal);
 }
 
 /** CodeMirror-facing values derived from the editor block. */
