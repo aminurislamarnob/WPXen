@@ -61,7 +61,7 @@ function buildContextMenu(mainWindow, serviceStatus, sites) {
 
   return Menu.buildFromTemplate([
     {
-      label: 'WPHerd',
+      label: 'WPDevPilot',
       enabled: false,
     },
     { type: 'separator' },
@@ -79,7 +79,7 @@ function buildContextMenu(mainWindow, serviceStatus, sites) {
     },
     { type: 'separator' },
     {
-      label: 'Open WPHerd',
+      label: 'Open WPDevPilot',
       click: () => {
         if (mainWindow) {
           mainWindow.show();
@@ -90,7 +90,7 @@ function buildContextMenu(mainWindow, serviceStatus, sites) {
     ...siteItems,
     { type: 'separator' },
     {
-      label: 'Quit WPHerd',
+      label: 'Quit WPDevPilot',
       accelerator: 'Cmd+Q',
       click: () => {
         app.quit();
@@ -101,7 +101,7 @@ function buildContextMenu(mainWindow, serviceStatus, sites) {
 
 function createTray(mainWindow, getStatus, getSites) {
   tray = new Tray(createTrayIcon());
-  tray.setToolTip('WPHerd — Local WordPress Development');
+  tray.setToolTip('WPDevPilot — Local WordPress Development');
 
   // Show main window on click (macOS: left-click opens menu, so use double-click)
   tray.on('double-click', () => {

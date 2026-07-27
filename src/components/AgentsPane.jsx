@@ -28,7 +28,7 @@ import { useSettings } from '../lib/useSettings';
 // Code prefix a status glyph) so the tab label reads cleanly.
 const cleanTitle = (t) => t.trim().replace(/^[\p{Emoji}\p{Symbol}]\s*/u, '');
 
-const CLOSE_CONFIRM_KEY = 'wpherd.terminalCloseConfirmSuppressed';
+const CLOSE_CONFIRM_KEY = 'wpdevpilot.terminalCloseConfirmSuppressed';
 
 // The places you actually want to look at while an agent works on a site.
 // Order is by how often they're reached for, not alphabetical.

@@ -2,7 +2,7 @@
 // classes — xterm.js and CodeMirror both want plain hex strings at runtime.
 // Keep these in sync with the CSS tokens in src/index.css: the dark palette is
 // Superset's "ember", the light one its neutral theme, and in both the cursor /
-// selection use WPHerd blue rather than Superset's ember orange.
+// selection use WPDevPilot blue rather than Superset's ember orange.
 
 // The 16-color ANSI sets double as the syntax palettes for the code editor
 // (see src/lib/editorTheme.js), exactly like Superset derives its editor theme

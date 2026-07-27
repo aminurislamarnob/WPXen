@@ -95,7 +95,7 @@ export default function DnsSection() {
           title="Passwordless DNS Control"
           subtitle={
             sudoers?.configured
-              ? 'WPHerd manages the dnsmasq resolver silently — no password prompts.'
+              ? 'WPDevPilot manages the dnsmasq resolver silently — no password prompts.'
               : 'Without this, macOS asks for your password when dnsmasq starts or stops.'
           }
         >
@@ -176,9 +176,9 @@ export default function DnsSection() {
       </Card>
 
       <p className="text-[11px] text-muted-foreground mt-1.5 px-1">
-        Installs <span className="font-mono">/etc/sudoers.d/wpherd</span> granting
+        Installs <span className="font-mono">/etc/sudoers.d/wpdevpilot</span> granting
         passwordless <span className="font-mono">sudo brew services</span>, used only for
-        dnsmasq — the other services run inside WPHerd and need no privileges.
+        dnsmasq — the other services run inside WPDevPilot and need no privileges.
       </p>
 
       {[sudoersMessage, dnsMessage].filter(Boolean).map((m, i) => (

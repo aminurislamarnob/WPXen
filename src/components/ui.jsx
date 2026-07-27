@@ -100,7 +100,7 @@ export function SettingsRow({ id, visible, ...props }) {
   return <Row {...props} />;
 }
 
-// Colored rounded-square icon tile. A deliberate WPHerd carve-out: Superset's
+// Colored rounded-square icon tile. A deliberate WPDevPilot carve-out: Superset's
 // iconography is all-monochrome, but the colored tiles are part of this app's
 // identity, so they stay in the sidebar, page heroes and settings rows.
 // size: tile square in px; icon scales with it.
@@ -130,7 +130,7 @@ export function IconTile({ icon: Icon, color = 'blue', size = 26, className = ''
   );
 }
 
-// Switch. Superset's compact dimensions, WPHerd's blue for the checked state
+// Switch. Superset's compact dimensions, WPDevPilot's blue for the checked state
 // (its `primary` is monochrome, which reads as "disabled" for a toggle).
 export function Toggle({ checked, onChange, disabled, label }) {
   return (

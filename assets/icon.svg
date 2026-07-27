@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="WPDevPilot">
+  <title>WPDevPilot</title>
+  <!-- Source of truth for icon.icns and the tray icons — regenerate the raster
+       sets from this. macOS grid: the tile covers 84% of the canvas with a
+       22.37% corner radius, and the plane spans 54% of the tile. -->
+  <rect x="81.9" y="81.9" width="860.2" height="860.2" rx="192.4" fill="#0a60ff" />
+  <path d="M713.7 309.7 291.5 491.3 466.7 556.7 532.2 727.7Z" fill="#fff" />
+</svg>

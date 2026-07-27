@@ -328,7 +328,7 @@ function selectExistingPlugins(plugins, exists) {
 
 // All-in-One WP Migration blanks active_plugins/template/stylesheet in its DB
 // export (so nothing fatals mid-restore) and re-applies them from package.json
-// in its own importer. WPHerd imports the DB directly, so without this step
+// in its own importer. WPDevPilot imports the DB directly, so without this step
 // every plugin and the site theme come back deactivated. Replicates AI1WM's
 // final activation — direct option writes, filtered to entries whose files are
 // present (matching ai1wm_activate_plugins/template/stylesheet).
@@ -361,6 +361,17 @@ function restoreWpressActiveState(sitePath, pkg) {
   } catch {}
 }
 
+// Deletes a mu-plugin left behind under its pre-rename (WPHerd) file name.
+// Both copies would otherwise load and redeclare the same functions — a fatal
+// error for the tunnel plugin, and a live second magic-login route holding a
+// stale secret. Best-effort: a read-only wp-content just keeps the old file.
+function removeLegacyMuPlugin(sitePath, name) {
+  const file = path.join(sitePath, 'wp-content', 'mu-plugins', name);
+  try {
+    if (fs.existsSync(file)) fs.unlinkSync(file);
+  } catch {}
+}
+
 // Drops a must-use plugin that makes WordPress emit URLs for whatever host the
 // request actually arrived on when that host is a *.trycloudflare.com share
 // domain. Without it, WP would generate `http://<site>.test` links that break
@@ -368,11 +379,11 @@ function restoreWpressActiveState(sitePath, pkg) {
 // normal local (.test) access. Best-effort — a missing wp-content is ignored.
 function ensureTunnelMuPlugin(sitePath) {
   const muDir = path.join(sitePath, 'wp-content', 'mu-plugins');
-  const file = path.join(muDir, 'wpherd-tunnel.php');
+  const file = path.join(muDir, 'wpdevpilot-tunnel.php');
   const contents = `<?php
 /**
- * Plugin Name: WPHerd Share Tunnel
- * Description: Serves correct URLs when the site is accessed through a WPHerd Cloudflare share tunnel. Managed by WPHerd.
+ * Plugin Name: WPDevPilot Share Tunnel
+ * Description: Serves correct URLs when the site is accessed through a WPDevPilot Cloudflare share tunnel. Managed by WPDevPilot.
  */
 if (!defined('ABSPATH')) {
     exit;
@@ -381,7 +392,7 @@ if (!defined('ABSPATH')) {
 /**
  * True when the current request arrived on a Cloudflare quick-tunnel share host.
  */
-function wpherd_is_tunnel_request() {
+function wpdevpilot_is_tunnel_request() {
     return !empty($_SERVER['HTTP_HOST'])
         && substr($_SERVER['HTTP_HOST'], -18) === '.trycloudflare.com';
 }
@@ -392,7 +403,7 @@ function wpherd_is_tunnel_request() {
 // endlessly (ERR_TOO_MANY_REDIRECTS). Mark tunnel requests as HTTPS — matching
 // the edge — so is_ssl() agrees with the https site URL and the loop is gone.
 // This runs at mu-plugin load, before any admin auth/SSL redirect check.
-if (wpherd_is_tunnel_request()) {
+if (wpdevpilot_is_tunnel_request()) {
     $_SERVER['HTTPS'] = 'on';
 }
 
@@ -400,21 +411,22 @@ if (wpherd_is_tunnel_request()) {
  * When the request host is a Cloudflare quick-tunnel domain, override the
  * home/siteurl so all generated links point at the public tunnel URL.
  */
-function wpherd_tunnel_filter_url($value) {
-    if (wpherd_is_tunnel_request()) {
+function wpdevpilot_tunnel_filter_url($value) {
+    if (wpdevpilot_is_tunnel_request()) {
         // Cloudflare quick tunnels are always served over https at the edge.
         return 'https://' . $_SERVER['HTTP_HOST'];
     }
     return $value;
 }
-add_filter('option_home', 'wpherd_tunnel_filter_url');
-add_filter('option_siteurl', 'wpherd_tunnel_filter_url');
+add_filter('option_home', 'wpdevpilot_tunnel_filter_url');
+add_filter('option_siteurl', 'wpdevpilot_tunnel_filter_url');
 `;
 
   try {
     if (!fs.existsSync(path.join(sitePath, 'wp-content'))) return false;
     if (!fs.existsSync(muDir)) fs.mkdirSync(muDir, { recursive: true });
     fs.writeFileSync(file, contents, 'utf8');
+    removeLegacyMuPlugin(sitePath, 'wpherd-tunnel.php');
     return true;
   } catch {
     return false;
@@ -459,7 +471,7 @@ function listAdminUsers(sitePath) {
 // per-site secret. Idempotent — call again to switch users or rotate the secret.
 function ensureMagicLoginMuPlugin(sitePath, { userId, secret }) {
   const muDir = path.join(sitePath, 'wp-content', 'mu-plugins');
-  const file = path.join(muDir, 'wpherd-magic-login.php');
+  const file = path.join(muDir, 'wpdevpilot-magic-login.php');
   const uid = parseInt(userId, 10);
   if (!Number.isInteger(uid) || uid <= 0) {
     throw new Error('A valid administrator must be selected.');
@@ -469,15 +481,15 @@ function ensureMagicLoginMuPlugin(sitePath, { userId, secret }) {
   }
   const contents = `<?php
 /**
- * Plugin Name: WPHerd One-Click Admin
- * Description: Passwordless admin login for local development. Managed by WPHerd — local access only.
+ * Plugin Name: WPDevPilot One-Click Admin
+ * Description: Passwordless admin login for local development. Managed by WPDevPilot — local access only.
  */
 if (!defined('ABSPATH')) {
     exit;
 }
 
 add_action('init', function () {
-    if (empty($_GET['wpherd_magic_login']) || !is_string($_GET['wpherd_magic_login'])) {
+    if (empty($_GET['wpdevpilot_magic_login']) || !is_string($_GET['wpdevpilot_magic_login'])) {
         return;
     }
     $secret  = '${secret}';
@@ -487,7 +499,7 @@ add_action('init', function () {
     if (substr($host, -18) === '.trycloudflare.com') {
         return;
     }
-    if (!hash_equals($secret, $_GET['wpherd_magic_login'])) {
+    if (!hash_equals($secret, $_GET['wpdevpilot_magic_login'])) {
         return;
     }
     $user = get_user_by('id', $user_id);
@@ -507,14 +519,21 @@ add_action('init', function () {
   }
   if (!fs.existsSync(muDir)) fs.mkdirSync(muDir, { recursive: true });
   fs.writeFileSync(file, contents, 'utf8');
+  removeLegacyMuPlugin(sitePath, 'wpherd-magic-login.php');
   return true;
 }
 
 // Removes the managed magic-login mu-plugin (when the feature is turned off).
 function removeMagicLoginMuPlugin(sitePath) {
-  const file = path.join(sitePath, 'wp-content', 'mu-plugins', 'wpherd-magic-login.php');
+  const file = path.join(
+    sitePath,
+    'wp-content',
+    'mu-plugins',
+    'wpdevpilot-magic-login.php'
+  );
   try {
     if (fs.existsSync(file)) fs.unlinkSync(file);
+    removeLegacyMuPlugin(sitePath, 'wpherd-magic-login.php');
     return true;
   } catch {
     return false;

@@ -285,13 +285,13 @@ describe('sites.dir validation', () => {
   });
 
   it('rejects a path that does not exist', () => {
-    expect(spec.validate(path.join(os.tmpdir(), 'wpherd-no-such-dir-xyz'))).toBe(
+    expect(spec.validate(path.join(os.tmpdir(), 'wpdevpilot-no-such-dir-xyz'))).toBe(
       'that folder does not exist'
     );
   });
 
   it('rejects a file', () => {
-    const file = path.join(os.tmpdir(), `wpherd-settings-test-${Date.now()}`);
+    const file = path.join(os.tmpdir(), `wpdevpilot-settings-test-${Date.now()}`);
     fs.writeFileSync(file, '');
     try {
       expect(spec.validate(file)).toBe('that path is not a folder');

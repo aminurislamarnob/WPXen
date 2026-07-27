@@ -46,7 +46,7 @@ export default function ServicesSection() {
           ))}
         </Card>
         <p className="text-[11px] text-muted-foreground mt-1.5 px-1">
-          Services WPHerd brings up when it starts. Mailpit is skipped when it isn’t
+          Services WPDevPilot brings up when it starts. Mailpit is skipped when it isn’t
           installed. You can always start a service by hand from the Services page.
         </p>
       </div>

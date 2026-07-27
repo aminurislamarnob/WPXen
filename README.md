@@ -1,8 +1,13 @@
-# WPHerd
+# WPDevPilot
 
 Blazingly fast local WordPress development for macOS — a native menu bar app that manages nginx, PHP-FPM, MySQL, and dnsmasq via Homebrew so you can spin up WordPress sites in seconds.
 
 Inspired by [Laravel Herd](https://herd.laravel.com).
+
+> **Previously released as WPHerd.** Upgrading is seamless: the first launch
+> carries your sites, settings and blueprints over from the old app's data
+> directory, archives exported by WPHerd still import, and the managed
+> `php.ini`, mu-plugin and sudoers files it left behind are replaced in place.
 
 ---
 
@@ -10,7 +15,7 @@ Inspired by [Laravel Herd](https://herd.laravel.com).
 
 - **macOS menu bar app** — lives in your tray, out of your way
 - **One-click service management** — start/stop nginx, PHP-FPM, MySQL, dnsmasq individually or all at once
-- **WordPress site wizard** — 3-step setup: name your site, pick a directory and PHP version, configure the DB — WPHerd handles the rest (downloads WordPress, creates the database, configures nginx, sets up your `.test` domain)
+- **WordPress site wizard** — 3-step setup: name your site, pick a directory and PHP version, configure the DB — WPDevPilot handles the rest (downloads WordPress, creates the database, configures nginx, sets up your `.test` domain)
 - **Per-site quick actions** — open in browser, open wp-admin, reveal in Finder, open in Terminal
 - **In-app browser** — preview a site, wp-admin or phpMyAdmin in a tab beside the agent working on it
 - **PHP version switcher** — detects all Homebrew-installed PHP versions and switches between them
@@ -37,7 +42,7 @@ Inspired by [Laravel Herd](https://herd.laravel.com).
 
 ## Prerequisites
 
-WPHerd manages services installed via [Homebrew](https://brew.sh). Install Homebrew first if you don't have it:
+WPDevPilot manages services installed via [Homebrew](https://brew.sh). Install Homebrew first if you don't have it:
 
 ```bash
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
@@ -62,8 +67,8 @@ brew install php@8.1 php@8.2 php@8.3
 ### Development
 
 ```bash
-git clone https://github.com/aminurislamarnob/wpherd.git
-cd wpherd
+git clone https://github.com/aminurislamarnob/wpdevpilot.git
+cd wpdevpilot
 npm install
 npm run dev
 ```
@@ -83,7 +88,7 @@ Outputs a `.dmg` installer to `release/` for both Apple Silicon and Intel.
 ## How it works
 
 ```
-WPHerd (Electron)
+WPDevPilot (Electron)
 ├── Main process (Node.js / CJS)
 │   ├── Services layer — wraps Homebrew CLI to manage processes
 │   │   ├── nginx     → generates vhost configs in /opt/homebrew/etc/nginx/servers/
@@ -100,7 +105,7 @@ WPHerd (Electron)
     └── Settings      → preferences + dependency checker
 ```
 
-When you add a WordPress site, WPHerd:
+When you add a WordPress site, WPDevPilot:
 
 1. Creates the site directory
 2. Runs `wp core download` to fetch WordPress
@@ -117,12 +122,12 @@ Your site is immediately available at `http://<name>.test`.
 ## Project structure
 
 ```
-wpherd/
+wpdevpilot/
 ├── electron/
 │   ├── main.cjs          # App entry, window management, tray
 │   ├── preload.cjs       # Secure IPC bridge (contextBridge)
 │   ├── ipc.cjs           # All IPC handler registrations
-│   ├── store.cjs         # JSON persistence (userData/wpherd-data.json)
+│   ├── store.cjs         # JSON persistence (userData/wpdevpilot-data.json)
 │   ├── tray.cjs          # Menu bar icon + context menu
 │   └── services/
 │       ├── brew.cjs      # Homebrew detection + PHP version discovery
@@ -148,7 +153,7 @@ wpherd/
 
 ## Homebrew paths
 
-WPHerd auto-detects your Homebrew prefix:
+WPDevPilot auto-detects your Homebrew prefix:
 
 | Mac                      | Homebrew prefix |
 | ------------------------ | --------------- |
@@ -162,7 +167,7 @@ PHP-FPM sockets are expected at `{prefix}/var/run/php/php{version}-fpm.sock`.
 
 ## DNS setup
 
-Sites are served under `.test` domains (e.g. `mysite.test`). WPHerd configures this by:
+Sites are served under `.test` domains (e.g. `mysite.test`). WPDevPilot configures this by:
 
 1. Adding `address=/.test/127.0.0.1` to `{prefix}/etc/dnsmasq.conf`
 2. Creating `/etc/resolver/test` with `nameserver 127.0.0.1` (requires your admin password — a macOS dialog will appear)
@@ -199,7 +204,7 @@ output — go to your default browser (the default) or to an in-app tab.
 switch to a file tab and back. The address bar autocompletes from browsing
 history; Settings → General can clear that history, or the browser's cookies and
 cache. Cmd+W closes the browser tab (not the window) and Cmd+R reloads the page
-(not WPHerd). Right-click gives the usual navigation, copy and "open in default
+(not WPDevPilot). Right-click gives the usual navigation, copy and "open in default
 browser" actions, and the toolbar has a DevTools button.
 
 All browser tabs share one session, so signing into a site in one tab carries to

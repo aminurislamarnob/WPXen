@@ -38,7 +38,7 @@ function execBrew(command) {
 // latter tries to refresh Homebrew's JSON API cache and exits non-zero on any
 // warning — e.g. a "Permission denied" on a root-owned cache file (left behind
 // by a past `sudo brew` run) makes `brew list` fail even though the formula is
-// present, which would make WPHerd report core services as missing. The
+// present, which would make WPDevPilot report core services as missing. The
 // filesystem check is also far faster (no Ruby spawn).
 function isPackageInstalled(name) {
   const prefix = getBrewPrefix();
@@ -82,7 +82,7 @@ function phpBinaryVersion(phpBin) {
   }
 }
 
-// Candidate versioned formulae WPHerd knows how to detect/install.
+// Candidate versioned formulae WPDevPilot knows how to detect/install.
 const PHP_VERSION_CANDIDATES = ['8.4', '8.3', '8.2', '8.1', '8.0', '7.4'];
 
 function getInstalledPhpVersions() {
@@ -312,7 +312,7 @@ function restartBrewService(name) {
 
 // Runs `brew services <action> <name>` as root.
 //
-// If the WPHerd sudoers file is installed (/etc/sudoers.d/wpherd), sudo runs
+// If the WPDevPilot sudoers file is installed (/etc/sudoers.d/wpdevpilot), sudo runs
 // silently with no password prompt. Otherwise falls back to an osascript
 // admin-privileges dialog — acceptable for the first run before setup.
 function execBrewServiceSudo(action, name) {
@@ -340,7 +340,7 @@ function execBrewServiceSudo(action, name) {
   const { adminOsascript } = require('./admin.cjs');
   const prefix = getBrewPrefix();
   const shellCmd = `PATH=${prefix}/bin:$PATH ${brewBin} services ${action} ${name}`;
-  const reason = `WPHerd wants to ${action} the ${name} service.`;
+  const reason = `WPDevPilot wants to ${action} the ${name} service.`;
   execSync(adminOsascript(shellCmd, reason), {
     stdio: ['ignore', 'pipe', 'pipe'],
   });

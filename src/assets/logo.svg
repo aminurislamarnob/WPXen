@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 250 48" role="img" aria-label="WPDevPilot">
+  <title>WPDevPilot</title>
+  <!-- Mark: the same tile + paper plane as assets/icon.svg (the app and tray
+       icons), so all three read as one mark. -->
+  <rect x="0" y="4" width="40" height="40" rx="11" fill="#0a60ff" />
+  <path d="M29.4 14.6 9.75 23.05 17.9 26.1 20.95 34Z" fill="#fff" />
+  <!-- textLength pins the wordmark's width so the lockup keeps its proportions
+       whatever the platform resolves the system font stack to. -->
+  <text
+    x="52"
+    y="34"
+    font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Helvetica, Arial, sans-serif"
+    font-size="30"
+    letter-spacing="-0.9"
+    textLength="196"
+    lengthAdjust="spacingAndGlyphs"
+  >
+    <tspan font-weight="800" fill="#0a60ff">WP</tspan><tspan font-weight="700" fill="#5d8bff">DevPilot</tspan>
+  </text>
+</svg>

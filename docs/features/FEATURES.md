@@ -1,6 +1,6 @@
-# WPHerd — Feature Roadmap
+# WPDevPilot — Feature Roadmap
 
-A comparison of WPHerd against leading local WordPress/PHP development tools, and a
+A comparison of WPDevPilot against leading local WordPress/PHP development tools, and a
 prioritized list of features to implement. Compiled from:
 
 - **Local (LocalWP)** — https://localwp.com/features/
@@ -12,31 +12,31 @@ prioritized list of features to implement. Compiled from:
 
 ## Competitor comparison
 
-| Capability                            | Local | Herd        | Studio                | **WPHerd today** |
-| ------------------------------------- | ----- | ----------- | --------------------- | ---------------- |
-| Native services (nginx / PHP / MySQL) | ✅    | ✅          | ✅                    | ✅               |
-| Multiple / hot-swap PHP versions      | ✅    | ✅          | ✅                    | ✅               |
-| Mail catching (Mailpit)               | ✅    | ✅ (Pro)    | ✅                    | ✅               |
-| phpMyAdmin / DB UI                    | ✅    | —           | ✅                    | ✅               |
-| Public share tunnel                   | ✅    | ✅ (Expose) | ✅ (Preview)          | ✅ (Cloudflare)  |
-| One-click admin / magic login         | —     | —           | —                     | ✅               |
-| Log viewer                            | ✅    | ✅ (Pro)    | ✅                    | ✅ (per-site)    |
-| Xdebug                                | ✅    | ✅          | ✅                    | ❌               |
-| Site cloning                          | ✅    | —           | —                     | ✅               |
-| Blueprints / templates                | ✅    | herd.yml    | ✅                    | ✅               |
-| Change site URL (+ DB search-replace) | ✅    | —           | ✅                    | ✅               |
-| Export / import site                  | ✅    | —           | ✅                    | ✅               |
-| Cloud backup / push-to-host sync      | ✅    | ✅ (Forge)  | ✅ (.com / Pressable) | ❌               |
-| Multisite support                     | ✅    | —           | —                     | ❌               |
-| AI / agentic coding                   | —     | —           | ✅ (Studio Code)      | ❌               |
-| Cross-platform (Windows / Linux)      | ✅    | ✅          | ✅                    | ❌ (macOS only)  |
+| Capability                            | Local | Herd        | Studio                | **WPDevPilot today** |
+| ------------------------------------- | ----- | ----------- | --------------------- | -------------------- |
+| Native services (nginx / PHP / MySQL) | ✅    | ✅          | ✅                    | ✅                   |
+| Multiple / hot-swap PHP versions      | ✅    | ✅          | ✅                    | ✅                   |
+| Mail catching (Mailpit)               | ✅    | ✅ (Pro)    | ✅                    | ✅                   |
+| phpMyAdmin / DB UI                    | ✅    | —           | ✅                    | ✅                   |
+| Public share tunnel                   | ✅    | ✅ (Expose) | ✅ (Preview)          | ✅ (Cloudflare)      |
+| One-click admin / magic login         | —     | —           | —                     | ✅                   |
+| Log viewer                            | ✅    | ✅ (Pro)    | ✅                    | ✅ (per-site)        |
+| Xdebug                                | ✅    | ✅          | ✅                    | ❌                   |
+| Site cloning                          | ✅    | —           | —                     | ✅                   |
+| Blueprints / templates                | ✅    | herd.yml    | ✅                    | ✅                   |
+| Change site URL (+ DB search-replace) | ✅    | —           | ✅                    | ✅                   |
+| Export / import site                  | ✅    | —           | ✅                    | ✅                   |
+| Cloud backup / push-to-host sync      | ✅    | ✅ (Forge)  | ✅ (.com / Pressable) | ❌                   |
+| Multisite support                     | ✅    | —           | —                     | ❌                   |
+| AI / agentic coding                   | —     | —           | ✅ (Studio Code)      | ❌                   |
+| Cross-platform (Windows / Linux)      | ✅    | ✅          | ✅                    | ❌ (macOS only)      |
 
 ---
 
-## Current WPHerd features (baseline)
+## Current WPDevPilot features (baseline)
 
 The **Also in** tag names which competitors ship a comparable feature — useful for
-spotting where WPHerd is already at parity and where it stands alone.
+spotting where WPDevPilot is already at parity and where it stands alone.
 
 - Supervised-child service management: nginx, PHP-FPM, MySQL, dnsmasq (start/stop/restart, crash restart, status polling) — _Also in: Local, Herd, Studio_
 - Add / remove local `.test` sites via a streamed multi-step pipeline — _Also in: Local, Herd, Studio_
@@ -44,16 +44,16 @@ spotting where WPHerd is already at parity and where it stands alone.
 - WP management via WP-CLI: overview, plugins, themes, wp-config editor (managed + raw), admin users — _Also in: Local, Studio_
 - Mailpit inbox (catch `mail()`, read / mark / delete, web UI) — _Also in: Local, Herd (Pro), Studio_
 - Cloudflare share tunnels (install, start / stop / list) — _Also in: Local (Live Links), Herd (Expose), Studio (Preview)_
-- One-click admin "magic login" — _WPHerd only_
+- One-click admin "magic login" — _WPDevPilot only_
 - phpMyAdmin, open in browser / Finder / terminal, per-site HTTPS toggle — _Also in: Local, Studio_
 - Per-site logs (view / clear) — _Also in: Local, Herd, Studio_
 - dnsmasq + `/etc/resolver/test` setup, sudoers management, dependency checks, onboarding — _Also in: Local, Herd, Studio_
 - Change site URL: rename a domain with WP-CLI `search-replace`, vhost regen, fresh cert — _Also in: Local, Studio_
 - Clone / duplicate a site: copy files + dump/restore DB + rewrite config/URLs + new vhost — _Also in: Local_
-- Export / import site: portable files+SQL zip; imports WPHerd, generic, and `.wpress` archives — _Also in: Local, Studio_
+- Export / import site: portable files+SQL zip; imports WPDevPilot, generic, and `.wpress` archives — _Also in: Local, Studio_
 - Site blueprints: save a full site snapshot and create new sites from it (Add Site → From Blueprint) — _Also in: Local, Herd (`herd.yml`), Studio_
 - HTTPS certificate trust automation: mkcert local CA install + per-site trusted cert — _Also in: Local, Studio_
-- Agent Launcher terminal: per-site AI-agent sessions in an embedded terminal with native clipboard/keys (Cmd+C/V, Shift+Enter multiline, line-edit chords), find (Cmd+F), clear (Cmd+K), WebGL rendering, Cmd+click file/URL links, drag-drop paths, OSC tab titles, and a session cache that survives tab switches — _WPHerd only (agentic coding: also in Studio Code)_
+- Agent Launcher terminal: per-site AI-agent sessions in an embedded terminal with native clipboard/keys (Cmd+C/V, Shift+Enter multiline, line-edit chords), find (Cmd+F), clear (Cmd+K), WebGL rendering, Cmd+click file/URL links, drag-drop paths, OSC tab titles, and a session cache that survives tab switches — _WPDevPilot only (agentic coding: also in Studio Code)_
 
 ---
 
@@ -64,7 +64,7 @@ benchmarking) and a **Reference** link to that solution's documentation.
 
 > **Workflow:** to build any of these, tell Claude the feature name (e.g. "develop
 > _Xdebug integration_" or "implement feature 3, _Clone site_"). Claude will open the
-> reference link to study how the competitor solves it, then implement the WPHerd
+> reference link to study how the competitor solves it, then implement the WPDevPilot
 > equivalent against `electron/` + `src/`.
 
 ### Tier 1 — High-value, low-friction (fits current architecture directly)
@@ -85,7 +85,7 @@ benchmarking) and a **Reference** link to that solution's documentation.
    — _Provided by: Local_
    — Reference: [Local — blueprints & clone](https://localwp.com/help-docs/local-features/how-to-use-blueprints/)
 4. **Export / Import site** — ✅ **Shipped.** Exports files + SQL into a portable
-   zip; imports WPHerd archives, generic files+SQL zips, and `.wpress`
+   zip; imports WPDevPilot archives, generic files+SQL zips, and `.wpress`
    (All-in-One WP Migration) for interop. See `siteops.cjs` + `archive.cjs` +
    `wpress.cjs`.
    — _Provided by: Local, Studio_

@@ -23,7 +23,7 @@ import DependenciesSection from './components/settings/sections/DependenciesSect
 import AboutSection from './components/settings/sections/AboutSection';
 import Onboarding from './components/Onboarding';
 import { SettingsProvider } from './lib/useSettings';
-import logo from './assets/logo.png';
+import logo from './assets/logo.svg';
 
 // Core dependencies without which the app can't run — used to gate onboarding.
 const coreMissing = (d) =>
@@ -95,8 +95,8 @@ export default function App() {
     return (
       <div className="h-screen flex items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-4">
-          <img src={logo} alt="WPHerd" className="h-9 w-auto" draggable={false} />
-          <p className="text-sm text-muted-foreground">Starting WPHerd…</p>
+          <img src={logo} alt="WPDevPilot" className="h-9 w-auto" draggable={false} />
+          <p className="text-sm text-muted-foreground">Starting WPDevPilot…</p>
         </div>
       </div>
     );

@@ -13,7 +13,7 @@ import {
   PanelLeft,
   Terminal,
 } from 'lucide-react';
-import logo from '../assets/logo.png';
+import logo from '../assets/logo.svg';
 import AgentsSidebar from './AgentsSidebar';
 import { Tooltip } from './ui';
 
@@ -161,7 +161,7 @@ export default function Layout() {
         <div className="flex items-center px-4 py-3">
           <img
             src={logo}
-            alt="WPHerd"
+            alt="WPDevPilot"
             className="h-5 w-auto object-contain"
             draggable={false}
           />

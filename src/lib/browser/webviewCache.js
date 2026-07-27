@@ -16,7 +16,7 @@ const cache = new Map(); // tabKey -> entry
 // visible in the next — which is the whole point when the agent and the user
 // are looking at the same site. Must match PARTITION in
 // electron/services/browser.cjs, which is what "clear browsing data" wipes.
-export const PARTITION = 'persist:wpherd-browser';
+export const PARTITION = 'persist:wpdevpilot-browser';
 
 let hiddenContainer = null;
 

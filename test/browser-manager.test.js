@@ -199,12 +199,12 @@ describe('navigation', () => {
     registry.set(1, guest);
     browser.register('browser:1', 1);
 
-    expect(browser.navigate('browser:1', 'wpherd.test')).toBe(true);
-    expect(guest.loadURL).toHaveBeenCalledWith('https://wpherd.test');
+    expect(browser.navigate('browser:1', 'wpdevpilot.test')).toBe(true);
+    expect(guest.loadURL).toHaveBeenCalledWith('https://wpdevpilot.test');
   });
 
   it('reports failure rather than throwing when the tab is gone', () => {
-    expect(browser.navigate('browser:gone', 'wpherd.test')).toBe(false);
+    expect(browser.navigate('browser:gone', 'wpdevpilot.test')).toBe(false);
     expect(browser.reload('browser:gone')).toBe(false);
     expect(browser.openDevTools('browser:gone')).toBe(false);
   });
@@ -234,8 +234,8 @@ describe('navigation', () => {
 describe('isAllowedBrowserUrl', () => {
   it('allows the web schemes a browser tab can sit on', () => {
     for (const url of [
-      'http://wpherd.test',
-      'https://wpherd.test/wp-admin',
+      'http://wpdevpilot.test',
+      'https://wpdevpilot.test/wp-admin',
       'about:blank',
     ]) {
       expect(browser.isAllowedBrowserUrl(url)).toBe(true);
@@ -248,7 +248,7 @@ describe('isAllowedBrowserUrl', () => {
       'javascript:alert(1)',
       'data:text/html,<script>',
       'ftp://example.com',
-      'wpherd://open',
+      'wpdevpilot://open',
       '',
       'not a url',
     ]) {
@@ -274,7 +274,7 @@ describe('scheme guard', () => {
     const { guest } = registered();
     for (const event of ['will-navigate', 'will-redirect']) {
       const e = { preventDefault: vi.fn() };
-      guest.emit(event, e, 'https://wpherd.test/wp-admin');
+      guest.emit(event, e, 'https://wpdevpilot.test/wp-admin');
       expect(e.preventDefault).not.toHaveBeenCalled();
     }
   });
@@ -298,7 +298,7 @@ describe('context menu', () => {
       {},
       {
         linkURL: 'https://example.com/docs',
-        pageURL: 'http://wpherd.test/',
+        pageURL: 'http://wpdevpilot.test/',
         selectionText: '',
         editFlags: NO_EDIT,
       }
@@ -329,7 +329,7 @@ describe('context menu', () => {
       {},
       {
         linkURL: '',
-        pageURL: 'http://wpherd.test/',
+        pageURL: 'http://wpdevpilot.test/',
         selectionText: '',
         editFlags: NO_EDIT,
       }
@@ -337,7 +337,7 @@ describe('context menu', () => {
 
     expect(labels()).toContain('Copy Page URL');
     item('Copy Page URL').click();
-    expect(writeText).toHaveBeenCalledWith('http://wpherd.test/');
+    expect(writeText).toHaveBeenCalledWith('http://wpdevpilot.test/');
     expect(item('Open Page in Default Browser').enabled).toBe(true);
   });
 
@@ -364,7 +364,7 @@ describe('context menu', () => {
       {},
       {
         linkURL: '',
-        pageURL: 'http://wpherd.test/',
+        pageURL: 'http://wpdevpilot.test/',
         selectionText: 'hello',
         editFlags: { canCopy: true, canPaste: false, canSelectAll: true },
       }
@@ -382,7 +382,7 @@ describe('context menu', () => {
       {},
       {
         linkURL: '',
-        pageURL: 'http://wpherd.test/',
+        pageURL: 'http://wpdevpilot.test/',
         selectionText: '',
         editFlags: NO_EDIT,
       }

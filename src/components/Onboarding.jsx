@@ -15,7 +15,7 @@ import {
   Circle,
 } from 'lucide-react';
 import { Button, IconTile, ProgressLog, StepIndicator, Tooltip } from './ui';
-import logo from '../assets/logo.png';
+import logo from '../assets/logo.svg';
 
 const CORE_KEYS = ['nginx', 'php', 'mysql', 'dnsmasq', 'wpCli'];
 const CORE_LABELS = {
@@ -207,12 +207,12 @@ export default function Onboarding({ deps, onComplete, onCreateFirstSite }) {
           <div className="text-center">
             <img
               src={logo}
-              alt="WPHerd"
+              alt="WPDevPilot"
               className="h-9 w-auto mx-auto mb-5"
               draggable={false}
             />
-            <StepHeading title="Welcome to WPHerd">
-              Let&apos;s get your Mac set up for local WordPress development — WPHerd
+            <StepHeading title="Welcome to WPDevPilot">
+              Let&apos;s get your Mac set up for local WordPress development — WPDevPilot
               installs and configures everything it needs via Homebrew.
             </StepHeading>
             <div className="grid grid-cols-2 gap-2 mb-6 text-left">
@@ -235,8 +235,8 @@ export default function Onboarding({ deps, onComplete, onCreateFirstSite }) {
         {current === 'homebrew' && (
           <div className="text-center">
             <StepHero icon={Beaker} color="orange" title="Install Homebrew">
-              Homebrew is the package manager WPHerd uses. It installs in Terminal — you
-              may be asked for your password and to install Xcode tools.
+              Homebrew is the package manager WPDevPilot uses. It installs in Terminal —
+              you may be asked for your password and to install Xcode tools.
             </StepHero>
 
             {!brewLaunched ? (
@@ -353,8 +353,8 @@ export default function Onboarding({ deps, onComplete, onCreateFirstSite }) {
         {current === 'dns' && (
           <div className="text-center">
             <StepHero icon={Globe} color="teal" title="Configure .test domains">
-              WPHerd routes <code className="font-mono text-[12px]">*.test</code> sites to
-              your Mac using dnsmasq. This needs your admin password once.
+              WPDevPilot routes <code className="font-mono text-[12px]">*.test</code>{' '}
+              sites to your Mac using dnsmasq. This needs your admin password once.
             </StepHero>
             <Button
               variant="primary"
@@ -406,7 +406,8 @@ export default function Onboarding({ deps, onComplete, onCreateFirstSite }) {
         {current === 'done' && (
           <div className="text-center">
             <StepHero icon={PartyPopper} color="purple" title="You're all set!">
-              WPHerd is ready. Create your first WordPress site or head to the dashboard.
+              WPDevPilot is ready. Create your first WordPress site or head to the
+              dashboard.
             </StepHero>
             <div className="space-y-2">
               <Button

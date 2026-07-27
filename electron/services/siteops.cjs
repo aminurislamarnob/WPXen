@@ -16,7 +16,11 @@ const { DOMAIN_RE } = require('./validation.cjs');
 // does, and long WP-CLI calls run through wpAsync with a 10-minute budget so
 // big databases don't trip the default 2-minute timeout.
 
-const MANIFEST_NAME = 'wpherd-manifest.json';
+const MANIFEST_NAME = 'wpdevpilot-manifest.json';
+// Archives exported before the WPHerd → WPDevPilot rename. Still importable:
+// the payload is identical, only the manifest name and `format` tag differ.
+const LEGACY_MANIFEST_NAME = 'wpherd-manifest.json';
+const MANIFEST_FORMATS = ['wpdevpilot-site', 'wpherd-site'];
 const LONG_TIMEOUT = 600000;
 
 // AIO housekeeping entries that must not be copied into wp-content.
@@ -34,7 +38,7 @@ function getTmpRoot() {
     const { app } = require('electron');
     return path.join(app.getPath('userData'), 'tmp');
   } catch {
-    return path.join(os.tmpdir(), 'wpherd-tmp');
+    return path.join(os.tmpdir(), 'wpdevpilot-tmp');
   }
 }
 
@@ -48,7 +52,7 @@ function makeTmpDir() {
 
 function buildManifest(site, { tablePrefix = 'wp_' } = {}) {
   return {
-    format: 'wpherd-site',
+    format: 'wpdevpilot-site',
     formatVersion: 1,
     exportedAt: new Date().toISOString(),
     name: site.name,
@@ -68,12 +72,12 @@ function validateManifest(obj) {
   if (!obj || typeof obj !== 'object') {
     throw new Error('The archive manifest is not valid JSON.');
   }
-  if (obj.format !== 'wpherd-site') {
-    throw new Error('This archive was not exported by WPHerd.');
+  if (!MANIFEST_FORMATS.includes(obj.format)) {
+    throw new Error('This archive was not exported by WPDevPilot.');
   }
   if (obj.formatVersion !== 1) {
     throw new Error(
-      `This archive uses format version ${obj.formatVersion}, which this version of WPHerd cannot read.`
+      `This archive uses format version ${obj.formatVersion}, which this version of WPDevPilot cannot read.`
     );
   }
   if (typeof obj.domain !== 'string' || !DOMAIN_RE.test(obj.domain)) {
@@ -89,8 +93,20 @@ function validateManifest(obj) {
 
 function detectImportKind(ext, entries) {
   if (ext === '.wpress') return 'wpress';
-  if (entries.some((e) => e === MANIFEST_NAME)) return 'wpherd';
+  if (entries.some((e) => e === MANIFEST_NAME || e === LEGACY_MANIFEST_NAME)) {
+    return 'wpdevpilot';
+  }
   return 'generic';
+}
+
+// Path of the manifest inside an extracted archive, preferring the current
+// name over the legacy one. Null when neither is present.
+function findManifest(dir) {
+  for (const name of [MANIFEST_NAME, LEGACY_MANIFEST_NAME]) {
+    const p = path.join(dir, name);
+    if (fs.existsSync(p)) return p;
+  }
+  return null;
 }
 
 // Extracts the host from a URL-ish string, or null.
@@ -168,7 +184,7 @@ async function inspectArchive(archivePath) {
       originUrl,
       suggestedName: baseSlug || 'imported-site',
       warning: multisite
-        ? 'This archive appears to contain a multisite network, which WPHerd does not support.'
+        ? 'This archive appears to contain a multisite network, which WPDevPilot does not support.'
         : null,
     };
   }
@@ -176,8 +192,11 @@ async function inspectArchive(archivePath) {
   const entries = await archive.listZipEntries(archivePath);
   const kind = detectImportKind(ext, entries);
 
-  if (kind === 'wpherd') {
-    const raw = await archive.readZipEntry(archivePath, MANIFEST_NAME);
+  if (kind === 'wpdevpilot') {
+    const entryName = entries.includes(MANIFEST_NAME)
+      ? MANIFEST_NAME
+      : LEGACY_MANIFEST_NAME;
+    const raw = await archive.readZipEntry(archivePath, entryName);
     const manifest = validateManifest(JSON.parse(raw));
     return {
       kind,
@@ -299,24 +318,19 @@ async function importSite(archivePath, target, onProgress) {
     } else {
       await archive.extractZip(archivePath, tmp);
     }
+    const manifestPath = kind === 'wpress' ? null : findManifest(tmp);
     const zipKind =
-      kind === 'wpress'
-        ? 'wpress'
-        : fs.existsSync(path.join(tmp, MANIFEST_NAME))
-          ? 'wpherd'
-          : 'generic';
+      kind === 'wpress' ? 'wpress' : manifestPath ? 'wpdevpilot' : 'generic';
 
-    // Manifest (wpherd archives only) — carries origin URL and table prefix.
+    // Manifest (wpdevpilot archives only) — carries origin URL and table prefix.
     let manifest = null;
-    if (zipKind === 'wpherd') {
-      manifest = validateManifest(
-        JSON.parse(fs.readFileSync(path.join(tmp, MANIFEST_NAME), 'utf8'))
-      );
+    if (zipKind === 'wpdevpilot') {
+      manifest = validateManifest(JSON.parse(fs.readFileSync(manifestPath, 'utf8')));
     }
 
     // Locate the SQL dump before touching the filesystem/database.
     let sqlFile = null;
-    if (zipKind === 'wpherd' || zipKind === 'wpress') {
+    if (zipKind === 'wpdevpilot' || zipKind === 'wpress') {
       const p = path.join(tmp, 'database.sql');
       sqlFile = fs.existsSync(p) ? p : null;
       if (!sqlFile && zipKind === 'wpress') {
@@ -334,10 +348,10 @@ async function importSite(archivePath, target, onProgress) {
       }
     }
 
-    // Multisite guard — WPHerd vhosts and tooling are single-site only.
+    // Multisite guard — WPDevPilot vhosts and tooling are single-site only.
     if (sqlFile && isMultisiteDump(readSqlHead(sqlFile))) {
       throw new Error(
-        'This archive contains a multisite network, which WPHerd does not support yet.'
+        'This archive contains a multisite network, which WPDevPilot does not support yet.'
       );
     }
 
@@ -345,10 +359,10 @@ async function importSite(archivePath, target, onProgress) {
     if (fs.existsSync(target.path) && fs.readdirSync(target.path).length > 0) {
       throw new Error(`${target.path} already exists and is not empty.`);
     }
-    if (zipKind === 'wpherd') {
+    if (zipKind === 'wpdevpilot') {
       const filesDir = path.join(tmp, 'files');
       if (!fs.existsSync(filesDir)) {
-        throw new Error('This WPHerd archive is missing its files/ directory.');
+        throw new Error('This WPDevPilot archive is missing its files/ directory.');
       }
       moveDir(filesDir, target.path);
       ledger.dirCreated = true;

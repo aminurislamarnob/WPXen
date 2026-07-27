@@ -3,7 +3,7 @@
 // Catches outgoing email from all sites. Mailpit runs a local SMTP sink
 // (127.0.0.1:1025) with a web inbox and REST API (127.0.0.1:8025). PHP's
 // mail() — and therefore wp_mail() — is routed into it by pointing
-// sendmail_path at `mailpit sendmail` via a WPHerd-managed conf.d override,
+// sendmail_path at `mailpit sendmail` via a WPDevPilot-managed conf.d override,
 // so no WordPress plugin or per-site change is needed.
 
 const { spawn, execSync } = require('child_process');
@@ -93,7 +93,7 @@ async function isRunningAsync() {
   }
 }
 
-// Mailpit runs as a supervised child of WPHerd (see procman.cjs) — no launchd
+// Mailpit runs as a supervised child of WPDevPilot (see procman.cjs) — no launchd
 // registration, so it never shows up in macOS "App Background Activity".
 function buildSpec() {
   const bin = getBinPath();
@@ -148,14 +148,30 @@ function getUrl(messageId) {
 
 // ─── PHP sendmail override ──────────────────────────────────────────────────
 //
-// One WPHerd-managed ini per installed PHP version (loaded last from conf.d).
-// Kept separate from zz-wpherd.ini so the numeric-settings round-tripper there
+// One WPDevPilot-managed ini per installed PHP version (loaded last from conf.d).
+// Kept separate from zz-wpdevpilot.ini so the numeric-settings round-tripper there
 // never sees or clobbers it.
 
 function getManagedIniPath(version) {
   const prefix = brew.getBrewPrefix();
   if (!prefix) return null;
-  return `${prefix}/etc/php/${version}/conf.d/zz-wpherd-mailpit.ini`;
+  return `${prefix}/etc/php/${version}/conf.d/zz-wpdevpilot-mailpit.ini`;
+}
+
+// Pre-rename override. It loads after ours (conf.d is alphabetical), so it must
+// be cleared whether catching is being turned on or off — otherwise turning it
+// off would leave PHP still piping mail() into Mailpit.
+function removeLegacyManagedIni(version) {
+  const prefix = brew.getBrewPrefix();
+  if (!prefix) return false;
+  const legacy = `${prefix}/etc/php/${version}/conf.d/zz-wpherd-mailpit.ini`;
+  try {
+    if (!fs.existsSync(legacy)) return false;
+    fs.rmSync(legacy, { force: true });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function buildIni() {
@@ -163,7 +179,7 @@ function buildIni() {
   // PHP invokes the real sendmail (`sendmail -t -i`) — mail() passes no
   // recipient arguments on the command line.
   return [
-    '; Managed by WPHerd — routes PHP mail() into Mailpit.',
+    '; Managed by WPDevPilot — routes PHP mail() into Mailpit.',
     `sendmail_path = "${getBinPath()} sendmail -t"`,
     '',
   ].join('\n');
@@ -193,6 +209,7 @@ function setCatchEnabled(enabled) {
       fs.rmSync(p, { force: true });
       changed = true;
     }
+    if (removeLegacyManagedIni(version)) changed = true;
     if (changed) php.reloadPhpFpmIfRunning(version);
   }
 }

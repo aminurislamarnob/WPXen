@@ -158,8 +158,9 @@ export default function PhpSettings() {
         ))}
       </div>
       <p className="text-xs text-muted-foreground mt-3">
-        Changes are written to a WPHerd-managed <span className="font-mono">.ini</span>{' '}
-        and applied by restarting each version&apos;s PHP-FPM.
+        Changes are written to a WPDevPilot-managed{' '}
+        <span className="font-mono">.ini</span> and applied by restarting each
+        version&apos;s PHP-FPM.
       </p>
     </div>
   );

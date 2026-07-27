@@ -13,7 +13,7 @@
    window backdrop).
 
    `--accent` is the neutral *hover fill*, not the brand color. The brand color
-   is `--highlight` (WPHerd blue). */
+   is `--highlight` (WPDevPilot blue). */
 :root {
   color-scheme: light;
 
@@ -44,7 +44,7 @@
   --sidebar-accent: 240 238 237;
   --sidebar-border: 231 231 231;
 
-  --highlight: 10 96 255; /* WPHerd blue */
+  --highlight: 10 96 255; /* WPDevPilot blue */
   --highlight-foreground: 255 255 255;
   --highlight-match: rgba(255, 211, 61, 0.35); /* search hit */
   --highlight-active: rgba(10, 96, 255, 0.35); /* current search hit */
@@ -275,7 +275,7 @@ textarea:focus {
     @apply text-[13px] font-semibold text-foreground mb-2 px-1;
   }
 
-  /* Small colored icon tile (sidebar + rows) — a deliberate WPHerd carve-out
+  /* Small colored icon tile (sidebar + rows) — a deliberate WPDevPilot carve-out
    from Superset's all-monochrome iconography. */
   .icon-tile {
     @apply rounded-[7px] flex items-center justify-center flex-shrink-0 text-white;

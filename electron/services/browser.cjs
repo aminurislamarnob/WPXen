@@ -83,7 +83,7 @@ function sanitizeUrl(url) {
 // Every browser tab shares one session, so signing into a site in one tab is
 // visible in the next. Must match PARTITION in src/lib/browser/webviewCache.js,
 // which is what actually sets it on the element (asserted in the tests).
-const PARTITION = 'persist:wpherd-browser';
+const PARTITION = 'persist:wpdevpilot-browser';
 
 // tabKey -> webContentsId of the live guest
 const guests = new Map();
@@ -227,7 +227,7 @@ function attachContextMenu(tabKey, wc) {
 
 // While a guest has focus its renderer sees keystrokes first, so neither the
 // app's window-level listeners nor the menu accelerators fire — Cmd+W would
-// hide the whole app and Cmd+R reload WPHerd itself. before-input-event runs
+// hide the whole app and Cmd+R reload WPDevPilot itself. before-input-event runs
 // in the main process ahead of both, and preventDefault suppresses them.
 //
 // keyDown-only so the chord doesn't fire again on keyUp; Shift/Alt are left

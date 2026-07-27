@@ -1,4 +1,4 @@
-// What a user types in the address bar isn't a URL yet: `wpherd.test` is a
+// What a user types in the address bar isn't a URL yet: `wpdevpilot.test` is a
 // host, `localhost:8025` is an insecure host, and `why is php slow` is a search.
 //
 // Deliberately duplicated in electron/services/browser.cjs — the main process
@@ -15,7 +15,7 @@ export function sanitizeUrl(url) {
 }
 
 // Address-bar presentation: hide about:blank entirely and drop the bare
-// trailing slash so "https://wpherd.test/" reads as "https://wpherd.test".
+// trailing slash so "https://wpdevpilot.test/" reads as "https://wpdevpilot.test".
 export function displayUrl(url) {
   if (!url || url === 'about:blank') return '';
   return url.endsWith('/') ? url.slice(0, -1) : url;

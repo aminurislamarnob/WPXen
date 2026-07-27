@@ -75,7 +75,7 @@ function configureDnsmasq() {
 
   const addressLine = `address=/.${TLD}/127.0.0.1`;
   if (!content.includes(addressLine)) {
-    content += `\n# WPHerd: Route *.${TLD} to localhost\n${addressLine}\n`;
+    content += `\n# WPDevPilot: Route *.${TLD} to localhost\n${addressLine}\n`;
     fs.writeFileSync(confPath, content, 'utf8');
   }
 
@@ -84,13 +84,13 @@ function configureDnsmasq() {
 }
 
 function createResolverFile() {
-  const resolverContent = `# WPHerd DNS resolver for .${TLD} domains\nnameserver 127.0.0.1\n`;
+  const resolverContent = `# WPDevPilot DNS resolver for .${TLD} domains\nnameserver 127.0.0.1\n`;
 
   // Stage the file content in a temp file (no privileges needed), then use
   // admin rights only to copy it into place. This avoids embedding multi-line
   // content inside nested AppleScript/shell quoting, which silently corrupts
   // the command (the newline splits `echo`, breaking the whole script).
-  const tmpFile = path.join(os.tmpdir(), `wpherd-resolver-${TLD}`);
+  const tmpFile = path.join(os.tmpdir(), `wpdevpilot-resolver-${TLD}`);
   fs.writeFileSync(tmpFile, resolverContent, 'utf8');
 
   // Also flush the DNS cache so macOS drops any negative (NXDOMAIN) result it
@@ -100,7 +100,7 @@ function createResolverFile() {
     `mkdir -p ${RESOLVER_DIR} && cp '${tmpFile}' '${RESOLVER_FILE}' && chmod 644 '${RESOLVER_FILE}'` +
     ` && dscacheutil -flushcache && killall -HUP mDNSResponder`;
   const reason =
-    `WPHerd wants to configure macOS so that .${TLD} sites resolve to your ` +
+    `WPDevPilot wants to configure macOS so that .${TLD} sites resolve to your ` +
     'local machine.';
   try {
     execSync(adminOsascript(shellCmd, reason), { stdio: 'pipe' });

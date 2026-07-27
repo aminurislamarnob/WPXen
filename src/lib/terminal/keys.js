@@ -1,6 +1,6 @@
 // Pure terminal key/clipboard helpers — no xterm or DOM dependency beyond the
 // shape of a KeyboardEvent / ClipboardEvent, so they unit-test in plain Node.
-// WPHerd is macOS-only, so these implement only the mac branches of Superset's
+// WPDevPilot is macOS-only, so these implement only the mac branches of Superset's
 // platform switches.
 
 // "meta only" — Cmd held, nothing else (Shift excluded).

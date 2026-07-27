@@ -18,7 +18,7 @@ const site = {
 describe('buildManifest / validateManifest', () => {
   it('round-trips a well-formed site', () => {
     const manifest = siteops.buildManifest(site, { tablePrefix: 'wp_' });
-    expect(manifest.format).toBe('wpherd-site');
+    expect(manifest.format).toBe('wpdevpilot-site');
     expect(manifest.formatVersion).toBe(1);
     expect(manifest.domain).toBe('my-blog.test');
     expect(manifest.https).toBe(true);
@@ -32,16 +32,21 @@ describe('buildManifest / validateManifest', () => {
     expect(m.tablePrefix).toBe('wp_');
   });
 
+  it('still accepts manifests written under the old WPHerd name', () => {
+    const legacy = { ...siteops.buildManifest(site), format: 'wpherd-site' };
+    expect(() => siteops.validateManifest(legacy)).not.toThrow();
+  });
+
   it('rejects a foreign format', () => {
     expect(() => siteops.validateManifest({ format: 'other', formatVersion: 1 })).toThrow(
-      /not exported by WPHerd/
+      /not exported by WPDevPilot/
     );
   });
 
   it('rejects a future format version', () => {
     expect(() =>
       siteops.validateManifest({
-        format: 'wpherd-site',
+        format: 'wpdevpilot-site',
         formatVersion: 2,
         domain: 'a.test',
       })
@@ -51,7 +56,7 @@ describe('buildManifest / validateManifest', () => {
   it('rejects an invalid domain', () => {
     expect(() =>
       siteops.validateManifest({
-        format: 'wpherd-site',
+        format: 'wpdevpilot-site',
         formatVersion: 1,
         domain: 'bad domain.test',
       })
@@ -61,7 +66,7 @@ describe('buildManifest / validateManifest', () => {
   it('rejects an unsafe table prefix', () => {
     expect(() =>
       siteops.validateManifest({
-        format: 'wpherd-site',
+        format: 'wpdevpilot-site',
         formatVersion: 1,
         domain: 'a.test',
         tablePrefix: 'wp`; DROP--',
@@ -80,10 +85,20 @@ describe('detectImportKind', () => {
     expect(siteops.detectImportKind('.wpress', [])).toBe('wpress');
   });
 
-  it('detects a WPHerd archive by manifest entry', () => {
+  it('detects a WPDevPilot archive by manifest entry', () => {
+    expect(
+      siteops.detectImportKind('.zip', [
+        'database.sql',
+        'wpdevpilot-manifest.json',
+        'files/',
+      ])
+    ).toBe('wpdevpilot');
+  });
+
+  it('detects an archive exported under the old WPHerd name', () => {
     expect(
       siteops.detectImportKind('.zip', ['database.sql', 'wpherd-manifest.json', 'files/'])
-    ).toBe('wpherd');
+    ).toBe('wpdevpilot');
   });
 
   it('falls back to generic', () => {
@@ -93,7 +108,7 @@ describe('detectImportKind', () => {
   });
 
   it('does not match a nested manifest path', () => {
-    expect(siteops.detectImportKind('.zip', ['files/wpherd-manifest.json'])).toBe(
+    expect(siteops.detectImportKind('.zip', ['files/wpdevpilot-manifest.json'])).toBe(
       'generic'
     );
   });

@@ -5,7 +5,7 @@ describe('assertSafeEntries', () => {
   it('accepts normal relative entries', () => {
     expect(
       archive.assertSafeEntries([
-        'wpherd-manifest.json',
+        'wpdevpilot-manifest.json',
         'database.sql',
         'files/wp-content/plugins/x/x.php',
         'files/wp-config.php',
