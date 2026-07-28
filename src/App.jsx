@@ -23,7 +23,7 @@ import DependenciesSection from './components/settings/sections/DependenciesSect
 import AboutSection from './components/settings/sections/AboutSection';
 import Onboarding from './components/Onboarding';
 import { SettingsProvider } from './lib/useSettings';
-import logo from './assets/logo.svg';
+import logo from './assets/logo.png';
 
 // Core dependencies without which the app can't run — used to gate onboarding.
 const coreMissing = (d) =>

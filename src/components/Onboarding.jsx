@@ -15,7 +15,7 @@ import {
   Circle,
 } from 'lucide-react';
 import { Button, IconTile, ProgressLog, StepIndicator, Tooltip } from './ui';
-import logo from '../assets/logo.svg';
+import logo from '../assets/logo.png';
 
 const CORE_KEYS = ['nginx', 'php', 'mysql', 'dnsmasq', 'wpCli'];
 const CORE_LABELS = {
