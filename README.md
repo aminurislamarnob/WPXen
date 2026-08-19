@@ -4,10 +4,11 @@ Blazingly fast local WordPress development for macOS — a native menu bar app t
 
 Inspired by [Laravel Herd](https://herd.laravel.com).
 
-> **Previously released as WPHerd.** Upgrading is seamless: the first launch
-> carries your sites, settings and blueprints over from the old app's data
-> directory, archives exported by WPHerd still import, and the managed
-> `php.ini`, mu-plugin and sudoers files it left behind are replaced in place.
+> **Previously released as WPHerd, then WPDevPilot.** Upgrading from either is
+> seamless: the first launch carries your sites, settings and blueprints over
+> from the most recent old data directory, archives exported under either name
+> still import, and the managed `php.ini`, mu-plugin and sudoers files they left
+> behind are replaced in place.
 
 ---
 

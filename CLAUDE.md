@@ -295,33 +295,44 @@ in-app switcher.
 - **Never `require('electron')` at module scope** in anything a test imports —
   see the CI note at the top. This fails only on the runner.
 
-### Legacy WPHerd names
+### Legacy names (WPHerd, WPDevPilot)
 
-The app was called **WPHerd** before it was renamed to WPXen, and it wrote
-its name into places outside its own bundle. Those are all still handled, and
-the shims are deliberate — don't tidy them away:
+The app has been renamed twice — **WPHerd** → **WPDevPilot** → **WPXen** — and
+each name was written into places outside the app bundle. Every compatibility
+path therefore carries _two_ older generations, not one, and they're ordered
+newest-first so a user who skipped a release is handled the same as one who
+upgraded through every name. These shims are deliberate — don't tidy them away:
 
-- `services/rebrand.cjs` copies `wpherd-data.json` and `blueprints/` out of the
-  old `Application Support/WPHerd` directory on first launch. Renaming the app
-  moved `userData` (Electron derives it from `productName`), so without this an
-  upgrading user's sites and settings look deleted. It copies rather than moves,
-  and never overwrites data the renamed app already has.
-- `siteops.cjs` still imports archives carrying `wpherd-manifest.json` /
-  `format: 'wpherd-site'`; it only ever _writes_ the new names.
-- conf.d is read alphabetically, so a leftover `zz-wpherd.ini` /
-  `zz-wpherd-mailpit.ini` loads _after_ ours and wins. `php.cjs` reads the old
-  file once for its values, then deletes it on the next write; `mailpit.cjs`
-  clears its own on every `setCatchEnabled` call, enabled or disabled.
-- `wordpress.cjs` deletes the `wpherd-`prefixed mu-plugins when writing theirs —
-  two copies would redeclare the same PHP functions, and the old magic-login
-  plugin would keep honouring a stale secret.
-- `sudoers.cjs` removes `/etc/sudoers.d/wpherd` inside the same privileged step
-  that installs (or removes) `/etc/sudoers.d/wpxen`.
+- `services/rebrand.cjs` walks `LEGACY_GENERATIONS` (`WPDevPilot`, then
+  `WPHerd`) and copies the first `*-data.json` it finds, plus `blueprints/`,
+  out of that `Application Support` directory on first launch. Renaming moved
+  `userData` (Electron derives it from `productName`), so without this an
+  upgrading user's sites and settings look deleted. It copies rather than
+  moves, and never overwrites data the renamed app already has.
+- `siteops.cjs` imports archives carrying any historical manifest name
+  (`MANIFEST_NAMES`) or `format` tag (`MANIFEST_FORMATS`); it only ever
+  _writes_ the current names.
+- conf.d is read alphabetically and `zz-wpxen.ini` sorts after both
+  `zz-wpdevpilot.ini` and `zz-wpherd.ini`, so ours now wins on load — but a
+  leftover still has to be cleared or it lingers forever setting directives
+  nothing owns. `php.cjs` reads the newest old file once for its customised
+  values, then deletes every generation on the next write. `mailpit.cjs` clears
+  all of them on every `setCatchEnabled` call, enabled or disabled — turning
+  catching off deletes only our own file, so a leftover override would keep
+  piping `mail()` into Mailpit with the toggle reading off.
+- `wordpress.cjs` deletes every legacy-prefixed mu-plugin when writing its own
+  (`LEGACY_PREFIXES`) — multiple copies redeclare the same PHP functions and
+  fatal the site, and an old magic-login plugin would keep honouring a stale
+  secret.
+- `sudoers.cjs` removes every `LEGACY_SUDOERS_PATHS` entry inside the same
+  privileged step that installs (or removes) `/etc/sudoers.d/wpxen`. They are
+  live `NOPASSWD` grants, so leaving one behind is a real permission the app no
+  longer knows about.
 
 Not carried over, deliberately: the browser partition
-(`persist:wpxen-browser`) and the `wpxen.*` localStorage keys start
-fresh, and nginx vhosts keep whatever `# WPHerd:` header comment they were
-written with — it's cosmetic and rewritten on the next vhost regeneration.
+(`persist:wpxen-browser`) and the `wpxen.*` localStorage keys start fresh, and
+nginx vhosts keep whatever header comment they were written with — it's
+cosmetic and rewritten on the next vhost regeneration.
 
 ## Further reading
 
