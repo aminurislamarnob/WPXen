@@ -6,8 +6,7 @@ A local environment where developers build, test, debug and ship WordPress proje
 
 Inspired by [Laravel Herd](https://herd.laravel.com).
 
-> **Previously released as WPHerd, then WPDevPilot** (see [Naming decision
-> history](#naming-decision-history)). Upgrading from either is
+> **Previously released as WPHerd, then WPDevPilot.** Upgrading from either is
 > seamless: the first launch carries your sites, settings and blueprints over
 > from the most recent old data directory, archives exported under either name
 > still import, and the managed `php.ini`, mu-plugin and sudoers files they left
@@ -230,16 +229,21 @@ the next.
 
 ---
 
-## Naming decision history
+## About the name
 
-**WPDevPilot → WPXen.** Final name: **WPXen**. Tagline: _AI-native WordPress
-development environment._
+> **WPXen — AI-native WordPress development environment.**
 
-### Why WPXen was selected
+- **WP** → WordPress
+- **Xen** → a distinctive, technical coined brand, with associations around
+  modern computing environments, isolation and orchestration
 
-WPDevPilot originally represented the product as an AI assistant — a "pilot" —
-for WordPress development. As the product evolved, its scope expanded well
-beyond an AI coding assistant:
+WPXen is not intended to be a forced acronym. The name itself is the brand,
+while the tagline explains its purpose.
+
+### Why a platform name
+
+The product spans the whole local WordPress workflow rather than any single
+part of it:
 
 - Complete local WordPress/PHP runtime
 - PHP, nginx, MySQL and service management
@@ -250,39 +254,19 @@ beyond an AI coding assistant:
 - AI coding agents and embedded agent workflows
 - Future agent workspaces, MCP, browser automation and autonomous development
 
-"DevPilot" therefore became too narrow: it describes mainly the AI
-developer/assistant aspect. WPXen better represents the product as a platform
-and environment where WordPress infrastructure, development workflows and AI
-agents work together.
-
-### Meaning of WPXen
-
-- **WP** → WordPress
-- **Xen** → a distinctive, technical coined brand, with associations around
-  modern computing environments, isolation and orchestration
-
-WPXen is not intended to be a forced acronym. The name itself is the brand,
-while the tagline explains its purpose.
+The name has to cover WordPress infrastructure, development workflows and AI
+agents working together, and leave room for where the product goes next.
 
 ### Brand positioning
-
-> **WPXen — AI-native WordPress development environment.**
 
 The intended product perception is a local, AI-native environment where
 developers can build, test, debug and ship WordPress projects with AI agents as
 first-class development participants.
 
-### Strategic direction
-
-WPXen is positioned between **local WordPress development**, **AI coding
-agents** and **agentic workspaces**. Rather than competing directly as another
-LocalWP or another Claude Code, the goal is a WordPress-native agentic
-development environment.
-
-### Decision
-
-Rebrand from WPDevPilot to WPXen, because WPXen provides broader brand
-flexibility for the product's long-term evolution.
+WPXen sits between **local WordPress development**, **AI coding agents** and
+**agentic workspaces**. Rather than competing directly as another LocalWP or
+another Claude Code, the goal is a WordPress-native agentic development
+environment.
 
 ---
 
