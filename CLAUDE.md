@@ -42,6 +42,12 @@ WPXen is an Electron macOS menu-bar app that orchestrates Homebrew-installed ser
 (nginx, PHP-FPM, MySQL, dnsmasq, WP-CLI) to run local WordPress `.test` sites. It does
 **not** bundle these binaries — it shells out to the user's Homebrew install.
 
+That service orchestration is only half of it. **Agents** is a top-level section
+alongside Sites: per-site AI-CLI terminals, a file explorer and git Changes pane, and an
+in-app browser, so a site and the agent working on it sit side by side. The README states
+the positioning as _AI-native WordPress development environment_ — when weighing a design
+call, both halves count, and neither is a bolt-on to the other.
+
 Two processes, separated by file extension:
 
 - **Main process** — `electron/*.cjs` (CommonJS). Node access, runs all system commands.
@@ -333,6 +339,16 @@ Not carried over, deliberately: the browser partition
 (`persist:wpxen-browser`) and the `wpxen.*` localStorage keys start fresh, and
 nginx vhosts keep whatever header comment they were written with — it's
 cosmetic and rewritten on the next vhost regeneration.
+
+**Adding anything new that carries the name.** Any file, option, PHP function,
+query param or path the app writes _outside its own bundle_ becomes another
+thing a future rename has to migrate. Use the current `wpxen` prefix, and put
+it somewhere a rename can find: a named constant near the top of its module,
+next to the `LEGACY_*` list it will one day join. Two failure modes are worth
+knowing, because both are silent — an orphaned file that keeps applying
+settings nothing owns any more (php.ini fragments, sudoers grants), and a
+duplicate that actively breaks (two mu-plugins redeclaring the same PHP
+function fatals the site).
 
 ## Further reading
 
