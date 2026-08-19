@@ -1,10 +1,13 @@
 # WPXen
 
-Blazingly fast local WordPress development for macOS — a native menu bar app that manages nginx, PHP-FPM, MySQL, and dnsmasq via Homebrew so you can spin up WordPress sites in seconds.
+**AI-native WordPress development environment.**
+
+A local environment where developers build, test, debug and ship WordPress projects with AI agents as first-class development participants — a native macOS menu bar app that manages nginx, PHP-FPM, MySQL and dnsmasq via Homebrew, so you can spin up WordPress sites in seconds.
 
 Inspired by [Laravel Herd](https://herd.laravel.com).
 
-> **Previously released as WPHerd, then WPDevPilot.** Upgrading from either is
+> **Previously released as WPHerd, then WPDevPilot** (see [Naming decision
+> history](#naming-decision-history)). Upgrading from either is
 > seamless: the first launch carries your sites, settings and blueprints over
 > from the most recent old data directory, archives exported under either name
 > still import, and the managed `php.ini`, mu-plugin and sudoers files they left
@@ -224,6 +227,62 @@ the next.
 | Packaging     | electron-builder (DMG, arm64 + x64)  |
 | Icons         | lucide-react                         |
 | Persistence   | Custom JSON store (no external deps) |
+
+---
+
+## Naming decision history
+
+**WPDevPilot → WPXen.** Final name: **WPXen**. Tagline: _AI-native WordPress
+development environment._
+
+### Why WPXen was selected
+
+WPDevPilot originally represented the product as an AI assistant — a "pilot" —
+for WordPress development. As the product evolved, its scope expanded well
+beyond an AI coding assistant:
+
+- Complete local WordPress/PHP runtime
+- PHP, nginx, MySQL and service management
+- WordPress site lifecycle management
+- WP-CLI, Mailpit, phpMyAdmin, HTTPS and Xdebug
+- Site cloning, blueprints, import/export
+- Cloudflare tunnels and local networking
+- AI coding agents and embedded agent workflows
+- Future agent workspaces, MCP, browser automation and autonomous development
+
+"DevPilot" therefore became too narrow: it describes mainly the AI
+developer/assistant aspect. WPXen better represents the product as a platform
+and environment where WordPress infrastructure, development workflows and AI
+agents work together.
+
+### Meaning of WPXen
+
+- **WP** → WordPress
+- **Xen** → a distinctive, technical coined brand, with associations around
+  modern computing environments, isolation and orchestration
+
+WPXen is not intended to be a forced acronym. The name itself is the brand,
+while the tagline explains its purpose.
+
+### Brand positioning
+
+> **WPXen — AI-native WordPress development environment.**
+
+The intended product perception is a local, AI-native environment where
+developers can build, test, debug and ship WordPress projects with AI agents as
+first-class development participants.
+
+### Strategic direction
+
+WPXen is positioned between **local WordPress development**, **AI coding
+agents** and **agentic workspaces**. Rather than competing directly as another
+LocalWP or another Claude Code, the goal is a WordPress-native agentic
+development environment.
+
+### Decision
+
+Rebrand from WPDevPilot to WPXen, because WPXen provides broader brand
+flexibility for the product's long-term evolution.
 
 ---
 
