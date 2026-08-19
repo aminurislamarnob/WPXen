@@ -16,30 +16,33 @@ Inspired by [Laravel Herd](https://herd.laravel.com).
 
 ## Features
 
+**Local stack**
+
 - **macOS menu bar app** — lives in your tray, out of your way
-- **One-click service management** — start/stop nginx, PHP-FPM, MySQL, dnsmasq individually or all at once
-- **WordPress site wizard** — 3-step setup: name your site, pick a directory and PHP version, configure the DB — WPXen handles the rest (downloads WordPress, creates the database, configures nginx, sets up your `.test` domain)
-- **Per-site quick actions** — open in browser, open wp-admin, reveal in Finder, open in Terminal
-- **In-app browser** — preview a site, wp-admin or phpMyAdmin in a tab beside the agent working on it
-- **PHP version switcher** — detects all Homebrew-installed PHP versions and switches between them
-- **`.test` domain support** — dnsmasq routes `*.test` to `127.0.0.1` automatically
-- **Settings panel** — configure sites directory, start at login, one-click dnsmasq setup
+- **Supervised services** — nginx, PHP-FPM, MySQL and Mailpit run as children of the app (crash-restarted, stopped on quit), so they stay out of macOS "App Background Activity"
+- **PHP version switcher** — detects every Homebrew-installed version, switches globally or per site, edits `php.ini` from the app; EOL 8.0/7.4 supported via the `shivammathur/php` tap
+- **`.test` domains** — dnsmasq routes `*.test` to `127.0.0.1`, with one-click resolver setup
+- **Per-site HTTPS** — mkcert installs a locally-trusted CA and mints browser-trusted certs
 
----
+**WordPress workflow**
 
-## Screenshots
+- **Site wizard** — name it, pick a directory and PHP version, configure the DB; WPXen downloads WordPress, creates the database, writes the vhost and sets up the domain
+- **WP management** — plugins, themes, admin users and a `wp-config.php` editor, all through WP-CLI
+- **One-click admin** — passwordless magic login for local development
+- **Clone, export & import** — duplicate a site, or move one as a portable archive (`.wpress` archives from All-in-One WP Migration import too)
+- **Blueprints** — snapshot a whole site and spin up new ones from it
+- **Change site URL** — rename a domain with a full database search-replace, new vhost and fresh cert
+- **Mail catching** — Mailpit captures `mail()` and shows it in an in-app inbox
+- **phpMyAdmin** — auto-installed on first use, opens signed in to the right database
+- **Share tunnels** — expose a local site publicly through Cloudflare
+- **Per-site logs** — view and clear nginx/PHP logs without leaving the app
 
-| Dashboard                        | Sites                    |
-| -------------------------------- | ------------------------ |
-| ![Dashboard](docs/dashboard.png) | ![Sites](docs/sites.png) |
+**Agents**
 
-| Add Site                       | Services                       |
-| ------------------------------ | ------------------------------ |
-| ![Add Site](docs/add-site.png) | ![Services](docs/services.png) |
-
-| PHP Versions         | Settings                       |
-| -------------------- | ------------------------------ |
-| ![PHP](docs/php.png) | ![Settings](docs/settings.png) |
+- **Per-site AI terminals** — run your AI CLI of choice rooted at a site's webroot, with real terminal behaviour (clipboard, search, Cmd+click file links, sessions that survive tab switches)
+- **File explorer & editor** — browse and edit the site's files, with git decorations
+- **Changes pane** — stage, unstage, discard and diff, per repository
+- **In-app browser** — preview a site, wp-admin, phpMyAdmin or the mail inbox in a tab beside the agent working on it
 
 ---
 
@@ -51,11 +54,16 @@ WPXen manages services installed via [Homebrew](https://brew.sh). Install Homebr
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 ```
 
-Then install the required services:
+WPXen installs what it needs on first launch — onboarding checks for the core
+formulae and offers to `brew install` whatever is missing. To do it yourself:
 
 ```bash
 brew install nginx php mysql dnsmasq wp-cli
 ```
+
+Optional extras are installed on demand the first time you use the feature:
+`mailpit` (mail catching), `mkcert` (per-site HTTPS), `cloudflared` (share
+tunnels) and phpMyAdmin.
 
 To install additional PHP versions:
 
@@ -70,8 +78,8 @@ brew install php@8.1 php@8.2 php@8.3
 ### Development
 
 ```bash
-git clone https://github.com/aminurislamarnob/wpxen.git
-cd wpxen
+git clone https://github.com/aminurislamarnob/WPXen.git
+cd WPXen
 npm install
 npm run dev
 ```
@@ -93,19 +101,26 @@ Outputs a `.dmg` installer to `release/` for both Apple Silicon and Intel.
 ```
 WPXen (Electron)
 ├── Main process (Node.js / CJS)
-│   ├── Services layer — wraps Homebrew CLI to manage processes
-│   │   ├── nginx     → generates vhost configs in /opt/homebrew/etc/nginx/servers/
-│   │   ├── PHP-FPM   → starts/stops php@x.x via brew services
+│   ├── procman       → supervises nginx, PHP-FPM, MySQL and Mailpit as child
+│   │                   processes (crash restart, graceful stop, orphan cleanup)
+│   ├── Services layer
+│   │   ├── nginx     → generates vhost configs in {prefix}/etc/nginx/servers/
+│   │   ├── PHP-FPM   → runs one php@x.x at a time, plus per-site overrides
 │   │   ├── MySQL     → start/stop + database create/drop
-│   │   └── dnsmasq   → configures *.test → 127.0.0.1 resolver
+│   │   ├── dnsmasq   → configures *.test → 127.0.0.1 (the one service still
+│   │   │               managed by `brew services` — it needs root for port 53)
+│   │   ├── siteops   → export, import, clone, blueprints, change-URL
+│   │   └── agents    → per-site pty sessions for AI CLIs
 │   ├── IPC handlers  → bridge between UI and system
 │   └── Tray icon     → menu bar quick-access
 └── Renderer (React + Vite + Tailwind)
     ├── Dashboard     → live service status + recent sites
-    ├── Sites         → site grid + add/remove wizard
+    ├── Sites         → site grid, per-site detail, WP management
+    ├── Agents        → terminals, file explorer, git changes, in-app browser
     ├── Services      → per-service controls
-    ├── PHP           → version switcher
-    └── Settings      → preferences + dependency checker
+    ├── PHP           → version switcher + php.ini editing
+    ├── Mail          → Mailpit inbox
+    └── Settings      → routed, searchable preferences
 ```
 
 When you add a WordPress site, WPXen:
@@ -125,34 +140,39 @@ Your site is immediately available at `http://<name>.test`.
 ## Project structure
 
 ```
-wpxen/
-├── electron/
-│   ├── main.cjs          # App entry, window management, tray
-│   ├── preload.cjs       # Secure IPC bridge (contextBridge)
-│   ├── ipc.cjs           # All IPC handler registrations
-│   ├── store.cjs         # JSON persistence (userData/wpxen-data.json)
-│   ├── tray.cjs          # Menu bar icon + context menu
-│   └── services/
-│       ├── brew.cjs      # Homebrew detection + PHP version discovery
-│       ├── nginx.cjs     # nginx process + vhost config generation
-│       ├── php.cjs       # PHP-FPM management + version switching
-│       ├── mysql.cjs     # MySQL/MariaDB management + DB operations
-│       ├── dnsmasq.cjs   # dnsmasq config + /etc/resolver/test
-│       └── wordpress.cjs # WordPress install via WP-CLI
-└── src/
-    ├── App.jsx
-    └── components/
-        ├── Dashboard.jsx
-        ├── Sites.jsx
-        ├── SiteCard.jsx
-        ├── AddSiteModal.jsx
-        ├── Services.jsx
-        ├── PHPVersions.jsx
-        ├── Settings.jsx
-        └── StatusBadge.jsx
+WPXen/
+├── electron/                 # Main process (CommonJS)
+│   ├── main.cjs              # App entry, window management, tray
+│   ├── preload.cjs           # Secure IPC bridge (contextBridge)
+│   ├── ipc.cjs               # All IPC handler registrations
+│   ├── store.cjs             # JSON persistence (userData/wpxen-data.json)
+│   ├── tray.cjs              # Menu bar icon + context menu
+│   └── services/             # One module per concern
+│       ├── procman.cjs       # Child-process supervisor
+│       ├── brew.cjs          # Homebrew detection + PHP version discovery
+│       ├── nginx.cjs         # nginx process + vhost generation
+│       ├── php.cjs           # PHP-FPM management + version switching
+│       ├── mysql.cjs         # MySQL/MariaDB + database operations
+│       ├── dnsmasq.cjs       # dnsmasq config + resolver setup
+│       ├── wordpress.cjs     # WordPress install + mu-plugins via WP-CLI
+│       ├── siteops.cjs       # Export / import / clone / change-URL engine
+│       ├── blueprints.cjs    # Site snapshots
+│       ├── agents.cjs        # Per-site pty sessions for AI CLIs
+│       ├── browser.cjs       # In-app browser guest policy
+│       ├── settings.cjs      # Settings schema + validation
+│       └── …                 # mailpit, mkcert, cloudflared, phpmyadmin,
+│                             # sudoers, admin, git, logs, setup, rebrand
+├── src/                      # Renderer (React)
+│   ├── App.jsx               # Routes
+│   ├── components/           # Pages + shared primitives (ui.jsx)
+│   │   ├── settings/         # Settings shell + one file per section
+│   │   └── browser/          # Browser pane, toolbar, error overlay
+│   └── lib/                  # Non-React logic
+│       ├── terminal/         # xterm glue, session cache, key handling
+│       ├── browser/          # webview cache, URL sanitising
+│       └── …                 # theme, typography, settings registry
+└── test/                     # vitest suites (main-process + pure helpers)
 ```
-
----
 
 ## Homebrew paths
 
@@ -225,7 +245,10 @@ the next.
 | Build         | Vite 5                               |
 | Packaging     | electron-builder (DMG, arm64 + x64)  |
 | Icons         | lucide-react                         |
+| Terminal      | xterm.js + node-pty                  |
+| Editor        | CodeMirror 6 (@uiw/react-codemirror) |
 | Persistence   | Custom JSON store (no external deps) |
+| Tests         | vitest                               |
 
 ---
 
