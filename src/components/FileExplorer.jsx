@@ -90,7 +90,7 @@ export default function FileExplorer({
   const [allCollapsed, setAllCollapsed] = useState(false);
   const [viewMode, setViewMode] = useState(() => {
     try {
-      return localStorage.getItem('wpdevpilot.changesViewMode') === 'tree'
+      return localStorage.getItem('wpxen.changesViewMode') === 'tree'
         ? 'tree'
         : 'folders';
     } catch {
@@ -187,7 +187,7 @@ export default function FileExplorer({
     setViewMode((m) => {
       const next = m === 'folders' ? 'tree' : 'folders';
       try {
-        localStorage.setItem('wpdevpilot.changesViewMode', next);
+        localStorage.setItem('wpxen.changesViewMode', next);
       } catch {
         /* private mode — fall back to session-only */
       }

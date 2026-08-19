@@ -237,7 +237,7 @@ export default function Services({ serviceStatus, refreshStatus }) {
       )}
 
       {/* App-managed services */}
-      <SectionLabel>Managed by WPDevPilot</SectionLabel>
+      <SectionLabel>Managed by WPXen</SectionLabel>
       <Card className="mb-6">
         {appManaged.map((config) => (
           <ServiceRow
@@ -269,9 +269,9 @@ export default function Services({ serviceStatus, refreshStatus }) {
         <div className="flex items-start gap-3 px-4 py-3 text-[13px] text-highlight">
           <Info size={14} className="flex-shrink-0 mt-0.5" />
           <p className="text-xs">
-            nginx, PHP-FPM, MySQL, and Mailpit run as part of WPDevPilot — they stop when
-            the app quits and don&apos;t appear as background items in macOS. dnsmasq runs
-            as a system service so <span className="font-mono">*.test</span> DNS keeps
+            nginx, PHP-FPM, MySQL, and Mailpit run as part of WPXen — they stop when the
+            app quits and don&apos;t appear as background items in macOS. dnsmasq runs as
+            a system service so <span className="font-mono">*.test</span> DNS keeps
             working when the app is closed. Install missing services with{' '}
             <span className="font-mono bg-highlight/10 px-1 rounded">
               brew install nginx php mysql dnsmasq

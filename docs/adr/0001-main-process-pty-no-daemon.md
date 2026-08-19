@@ -2,7 +2,7 @@
 
 ## Context
 
-WPDevPilot is adding an Agent Launcher: a per-Site terminal that runs an AI-provider
+WPXen is adding an Agent Launcher: a per-Site terminal that runs an AI-provider
 CLI (Claude Code, Codex, …) in a pseudo-terminal (pty) scoped to the Site's
 webroot. The reference implementation, Superset (`reference/superset-main`), runs
 its ptys in a standalone `pty-daemon` process that outlives the app, with a
@@ -10,10 +10,10 @@ cross-process session protocol so terminals survive an application restart.
 
 ## Decision
 
-Each Session's pty is spawned by `node-pty` **inside WPDevPilot's Electron main
+Each Session's pty is spawned by `node-pty` **inside WPXen's Electron main
 process** — supervised alongside the existing services — rather than in a separate
 long-lived daemon. A Session survives the window hiding to the tray (the main
-process stays alive), but is **torn down when WPDevPilot quits**. Reattach after a
+process stays alive), but is **torn down when WPXen quits**. Reattach after a
 window reopen is served by an in-memory ring buffer replayed into a fresh xterm,
 not by a persistent cross-process protocol.
 

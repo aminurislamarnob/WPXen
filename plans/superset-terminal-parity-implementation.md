@@ -1,6 +1,6 @@
 # Plan: Terminal — Superset parity implementation (Phases 1–4)
 
-Implementation spec for bringing WPDevPilot's Agents-screen terminal up to
+Implementation spec for bringing WPXen's Agents-screen terminal up to
 Superset parity, per the analysis in `plans/superset-terminal-parity.md`.
 **Written so a fresh session can implement every phase without the
 reference checkout** — all escape sequences, predicates, and algorithms are
@@ -36,7 +36,7 @@ stop`.
 1. **Stage files explicitly by name** — never `git add -A` / `git add .`.
    Never commit `reference/` or unrelated local changes (historically
    `electron/services/brew.cjs` carried one — check `git status` first).
-2. **WPDevPilot is on `@xterm/xterm` 5.5.0 stable; Superset is on 6.1.0-beta.**
+2. **WPXen is on `@xterm/xterm` 5.5.0 stable; Superset is on 6.1.0-beta.**
    Do NOT copy 6.x-only options — there is no `vtExtensions` (kitty
    keyboard) and no `scrollbar: { showScrollbar }` in 5.5. Do not upgrade
    xterm; install the addon versions pinned in each phase (they are the
@@ -434,7 +434,7 @@ lost; keep `terminal-ready`'s replay path for the cache-miss case.
 ### 3b. File-path links → CodeEditor
 
 Custom xterm link provider (regex + IPC stat validation), Cmd+click opens
-the file in WPDevPilot's editor at the line. Agents print `path:line` targets
+the file in WPXen's editor at the line. Agents print `path:line` targets
 constantly, so this is the highest-leverage link feature.
 
 1. **IPC `terminal-stat-path`** (three touchpoints). Handler
@@ -512,7 +512,7 @@ keeps `titles` state (`sessionId → string`); tab label =
 `truncate max-w-[140px]`.
 
 Skip Superset's typed-command heuristic (`commandBuffer`) and OSC 7 cwd
-tracking — WPDevPilot sessions are site-rooted and agent-named; titles from
+tracking — WPXen sessions are site-rooted and agent-named; titles from
 OSC are enough.
 
 ### 3e. Per-tab close confirm
@@ -527,7 +527,7 @@ OSC are enough.
   running agent in [Agent Name]. Anything it is doing will be
   interrupted.", confirm "End Session", danger.
 - "Don't ask again" checkbox → `localStorage`
-  `wpdevpilot.terminalCloseConfirmSuppressed = '1'`; suppressed → close
+  `wpxen.terminalCloseConfirmSuppressed = '1'`; suppressed → close
   immediately. (No settings UI to reset it — acceptable, note in code.)
 
 ### 3f. Query-response suppression
@@ -598,7 +598,7 @@ the upload logic already shipped; this is presentation only.
 
 **Not doing** (unchanged from the analysis): virtualized rows (revisit
 only if large `wp-content` trees measurably lag), "Open in New Tab"
-(WPDevPilot has no preview-tab concept — every open is already a real tab),
+(WPXen has no preview-tab concept — every open is already a real tab),
 base-branch selector / commit filter / Review-PR tab / external editor.
 
 ---
@@ -618,7 +618,7 @@ One commit per phase (Phase 3 = one commit per sub-feature 3a–3f is also
 fine). After each: `npm run test`, `npm run lint`, and a manual pass in
 `npm run dev` against a real site with a real agent CLI (Claude Code) —
 the acceptance list at the end of each phase is the manual script. Never
-test destructive git/fs actions inside the WPDevPilot repo itself; use a
+test destructive git/fs actions inside the WPXen repo itself; use a
 scratch site. Update `docs/features/FEATURES.md`'s baseline list once all
 phases land (one line: terminal parity — search, links, clipboard/keys,
 session cache).

@@ -95,8 +95,8 @@ export default function App() {
     return (
       <div className="h-screen flex items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-4">
-          <img src={logo} alt="WPDevPilot" className="h-9 w-auto" draggable={false} />
-          <p className="text-sm text-muted-foreground">Starting WPDevPilot…</p>
+          <img src={logo} alt="WPXen" className="h-9 w-auto" draggable={false} />
+          <p className="text-sm text-muted-foreground">Starting WPXen…</p>
         </div>
       </div>
     );

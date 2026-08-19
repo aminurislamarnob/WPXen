@@ -138,7 +138,7 @@ function resolveShellEnv() {
   let env = { ...process.env };
   try {
     const shell = getUserShell();
-    const delimiter = '__WPDEVPILOT_ENV_SNAPSHOT__';
+    const delimiter = '__WPXEN_ENV_SNAPSHOT__';
     // -ilc: interactive login shell so it sources the user's rc files, then dump
     // env between markers. stdin ignored so the interactive shell can't block.
     const out = execFileSync(
@@ -338,7 +338,7 @@ function launch({ site, agentId, target = null, globalArgs = '' }) {
       env: {
         ...env,
         TERM: 'xterm-256color',
-        TERM_PROGRAM: 'WPDevPilot',
+        TERM_PROGRAM: 'WPXen',
         // Suppress oh-my-zsh's auto-update check. It fires during rc sourcing and
         // blocks on an interactive `[Y/n]` prompt (a single-char `read`); the
         // settle-window that types the agent command can't reliably out-wait it,

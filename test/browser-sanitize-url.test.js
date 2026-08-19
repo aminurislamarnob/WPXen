@@ -5,11 +5,11 @@ import browser from '../electron/services/browser.cjs';
 // The renderer and the main process each sanitize (a URL can arrive from either
 // the address bar or IPC), so both copies are held to the same table.
 const cases = [
-  ['https://wpdevpilot.test', 'https://wpdevpilot.test'],
-  ['http://wpdevpilot.test/wp-admin', 'http://wpdevpilot.test/wp-admin'],
+  ['https://wpxen.test', 'https://wpxen.test'],
+  ['http://wpxen.test/wp-admin', 'http://wpxen.test/wp-admin'],
   ['about:blank', 'about:blank'],
   // Bare hosts are https by default…
-  ['wpdevpilot.test', 'https://wpdevpilot.test'],
+  ['wpxen.test', 'https://wpxen.test'],
   ['phpmyadmin.test/index.php?route=/', 'https://phpmyadmin.test/index.php?route=/'],
   // …but loopback isn't served over TLS, so don't pretend it is.
   ['localhost:8025', 'http://localhost:8025'],
@@ -55,12 +55,10 @@ describe('displayUrl', () => {
   });
 
   it('drops a bare trailing slash', () => {
-    expect(displayUrl('https://wpdevpilot.test/')).toBe('https://wpdevpilot.test');
+    expect(displayUrl('https://wpxen.test/')).toBe('https://wpxen.test');
   });
 
   it('leaves a path alone', () => {
-    expect(displayUrl('https://wpdevpilot.test/wp-admin')).toBe(
-      'https://wpdevpilot.test/wp-admin'
-    );
+    expect(displayUrl('https://wpxen.test/wp-admin')).toBe('https://wpxen.test/wp-admin');
   });
 });

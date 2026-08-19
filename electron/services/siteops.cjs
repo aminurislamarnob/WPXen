@@ -16,11 +16,13 @@ const { DOMAIN_RE } = require('./validation.cjs');
 // does, and long WP-CLI calls run through wpAsync with a 10-minute budget so
 // big databases don't trip the default 2-minute timeout.
 
-const MANIFEST_NAME = 'wpdevpilot-manifest.json';
-// Archives exported before the WPHerd → WPDevPilot rename. Still importable:
-// the payload is identical, only the manifest name and `format` tag differ.
-const LEGACY_MANIFEST_NAME = 'wpherd-manifest.json';
-const MANIFEST_FORMATS = ['wpdevpilot-site', 'wpherd-site'];
+const MANIFEST_NAME = 'wpxen-manifest.json';
+// Archives exported under the app's previous names (WPHerd, WPDevPilot). Still
+// importable: the payload is identical, only the manifest name and `format` tag
+// differ. Newest first — findManifest() prefers the earliest match.
+const LEGACY_MANIFEST_NAMES = ['wpdevpilot-manifest.json', 'wpherd-manifest.json'];
+const MANIFEST_NAMES = [MANIFEST_NAME, ...LEGACY_MANIFEST_NAMES];
+const MANIFEST_FORMATS = ['wpxen-site', 'wpdevpilot-site', 'wpherd-site'];
 const LONG_TIMEOUT = 600000;
 
 // AIO housekeeping entries that must not be copied into wp-content.
@@ -38,7 +40,7 @@ function getTmpRoot() {
     const { app } = require('electron');
     return path.join(app.getPath('userData'), 'tmp');
   } catch {
-    return path.join(os.tmpdir(), 'wpdevpilot-tmp');
+    return path.join(os.tmpdir(), 'wpxen-tmp');
   }
 }
 
@@ -52,7 +54,7 @@ function makeTmpDir() {
 
 function buildManifest(site, { tablePrefix = 'wp_' } = {}) {
   return {
-    format: 'wpdevpilot-site',
+    format: 'wpxen-site',
     formatVersion: 1,
     exportedAt: new Date().toISOString(),
     name: site.name,
@@ -73,11 +75,11 @@ function validateManifest(obj) {
     throw new Error('The archive manifest is not valid JSON.');
   }
   if (!MANIFEST_FORMATS.includes(obj.format)) {
-    throw new Error('This archive was not exported by WPDevPilot.');
+    throw new Error('This archive was not exported by WPXen.');
   }
   if (obj.formatVersion !== 1) {
     throw new Error(
-      `This archive uses format version ${obj.formatVersion}, which this version of WPDevPilot cannot read.`
+      `This archive uses format version ${obj.formatVersion}, which this version of WPXen cannot read.`
     );
   }
   if (typeof obj.domain !== 'string' || !DOMAIN_RE.test(obj.domain)) {
@@ -93,16 +95,16 @@ function validateManifest(obj) {
 
 function detectImportKind(ext, entries) {
   if (ext === '.wpress') return 'wpress';
-  if (entries.some((e) => e === MANIFEST_NAME || e === LEGACY_MANIFEST_NAME)) {
-    return 'wpdevpilot';
+  if (entries.some((e) => MANIFEST_NAMES.includes(e))) {
+    return 'wpxen';
   }
   return 'generic';
 }
 
 // Path of the manifest inside an extracted archive, preferring the current
-// name over the legacy one. Null when neither is present.
+// name over the legacy ones. Null when none is present.
 function findManifest(dir) {
-  for (const name of [MANIFEST_NAME, LEGACY_MANIFEST_NAME]) {
+  for (const name of MANIFEST_NAMES) {
     const p = path.join(dir, name);
     if (fs.existsSync(p)) return p;
   }
@@ -184,7 +186,7 @@ async function inspectArchive(archivePath) {
       originUrl,
       suggestedName: baseSlug || 'imported-site',
       warning: multisite
-        ? 'This archive appears to contain a multisite network, which WPDevPilot does not support.'
+        ? 'This archive appears to contain a multisite network, which WPXen does not support.'
         : null,
     };
   }
@@ -192,10 +194,9 @@ async function inspectArchive(archivePath) {
   const entries = await archive.listZipEntries(archivePath);
   const kind = detectImportKind(ext, entries);
 
-  if (kind === 'wpdevpilot') {
-    const entryName = entries.includes(MANIFEST_NAME)
-      ? MANIFEST_NAME
-      : LEGACY_MANIFEST_NAME;
+  if (kind === 'wpxen') {
+    // Newest name present wins, matching findManifest() on the extracted copy.
+    const entryName = MANIFEST_NAMES.find((n) => entries.includes(n));
     const raw = await archive.readZipEntry(archivePath, entryName);
     const manifest = validateManifest(JSON.parse(raw));
     return {
@@ -319,18 +320,17 @@ async function importSite(archivePath, target, onProgress) {
       await archive.extractZip(archivePath, tmp);
     }
     const manifestPath = kind === 'wpress' ? null : findManifest(tmp);
-    const zipKind =
-      kind === 'wpress' ? 'wpress' : manifestPath ? 'wpdevpilot' : 'generic';
+    const zipKind = kind === 'wpress' ? 'wpress' : manifestPath ? 'wpxen' : 'generic';
 
-    // Manifest (wpdevpilot archives only) — carries origin URL and table prefix.
+    // Manifest (wpxen archives only) — carries origin URL and table prefix.
     let manifest = null;
-    if (zipKind === 'wpdevpilot') {
+    if (zipKind === 'wpxen') {
       manifest = validateManifest(JSON.parse(fs.readFileSync(manifestPath, 'utf8')));
     }
 
     // Locate the SQL dump before touching the filesystem/database.
     let sqlFile = null;
-    if (zipKind === 'wpdevpilot' || zipKind === 'wpress') {
+    if (zipKind === 'wpxen' || zipKind === 'wpress') {
       const p = path.join(tmp, 'database.sql');
       sqlFile = fs.existsSync(p) ? p : null;
       if (!sqlFile && zipKind === 'wpress') {
@@ -348,10 +348,10 @@ async function importSite(archivePath, target, onProgress) {
       }
     }
 
-    // Multisite guard — WPDevPilot vhosts and tooling are single-site only.
+    // Multisite guard — WPXen vhosts and tooling are single-site only.
     if (sqlFile && isMultisiteDump(readSqlHead(sqlFile))) {
       throw new Error(
-        'This archive contains a multisite network, which WPDevPilot does not support yet.'
+        'This archive contains a multisite network, which WPXen does not support yet.'
       );
     }
 
@@ -359,10 +359,10 @@ async function importSite(archivePath, target, onProgress) {
     if (fs.existsSync(target.path) && fs.readdirSync(target.path).length > 0) {
       throw new Error(`${target.path} already exists and is not empty.`);
     }
-    if (zipKind === 'wpdevpilot') {
+    if (zipKind === 'wpxen') {
       const filesDir = path.join(tmp, 'files');
       if (!fs.existsSync(filesDir)) {
-        throw new Error('This WPDevPilot archive is missing its files/ directory.');
+        throw new Error('This WPXen archive is missing its files/ directory.');
       }
       moveDir(filesDir, target.path);
       ledger.dirCreated = true;

@@ -113,13 +113,13 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
-  // Initialize store. The rename moved userData (Electron derives it from
-  // productName), so carry over an existing WPHerd install's data first.
+  // Initialize store. Each rename moved userData (Electron derives it from
+  // productName), so carry over the newest previous install's data first.
   migrateLegacyUserData({
-    legacyDir: path.join(app.getPath('appData'), 'WPHerd'),
+    appDataDir: app.getPath('appData'),
     currentDir: app.getPath('userData'),
   });
-  store = new JsonStore('wpdevpilot-data');
+  store = new JsonStore('wpxen-data');
 
   // Light/dark follows the macOS system appearance by default, but Settings →
   // Appearance can force it: registerHandlers() sets nativeTheme.themeSource
@@ -278,7 +278,7 @@ app.on('before-quit', (e) => {
         buttons: ['Quit', 'Cancel'],
         defaultId: 1,
         cancelId: 1,
-        message: 'Quit WPDevPilot?',
+        message: 'Quit WPXen?',
         detail: `This stops ${running.join(', ')}, taking your local sites offline. You can turn this confirmation off in Settings → General.`,
       });
       if (choice === 1) {

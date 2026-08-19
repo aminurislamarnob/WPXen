@@ -38,7 +38,7 @@ so to reproduce, temporarily move `node_modules/electron/path.txt` aside.
 
 ## Architecture
 
-WPDevPilot is an Electron macOS menu-bar app that orchestrates Homebrew-installed services
+WPXen is an Electron macOS menu-bar app that orchestrates Homebrew-installed services
 (nginx, PHP-FPM, MySQL, dnsmasq, WP-CLI) to run local WordPress `.test` sites. It does
 **not** bundle these binaries — it shells out to the user's Homebrew install.
 
@@ -72,7 +72,7 @@ Node directly. When adding a feature that crosses the boundary you must touch th
   LaunchDaemon, port 53). `services/migration.cjs` unregisters the old brew services
   once per machine.
 - `store.cjs` — `JsonStore`, a dependency-free JSON persistence layer at
-  `userData/wpdevpilot-data.json`. Supports dotted key paths (`get('a.b', default)`).
+  `userData/wpxen-data.json`. Supports dotted key paths (`get('a.b', default)`).
   Sites and settings live here.
 - `tray.cjs` — menu-bar icon and context menu.
 - `services/` — one module per concern, most wrapping CLI calls via `execSync`:
@@ -98,7 +98,7 @@ Node directly. When adding a feature that crosses the boundary you must touch th
   - **Privilege** — `admin.cjs` builds the osascript "with administrator
     privileges" command; its prompt text is customizable, but the bold app name
     in the macOS dialog is not, without shipping a signed privileged helper.
-    `sudoers.cjs` installs `/etc/sudoers.d/wpdevpilot`.
+    `sudoers.cjs` installs `/etc/sudoers.d/wpxen`.
   - **Support** — `settings.cjs` (see below), `agents.cjs` (see below),
     `browser.cjs` / `browserHistory.cjs` / `safeUrl.cjs` (see below),
     `externalTools.cjs` (which app opens a file/folder/terminal — maps each
@@ -137,7 +137,7 @@ no daemon** (see `docs/adr/0001-main-process-pty-no-daemon.md`), so it survives
 the window hiding to the tray and is reaped on quit; reattach after a window
 reopen is served from an in-memory ring buffer. The provider registry is
 data-shaped: `cmd` is the binary detected on `$PATH` and spawned, `install` is
-the hint shown when it isn't found (WPDevPilot never auto-installs).
+the hint shown when it isn't found (WPXen never auto-installs).
 
 ### In-app browser
 
@@ -154,7 +154,7 @@ DevTools, native context menus, key interception.
 - Re-parenting **mints a new `webContentsId`**, so the renderer re-registers on
   every `dom-ready` and `register()` is deliberately idempotent — it tears the
   previous guest's listeners down rather than stacking a second set.
-- `PARTITION` (`persist:wpdevpilot-browser`) is duplicated in `webviewCache.js` and
+- `PARTITION` (`persist:wpxen-browser`) is duplicated in `webviewCache.js` and
   `browser.cjs` and **must stay in sync** — the renderer sets it on the element,
   the main process is what "clear browsing data" wipes. Asserted in the tests.
 - Only `http:`, `https:` and `about:` are allowed. The real enforcement point is
@@ -250,7 +250,7 @@ agent toolbars) sits on `tertiary` with the content on `background`.
 **Icons.** lucide-react, monochrome, colored only by text color
 (`text-muted-foreground` → `hover:text-foreground`). The one deliberate
 exception is `IconTile` / `TILE_COLORS` — the colored rounded-square tiles in
-the sidebar, page heroes and settings rows are part of WPDevPilot's identity and
+the sidebar, page heroes and settings rows are part of WPXen's identity and
 stay.
 
 **Terminal & editor.** Both derive their palettes from `src/lib/theme.js`
@@ -297,7 +297,7 @@ in-app switcher.
 
 ### Legacy WPHerd names
 
-The app was called **WPHerd** before it was renamed to WPDevPilot, and it wrote
+The app was called **WPHerd** before it was renamed to WPXen, and it wrote
 its name into places outside its own bundle. Those are all still handled, and
 the shims are deliberate — don't tidy them away:
 
@@ -316,10 +316,10 @@ the shims are deliberate — don't tidy them away:
   two copies would redeclare the same PHP functions, and the old magic-login
   plugin would keep honouring a stale secret.
 - `sudoers.cjs` removes `/etc/sudoers.d/wpherd` inside the same privileged step
-  that installs (or removes) `/etc/sudoers.d/wpdevpilot`.
+  that installs (or removes) `/etc/sudoers.d/wpxen`.
 
 Not carried over, deliberately: the browser partition
-(`persist:wpdevpilot-browser`) and the `wpdevpilot.*` localStorage keys start
+(`persist:wpxen-browser`) and the `wpxen.*` localStorage keys start
 fresh, and nginx vhosts keep whatever `# WPHerd:` header comment they were
 written with — it's cosmetic and rewritten on the next vhost regeneration.
 

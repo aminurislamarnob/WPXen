@@ -7,7 +7,7 @@ import files from '../electron/services/files.cjs';
 describe('files.statPath', () => {
   let root;
   beforeEach(() => {
-    root = fs.mkdtempSync(path.join(os.tmpdir(), 'wpdevpilot-statpath-'));
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'wpxen-statpath-'));
     fs.mkdirSync(path.join(root, 'wp-content'));
     fs.writeFileSync(path.join(root, 'wp-content', 'x.php'), '<?php');
   });

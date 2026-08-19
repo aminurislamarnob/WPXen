@@ -17,7 +17,7 @@ export default function AboutSection() {
         {[
           ['Platform', `${sysInfo.platform} (${sysInfo.arch})`],
           ['Homebrew Prefix', sysInfo.brewPrefix || 'Not detected'],
-          ['WPDevPilot Version', sysInfo.appVersion],
+          ['WPXen Version', sysInfo.appVersion],
           ['Electron', sysInfo.electronVersion],
           ['Node.js', sysInfo.nodeVersion],
         ].map(([label, value]) => (

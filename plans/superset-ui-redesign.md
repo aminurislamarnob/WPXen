@@ -1,4 +1,4 @@
-# WPDevPilot UI Redesign — Adopt the Superset Design System
+# WPXen UI Redesign — Adopt the Superset Design System
 
 **Status:** implemented (Phases 0–6, pending visual QA) · **Author:** design analysis of `reference/superset-main` (Superset desktop, `apps/desktop`)
 
@@ -21,13 +21,13 @@
 > - `dark:` variant count went 249 → **1** (`dark:bg-input/60` on the active
 >   segmented tab), well under the <30 target.
 
-WPDevPilot currently mimics macOS System Settings + Liquid Glass (transparent window over
+WPXen currently mimics macOS System Settings + Liquid Glass (transparent window over
 NSVisualEffectView, capsule buttons, frosted translucent cards, colored icon tiles,
 blue accent). This plan replaces that aesthetic with **Superset's** design language:
 an opaque, warm near-black "ember" dark theme + clean neutral light theme, flat
 bordered cards, shadcn-style semantic tokens, segmented tabs, token-driven
 terminal/editor themes, and JetBrains-Mono-first monospace. Two deliberate
-WPDevPilot carve-outs from Superset's look: **blue stays the brand/highlight color**
+WPXen carve-outs from Superset's look: **blue stays the brand/highlight color**
 (not ember orange) and **the sidebar keeps its colored icon tiles** (§2.3–2.4).
 
 Read this whole document before writing code. Phases are ordered so the app stays
@@ -182,17 +182,17 @@ Editor theme is **derived from the app theme**:
 
 ---
 
-## 2. Design decisions for WPDevPilot (locked)
+## 2. Design decisions for WPXen (locked)
 
 1. **Adopt ember as the dark theme, Superset light as the light theme.** Keep
-   WPDevPilot's existing behavior of following the macOS appearance via
+   WPXen's existing behavior of following the macOS appearance via
    `prefers-color-scheme` (`darkMode: 'media'`, `nativeTheme` untouched). No
    in-app theme switcher, no theme store. Dark values live in the
-   `@media (prefers-color-scheme: dark)` block (WPDevPilot's existing pattern),
+   `@media (prefers-color-scheme: dark)` block (WPXen's existing pattern),
    not under a `.light` class.
 2. **Opaque window.** Remove transparency + vibrancy. This retires the entire
    Liquid Glass system (`.glass`, translucent tints, `--glass-*` tokens).
-3. **Blue stays the brand color.** `--highlight` is WPDevPilot's existing accent
+3. **Blue stays the brand color.** `--highlight` is WPXen's existing accent
    blue (`#0a60ff` light / `#0a84ff` dark), **not** Superset's ember orange —
    used for the terminal cursor, selections, unread/dirty dots, progress
    accents, the active sidebar pill, and toggles. Primary buttons follow
@@ -205,11 +205,11 @@ text-highlight-foreground`).
    re-pointed to `highlight` during the sweep, or it silently turns gray.
    Grep `accent` early and track the list.
 4. **The sidebar keeps its colored icon tiles** (`IconTile` + `TILE_COLORS`)
-   exactly as today — that's a deliberate WPDevPilot identity carve-out from
+   exactly as today — that's a deliberate WPXen identity carve-out from
    Superset's all-monochrome iconography. `IconTile` stays a supported
    primitive (sidebar, PageHero, settings rows keep their tiles).
 5. **No shadcn/ui dependency.** We port shadcn's _styling recipes_ (which
-   Superset uses) into WPDevPilot's existing primitives (`ui.jsx` + `.btn-*` /
+   Superset uses) into WPXen's existing primitives (`ui.jsx` + `.btn-*` /
    card classes). Do not add Radix, cva, clsx, or tailwind-merge.
 6. **Keep the existing component seam:** pages keep composing `Button`, `Card`,
    `Row`, `PageHeader`, etc. from `src/components/ui.jsx` and the `.btn-*` /
@@ -247,7 +247,7 @@ Verify: `npm run dev` — window is opaque warm-black in dark mode, white in lig
 
 ### 4.1 New token block (replaces the current `:root` / dark block)
 
-Keep WPDevPilot's **space-separated RGB triplet** format so Tailwind alpha
+Keep WPXen's **space-separated RGB triplet** format so Tailwind alpha
 modifiers (`bg-card/60`) keep working. Light values first, ember dark in the
 media query. Convert Superset's oklch light values to their RGB equivalents:
 
@@ -281,7 +281,7 @@ media query. Convert Superset's oklch light values to their RGB equivalents:
   --sidebar-foreground: 37 37 37;
   --sidebar-accent: 240 238 237; /* hover/active fill */
   --sidebar-border: 231 231 231;
-  --highlight: 10 96 255; /* WPDevPilot blue (kept) */
+  --highlight: 10 96 255; /* WPXen blue (kept) */
   --highlight-foreground: 255 255 255;
   --highlight-match: rgba(255, 211, 61, 0.35); /* search: yellow reads best in light */
   --highlight-active: rgba(10, 96, 255, 0.35);
@@ -341,7 +341,7 @@ media query. Convert Superset's oklch light values to their RGB equivalents:
     --sidebar-foreground: 234 232 230;
     --sidebar-accent: 37 34 32; /* #252220 */
     --sidebar-border: 42 40 39;
-    --highlight: 10 132 255; /* WPDevPilot blue, dark-mode variant (kept) */
+    --highlight: 10 132 255; /* WPXen blue, dark-mode variant (kept) */
     --highlight-foreground: 255 255 255;
     --highlight-match: rgba(10, 132, 255, 0.22);
     --highlight-active: rgba(10, 132, 255, 0.45);
@@ -523,7 +523,7 @@ No backdrop-filter anywhere. `site-card:hover` keeps the lift but swap shadow:
 
 ### 5.4 ui.jsx component updates
 
-- **Toggle** → Superset switch dims, WPDevPilot color: track `w-8 h-[18px]`,
+- **Toggle** → Superset switch dims, WPXen color: track `w-8 h-[18px]`,
   thumb `w-4 h-4 bg-white shadow-sm`, checked `bg-highlight` (blue — macOS
   familiar, per §2.3), unchecked `bg-input`.
 - **IconTile / PageHero — KEEP.** `IconTile` and both `TILE_COLORS` maps stay
@@ -563,7 +563,7 @@ unaffected but run anyway).
 
 1. Sidebar `<aside>`: `bg-sidebar border-r border-sidebar-border` (opaque; no
    more raw vibrancy). Width stays `w-56`.
-2. Nav items — Superset row metrics, **WPDevPilot tiles and blue pill kept** (§2.4):
+2. Nav items — Superset row metrics, **WPXen tiles and blue pill kept** (§2.4):
    ```
    base:   flex items-center gap-2.5 px-2 py-[5px] rounded-md text-[13px]
            text-sidebar-foreground/90
@@ -605,7 +605,7 @@ export const terminalThemes = {
     background: '#151110',
     foreground: '#eae8e6',
     cursor: '#0a84ff',
-    cursorAccent: '#151110' /* WPDevPilot blue (kept) */,
+    cursorAccent: '#151110' /* WPXen blue (kept) */,
     selectionBackground: 'rgba(10,132,255,0.28)',
     black: '#151110',
     red: '#dc6b6b',
@@ -787,7 +787,7 @@ Superset-style `dark:bg-input/30` on inputs/outline buttons. Target: reduce
 
 ## 11. Out of scope
 
-- Theme switcher UI / custom theme import (Superset has one; WPDevPilot follows the
+- Theme switcher UI / custom theme import (Superset has one; WPXen follows the
   OS — revisit later).
 - `superset-font://`-style SF Mono protocol loading (stack falls back to Menlo
   fine; JetBrains Mono users get the upgrade automatically).

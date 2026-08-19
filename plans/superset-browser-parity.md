@@ -9,7 +9,7 @@
 > - **Step 22 (mkcert HTTPS `.test`) is verified working — no bypass needed.**
 >   Driving the running app over CDP loaded `https://wp-theme.test/` in a browser
 >   tab with no certificate error, so Chromium does consult the macOS trust store
->   for the `persist:wpdevpilot-browser` partition. The `certificate-error` handler
+>   for the `persist:wpxen-browser` partition. The `certificate-error` handler
 >   contemplated in D6 was **not** written and should not be.
 > - **Steps 29–30 merged.** Rather than adding external/in-app variants of every
 >   quick action, the actions resolve a URL and hand it to `useOpenLink`, which
@@ -24,7 +24,7 @@
 >   the native context menu, and drag passthrough, all of which need real input
 >   events rather than synthetic clicks.
 
-Adds a built-in browser to WPDevPilot's Agents screen, modelled on Superset's
+Adds a built-in browser to WPXen's Agents screen, modelled on Superset's
 browser pane (reference checkout at `reference/superset-main`), plus a
 site-specific "open phpMyAdmin in the app" action.
 
@@ -59,7 +59,7 @@ The **renderer** owns the `<webview>` element. It creates it imperatively
 off-screen container** rather than destroying it — so a browser tab keeps its
 page, scroll position, cookies and JS state when you switch tabs. On remount it
 is `appendChild`-ed back into the live container. This is byte-for-byte the same
-pattern WPDevPilot already uses for terminals in `src/lib/terminal/sessionCache.js`
+pattern WPXen already uses for terminals in `src/lib/terminal/sessionCache.js`
 (whose header comment already calls it "Superset's hide attach pattern").
 
 The **main process** never owns the view; it only gets handed a
@@ -91,7 +91,7 @@ resulting events don't push duplicate entries.
 - **Drag passthrough** (`usePersistentWebview.ts:44`) — webviews are separate
   compositor layers that swallow drag events. Global capture-phase
   `dragstart`/`dragend`/`drop` listeners flip `pointer-events: none` on every
-  registered webview so drop targets underneath still work. WPDevPilot's
+  registered webview so drop targets underneath still work. WPXen's
   `react-resizable-panels` divider has the same problem with plain mouse drags.
 - **`setBackgroundThrottling(true)`** so parked off-screen webviews don't run
   at full speed.
@@ -108,7 +108,7 @@ resulting events don't push duplicate entries.
 
 ---
 
-## 2. What WPDevPilot has today
+## 2. What WPXen has today
 
 - `src/components/AgentsPane.jsx` — a 3-column `PanelGroup`:
   explorer (`FileExplorer`) │ terminal column (tab strip + `Terminal`) │ editor
@@ -127,7 +127,7 @@ resulting events don't push duplicate entries.
 - `main.cjs:44` `webPreferences` has **no `webviewTag`** — webviews are
   currently disabled.
 - Persistence is `JsonStore` (`electron/store.cjs`), dotted key paths, backed by
-  `userData/wpdevpilot-data.json`. There is no SQLite, so browsing history goes here.
+  `userData/wpxen-data.json`. There is no SQLite, so browsing history goes here.
 
 ### Gap list
 
@@ -136,7 +136,7 @@ the phpMyAdmin action both shell out to Safari/Chrome.
 
 ---
 
-## 3. Design decisions for WPDevPilot
+## 3. Design decisions for WPXen
 
 **D1 — `<webview>` tag, not `WebContentsView`.**
 `WebContentsView` requires the main process to track and sync pixel bounds
@@ -166,7 +166,7 @@ editor tab is active, switching between a file and the browser is free.
 container. Same mental model for anyone who has read the terminal code.
 
 **D4 — Browser state lives in `AgentsPane`, not a global store.**
-WPDevPilot has no Zustand; state is React `useState` in `AgentsPane`. Per-tab
+WPXen has no Zustand; state is React `useState` in `AgentsPane`. Per-tab
 browser state (`url`, `title`, `favicon`, `history[]`, `historyIndex`,
 `loading`, `error`) is a `browserState` map keyed by tab key, owned by
 `AgentsPane` and threaded down. Keeps it consistent with how `titles` and
@@ -182,7 +182,7 @@ force-deletes `webPreferences.preload`, forces `nodeIntegration: false` /
 **D6 — mkcert HTTPS `.test` sites.**
 Chromium on macOS consults the system trust store, and `mkcert.cjs` installs its
 root CA there, so HTTPS `.test` sites should validate. If they don't (the
-webview's `persist:wpdevpilot` partition validates independently), add a narrowly
+webview's `persist:wpxen` partition validates independently), add a narrowly
 scoped `certificate-error` handler that only trusts errors whose hostname ends
 in `.test` **and** whose fingerprint matches the mkcert root — never a blanket
 `event.preventDefault()`. Verify empirically in Phase 3 before writing any
@@ -222,7 +222,7 @@ deduped by URL, capped at 500, most-recent-first. No new dependency.
    `browser-new-window`, `browser-context-menu-action`, `browser-close-tab`,
    `browser-reload-tab`, `browser-console` to `VALID_EVENT_CHANNELS`.
    Push events carry `{ tabKey, … }` so a single channel serves all tabs
-   (WPDevPilot has no per-subscription IPC like tRPC observables — filter by
+   (WPXen has no per-subscription IPC like tRPC observables — filter by
    `tabKey` in the hook, the way `sessionCache.js` filters `terminal-data`).
 
 **Renderer**
@@ -248,7 +248,7 @@ deduped by URL, capped at 500, most-recent-first. No new dependency.
     changes (`AgentsPane.jsx:103` already clears `openFiles`).
 
 **Acceptance:** open a browser tab from the editor tab strip, type
-`wpdevpilot.test`, page loads; switch to a file tab and back — the page is still
+`wpxen.test`, page loads; switch to a file tab and back — the page is still
 scrolled where you left it and did not reload.
 
 **Tests:** `test/browser-sanitize-url.test.js` (bare host, localhost, IP, search
@@ -346,7 +346,7 @@ ranking.
 ### Phase 5 — Wire the rest of the app into it
 
 29. `SiteCard.jsx` / `SiteDetail.jsx` — the phpMyAdmin, Site and WP Admin quick
-    actions gain an "Open in WPDevPilot" variant that navigates to
+    actions gain an "Open in WPXen" variant that navigates to
     `/agents/<siteId>` with `location.state.openBrowser = url`, which
     `AgentsPane`'s existing location-state effect (`AgentsPane.jsx:81`) honours
     the same way it honours `spawn`.
@@ -363,14 +363,14 @@ ranking.
 
 ## 5. Risks
 
-| Risk                                                                          | Mitigation                                                                                                |
-| ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| `webviewTag: true` widens the renderer's attack surface                       | D5 `will-attach-webview` hardening; scheme allowlist                                                      |
-| `<webview>` is officially discouraged by Electron and could be deprecated     | Isolated behind `webviewCache.js` + `BrowserPane.jsx`; a future `WebContentsView` port touches only those |
-| Parked webviews keep pages (and their JS timers) alive → memory growth        | `setBackgroundThrottling(true)`; dispose on tab close and on site change; consider a cap on browser tabs  |
-| mkcert HTTPS `.test` certs rejected inside the `persist:wpdevpilot` partition | Verify first (Phase 3, step 22); only then a fingerprint-scoped `certificate-error` handler               |
-| First phpMyAdmin open runs `brew install phpmyadmin` and blocks               | Spinner in the menu item + error surfaced in the pane; `ensureReady()` is already idempotent              |
-| Webview swallows the column-resize drag                                       | Step 21 pointer-events passthrough                                                                        |
+| Risk                                                                      | Mitigation                                                                                                |
+| ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `webviewTag: true` widens the renderer's attack surface                   | D5 `will-attach-webview` hardening; scheme allowlist                                                      |
+| `<webview>` is officially discouraged by Electron and could be deprecated | Isolated behind `webviewCache.js` + `BrowserPane.jsx`; a future `WebContentsView` port touches only those |
+| Parked webviews keep pages (and their JS timers) alive → memory growth    | `setBackgroundThrottling(true)`; dispose on tab close and on site change; consider a cap on browser tabs  |
+| mkcert HTTPS `.test` certs rejected inside the `persist:wpxen` partition  | Verify first (Phase 3, step 22); only then a fingerprint-scoped `certificate-error` handler               |
+| First phpMyAdmin open runs `brew install phpmyadmin` and blocks           | Spinner in the menu item + error surfaced in the pane; `ensureReady()` is already idempotent              |
+| Webview swallows the column-resize drag                                   | Step 21 pointer-events passthrough                                                                        |
 
 ---
 

@@ -18,7 +18,7 @@ const site = {
 describe('buildManifest / validateManifest', () => {
   it('round-trips a well-formed site', () => {
     const manifest = siteops.buildManifest(site, { tablePrefix: 'wp_' });
-    expect(manifest.format).toBe('wpdevpilot-site');
+    expect(manifest.format).toBe('wpxen-site');
     expect(manifest.formatVersion).toBe(1);
     expect(manifest.domain).toBe('my-blog.test');
     expect(manifest.https).toBe(true);
@@ -37,16 +37,25 @@ describe('buildManifest / validateManifest', () => {
     expect(() => siteops.validateManifest(legacy)).not.toThrow();
   });
 
+  it.each(['wpxen-site', 'wpdevpilot-site', 'wpherd-site'])(
+    'accepts the %s format tag',
+    (format) => {
+      expect(() =>
+        siteops.validateManifest({ format, formatVersion: 1, domain: 'a.test' })
+      ).not.toThrow();
+    }
+  );
+
   it('rejects a foreign format', () => {
     expect(() => siteops.validateManifest({ format: 'other', formatVersion: 1 })).toThrow(
-      /not exported by WPDevPilot/
+      /not exported by WPXen/
     );
   });
 
   it('rejects a future format version', () => {
     expect(() =>
       siteops.validateManifest({
-        format: 'wpdevpilot-site',
+        format: 'wpxen-site',
         formatVersion: 2,
         domain: 'a.test',
       })
@@ -56,7 +65,7 @@ describe('buildManifest / validateManifest', () => {
   it('rejects an invalid domain', () => {
     expect(() =>
       siteops.validateManifest({
-        format: 'wpdevpilot-site',
+        format: 'wpxen-site',
         formatVersion: 1,
         domain: 'bad domain.test',
       })
@@ -66,7 +75,7 @@ describe('buildManifest / validateManifest', () => {
   it('rejects an unsafe table prefix', () => {
     expect(() =>
       siteops.validateManifest({
-        format: 'wpdevpilot-site',
+        format: 'wpxen-site',
         formatVersion: 1,
         domain: 'a.test',
         tablePrefix: 'wp`; DROP--',
@@ -85,21 +94,20 @@ describe('detectImportKind', () => {
     expect(siteops.detectImportKind('.wpress', [])).toBe('wpress');
   });
 
-  it('detects a WPDevPilot archive by manifest entry', () => {
+  it('detects a WPXen archive by manifest entry', () => {
     expect(
-      siteops.detectImportKind('.zip', [
-        'database.sql',
-        'wpdevpilot-manifest.json',
-        'files/',
-      ])
-    ).toBe('wpdevpilot');
+      siteops.detectImportKind('.zip', ['database.sql', 'wpxen-manifest.json', 'files/'])
+    ).toBe('wpxen');
   });
 
-  it('detects an archive exported under the old WPHerd name', () => {
-    expect(
-      siteops.detectImportKind('.zip', ['database.sql', 'wpherd-manifest.json', 'files/'])
-    ).toBe('wpdevpilot');
-  });
+  it.each(['wpdevpilot-manifest.json', 'wpherd-manifest.json'])(
+    'detects an archive exported under the old name %s',
+    (manifest) => {
+      expect(siteops.detectImportKind('.zip', ['database.sql', manifest, 'files/'])).toBe(
+        'wpxen'
+      );
+    }
+  );
 
   it('falls back to generic', () => {
     expect(siteops.detectImportKind('.zip', ['site/wp-settings.php', 'db.sql'])).toBe(
@@ -108,7 +116,7 @@ describe('detectImportKind', () => {
   });
 
   it('does not match a nested manifest path', () => {
-    expect(siteops.detectImportKind('.zip', ['files/wpdevpilot-manifest.json'])).toBe(
+    expect(siteops.detectImportKind('.zip', ['files/wpxen-manifest.json'])).toBe(
       'generic'
     );
   });

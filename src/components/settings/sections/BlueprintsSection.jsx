@@ -78,8 +78,8 @@ export default function BlueprintsSection() {
         )}
       </Card>
       <p className="text-[11px] text-muted-foreground mt-1.5 px-1">
-        Blueprints are full snapshots (files + database) stored in WPDevPilot’s data
-        folder. Create a site from one via{' '}
+        Blueprints are full snapshots (files + database) stored in WPXen’s data folder.
+        Create a site from one via{' '}
         <span className="font-medium">Add Site → From Blueprint</span>.
       </p>
     </div>

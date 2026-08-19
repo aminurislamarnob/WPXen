@@ -3,30 +3,34 @@
 const fs = require('fs');
 const path = require('path');
 
-// One-time carry-over from the WPHerd name to WPDevPilot.
+// One-time carry-over of user data across the app's renames
+// (WPHerd → WPDevPilot → WPXen).
 //
 // Renaming the app moves `userData` — Electron derives it from productName, so
-// a rebranded build looks at ~/Library/Application Support/WPDevPilot and finds
+// a rebranded build looks at ~/Library/Application Support/WPXen and finds
 // nothing, and every site, setting and blueprint appears to have vanished. This
-// copies (never moves) the user-meaningful state out of the old directory the
-// first time the renamed build starts. Caches, logs, pid files and the browser
+// copies (never moves) the user-meaningful state out of the newest old
+// directory that still has data. Caches, logs, pid files and the browser
 // partition are deliberately left behind — they rebuild themselves.
 //
+// Generations are tried newest-first and the first hit wins, so someone who
+// skipped a release entirely — WPHerd straight to WPXen — is carried over just
+// the same as someone who upgraded through every name.
+//
 // Pure fs + path so the module stays importable outside Electron: the caller
-// supplies both directories.
+// supplies the directories.
 
-const LEGACY_DATA_FILE = 'wpherd-data.json';
-const DATA_FILE = 'wpdevpilot-data.json';
+const DATA_FILE = 'wpxen-data.json';
+// Newest first. `dir` is relative to the platform's appData directory.
+const LEGACY_GENERATIONS = [
+  { dir: 'WPDevPilot', dataFile: 'wpdevpilot-data.json' },
+  { dir: 'WPHerd', dataFile: 'wpherd-data.json' },
+];
 const CARRIED_DIRS = ['blueprints'];
 
-function migrateLegacyUserData({
-  legacyDir,
-  currentDir,
-  legacyDataFile = LEGACY_DATA_FILE,
-  dataFile = DATA_FILE,
-} = {}) {
-  if (!legacyDir || !currentDir) return false;
-
+// Copies one generation's data into currentDir. Returns false when there is
+// nothing to copy, so the caller can fall through to an older generation.
+function migrateOneGeneration({ legacyDir, currentDir, legacyDataFile, dataFile }) {
   const target = path.join(currentDir, dataFile);
   const source = path.join(legacyDir, legacyDataFile);
   // Already migrated, or already running with its own data — leave it alone.
@@ -56,4 +60,27 @@ function migrateLegacyUserData({
   return true;
 }
 
-module.exports = { migrateLegacyUserData, LEGACY_DATA_FILE, DATA_FILE };
+function migrateLegacyUserData({
+  appDataDir,
+  currentDir,
+  generations = LEGACY_GENERATIONS,
+  dataFile = DATA_FILE,
+} = {}) {
+  if (!appDataDir || !currentDir) return false;
+  // A store of our own already exists — nothing to carry over, and checking
+  // every generation would only risk clobbering it.
+  if (fs.existsSync(path.join(currentDir, dataFile))) return false;
+
+  for (const gen of generations) {
+    const migrated = migrateOneGeneration({
+      legacyDir: path.join(appDataDir, gen.dir),
+      currentDir,
+      legacyDataFile: gen.dataFile,
+      dataFile,
+    });
+    if (migrated) return true;
+  }
+  return false;
+}
+
+module.exports = { migrateLegacyUserData, LEGACY_GENERATIONS, DATA_FILE };

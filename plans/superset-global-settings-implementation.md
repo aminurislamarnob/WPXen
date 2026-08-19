@@ -1,4 +1,4 @@
-# WPDevPilot global settings — implementation plan
+# WPXen global settings — implementation plan
 
 Companion to `plans/superset-global-settings.md` (the analysis). That document says
 _what_ to build and why; this one says _how_, in the order it should be built.
@@ -60,11 +60,11 @@ Reference implementation: `superset-sh/superset`,
 
 **Goal.** Turn `src/components/Settings.jsx` — one 491-line scroll with a trailing
 Save button — into a routed, searchable, auto-saving settings surface, and fill it
-with the global preferences WPDevPilot is missing.
+with the global preferences WPXen is missing.
 
 **Non-goals.** Account / Organization / Teams / Billing / Hosts / Integrations
-(Superset is multi-user cloud; WPDevPilot is single-user local). No Models section
-until WPDevPilot itself calls a model. No v1/v2 variant gating.
+(Superset is multi-user cloud; WPXen is single-user local). No Models section
+until WPXen itself calls a model. No v1/v2 variant gating.
 
 **The three-place rule still applies.** Every setting that crosses the process
 boundary touches `electron/ipc.cjs` (handler) → `electron/preload.cjs` (bridge
@@ -91,7 +91,7 @@ The plan below lists all three for each phase.
 
 ### 1.1 One generic settings channel, not one handler per setting
 
-Superset gets a typed getter+setter per setting for free from tRPC. WPDevPilot would
+Superset gets a typed getter+setter per setting for free from tRPC. WPXen would
 pay for that in hand-written IPC. Instead:
 
 ```js
@@ -142,7 +142,7 @@ validation.
 ### 1.3 Auto-save, optimistic, with rollback
 
 Superset's `BehaviorSettings.tsx` pattern: write local state immediately, fire the
-mutation, roll back and toast on rejection. In WPDevPilot this is one hook:
+mutation, roll back and toast on rejection. In WPXen this is one hook:
 
 ```js
 // src/lib/useSettings.js
@@ -329,7 +329,7 @@ Tests: schema validation for each new type (port range, enum, path exists);
 
 - `terminal.presets` — `[{ id, name, description, cwd, commands[], siteScoped }]`,
   Superset's `PRESET_COLUMNS` (`settings/presets/types.ts`) plus a `commands`
-  array. WPDevPilot-native seeds: `wp db cli`, `wp cron event run --due-now`,
+  array. WPXen-native seeds: `wp db cli`, `wp cron event run --due-now`,
   `npm run dev` in the active theme directory, `tail -f` the site's error log.
 - `terminal.quickAdd` — which presets appear in the site page's launcher.
 - `terminal.scrollback` (int), `terminal.backgroundSessionCap` (int) — Superset's
@@ -416,7 +416,7 @@ override mapping (Superset has `toFontWeightOverride.test.ts` — port it);
 **Keyboard** — a shortcut registry in the renderer, click-to-record rebinding,
 conflict detection with Superset's "would you like to reassign it?" prompt, and
 reset-to-default. Persist as `keyboard.bindings` (`{ commandId: accelerator }`).
-Start by cataloguing what WPDevPilot already binds (`Terminal.jsx`,
+Start by cataloguing what WPXen already binds (`Terminal.jsx`,
 `TerminalSearchBar.jsx`, `FileExplorer.jsx`) rather than inventing new commands.
 
 **Permissions** (macOS-only section, hidden elsewhere like Superset's `macOnly`) —
@@ -444,7 +444,7 @@ banner. Populate only when there is something to gate.
 - "Copy diagnostics" on About (platform, brew prefix, versions, service states) —
   scrub `dbPassword` and any custom agent commands before copying.
 - "Open data folder", "Reset app data" (typed confirmation; it deletes
-  `wpdevpilot-data.json` and blueprints), "Check for updates".
+  `wpxen-data.json` and blueprints), "Check for updates".
 - `docs/features/FEATURES.md` update.
 
 ---

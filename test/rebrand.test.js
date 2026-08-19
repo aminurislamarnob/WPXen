@@ -4,49 +4,65 @@ import os from 'os';
 import path from 'path';
 import { migrateLegacyUserData } from '../electron/services/rebrand.cjs';
 
-let root;
-let legacyDir;
+let appDataDir;
 let currentDir;
 
 beforeEach(() => {
-  root = fs.mkdtempSync(path.join(os.tmpdir(), 'wpdevpilot-rebrand-'));
-  legacyDir = path.join(root, 'WPHerd');
-  currentDir = path.join(root, 'WPDevPilot');
+  appDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wpxen-rebrand-'));
+  currentDir = path.join(appDataDir, 'WPXen');
 });
 
 afterEach(() => {
-  fs.rmSync(root, { recursive: true, force: true });
+  fs.rmSync(appDataDir, { recursive: true, force: true });
 });
 
-function seedLegacy(data = { sites: [{ domain: 'my-blog.test' }] }) {
+const GENERATIONS = {
+  WPDevPilot: 'wpdevpilot-data.json',
+  WPHerd: 'wpherd-data.json',
+};
+
+function seedLegacy(dir, data = { sites: [{ domain: 'my-blog.test' }] }) {
+  const legacyDir = path.join(appDataDir, dir);
   fs.mkdirSync(legacyDir, { recursive: true });
-  fs.writeFileSync(
-    path.join(legacyDir, 'wpherd-data.json'),
-    JSON.stringify(data),
-    'utf8'
-  );
+  fs.writeFileSync(path.join(legacyDir, GENERATIONS[dir]), JSON.stringify(data), 'utf8');
+  return legacyDir;
 }
 
 describe('migrateLegacyUserData', () => {
-  it('copies the old data file into the renamed userData directory', () => {
-    seedLegacy();
+  it.each(Object.keys(GENERATIONS))(
+    'copies a %s data file into the renamed userData directory',
+    (dir) => {
+      const legacyDir = seedLegacy(dir);
 
-    expect(migrateLegacyUserData({ legacyDir, currentDir })).toBe(true);
+      expect(migrateLegacyUserData({ appDataDir, currentDir })).toBe(true);
+
+      const moved = JSON.parse(
+        fs.readFileSync(path.join(currentDir, 'wpxen-data.json'), 'utf8')
+      );
+      expect(moved.sites[0].domain).toBe('my-blog.test');
+      // Copy, not move — a downgrade should still find its own data.
+      expect(fs.existsSync(path.join(legacyDir, GENERATIONS[dir]))).toBe(true);
+    }
+  );
+
+  it('prefers the newest generation when several are present', () => {
+    seedLegacy('WPHerd', { sites: [{ domain: 'oldest.test' }] });
+    seedLegacy('WPDevPilot', { sites: [{ domain: 'newest.test' }] });
+
+    expect(migrateLegacyUserData({ appDataDir, currentDir })).toBe(true);
 
     const moved = JSON.parse(
-      fs.readFileSync(path.join(currentDir, 'wpdevpilot-data.json'), 'utf8')
+      fs.readFileSync(path.join(currentDir, 'wpxen-data.json'), 'utf8')
     );
-    expect(moved.sites[0].domain).toBe('my-blog.test');
-    // Copy, not move — a downgrade should still find its own data.
-    expect(fs.existsSync(path.join(legacyDir, 'wpherd-data.json'))).toBe(true);
+    expect(moved.sites[0].domain).toBe('newest.test');
   });
 
   it('carries blueprints across', () => {
-    seedLegacy();
+    const legacyDir = seedLegacy('WPDevPilot');
     fs.mkdirSync(path.join(legacyDir, 'blueprints'), { recursive: true });
     fs.writeFileSync(path.join(legacyDir, 'blueprints', 'bp1.zip'), 'zip', 'utf8');
 
-    migrateLegacyUserData({ legacyDir, currentDir });
+    migrateLegacyUserData({ appDataDir, currentDir });
 
     expect(fs.readFileSync(path.join(currentDir, 'blueprints', 'bp1.zip'), 'utf8')).toBe(
       'zip'
@@ -54,23 +70,23 @@ describe('migrateLegacyUserData', () => {
   });
 
   it('never overwrites data the renamed app already has', () => {
-    seedLegacy();
+    seedLegacy('WPDevPilot');
     fs.mkdirSync(currentDir, { recursive: true });
     fs.writeFileSync(
-      path.join(currentDir, 'wpdevpilot-data.json'),
+      path.join(currentDir, 'wpxen-data.json'),
       JSON.stringify({ sites: [] }),
       'utf8'
     );
 
-    expect(migrateLegacyUserData({ legacyDir, currentDir })).toBe(false);
+    expect(migrateLegacyUserData({ appDataDir, currentDir })).toBe(false);
     const kept = JSON.parse(
-      fs.readFileSync(path.join(currentDir, 'wpdevpilot-data.json'), 'utf8')
+      fs.readFileSync(path.join(currentDir, 'wpxen-data.json'), 'utf8')
     );
     expect(kept.sites).toEqual([]);
   });
 
   it('is a no-op with nothing to migrate', () => {
-    expect(migrateLegacyUserData({ legacyDir, currentDir })).toBe(false);
+    expect(migrateLegacyUserData({ appDataDir, currentDir })).toBe(false);
     expect(fs.existsSync(currentDir)).toBe(false);
   });
 

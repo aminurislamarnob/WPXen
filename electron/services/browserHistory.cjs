@@ -2,7 +2,7 @@
 
 // Browsing history for the in-app browser's address-bar autocomplete.
 //
-// Superset keeps this in SQLite; WPDevPilot has no SQL layer, so it lives in the
+// Superset keeps this in SQLite; WPXen has no SQL layer, so it lives in the
 // JsonStore under `browser.history` — a most-recent-first list, deduped by URL,
 // capped so the store file can't grow without bound.
 //
@@ -51,8 +51,8 @@ function searchEntries(entries, query, limit = 8) {
   for (const entry of entries) {
     const url = entry.url.toLowerCase();
     const title = (entry.title || '').toLowerCase();
-    // Compare against the URL without its scheme too, so "wpdevpilot" matches
-    // "https://wpdevpilot.test" as a prefix rather than a mid-string hit.
+    // Compare against the URL without its scheme too, so "wpxen" matches
+    // "https://wpxen.test" as a prefix rather than a mid-string hit.
     const bare = url.replace(/^https?:\/\/(www\.)?/, '');
 
     let tier;

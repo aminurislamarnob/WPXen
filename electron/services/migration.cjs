@@ -1,6 +1,6 @@
 'use strict';
 
-// One-time migration from `brew services`-managed daemons to WPDevPilot-supervised
+// One-time migration from `brew services`-managed daemons to WPXen-supervised
 // child processes (see procman.cjs). `brew services stop` both unloads the
 // launchd job and deletes its LaunchAgent plist, which is what removes the
 // entries from macOS "App Background Activity". dnsmasq is deliberately left
@@ -16,7 +16,7 @@ async function migrateToChildProcs(store) {
   if (store.get(STORE_FLAG, false)) return;
 
   // nginx ran as a *root* LaunchDaemon — stopping it needs the sudo path
-  // (silent when the WPDevPilot sudoers file is installed, otherwise one admin
+  // (silent when the WPXen sudoers file is installed, otherwise one admin
   // prompt; acceptable for a one-time migration).
   try {
     brew.stopBrewServiceSudo('nginx');

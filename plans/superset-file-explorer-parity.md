@@ -1,6 +1,6 @@
 # Plan: File Explorer & Changes tab — Superset parity
 
-Implementation spec for bringing WPDevPilot's Agents-screen file explorer and git
+Implementation spec for bringing WPXen's Agents-screen file explorer and git
 Changes tab up to feature parity with Superset (reference checkout at
 `reference/superset-main`, see
 `apps/desktop/src/renderer/routes/_authenticated/_dashboard/v2-workspace/$workspaceId/components/WorkspaceSidebar/`
@@ -221,7 +221,7 @@ Full directory hierarchy built from the section's `rel` paths:
 
 ### Shared
 
-- Persist mode in `localStorage` key `wpdevpilot.changesViewMode`
+- Persist mode in `localStorage` key `wpxen.changesViewMode`
   (`'folders'|'tree'`), read once on mount.
 - `foldSignal` from Phase 1 collapses/expands folder groups (folders view)
   or directory nodes (tree view) in addition to the sections.
@@ -236,7 +236,7 @@ collapses groups/dirs in both modes; a change in
 ## Phase 3 — Diff viewer
 
 The flagship gap: clicking a changed file opens a **diff**, not the raw
-file. Superset renders diffs in a pane; WPDevPilot renders them as a special
+file. Superset renders diffs in a pane; WPXen renders them as a special
 editor tab in `CodeEditor`.
 
 ### 3a. Dependency
@@ -286,7 +286,7 @@ let `@codemirror/merge` compute chunks:
 - Changes row click → open diff tab. Row context menu (new, reuse the
   `.panel` fixed-position menu pattern from the Files tree): **Open Diff**,
   **Open File**, **Copy Path**, **Copy Relative Path**, **Reveal in
-  Finder**. (No "Open in Editor"/external — WPDevPilot has no external-editor
+  Finder**. (No "Open in Editor"/external — WPXen has no external-editor
   concept.)
 - Refresh behavior: when the changes poll detects a file's counts changed
   and its diff tab is active, re-fetch that diff's documents (cheap:
@@ -343,5 +343,5 @@ upload, virtualized tree, external-editor integration.
 Implement as separate commits per phase (1a+1b+1c+1d+1e together is fine as
 one commit). After each phase: `npm run test`, `npm run lint`, and a manual
 pass in `npm run dev` against a real site repo (create scratch changes with
-plain `git`/`touch` in the site dir — never in the WPDevPilot repo itself).
+plain `git`/`touch` in the site dir — never in the WPXen repo itself).
 Commit messages: `feat(agents): …` style, matching the existing history.

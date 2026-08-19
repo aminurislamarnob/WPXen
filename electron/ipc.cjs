@@ -136,7 +136,7 @@ async function computeServiceStatus() {
     mailpit.isRunningAsync(),
   ]);
 
-  // Supervisor view of each converted service: whether WPDevPilot owns the
+  // Supervisor view of each converted service: whether WPXen owns the
   // process, its lifecycle state, and any crash-loop error for the UI. The
   // probe-based `running` booleans above stay the source of truth (they also
   // see instances we didn't spawn).
@@ -1189,7 +1189,7 @@ function registerHandlers(win, storeInstance) {
     let url = `${base}/wp-admin`;
     if (site.oneClickAdmin?.enabled) {
       const secret = store.get(`magicLogin.${id}`, null);
-      if (secret) url = `${base}/?wpdevpilot_magic_login=${secret}`;
+      if (secret) url = `${base}/?wpxen_magic_login=${secret}`;
     }
     return { success: true, url };
   }

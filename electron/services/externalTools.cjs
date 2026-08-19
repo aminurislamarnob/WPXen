@@ -2,7 +2,7 @@
 
 // Which app opens a file, a folder or a terminal.
 //
-// Before this, WPDevPilot handed everything to `shell.openPath` and let macOS
+// Before this, WPXen handed everything to `shell.openPath` and let macOS
 // decide — which meant "Open in editor" landed wherever Launch Services
 // pointed, often Xcode or TextEdit. Each editor here maps to the CLI shim it
 // installs on $PATH; if that shim isn't there we fall back to `shell.openPath`

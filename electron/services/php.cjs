@@ -6,7 +6,7 @@ const brew = require('./brew.cjs');
 const execAsync = require('./asyncExec.cjs');
 const procman = require('./procman.cjs');
 
-// PHP versions WPDevPilot can install. Newer versions ship as Homebrew core
+// PHP versions WPXen can install. Newer versions ship as Homebrew core
 // formulae (php@<version>); older EOL versions were dropped from core and come
 // from the community shivammathur/php tap instead. Newest first, and kept in
 // sync with the versions probed by brew.getInstalledPhpVersions.
@@ -53,11 +53,11 @@ function getBrewServiceName(version) {
   return brew.phpFormulaForVersion(version) || 'php';
 }
 
-// Match only the php-fpm master that WPDevPilot manages — its config lives under
+// Match only the php-fpm master that WPXen manages — its config lives under
 // the Homebrew prefix ({prefix}/etc/php/...). This deliberately excludes other
 // php-fpm processes on the machine (e.g. Laravel Herd's, whose config is under
 // ~/Library/Application Support/Herd), so the status and Stop button reflect
-// what WPDevPilot actually controls.
+// what WPXen actually controls.
 function phpFpmPgrepPattern() {
   const prefix = brew.getBrewPrefix();
   return prefix ? `php-fpm: master.*${prefix}/etc/php` : null;
@@ -88,7 +88,7 @@ async function isPhpFpmRunningAsync(_version) {
   }
 }
 
-// php-fpm runs as a single supervised child of WPDevPilot (registry slot 'php',
+// php-fpm runs as a single supervised child of WPXen (registry slot 'php',
 // see procman.cjs) — one version at a time, matching today's behavior: every
 // version's pool listens on 127.0.0.1:9000, so two can't coexist anyway.
 function buildFpmSpec(version) {
@@ -229,7 +229,7 @@ async function getInstalledPhpVersionsWithDetailsAsync() {
   });
 }
 
-// Lists PHP versions WPDevPilot can install via Homebrew, each flagged with whether
+// Lists PHP versions WPXen can install via Homebrew, each flagged with whether
 // it's already installed. Any installed version not in the known list (e.g. a
 // newer release from a tap) is appended so nothing installed is ever hidden.
 function getInstallablePhpVersions() {
@@ -297,18 +297,18 @@ function runBrewStreaming(args, onProgress) {
 
 // Homebrew 6.0 turned on HOMEBREW_REQUIRE_TAP_TRUST by default, so it refuses
 // to load formulae from untrusted third-party taps — which breaks install and
-// upgrade of the EOL PHP versions WPDevPilot pulls from shivammathur/php (they fail
+// upgrade of the EOL PHP versions WPXen pulls from shivammathur/php (they fail
 // with "the following taps are not trusted"). `brew tap` clones the repo and
 // `brew trust` whitelists it in trust.json; both are idempotent, and on older
 // Homebrew that lacks `brew trust` the failure is swallowed (trust isn't
 // required there, so the install/upgrade below still runs and surfaces any
 // real error itself).
-const WPDEVPILOT_PHP_TAP = 'shivammathur/php';
+const WPXEN_PHP_TAP = 'shivammathur/php';
 
 async function ensurePhpTapTrusted(onProgress) {
   // Tap must exist before it can be trusted or its formulae loaded.
-  await runBrewStreaming(['tap', WPDEVPILOT_PHP_TAP], onProgress).catch(() => {});
-  await runBrewStreaming(['trust', WPDEVPILOT_PHP_TAP], onProgress).catch(() => {});
+  await runBrewStreaming(['tap', WPXEN_PHP_TAP], onProgress).catch(() => {});
+  await runBrewStreaming(['trust', WPXEN_PHP_TAP], onProgress).catch(() => {});
 }
 
 // Installs a PHP version via Homebrew (core or the shivammathur/php tap).
@@ -367,7 +367,7 @@ function switchActivePhpVersion(version) {
 // ─── php.ini settings ──────────────────────────────────────────────────────
 //
 // Editable php.ini directives, exposed per installed version. We never touch the
-// user's php.ini; instead we write a WPDevPilot-managed override into that version's
+// user's php.ini; instead we write a WPXen-managed override into that version's
 // conf.d directory (loaded last, so it wins). Each setting stores a single plain
 // number that maps to one or more directives.
 const PHP_INI_SETTINGS = [
@@ -406,7 +406,7 @@ const PHP_INI_SETTINGS = [
 // Site-specific overrides applied through the site's nginx vhost via
 // `fastcgi_param PHP_VALUE` (all of these directives are PHP_INI_PERDIR or
 // PHP_INI_ALL, so FPM honours them per request). They take precedence over the
-// global php.ini and the WPDevPilot-managed conf.d file — for this site only.
+// global php.ini and the WPXen-managed conf.d file — for this site only.
 const SITE_PHP_SETTINGS = [
   {
     key: 'memory_limit',
@@ -586,23 +586,30 @@ function getSitePhpSettingsSchema() {
 function getManagedIniPath(version) {
   const prefix = brew.getBrewPrefix();
   if (!prefix) return null;
-  return `${prefix}/etc/php/${version}/conf.d/zz-wpdevpilot.ini`;
+  return `${prefix}/etc/php/${version}/conf.d/zz-wpxen.ini`;
 }
 
-// The pre-rename file. conf.d loads alphabetically, so a leftover zz-wpherd.ini
-// would load *after* zz-wpdevpilot.ini and silently win — it has to be read for
-// its values once, then deleted the moment we write our own.
-function getLegacyManagedIniPath(version) {
+// The pre-rename files, newest first. conf.d loads alphabetically and
+// zz-wpxen.ini sorts after both, so ours wins on load — but a leftover still
+// has to be read once for its customised values, then deleted the moment we
+// write our own, or the file lingers forever setting directives nothing owns.
+const LEGACY_INI_MARKERS = ['wpdevpilot', 'wpherd'];
+
+function getLegacyManagedIniPaths(version) {
   const prefix = brew.getBrewPrefix();
-  if (!prefix) return null;
-  return `${prefix}/etc/php/${version}/conf.d/zz-wpherd.ini`;
+  if (!prefix) return [];
+  return LEGACY_INI_MARKERS.map((marker) => [
+    `${prefix}/etc/php/${version}/conf.d/zz-${marker}.ini`,
+    marker,
+  ]);
 }
 
 function removeLegacyManagedIni(version) {
-  try {
-    const legacy = getLegacyManagedIniPath(version);
-    if (legacy && fs.existsSync(legacy)) fs.rmSync(legacy, { force: true });
-  } catch {}
+  for (const [legacy] of getLegacyManagedIniPaths(version)) {
+    try {
+      if (fs.existsSync(legacy)) fs.rmSync(legacy, { force: true });
+    } catch {}
+  }
 }
 
 // Validates a raw input against a setting's rules, returning an integer.
@@ -624,19 +631,19 @@ function validateSettingValue(setting, value) {
   return num;
 }
 
-// Reads the WPDevPilot-managed values for a version, falling back to defaults for
+// Reads the WPXen-managed values for a version, falling back to defaults for
 // any setting that hasn't been customised yet. Values are round-tripped via a
-// `; wpdevpilot:<key>=<number>` comment so the plain number survives directive
+// `; wpxen:<key>=<number>` comment so the plain number survives directive
 // formatting (e.g. "128M").
 function readManagedValues(version) {
   const values = {};
   for (const s of PHP_INI_SETTINGS) values[s.key] = s.default;
 
-  // Prefer our own file; fall back to the pre-rename one so a WPHerd install's
-  // customised values survive the first read after upgrading.
+  // Prefer our own file; fall back through the pre-rename ones so a customised
+  // value survives the first read after upgrading, whichever name wrote it.
   const candidates = [
-    [getManagedIniPath(version), 'wpdevpilot'],
-    [getLegacyManagedIniPath(version), 'wpherd'],
+    [getManagedIniPath(version), 'wpxen'],
+    ...getLegacyManagedIniPaths(version),
   ];
   for (const [p, marker] of candidates) {
     try {
@@ -658,10 +665,10 @@ function writeManagedIni(version, values) {
   const dir = p.slice(0, p.lastIndexOf('/'));
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
-  const lines = ['; Managed by WPDevPilot — edit these from the app.', ''];
+  const lines = ['; Managed by WPXen — edit these from the app.', ''];
   for (const s of PHP_INI_SETTINGS) {
     const v = values[s.key];
-    lines.push(`; wpdevpilot:${s.key}=${v}`);
+    lines.push(`; wpxen:${s.key}=${v}`);
     for (const [directive, val] of Object.entries(s.toDirectives(v))) {
       lines.push(`${directive} = ${val}`);
     }

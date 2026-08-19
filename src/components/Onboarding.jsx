@@ -207,12 +207,12 @@ export default function Onboarding({ deps, onComplete, onCreateFirstSite }) {
           <div className="text-center">
             <img
               src={logo}
-              alt="WPDevPilot"
+              alt="WPXen"
               className="h-9 w-auto mx-auto mb-5"
               draggable={false}
             />
-            <StepHeading title="Welcome to WPDevPilot">
-              Let&apos;s get your Mac set up for local WordPress development — WPDevPilot
+            <StepHeading title="Welcome to WPXen">
+              Let&apos;s get your Mac set up for local WordPress development — WPXen
               installs and configures everything it needs via Homebrew.
             </StepHeading>
             <div className="grid grid-cols-2 gap-2 mb-6 text-left">
@@ -235,8 +235,8 @@ export default function Onboarding({ deps, onComplete, onCreateFirstSite }) {
         {current === 'homebrew' && (
           <div className="text-center">
             <StepHero icon={Beaker} color="orange" title="Install Homebrew">
-              Homebrew is the package manager WPDevPilot uses. It installs in Terminal —
-              you may be asked for your password and to install Xcode tools.
+              Homebrew is the package manager WPXen uses. It installs in Terminal — you
+              may be asked for your password and to install Xcode tools.
             </StepHero>
 
             {!brewLaunched ? (
@@ -353,8 +353,8 @@ export default function Onboarding({ deps, onComplete, onCreateFirstSite }) {
         {current === 'dns' && (
           <div className="text-center">
             <StepHero icon={Globe} color="teal" title="Configure .test domains">
-              WPDevPilot routes <code className="font-mono text-[12px]">*.test</code>{' '}
-              sites to your Mac using dnsmasq. This needs your admin password once.
+              WPXen routes <code className="font-mono text-[12px]">*.test</code> sites to
+              your Mac using dnsmasq. This needs your admin password once.
             </StepHero>
             <Button
               variant="primary"
@@ -406,8 +406,7 @@ export default function Onboarding({ deps, onComplete, onCreateFirstSite }) {
         {current === 'done' && (
           <div className="text-center">
             <StepHero icon={PartyPopper} color="purple" title="You're all set!">
-              WPDevPilot is ready. Create your first WordPress site or head to the
-              dashboard.
+              WPXen is ready. Create your first WordPress site or head to the dashboard.
             </StepHero>
             <div className="space-y-2">
               <Button
