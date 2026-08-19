@@ -1,8 +1,16 @@
-# WPHerd
+# WPXen
 
-Blazingly fast local WordPress development for macOS — a native menu bar app that manages nginx, PHP-FPM, MySQL, and dnsmasq via Homebrew so you can spin up WordPress sites in seconds.
+**AI-native WordPress development environment.**
+
+A local environment where developers build, test, debug and ship WordPress projects with AI agents as first-class development participants — a native macOS menu bar app that manages nginx, PHP-FPM, MySQL and dnsmasq via Homebrew, so you can spin up WordPress sites in seconds.
 
 Inspired by [Laravel Herd](https://herd.laravel.com).
+
+> **Previously released as WPHerd, then WPDevPilot.** Upgrading from either is
+> seamless: the first launch carries your sites, settings and blueprints over
+> from the most recent old data directory, archives exported under either name
+> still import, and the managed `php.ini`, mu-plugin and sudoers files they left
+> behind are replaced in place.
 
 ---
 
@@ -10,7 +18,7 @@ Inspired by [Laravel Herd](https://herd.laravel.com).
 
 - **macOS menu bar app** — lives in your tray, out of your way
 - **One-click service management** — start/stop nginx, PHP-FPM, MySQL, dnsmasq individually or all at once
-- **WordPress site wizard** — 3-step setup: name your site, pick a directory and PHP version, configure the DB — WPHerd handles the rest (downloads WordPress, creates the database, configures nginx, sets up your `.test` domain)
+- **WordPress site wizard** — 3-step setup: name your site, pick a directory and PHP version, configure the DB — WPXen handles the rest (downloads WordPress, creates the database, configures nginx, sets up your `.test` domain)
 - **Per-site quick actions** — open in browser, open wp-admin, reveal in Finder, open in Terminal
 - **In-app browser** — preview a site, wp-admin or phpMyAdmin in a tab beside the agent working on it
 - **PHP version switcher** — detects all Homebrew-installed PHP versions and switches between them
@@ -37,7 +45,7 @@ Inspired by [Laravel Herd](https://herd.laravel.com).
 
 ## Prerequisites
 
-WPHerd manages services installed via [Homebrew](https://brew.sh). Install Homebrew first if you don't have it:
+WPXen manages services installed via [Homebrew](https://brew.sh). Install Homebrew first if you don't have it:
 
 ```bash
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
@@ -62,8 +70,8 @@ brew install php@8.1 php@8.2 php@8.3
 ### Development
 
 ```bash
-git clone https://github.com/aminurislamarnob/wpherd.git
-cd wpherd
+git clone https://github.com/aminurislamarnob/wpxen.git
+cd wpxen
 npm install
 npm run dev
 ```
@@ -83,7 +91,7 @@ Outputs a `.dmg` installer to `release/` for both Apple Silicon and Intel.
 ## How it works
 
 ```
-WPHerd (Electron)
+WPXen (Electron)
 ├── Main process (Node.js / CJS)
 │   ├── Services layer — wraps Homebrew CLI to manage processes
 │   │   ├── nginx     → generates vhost configs in /opt/homebrew/etc/nginx/servers/
@@ -100,7 +108,7 @@ WPHerd (Electron)
     └── Settings      → preferences + dependency checker
 ```
 
-When you add a WordPress site, WPHerd:
+When you add a WordPress site, WPXen:
 
 1. Creates the site directory
 2. Runs `wp core download` to fetch WordPress
@@ -117,12 +125,12 @@ Your site is immediately available at `http://<name>.test`.
 ## Project structure
 
 ```
-wpherd/
+wpxen/
 ├── electron/
 │   ├── main.cjs          # App entry, window management, tray
 │   ├── preload.cjs       # Secure IPC bridge (contextBridge)
 │   ├── ipc.cjs           # All IPC handler registrations
-│   ├── store.cjs         # JSON persistence (userData/wpherd-data.json)
+│   ├── store.cjs         # JSON persistence (userData/wpxen-data.json)
 │   ├── tray.cjs          # Menu bar icon + context menu
 │   └── services/
 │       ├── brew.cjs      # Homebrew detection + PHP version discovery
@@ -148,7 +156,7 @@ wpherd/
 
 ## Homebrew paths
 
-WPHerd auto-detects your Homebrew prefix:
+WPXen auto-detects your Homebrew prefix:
 
 | Mac                      | Homebrew prefix |
 | ------------------------ | --------------- |
@@ -162,7 +170,7 @@ PHP-FPM sockets are expected at `{prefix}/var/run/php/php{version}-fpm.sock`.
 
 ## DNS setup
 
-Sites are served under `.test` domains (e.g. `mysite.test`). WPHerd configures this by:
+Sites are served under `.test` domains (e.g. `mysite.test`). WPXen configures this by:
 
 1. Adding `address=/.test/127.0.0.1` to `{prefix}/etc/dnsmasq.conf`
 2. Creating `/etc/resolver/test` with `nameserver 127.0.0.1` (requires your admin password — a macOS dialog will appear)
@@ -199,7 +207,7 @@ output — go to your default browser (the default) or to an in-app tab.
 switch to a file tab and back. The address bar autocompletes from browsing
 history; Settings → General can clear that history, or the browser's cookies and
 cache. Cmd+W closes the browser tab (not the window) and Cmd+R reloads the page
-(not WPHerd). Right-click gives the usual navigation, copy and "open in default
+(not WPXen). Right-click gives the usual navigation, copy and "open in default
 browser" actions, and the toolbar has a DevTools button.
 
 All browser tabs share one session, so signing into a site in one tab carries to
@@ -218,6 +226,47 @@ the next.
 | Packaging     | electron-builder (DMG, arm64 + x64)  |
 | Icons         | lucide-react                         |
 | Persistence   | Custom JSON store (no external deps) |
+
+---
+
+## About the name
+
+> **WPXen — AI-native WordPress development environment.**
+
+- **WP** → WordPress
+- **Xen** → a distinctive, technical coined brand, with associations around
+  modern computing environments, isolation and orchestration
+
+WPXen is not intended to be a forced acronym. The name itself is the brand,
+while the tagline explains its purpose.
+
+### Why a platform name
+
+The product spans the whole local WordPress workflow rather than any single
+part of it:
+
+- Complete local WordPress/PHP runtime
+- PHP, nginx, MySQL and service management
+- WordPress site lifecycle management
+- WP-CLI, Mailpit, phpMyAdmin, HTTPS and Xdebug
+- Site cloning, blueprints, import/export
+- Cloudflare tunnels and local networking
+- AI coding agents and embedded agent workflows
+- Future agent workspaces, MCP, browser automation and autonomous development
+
+The name has to cover WordPress infrastructure, development workflows and AI
+agents working together, and leave room for where the product goes next.
+
+### Brand positioning
+
+The intended product perception is a local, AI-native environment where
+developers can build, test, debug and ship WordPress projects with AI agents as
+first-class development participants.
+
+WPXen sits between **local WordPress development**, **AI coding agents** and
+**agentic workspaces**. Rather than competing directly as another LocalWP or
+another Claude Code, the goal is a WordPress-native agentic development
+environment.
 
 ---
 

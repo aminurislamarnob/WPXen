@@ -150,7 +150,7 @@ describe('discoverRepos', () => {
   const mkGit = (p) => fs.mkdirSync(path.join(p, '.git'), { recursive: true });
 
   beforeEach(() => {
-    root = fs.mkdtempSync(path.join(os.tmpdir(), 'wpherd-git-'));
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'wpxen-git-'));
   });
   afterEach(() => {
     fs.rmSync(root, { recursive: true, force: true });

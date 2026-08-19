@@ -61,7 +61,7 @@ function getNginxBinPath() {
   return null;
 }
 
-// nginx runs as a supervised child of WPHerd (see procman.cjs). No root
+// nginx runs as a supervised child of WPXen (see procman.cjs). No root
 // needed: since macOS 10.14 unprivileged processes may bind ports below 1024,
 // so 80/443 work from a plain child process (this is how Herd does it too).
 function buildSpec() {
@@ -317,7 +317,7 @@ function generateSiteConfig(site) {
 
   if (useHttps) {
     // Redirect plain http to https, and serve the site over TLS on 443.
-    return `# WPHerd: ${name}
+    return `# WPXen: ${name}
 server {
     listen 80;
     server_name ${serverNames};
@@ -336,7 +336,7 @@ ${body}
 `;
   }
 
-  return `# WPHerd: ${name}
+  return `# WPXen: ${name}
 server {
     listen 80;
     server_name ${serverNames};

@@ -4,6 +4,7 @@ const { app, BrowserWindow, dialog, nativeTheme, screen } = require('electron');
 const path = require('path');
 
 const JsonStore = require('./store.cjs');
+const { migrateLegacyUserData } = require('./services/rebrand.cjs');
 const { isAllowedBrowserUrl } = require('./services/browser.cjs');
 const { createTray } = require('./tray.cjs');
 const {
@@ -112,8 +113,13 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
-  // Initialize store
-  store = new JsonStore('wpherd-data');
+  // Initialize store. Each rename moved userData (Electron derives it from
+  // productName), so carry over the newest previous install's data first.
+  migrateLegacyUserData({
+    appDataDir: app.getPath('appData'),
+    currentDir: app.getPath('userData'),
+  });
+  store = new JsonStore('wpxen-data');
 
   // Light/dark follows the macOS system appearance by default, but Settings →
   // Appearance can force it: registerHandlers() sets nativeTheme.themeSource
@@ -272,7 +278,7 @@ app.on('before-quit', (e) => {
         buttons: ['Quit', 'Cancel'],
         defaultId: 1,
         cancelId: 1,
-        message: 'Quit WPHerd?',
+        message: 'Quit WPXen?',
         detail: `This stops ${running.join(', ')}, taking your local sites offline. You can turn this confirmation off in Settings → General.`,
       });
       if (choice === 1) {

@@ -14,8 +14,8 @@ describe('getUrl', () => {
   });
 
   it('deep-links straight to a site database', () => {
-    expect(phpmyadmin.getUrl('wpherd_blog')).toBe(
-      'http://phpmyadmin.test/index.php?route=/database/structure&db=wpherd_blog'
+    expect(phpmyadmin.getUrl('wpxen_blog')).toBe(
+      'http://phpmyadmin.test/index.php?route=/database/structure&db=wpxen_blog'
     );
   });
 
@@ -27,8 +27,8 @@ describe('getUrl', () => {
 });
 
 describe('DB_NAME_RE (the gate in front of getUrl)', () => {
-  it('accepts the names WPHerd generates', () => {
-    for (const name of ['wp_site', 'wpherd_blog1', 'A_b_9', 'x'.repeat(64)]) {
+  it('accepts the names WPXen generates', () => {
+    for (const name of ['wp_site', 'wpxen_blog1', 'A_b_9', 'x'.repeat(64)]) {
       expect(DB_NAME_RE.test(name)).toBe(true);
     }
   });

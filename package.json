@@ -1,6 +1,6 @@
 {
-  "name": "wpherd",
-  "productName": "WPHerd",
+  "name": "wpxen",
+  "productName": "WPXen",
   "version": "1.0.0",
   "description": "Blazingly fast local WordPress development for macOS",
   "main": "electron/main.cjs",
@@ -30,7 +30,7 @@
     "php",
     "nginx"
   ],
-  "author": "WPHerd",
+  "author": "WPXen",
   "license": "MIT",
   "dependencies": {
     "@codemirror/lang-css": "^6.3.1",
@@ -80,9 +80,9 @@
     "wait-on": "^7.2.0"
   },
   "build": {
-    "appId": "com.wpherd.app",
-    "productName": "WPHerd",
-    "copyright": "Copyright © 2024 WPHerd",
+    "appId": "com.wpxen.app",
+    "productName": "WPXen",
+    "copyright": "Copyright © 2024 WPXen",
     "mac": {
       "category": "public.app-category.developer-tools",
       "icon": "assets/icon.icns",

@@ -17,22 +17,22 @@ const entry = (url, over = {}) => ({
 
 describe('upsertEntry', () => {
   it('prepends a new visit', () => {
-    const next = upsertEntry([], { url: 'https://wpherd.test' }, 5);
+    const next = upsertEntry([], { url: 'https://wpxen.test' }, 5);
     expect(next).toHaveLength(1);
     expect(next[0]).toMatchObject({
-      url: 'https://wpherd.test',
+      url: 'https://wpxen.test',
       visits: 1,
       visitedAt: 5,
     });
   });
 
   it('dedupes by URL, moving the entry to the front and counting the visit', () => {
-    const before = [entry('https://a.test'), entry('https://wpherd.test', { visits: 3 })];
-    const next = upsertEntry(before, { url: 'https://wpherd.test' }, 9);
+    const before = [entry('https://a.test'), entry('https://wpxen.test', { visits: 3 })];
+    const next = upsertEntry(before, { url: 'https://wpxen.test' }, 9);
 
     expect(next).toHaveLength(2);
     expect(next[0]).toMatchObject({
-      url: 'https://wpherd.test',
+      url: 'https://wpxen.test',
       visits: 4,
       visitedAt: 9,
     });
@@ -40,19 +40,19 @@ describe('upsertEntry', () => {
 
   it('keeps a title and favicon a previous visit learned', () => {
     const before = [
-      entry('https://wpherd.test', { title: 'My Blog', faviconUrl: 'https://f.ico' }),
+      entry('https://wpxen.test', { title: 'My Blog', faviconUrl: 'https://f.ico' }),
     ];
     // did-stop-loading fires before the favicon arrives, so this visit has
     // neither — it must not wipe what's already known.
-    const next = upsertEntry(before, { url: 'https://wpherd.test' });
+    const next = upsertEntry(before, { url: 'https://wpxen.test' });
     expect(next[0].title).toBe('My Blog');
     expect(next[0].faviconUrl).toBe('https://f.ico');
   });
 
   it('lets a new visit update the title and favicon', () => {
-    const before = [entry('https://wpherd.test', { title: 'Old' })];
+    const before = [entry('https://wpxen.test', { title: 'Old' })];
     const next = upsertEntry(before, {
-      url: 'https://wpherd.test',
+      url: 'https://wpxen.test',
       title: 'New',
       faviconUrl: 'https://n.ico',
     });
@@ -85,9 +85,9 @@ describe('upsertEntry', () => {
 
 describe('searchEntries', () => {
   const entries = [
-    entry('https://wpherd.test/wp-admin', { title: 'Dashboard', visitedAt: 300 }),
-    entry('https://wpherd.test', { title: 'My Blog', visitedAt: 200 }),
-    entry('http://phpmyadmin.test/index.php?route=/&db=wpherd', {
+    entry('https://wpxen.test/wp-admin', { title: 'Dashboard', visitedAt: 300 }),
+    entry('https://wpxen.test', { title: 'My Blog', visitedAt: 200 }),
+    entry('http://phpmyadmin.test/index.php?route=/&db=wpxen', {
       title: 'phpMyAdmin',
       visitedAt: 100,
     }),
@@ -100,11 +100,11 @@ describe('searchEntries', () => {
   });
 
   it('ranks a host prefix above a match buried in the URL', () => {
-    // "wpherd" is a prefix of two hosts and also appears in phpMyAdmin's query
+    // "wpxen" is a prefix of two hosts and also appears in phpMyAdmin's query
     // string — the hosts must win.
-    const found = searchEntries(entries, 'wpherd');
-    expect(found[0].url).toBe('https://wpherd.test/wp-admin');
-    expect(found[2].url).toBe('http://phpmyadmin.test/index.php?route=/&db=wpherd');
+    const found = searchEntries(entries, 'wpxen');
+    expect(found[0].url).toBe('https://wpxen.test/wp-admin');
+    expect(found[2].url).toBe('http://phpmyadmin.test/index.php?route=/&db=wpxen');
   });
 
   it('matches a host prefix through the scheme', () => {
@@ -113,17 +113,17 @@ describe('searchEntries', () => {
 
   it('matches on title', () => {
     expect(searchEntries(entries, 'dashboard')[0].url).toBe(
-      'https://wpherd.test/wp-admin'
+      'https://wpxen.test/wp-admin'
     );
   });
 
   it('breaks ties by recency', () => {
-    const found = searchEntries(entries, 'wpherd.test');
+    const found = searchEntries(entries, 'wpxen.test');
     expect(found.map((e) => e.visitedAt)).toEqual([300, 200]);
   });
 
   it('is case-insensitive', () => {
-    expect(searchEntries(entries, 'WPHERD.TEST')).toHaveLength(2);
+    expect(searchEntries(entries, 'WPXEN.TEST')).toHaveLength(2);
   });
 
   it('returns nothing for a query that matches nothing', () => {
@@ -159,10 +159,10 @@ describe('store wrappers', () => {
 
   it('records, searches and clears', () => {
     const store = fakeStore();
-    history.record(store, { url: 'https://wpherd.test', title: 'My Blog' });
+    history.record(store, { url: 'https://wpxen.test', title: 'My Blog' });
     history.record(store, { url: 'https://other.test' });
 
-    expect(history.search(store, 'wpherd')).toHaveLength(1);
+    expect(history.search(store, 'wpxen')).toHaveLength(1);
     history.clear(store);
     expect(history.search(store, '')).toEqual([]);
   });
@@ -170,7 +170,7 @@ describe('store wrappers', () => {
   it('survives a store holding something that is not a list', () => {
     const store = fakeStore({ browser: { history: 'corrupt' } });
     expect(history.search(store, '')).toEqual([]);
-    expect(() => history.record(store, { url: 'https://wpherd.test' })).not.toThrow();
+    expect(() => history.record(store, { url: 'https://wpxen.test' })).not.toThrow();
     expect(history.search(store, '')).toHaveLength(1);
   });
 });

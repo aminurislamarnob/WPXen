@@ -38,7 +38,7 @@ so to reproduce, temporarily move `node_modules/electron/path.txt` aside.
 
 ## Architecture
 
-WPHerd is an Electron macOS menu-bar app that orchestrates Homebrew-installed services
+WPXen is an Electron macOS menu-bar app that orchestrates Homebrew-installed services
 (nginx, PHP-FPM, MySQL, dnsmasq, WP-CLI) to run local WordPress `.test` sites. It does
 **not** bundle these binaries — it shells out to the user's Homebrew install.
 
@@ -72,7 +72,7 @@ Node directly. When adding a feature that crosses the boundary you must touch th
   LaunchDaemon, port 53). `services/migration.cjs` unregisters the old brew services
   once per machine.
 - `store.cjs` — `JsonStore`, a dependency-free JSON persistence layer at
-  `userData/wpherd-data.json`. Supports dotted key paths (`get('a.b', default)`).
+  `userData/wpxen-data.json`. Supports dotted key paths (`get('a.b', default)`).
   Sites and settings live here.
 - `tray.cjs` — menu-bar icon and context menu.
 - `services/` — one module per concern, most wrapping CLI calls via `execSync`:
@@ -98,7 +98,7 @@ Node directly. When adding a feature that crosses the boundary you must touch th
   - **Privilege** — `admin.cjs` builds the osascript "with administrator
     privileges" command; its prompt text is customizable, but the bold app name
     in the macOS dialog is not, without shipping a signed privileged helper.
-    `sudoers.cjs` installs `/etc/sudoers.d/wpherd`.
+    `sudoers.cjs` installs `/etc/sudoers.d/wpxen`.
   - **Support** — `settings.cjs` (see below), `agents.cjs` (see below),
     `browser.cjs` / `browserHistory.cjs` / `safeUrl.cjs` (see below),
     `externalTools.cjs` (which app opens a file/folder/terminal — maps each
@@ -137,7 +137,7 @@ no daemon** (see `docs/adr/0001-main-process-pty-no-daemon.md`), so it survives
 the window hiding to the tray and is reaped on quit; reattach after a window
 reopen is served from an in-memory ring buffer. The provider registry is
 data-shaped: `cmd` is the binary detected on `$PATH` and spawned, `install` is
-the hint shown when it isn't found (WPHerd never auto-installs).
+the hint shown when it isn't found (WPXen never auto-installs).
 
 ### In-app browser
 
@@ -154,7 +154,7 @@ DevTools, native context menus, key interception.
 - Re-parenting **mints a new `webContentsId`**, so the renderer re-registers on
   every `dom-ready` and `register()` is deliberately idempotent — it tears the
   previous guest's listeners down rather than stacking a second set.
-- `PARTITION` (`persist:wpherd-browser`) is duplicated in `webviewCache.js` and
+- `PARTITION` (`persist:wpxen-browser`) is duplicated in `webviewCache.js` and
   `browser.cjs` and **must stay in sync** — the renderer sets it on the element,
   the main process is what "clear browsing data" wipes. Asserted in the tests.
 - Only `http:`, `https:` and `about:` are allowed. The real enforcement point is
@@ -250,7 +250,7 @@ agent toolbars) sits on `tertiary` with the content on `background`.
 **Icons.** lucide-react, monochrome, colored only by text color
 (`text-muted-foreground` → `hover:text-foreground`). The one deliberate
 exception is `IconTile` / `TILE_COLORS` — the colored rounded-square tiles in
-the sidebar, page heroes and settings rows are part of WPHerd's identity and
+the sidebar, page heroes and settings rows are part of WPXen's identity and
 stay.
 
 **Terminal & editor.** Both derive their palettes from `src/lib/theme.js`
@@ -294,6 +294,45 @@ in-app switcher.
 
 - **Never `require('electron')` at module scope** in anything a test imports —
   see the CI note at the top. This fails only on the runner.
+
+### Legacy names (WPHerd, WPDevPilot)
+
+The app has been renamed twice — **WPHerd** → **WPDevPilot** → **WPXen** — and
+each name was written into places outside the app bundle. Every compatibility
+path therefore carries _two_ older generations, not one, and they're ordered
+newest-first so a user who skipped a release is handled the same as one who
+upgraded through every name. These shims are deliberate — don't tidy them away:
+
+- `services/rebrand.cjs` walks `LEGACY_GENERATIONS` (`WPDevPilot`, then
+  `WPHerd`) and copies the first `*-data.json` it finds, plus `blueprints/`,
+  out of that `Application Support` directory on first launch. Renaming moved
+  `userData` (Electron derives it from `productName`), so without this an
+  upgrading user's sites and settings look deleted. It copies rather than
+  moves, and never overwrites data the renamed app already has.
+- `siteops.cjs` imports archives carrying any historical manifest name
+  (`MANIFEST_NAMES`) or `format` tag (`MANIFEST_FORMATS`); it only ever
+  _writes_ the current names.
+- conf.d is read alphabetically and `zz-wpxen.ini` sorts after both
+  `zz-wpdevpilot.ini` and `zz-wpherd.ini`, so ours now wins on load — but a
+  leftover still has to be cleared or it lingers forever setting directives
+  nothing owns. `php.cjs` reads the newest old file once for its customised
+  values, then deletes every generation on the next write. `mailpit.cjs` clears
+  all of them on every `setCatchEnabled` call, enabled or disabled — turning
+  catching off deletes only our own file, so a leftover override would keep
+  piping `mail()` into Mailpit with the toggle reading off.
+- `wordpress.cjs` deletes every legacy-prefixed mu-plugin when writing its own
+  (`LEGACY_PREFIXES`) — multiple copies redeclare the same PHP functions and
+  fatal the site, and an old magic-login plugin would keep honouring a stale
+  secret.
+- `sudoers.cjs` removes every `LEGACY_SUDOERS_PATHS` entry inside the same
+  privileged step that installs (or removes) `/etc/sudoers.d/wpxen`. They are
+  live `NOPASSWD` grants, so leaving one behind is a real permission the app no
+  longer knows about.
+
+Not carried over, deliberately: the browser partition
+(`persist:wpxen-browser`) and the `wpxen.*` localStorage keys start fresh, and
+nginx vhosts keep whatever header comment they were written with — it's
+cosmetic and rewritten on the next vhost regeneration.
 
 ## Further reading
 

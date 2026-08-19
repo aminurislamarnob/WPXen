@@ -161,7 +161,7 @@ export default function Layout() {
         <div className="flex items-center px-4 py-3">
           <img
             src={logo}
-            alt="WPHerd"
+            alt="WPXen"
             className="h-5 w-auto object-contain"
             draggable={false}
           />

@@ -27,7 +27,7 @@ export default function GeneralSection() {
           id="app.startAtLogin"
           visible={visible}
           title="Start at Login"
-          subtitle="Launch WPHerd when you log into macOS"
+          subtitle="Launch WPXen when you log into macOS"
         >
           <Toggle
             checked={!!settings['app.startAtLogin']}
@@ -61,7 +61,7 @@ export default function GeneralSection() {
             ariaLabel="Close button behaviour"
             options={[
               { value: 'tray', label: 'Hide to menu bar' },
-              { value: 'quit', label: 'Quit WPHerd' },
+              { value: 'quit', label: 'Quit WPXen' },
             ]}
           />
         </SettingsRow>
@@ -81,7 +81,7 @@ export default function GeneralSection() {
             ariaLabel="Open links in"
             options={[
               { value: 'system', label: 'Default browser' },
-              { value: 'app', label: 'WPHerd' },
+              { value: 'app', label: 'WPXen' },
             ]}
           />
         </SettingsRow>

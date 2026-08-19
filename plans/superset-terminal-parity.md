@@ -5,7 +5,7 @@
 > touchpoints, tests, acceptance). This document is the analysis behind it.
 
 Feature-by-feature analysis of the Superset desktop terminal (reference
-checkout at `reference/superset-main`) against WPHerd's Agents-screen
+checkout at `reference/superset-main`) against WPXen's Agents-screen
 terminal, and the recommended implementation list. Companion to
 `plans/superset-file-explorer-parity.md` (whose Phases 1–5 have shipped);
 the closing section here lists the small explorer gaps that remain.
@@ -23,7 +23,7 @@ Superset reference paths (all under `apps/desktop/src/renderer/`):
   — the v2 pane: rich input, session dropdown, link hover/click hints.
 - `hotkeys/registry.ts` — terminal shortcut assignments.
 
-## WPHerd terminal today (`src/components/Terminal.jsx`)
+## WPXen terminal today (`src/components/Terminal.jsx`)
 
 xterm + FitAddon only: theme flip with macOS appearance, 13px `MONO_STACK`
 font, block cursor, ring-buffer replay on attach (~1 MB, main-process pty
@@ -67,10 +67,10 @@ unicode11, or paste handling of any kind — everything below is a gap.
 | C4  | **Image addon** — inline iTerm/sixel images                                                                                                                    | `terminal-addons.ts`                                     |                                                         |
 | C5  | **Ligatures addon** (toggleable per font settings)                                                                                                             | same                                                     |                                                         |
 | C6  | **Progress addon** (OSC 9;4) feeding UI progress state                                                                                                         | same                                                     |                                                         |
-| C7  | **Scrollback 5000** (`DEFAULT_TERMINAL_SCROLLBACK`), native scrollbar hidden (fit addon reserves its width otherwise), custom wheel handler                    | `config.ts`, `shared/constants.ts`                       | WPHerd is on xterm's default 1000 lines.                |
+| C7  | **Scrollback 5000** (`DEFAULT_TERMINAL_SCROLLBACK`), native scrollbar hidden (fit addon reserves its width otherwise), custom wheel handler                    | `config.ts`, `shared/constants.ts`                       | WPXen is on xterm's default 1000 lines.                 |
 | C8  | **Query-response suppression** — parser hooks swallow CPR / focus-report / mode-report responses so they never render as junk text                             | `suppressQueryResponses.ts`                              |                                                         |
-| C9  | **Perf plumbing**: write coalescer + parser-idle gate (fit/resize only when the parser is idle)                                                                | `lib/terminal/write-coalescer.ts`, `parser-idle-gate.ts` | Only worth porting if WPHerd sees jank.                 |
-| C10 | Flash-free theming: initial terminal theme read synchronously before store hydration; theme object swapped live on change                                      | `helpers.ts` `getDefaultTerminalTheme`                   | WPHerd already swaps theme live via `onThemeChange`.    |
+| C9  | **Perf plumbing**: write coalescer + parser-idle gate (fit/resize only when the parser is idle)                                                                | `lib/terminal/write-coalescer.ts`, `parser-idle-gate.ts` | Only worth porting if WPXen sees jank.                  |
+| C10 | Flash-free theming: initial terminal theme read synchronously before store hydration; theme object swapped live on change                                      | `helpers.ts` `getDefaultTerminalTheme`                   | WPXen already swaps theme live via `onThemeChange`.     |
 
 ### D. Links
 
@@ -83,29 +83,29 @@ unicode11, or paste handling of any kind — everything below is a gap.
 
 ### E. Session & lifecycle UX
 
-| #   | Feature                                                                                                                                                                                                                                       | Superset source                                                | Notes                                                                                                                        |
-| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| E1  | **xterm instance cache across tab switches** — the terminal opens into a detached wrapper div that's re-parented on mount, so switching tabs never disposes xterm or drops scroll position/images; the data stream keeps writing while hidden | `helpers.ts` `createTerminalInWrapper`, `v1-terminal-cache.ts` | WPHerd re-creates xterm per mount and replays the ring buffer — loses scroll position, selections, images; visible re-paint. |
-| E2  | **Reconnect with backoff** (max 5 tries) + "[Connection lost. Reconnecting…]" line + connection indicator                                                                                                                                     | `Terminal.tsx`                                                 | Less relevant: WPHerd's pty is in-process.                                                                                   |
-| E3  | **Session-killed overlay with Restart**; typing into an exited terminal restarts it                                                                                                                                                           | `components/SessionKilledOverlay`, `useTerminalLifecycle`      | WPHerd's exit overlay only offers Close.                                                                                     |
-| E4  | **Close-confirm** when a terminal has a running process, with persisted "don't ask again"                                                                                                                                                     | `stores/terminal-close-confirm/`                               | WPHerd confirms only at app quit (ADR 0001).                                                                                 |
-| E5  | **Tab titles**: OSC title changes + typed-command heuristic (`commandBuffer` — the echoed command becomes the tab name); **CWD tracking** via OSC 7 so new terminals inherit the cwd                                                          | `useTerminalLifecycle`, `commandBuffer.ts`, `parseCwd.ts`      | WPHerd tabs are static agent names.                                                                                          |
-| E6  | **Agent status** (working / permission / idle) surfaced on tabs & sidebar; Ctrl+C / Escape clears "working" state                                                                                                                             | `TerminalPane/hooks/useTerminalInterruptClear`, tabs store     | Superset's primary signal is agent hook events; the interrupt-clear part is terminal-side.                                   |
-| E7  | Cold restore of a previous daemon session (scrollback snapshot + "restored" overlay), background-terminal reattach dropdown                                                                                                                   | `useTerminalColdRestore`, `TerminalSessionDropdown`            | **Rejected for WPHerd** by ADR 0001 (no daemon).                                                                             |
-| E8  | **Scroll-to-bottom floating button**, visible only when scrolled up (tracks `viewportY < baseY` on write/scroll)                                                                                                                              | `ScrollToBottomButton/`                                        |                                                                                                                              |
+| #   | Feature                                                                                                                                                                                                                                       | Superset source                                                | Notes                                                                                                                       |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| E1  | **xterm instance cache across tab switches** — the terminal opens into a detached wrapper div that's re-parented on mount, so switching tabs never disposes xterm or drops scroll position/images; the data stream keeps writing while hidden | `helpers.ts` `createTerminalInWrapper`, `v1-terminal-cache.ts` | WPXen re-creates xterm per mount and replays the ring buffer — loses scroll position, selections, images; visible re-paint. |
+| E2  | **Reconnect with backoff** (max 5 tries) + "[Connection lost. Reconnecting…]" line + connection indicator                                                                                                                                     | `Terminal.tsx`                                                 | Less relevant: WPXen's pty is in-process.                                                                                   |
+| E3  | **Session-killed overlay with Restart**; typing into an exited terminal restarts it                                                                                                                                                           | `components/SessionKilledOverlay`, `useTerminalLifecycle`      | WPXen's exit overlay only offers Close.                                                                                     |
+| E4  | **Close-confirm** when a terminal has a running process, with persisted "don't ask again"                                                                                                                                                     | `stores/terminal-close-confirm/`                               | WPXen confirms only at app quit (ADR 0001).                                                                                 |
+| E5  | **Tab titles**: OSC title changes + typed-command heuristic (`commandBuffer` — the echoed command becomes the tab name); **CWD tracking** via OSC 7 so new terminals inherit the cwd                                                          | `useTerminalLifecycle`, `commandBuffer.ts`, `parseCwd.ts`      | WPXen tabs are static agent names.                                                                                          |
+| E6  | **Agent status** (working / permission / idle) surfaced on tabs & sidebar; Ctrl+C / Escape clears "working" state                                                                                                                             | `TerminalPane/hooks/useTerminalInterruptClear`, tabs store     | Superset's primary signal is agent hook events; the interrupt-clear part is terminal-side.                                  |
+| E7  | Cold restore of a previous daemon session (scrollback snapshot + "restored" overlay), background-terminal reattach dropdown                                                                                                                   | `useTerminalColdRestore`, `TerminalSessionDropdown`            | **Rejected for WPXen** by ADR 0001 (no daemon).                                                                             |
+| E8  | **Scroll-to-bottom floating button**, visible only when scrolled up (tracks `viewportY < baseY` on write/scroll)                                                                                                                              | `ScrollToBottomButton/`                                        |                                                                                                                             |
 
 ### F. Input extras & settings
 
-| #   | Feature                                                                                                                                                                                                   | Superset source                             | Notes                                               |
-| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- | --------------------------------------------------- |
-| F1  | **Drag & drop into the terminal**: Finder file drops and internal file-tree drags insert shell-escaped path(s) (`shell-quote`)                                                                            | `Terminal.tsx` `handleDrop`                 | Pairs naturally with WPHerd's Files tree.           |
-| F2  | **Rich input composer** (Cmd+I): Warp-style multiline editor overlay with @file mentions and per-terminal drafts; submits via bracketed paste + CR                                                        | `TerminalRichInput/`                        |                                                     |
-| F3  | **Terminal appearance settings**: font family/size (validated/sanitized), line height, letter spacing, weight, ligatures toggle, min contrast, cursor style/blink; live re-fit + backend resize on change | `lib/terminal/appearance/`, settings router |                                                     |
-| F4  | Focus-follows-terminal (textarea focus listener drives the app's focused-pane state)                                                                                                                      | `helpers.ts` `setupFocusListener`           | WPHerd single-pane; matters only if panes multiply. |
+| #   | Feature                                                                                                                                                                                                   | Superset source                             | Notes                                              |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- | -------------------------------------------------- |
+| F1  | **Drag & drop into the terminal**: Finder file drops and internal file-tree drags insert shell-escaped path(s) (`shell-quote`)                                                                            | `Terminal.tsx` `handleDrop`                 | Pairs naturally with WPXen's Files tree.           |
+| F2  | **Rich input composer** (Cmd+I): Warp-style multiline editor overlay with @file mentions and per-terminal drafts; submits via bracketed paste + CR                                                        | `TerminalRichInput/`                        |                                                    |
+| F3  | **Terminal appearance settings**: font family/size (validated/sanitized), line height, letter spacing, weight, ligatures toggle, min contrast, cursor style/blink; live re-fit + backend resize on change | `lib/terminal/appearance/`, settings router |                                                    |
+| F4  | Focus-follows-terminal (textarea focus listener drives the app's focused-pane state)                                                                                                                      | `helpers.ts` `setupFocusListener`           | WPXen single-pane; matters only if panes multiply. |
 
 ---
 
-## Recommendation — what WPHerd should implement
+## Recommendation — what WPXen should implement
 
 Everything targets `src/components/Terminal.jsx` (+ `electron/services/agents.cjs`
 / `ipc.cjs` / `preload.cjs` where noted). Phases are independent commits.
@@ -114,7 +114,7 @@ Everything targets `src/components/Terminal.jsx` (+ `electron/services/agents.cj
 
 1. **Custom key handler (A1 + A2)**: port `clipboard-shortcuts.ts` +
    `terminal-key-event-handler.ts` mac branch — bubble every Cmd chord,
-   Cmd+A → `selectAll()`. WPHerd is macOS-only, so the Win/Linux branches
+   Cmd+A → `selectAll()`. WPXen is macOS-only, so the Win/Linux branches
    can be dropped. This makes Cmd+C/Cmd+V behave natively.
 2. **Line-edit translations (B1 + B2)**: Shift+Enter / Cmd+Enter → `\x1b\r`
    (multiline prompts in Claude Code), Cmd+Backspace/Left/Right → `^U`/`^A`/`^E`,
@@ -152,12 +152,12 @@ Everything targets `src/components/Terminal.jsx` (+ `electron/services/agents.cj
     replaces most uses of the replay path (replay stays for window reopen).
 13. **File-path links (D1)**: port the local-link detector with a
     `stat`-over-IPC resolver (confine to the site root via
-    `files.assertInRoot`) and open matches in WPHerd's CodeEditor at
+    `files.assertInRoot`) and open matches in WPXen's CodeEditor at
     line/col. High leverage — agents constantly print `path:line`.
 14. **Drag & drop into terminal (F1)**: Finder drops + Files-tree drags →
     shell-escaped paths written to the pty.
 15. **Tab title & cwd (E5)**: `onTitleChange` → session tab label;
-    OSC 7 cwd parse is optional (WPHerd sessions are site-rooted anyway).
+    OSC 7 cwd parse is optional (WPXen sessions are site-rooted anyway).
 16. **Per-tab close confirm (E4)** with persisted suppression, replacing the
     bare `X` kill on session tabs.
 17. **Query-response suppression (C8)**: cheap port, prevents stray `;1R`
@@ -166,7 +166,7 @@ Everything targets `src/components/Terminal.jsx` (+ `electron/services/agents.cj
 ### Explicitly not recommended
 
 - **Daemon cold restore / session dropdown / reconnect transport (E2, E7)** —
-  contradicts ADR 0001's no-daemon decision; WPHerd's pty is in-process.
+  contradicts ADR 0001's no-daemon decision; WPXen's pty is in-process.
 - **Rich input composer (F2)**, **progress addon (C6)**, **appearance
   settings UI (F3)**, **agent status via hook events (E6)** — real features,
   but each is a product decision beyond terminal parity; revisit after
@@ -179,20 +179,20 @@ Everything targets `src/components/Terminal.jsx` (+ `electron/services/agents.cj
 ## File explorer — remaining gaps (after shipped Phases 1–5)
 
 Superset's current explorer (`FilesTab` on `@pierre/trees`) adds, beyond
-what WPHerd already shipped (tabs, lazy tree, search filter, new
+what WPXen already shipped (tabs, lazy tree, search filter, new
 file/folder, inline rename, panel delete confirm, context menus, Changes
 sections/view modes/diff viewer/stage-unstage-discard, git decorations,
 drag-drop upload, nested repos):
 
-1. **"Open in New Tab"** context item — trivial; WPHerd's editor already
+1. **"Open in New Tab"** context item — trivial; WPXen's editor already
    has tabs.
 2. **Reveal active editor file in the tree** (expand ancestors +
    scroll-to-row when the active editor tab changes).
 3. **Virtualized rows** — Superset renders through a virtualized tree;
-   WPHerd renders all expanded rows. Only matters for huge `wp-content`
+   WPXen renders all expanded rows. Only matters for huge `wp-content`
    trees; defer until it's felt.
 4. **Tree keyboard navigation** (arrow keys expand/collapse/move).
-5. Cosmetic: scroll-fade edges, full-pane drop overlay (WPHerd's drag-drop
+5. Cosmetic: scroll-fade edges, full-pane drop overlay (WPXen's drag-drop
    shipped without the overlay treatment).
 
 Still out of scope (Superset's PR/worktree product): base-branch selector,

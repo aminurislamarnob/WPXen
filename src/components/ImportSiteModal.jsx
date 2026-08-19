@@ -14,7 +14,7 @@ import { ProgressLog, StepIndicator, Tooltip } from './ui';
 const STEPS = ['Archive', 'Destination', 'Importing'];
 
 const KIND_LABELS = {
-  wpherd: 'WPHerd export',
+  wpxen: 'WPXen export',
   wpress: 'All-in-One WP Migration',
   generic: 'Generic zip',
 };
@@ -161,7 +161,7 @@ export default function ImportSiteModal({ onClose, onSiteImported, phpVersions }
         <div className="px-6 pt-6">
           <h2 className="text-[15px] font-bold text-foreground">Import Site</h2>
           <p className="text-[13px] text-muted-foreground mt-0.5">
-            Restore a site from a WPHerd export, a .wpress file, or a generic zip
+            Restore a site from a WPXen export, a .wpress file, or a generic zip
           </p>
         </div>
 

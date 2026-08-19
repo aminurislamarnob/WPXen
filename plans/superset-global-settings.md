@@ -1,10 +1,10 @@
-# Superset settings → WPHerd global settings
+# Superset settings → WPXen global settings
 
 A read of Superset's settings surface (`superset-sh/superset`,
-`apps/desktop/src/renderer/routes/_authenticated/settings/**`) and what of it WPHerd
+`apps/desktop/src/renderer/routes/_authenticated/settings/**`) and what of it WPXen
 should adopt as **global settings**.
 
-WPHerd's settings today live in one scrolling page,
+WPXen's settings today live in one scrolling page,
 `src/components/Settings.jsx` (491 lines), with five cards — General, Database,
 DNS & Permissions, Blueprints, Dependencies, About — and a single trailing
 **Save** button. Persisted keys are only `settings.sitesDir`,
@@ -55,7 +55,7 @@ setting can be hidden per UI variant without touching the page.
 
 ---
 
-## 2. Superset's actual setting inventory (the parts with a WPHerd analogue)
+## 2. Superset's actual setting inventory (the parts with a WPXen analogue)
 
 - **Appearance** — theme picker (System / named light / named dark, each with a
   colour swatch; System splits into _light theme_ + _dark theme_ pickers), custom
@@ -87,36 +87,36 @@ setting can be hidden per UI variant without touching the page.
 
 ---
 
-## 3. What WPHerd should take
+## 3. What WPXen should take
 
 ### Tier 0 — structure (do this first; everything else lands cheaper afterwards)
 
 1. **Split Settings into routed sections with a settings sidebar.** Suggested
-   groups, WPHerd-flavoured:
+   groups, WPXen-flavoured:
    - _Personal_ — Appearance · Notifications
    - _App_ — General · Keyboard · Terminal · Agents · External Tools
    - _WordPress_ — Sites · PHP · Database · Mail · Blueprints
    - _System_ — Services · DNS & HTTPS · Permissions · Sharing · Experimental ·
      Dependencies · About
-2. **Kill the Save button.** Persist per row on change (WPHerd's `JsonStore`
+2. **Kill the Save button.** Persist per row on change (WPXen's `JsonStore`
    already supports dotted-path `set`, and `save-settings` already re-inits the
    MySQL client on write). One `settings-updated` event back to the renderer keeps
    other panes in sync.
 3. **Build the setting registry** — `{ id, section, title, description, keywords }`
-   — and a search box that filters sections + rows. WPHerd has enough settings to
+   — and a search box that filters sections + rows. WPXen has enough settings to
    justify it the moment tier 1 lands.
-4. **Adopt the global-default → per-site-override pattern explicitly.** WPHerd
+4. **Adopt the global-default → per-site-override pattern explicitly.** WPXen
    already has `PhpSettings.jsx` and `SitePhpSettings.jsx`; make the global page
    the documented default source and show "inherited from global" on the site page.
 
-### Tier 1 — settings WPHerd is missing and clearly needs
+### Tier 1 — settings WPXen is missing and clearly needs
 
 | Setting                                      | Section        | Why                                                                                                                                                                                                                  |
 | -------------------------------------------- | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Confirm before quitting**                  | General        | Quitting stops nginx/PHP-FPM/MySQL for every site (`procman`). Superset's `BEHAVIOR_CONFIRM_QUIT` verbatim.                                                                                                          |
 | **Close button: hide to tray / quit**        | General        | `main.cjs` hard-codes hide-to-tray; make it a preference.                                                                                                                                                            |
 | **Catch outgoing mail**                      | Mail           | `settings.mailCatch` already exists in the store but is only reachable from the Mail page.                                                                                                                           |
-| **External editor / browser / terminal app** | External Tools | Superset's Links section. WPHerd calls `shell.openPath` today, so "Open in editor" is whatever macOS decided. Offer VS Code / Cursor / PhpStorm / Sublime / custom command, plus which browser opens a site.         |
+| **External editor / browser / terminal app** | External Tools | Superset's Links section. WPXen calls `shell.openPath` today, so "Open in editor" is whatever macOS decided. Offer VS Code / Cursor / PhpStorm / Sublime / custom command, plus which browser opens a site.          |
 | **New-site defaults**                        | Sites          | Default WP version + locale, admin user/email/password, TLD, "enable HTTPS on create", multisite, and a default plugin/theme list. This is Superset's _project scripts / env vars_ idea applied to site scaffolding. |
 | **Global PHP defaults**                      | PHP            | `memory_limit`, `max_execution_time`, `upload_max_filesize`, `post_max_size`, Xdebug — global default, per-site override.                                                                                            |
 | **Service auto-start + ports**               | Services       | Which of nginx / PHP-FPM / MySQL / Mailpit start on launch; nginx 80/443, MySQL 3306, Mailpit 8025. Currently implicit in `main.cjs`.                                                                                |
@@ -125,7 +125,7 @@ setting can be hidden per UI variant without touching the page.
 
 ### Tier 2 — high value, larger builds
 
-- **Appearance section — colour scheme.** WPHerd deliberately follows the macOS
+- **Appearance section — colour scheme.** WPXen deliberately follows the macOS
   appearance today (`darkMode: 'media'`, no switcher). Adopt Superset's shape
   rather than a plain toggle: **System / Light / Dark**, where System exposes
   _which_ light theme and _which_ dark theme, each row showing a `ThemeSwatch`
@@ -138,7 +138,7 @@ ui: UIColors, terminal?: TerminalColors, editor?: EditorThemeOverrides }` —
   scheme" picker:
   - `ui` — the full chrome token set (background, card, popover, primary,
     secondary, muted, accent, tertiary, border/input/ring, sidebar…), the same
-    vocabulary as WPHerd's `src/index.css` variables.
+    vocabulary as WPXen's `src/index.css` variables.
   - `terminal` — the complete xterm palette: background, foreground, cursor,
     cursorAccent, selectionBackground + all 8 ANSI + 8 bright ANSI. Optional;
     falls back to `getDefaultTerminalColors(theme.type)`.
@@ -146,14 +146,14 @@ ui: UIColors, terminal?: TerminalColors, editor?: EditorThemeOverrides }` —
     panel chrome, addition/deletion/modified) plus an `EditorSyntaxColors` set
     (comment, keyword, string, number, functionCall, variableName, typeName,
     className, constant…). Optional; otherwise **derived from the UI + terminal
-    tokens** — exactly what WPHerd's `src/lib/editorTheme.js` already does by
+    tokens** — exactly what WPXen's `src/lib/editorTheme.js` already does by
     mapping the ANSI set onto CodeMirror highlight tags.
 
   Built-ins ship as Ember (dark, default), Light, and Monokai. Custom themes are
   imported from a JSON file (`parseThemeConfigFile`, 256 KB cap) and appear in a
   "Custom" group in the same dropdown.
 
-  For WPHerd this is mostly plumbing: `src/lib/theme.js` already holds
+  For WPXen this is mostly plumbing: `src/lib/theme.js` already holds
   `terminalThemes` (with the ANSI/bright set) and `uiColors`, and everything
   themable already resolves through a CSS variable. The work is promoting those
   two objects into a named-theme record, persisting a selected id, and letting the
@@ -176,13 +176,13 @@ ui: UIColors, terminal?: TerminalColors, editor?: EditorThemeOverrides }` —
   with a "font not found" banner if it doesn't resolve. Both blocks render live
   preview surfaces.
 
-  WPHerd hardcodes a single `MONO_STACK` for both the xterm terminal and the
+  WPXen hardcodes a single `MONO_STACK` for both the xterm terminal and the
   CodeMirror editor. Users of a local-dev tool live in that terminal, and Nerd Font
   support matters the moment someone runs a themed shell prompt inside an agent
   session — this is worth taking close to verbatim, including the two-block split.
 
 - **Terminal presets.** Superset's preset = name + description + cwd + commands.
-  WPHerd's version writes itself: per-site presets like `wp db cli`,
+  WPXen's version writes itself: per-site presets like `wp db cli`,
   `npm run dev` in the active theme dir, `wp cron event run --due-now` — launchable
   from the site page. Plus a sessions list (`agents.cjs` already tracks sessions)
   with kill buttons.
@@ -190,7 +190,7 @@ ui: UIColors, terminal?: TerminalColors, editor?: EditorThemeOverrides }` —
   gemini / opencode. Expose enable-disable, per-agent launch command, and
   user-defined agents — exactly `AGENTS_ENABLED` / `AGENTS_COMMANDS`.
 - **Keyboard shortcuts** with rebinding and conflict detection.
-- **macOS Permissions page.** Superset's status + deep-link pattern. WPHerd's
+- **macOS Permissions page.** Superset's status + deep-link pattern. WPXen's
   sudoers row is the seed; add Full Disk Access (sites in `~/Documents`/iCloud) and
   Local Network (`.test` resolution). Keep it `macOnly`-gated like Superset does.
 - **Sharing / Security.** `cloudflared.cjs` already exists — global defaults for
@@ -200,20 +200,20 @@ ui: UIColors, terminal?: TerminalColors, editor?: EditorThemeOverrides }` —
 
 ### Tier 3 — adopt only if the feature arrives
 
-- **Models.** Only meaningful once WPHerd itself calls a model (AI site naming,
+- **Models.** Only meaningful once WPXen itself calls a model (AI site naming,
   log explanation, error triage). If that happens, copy Superset's shape: OAuth
   _or_ API key, a status badge, and a collapsed Advanced block for base URL /
   auth token / extra env, saved on blur.
 - **Account / Organization / Teams / Billing / Hosts / Integrations.** Superset is
-  a multi-user cloud product; WPHerd is single-user and local. Skip.
-- **Git & Worktrees.** Only if WPHerd grows a git workflow beyond `git.cjs`.
+  a multi-user cloud product; WPXen is single-user and local. Skip.
+- **Git & Worktrees.** Only if WPXen grows a git workflow beyond `git.cjs`.
 
 ### Explicitly not worth copying
 
 - Per-setting `v1` / `v2` variant gating — that exists to run two UIs at once.
-- Markdown render style, file open mode (split pane / new tab) — no WPHerd surface
+- Markdown render style, file open mode (split pane / new tab) — no WPXen surface
   needs them yet.
-- The in-app browser toggle: WPHerd opens sites in a real browser on purpose.
+- The in-app browser toggle: WPXen opens sites in a real browser on purpose.
 
 ---
 

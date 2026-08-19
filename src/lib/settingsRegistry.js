@@ -257,7 +257,7 @@ export const SETTINGS_ITEMS = [
     id: 'app.startAtLogin',
     section: 'general',
     title: 'Start at Login',
-    description: 'Launch WPHerd when you log into macOS',
+    description: 'Launch WPXen when you log into macOS',
     keywords: ['start', 'login', 'launch', 'startup', 'boot', 'auto', 'open', 'macos'],
   },
   {
@@ -271,7 +271,7 @@ export const SETTINGS_ITEMS = [
     id: 'app.closeAction',
     section: 'general',
     title: 'When the window is closed',
-    description: 'Hide to the menu bar, or quit WPHerd entirely',
+    description: 'Hide to the menu bar, or quit WPXen entirely',
     keywords: [
       'close',
       'window',
@@ -287,7 +287,7 @@ export const SETTINGS_ITEMS = [
     id: 'app.openLinksIn',
     section: 'general',
     title: 'Open links in',
-    description: 'Use the default browser, or a browser tab inside WPHerd',
+    description: 'Use the default browser, or a browser tab inside WPXen',
     keywords: [
       'links',
       'open',
@@ -431,7 +431,7 @@ export const SETTINGS_ITEMS = [
     id: 'services.autoStart',
     section: 'services',
     title: 'Start on Launch',
-    description: 'Which services WPHerd brings up when it starts',
+    description: 'Which services WPXen brings up when it starts',
     keywords: [
       'services',
       'start',
@@ -500,7 +500,7 @@ export const SETTINGS_ITEMS = [
     id: 'dns.sudoers',
     section: 'dns',
     title: 'Passwordless DNS Control',
-    description: 'Let WPHerd manage the dnsmasq resolver without a password prompt',
+    description: 'Let WPXen manage the dnsmasq resolver without a password prompt',
     keywords: [
       'sudo',
       'sudoers',
@@ -568,7 +568,7 @@ export const SETTINGS_ITEMS = [
     id: 'dependencies.list',
     section: 'dependencies',
     title: 'Dependencies',
-    description: 'Homebrew packages WPHerd needs to run services',
+    description: 'Homebrew packages WPXen needs to run services',
     keywords: [
       'dependencies',
       'homebrew',

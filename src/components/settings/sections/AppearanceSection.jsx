@@ -12,7 +12,7 @@ import { buildEditorMetrics, editorThemes } from '../../../lib/editorTheme';
 import { toTerminalOptions } from '../../../lib/typography';
 import { MONO_STACK, onThemeChange, terminalThemes, themeName } from '../../../lib/theme';
 
-// Fonts worth offering by name. WPHerd can't enumerate installed families from
+// Fonts worth offering by name. WPXen can't enumerate installed families from
 // the renderer without the (Chromium-only, permission-gated) local font access
 // API, so — like Superset — this is a curated list plus a free-typed fallback:
 // anything the user types is used if the OS resolves it, and silently falls
@@ -60,9 +60,9 @@ const SAMPLES = {
     '\x1b[90m=> 0 !== $count && $x >= 1;\x1b[0m',
   ].join('\r\n'),
   editor: `<?php
-final class WPHerd_Hello {
+final class WPXen_Hello {
     public function __construct() {
-        add_shortcode( 'wpherd_hello', [ $this, 'render' ] );
+        add_shortcode( 'wpxen_hello', [ $this, 'render' ] );
     }
 
     public function render( array $atts ): string {

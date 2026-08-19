@@ -83,7 +83,7 @@ export default function ToolsSection() {
         </SettingsRow>
       </Card>
       <p className="text-[11px] text-muted-foreground mt-1.5 px-1">
-        WPHerd looks for each editor’s command-line shim (
+        WPXen looks for each editor’s command-line shim (
         <span className="font-mono">code</span>, <span className="font-mono">subl</span>,
         …) and falls back to the app bundle, then to whatever macOS would open the file
         with.
