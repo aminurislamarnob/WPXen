@@ -17,7 +17,7 @@ const { execFile } = require('child_process');
 const brew = require('./brew.cjs');
 const php = require('./php.cjs');
 
-// Homebrew formula names WPHerd needs. Note the formula is `wp-cli` while the
+// Homebrew formula names WPXen needs. Note the formula is `wp-cli` while the
 // dependency key `checkAllDependencies` reports is `wpCli`. Plain `php` = the
 // latest release, which matches the generic `php` dep check and avoids the
 // shivammathur tap-trust flow used only for EOL versions.

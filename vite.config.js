@@ -5,6 +5,12 @@ import path from 'path';
 export default defineConfig({
   plugins: [react()],
   base: './',
+  // Scope the dependency scanner to our own entry. Without this, Vite globs
+  // **/*.html and crawls the reference/superset-main checkout, failing on its
+  // uninstalled imports.
+  optimizeDeps: {
+    entries: ['index.html'],
+  },
   build: {
     outDir: 'dist',
     emptyOutDir: true,

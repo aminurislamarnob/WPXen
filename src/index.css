@@ -3,78 +3,95 @@
 @tailwind utilities;
 
 /* ── Theme tokens ─────────────────────────────────────────────────────────
-   Space-separated RGB triplets consumed by tailwind.config.js via
-   `rgb(var(--…) / <alpha-value>)`. The dark block mirrors macOS System
-   Settings dark mode; the gray ramp inverts so gray-900 is always "primary
-   text" and gray-50 is always "subtle fill". prefers-color-scheme is driven
-   by nativeTheme.themeSource in the main process (Auto/Light/Dark). */
+   Superset's shadcn-style semantic palette. Space-separated RGB triplets so
+   tailwind.config.js can consume them as `rgb(var(--…) / <alpha-value>)` and
+   alpha modifiers (`bg-card/60`) keep working.
+
+   Light is a neutral white/gray scale; dark is Superset's warm "ember"
+   near-black. prefers-color-scheme follows the macOS system appearance
+   (nativeTheme stays on 'system'; main.cjs only mirrors it onto the opaque
+   window backdrop).
+
+   `--accent` is the neutral *hover fill*, not the brand color. The brand color
+   is `--highlight` (WPXen blue). */
 :root {
   color-scheme: light;
 
-  --gray-50: 249 250 251;
-  --gray-100: 243 244 246;
-  --gray-200: 229 231 235;
-  --gray-300: 209 213 219;
-  --gray-400: 156 163 175;
-  --gray-500: 107 114 128;
-  --gray-600: 75 85 99;
-  --gray-700: 55 65 81;
-  --gray-800: 31 41 55;
-  --gray-900: 17 24 39;
+  --background: 255 255 255;
+  --foreground: 37 37 37;
+  --card: 247 247 247;
+  --card-foreground: 37 37 37;
+  --popover: 255 255 255;
+  --popover-foreground: 37 37 37;
+  --primary: 52 52 52;
+  --primary-foreground: 251 251 251;
+  --secondary: 247 247 247;
+  --secondary-foreground: 52 52 52;
+  --muted: 247 247 247;
+  --muted-foreground: 130 130 130;
+  --accent: 236 236 236; /* hover fill */
+  --accent-foreground: 52 52 52;
+  --tertiary: 240 238 237; /* toolbars, wells */
+  --tertiary-active: 226 223 221;
+  --destructive: 220 38 38;
+  --destructive-foreground: 251 251 251;
+  --border: 231 231 231;
+  --input: 231 231 231;
+  --ring: 178 178 178;
 
-  --surface: 245 244 246; /* window content background */
-  --surface-card: 255 255 255; /* grouped card background */
-  --surface-border: 229 228 231;
-  --surface-hairline: 233 232 234; /* row dividers inside cards */
+  --sidebar: 250 250 250;
+  --sidebar-foreground: 37 37 37;
+  --sidebar-accent: 240 238 237;
+  --sidebar-border: 231 231 231;
 
-  --sidebar: 231 230 232; /* light translucent sidebar */
-  --sidebar-hover: 221 220 223;
+  --highlight: 10 96 255; /* WPXen blue */
+  --highlight-foreground: 255 255 255;
+  --highlight-match: rgba(255, 211, 61, 0.35); /* search hit */
+  --highlight-active: rgba(10, 96, 255, 0.35); /* current search hit */
 
-  --accent: 10 96 255; /* selection blue (System Settings active pill) */
-  --accent-hover: 10 85 224;
+  --status-running: 16 185 129;
+  --status-warning: 245 158 11;
+  --status-error: 239 68 68;
 
-  --shadow-card: 0 0 0 0.5px rgba(0, 0, 0, 0.08), 0 1px 2px 0 rgba(0, 0, 0, 0.04);
-  --shadow-card-hover: 0 0 0 0.5px rgba(0, 0, 0, 0.1), 0 2px 6px 0 rgba(0, 0, 0, 0.08);
-
-  /* Liquid Glass (macOS 26): hairline edge, specular top highlight, lift */
-  --glass-border: rgba(255, 255, 255, 0.55);
-  --glass-highlight: inset 0 1px 0 0 rgba(255, 255, 255, 0.6);
-  --shadow-glass: 0 4px 14px rgba(0, 0, 0, 0.06);
+  --radius: 10px;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
     color-scheme: dark;
 
-    --gray-50: 49 49 54;
-    --gray-100: 58 58 63;
-    --gray-200: 72 72 78;
-    --gray-300: 86 86 94;
-    --gray-400: 124 124 133;
-    --gray-500: 152 152 159;
-    --gray-600: 184 184 189;
-    --gray-700: 212 212 216;
-    --gray-800: 232 232 234;
-    --gray-900: 245 245 247;
+    /* ember */
+    --background: 21 17 16;
+    --foreground: 234 232 230;
+    --card: 32 30 28;
+    --card-foreground: 234 232 230;
+    --popover: 32 30 28;
+    --popover-foreground: 234 232 230;
+    --primary: 234 232 230;
+    --primary-foreground: 21 17 16;
+    --secondary: 42 40 39;
+    --secondary-foreground: 234 232 230;
+    --muted: 42 40 39;
+    --muted-foreground: 168 165 163;
+    --accent: 42 40 39;
+    --accent-foreground: 234 232 230;
+    --tertiary: 26 23 22;
+    --tertiary-active: 37 34 32;
+    --destructive: 204 68 68;
+    --destructive-foreground: 255 204 204;
+    --border: 42 40 39;
+    --input: 42 40 39;
+    --ring: 58 56 55;
 
-    --surface: 30 30 30;
-    --surface-card: 44 44 46;
-    --surface-border: 58 58 60;
-    --surface-hairline: 56 56 58;
+    --sidebar: 26 23 22;
+    --sidebar-foreground: 234 232 230;
+    --sidebar-accent: 37 34 32;
+    --sidebar-border: 42 40 39;
 
-    --sidebar: 35 35 36;
-    --sidebar-hover: 44 44 46;
-
-    --accent: 10 132 255; /* brighter accent, like macOS dark mode */
-    --accent-hover: 40 145 255;
-
-    --shadow-card: 0 0 0 0.5px rgba(255, 255, 255, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.3);
-    --shadow-card-hover:
-      0 0 0 0.5px rgba(255, 255, 255, 0.14), 0 2px 6px 0 rgba(0, 0, 0, 0.4);
-
-    --glass-border: rgba(255, 255, 255, 0.09);
-    --glass-highlight: inset 0 1px 0 0 rgba(255, 255, 255, 0.07);
-    --shadow-glass: 0 4px 14px rgba(0, 0, 0, 0.22);
+    --highlight: 10 132 255;
+    --highlight-foreground: 255 255 255;
+    --highlight-match: rgba(10, 132, 255, 0.22);
+    --highlight-active: rgba(10, 132, 255, 0.45);
   }
 }
 
@@ -85,14 +102,15 @@
 }
 
 body {
-  @apply font-sans overflow-hidden select-none;
-  background: transparent;
+  @apply font-sans overflow-hidden select-none bg-background text-foreground;
 }
 
-/* Custom scrollbar */
+/* ── Scrollbars (Superset spec) ───────────────────────────────────────────
+   The transparent border + background-clip trick insets the thumb so it reads
+   as a floating pill rather than a full-width bar. */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 10px;
+  height: 10px;
 }
 
 ::-webkit-scrollbar-track {
@@ -100,11 +118,29 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  @apply bg-gray-300 rounded-full;
+  background-color: rgb(var(--muted-foreground) / 0.35);
+  border: 3px solid transparent;
+  background-clip: padding-box;
+  border-radius: 6px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  @apply bg-gray-400;
+  background-color: rgb(var(--muted-foreground) / 0.55);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Compact variant for dense areas (file tree, log panes) */
+.scrollbar-thin::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  border-width: 2px;
+  border-radius: 4px;
 }
 
 /* Drag region for title bar */
@@ -133,7 +169,7 @@ body {
 
 /* Smooth transitions */
 .sidebar-item {
-  @apply transition-all duration-150;
+  @apply transition-colors duration-150;
 }
 
 /* Progress bar animation */
@@ -148,7 +184,7 @@ body {
 
 .progress-indeterminate::after {
   content: '';
-  @apply absolute inset-y-0 w-1/3 bg-wp-blue-light rounded-full;
+  @apply absolute inset-y-0 w-1/3 bg-highlight rounded-full;
   animation: progress-slide 1.4s ease-in-out infinite;
 }
 
@@ -157,169 +193,130 @@ body {
   @apply transition-all duration-200;
 }
 
-/* Override .settings-card's overflow-hidden (needs higher specificity since
-   .settings-card is defined later) so the actions dropdown can escape the
-   card bounds instead of being clipped. */
+/* Override .settings-card's overflow-hidden so the actions dropdown can escape
+   the card bounds instead of being clipped. Unlayered, so it is emitted after
+   the components layer and wins. */
 .site-card.settings-card {
   overflow: visible;
 }
 
 .site-card:hover {
-  @apply shadow-card-hover -translate-y-0.5;
+  @apply shadow-md -translate-y-0.5 border-ring/60;
 }
 
-/* Service toggle button */
-.service-toggle {
-  @apply transition-all duration-200 rounded-lg px-3 py-1.5 text-xs font-semibold;
+/* Superset's run-state tint: a card for a running site borrows a little of the
+   status color into its border and surface. */
+.card-running {
+  border-color: color-mix(in srgb, rgb(var(--status-running)) 25%, rgb(var(--border)));
+  background-color: color-mix(in srgb, rgb(var(--status-running)) 4%, rgb(var(--card)));
 }
 
-/* macOS-style blur backdrop */
-.backdrop-macos {
-  backdrop-filter: blur(20px) saturate(180%);
-  -webkit-backdrop-filter: blur(20px) saturate(180%);
-}
-
-/* ── Liquid Glass (macOS 26) primitives ───────────────────────────────────
-   The window itself is transparent over an NSVisualEffectView (see
-   main.cjs), so these surfaces are translucent tints + blur over the real
-   desktop, with a hairline edge and a specular top highlight. */
-.glass {
-  background: rgb(var(--surface-card) / 0.55);
-  backdrop-filter: blur(24px) saturate(180%);
-  -webkit-backdrop-filter: blur(24px) saturate(180%);
-  box-shadow:
-    var(--glass-highlight),
-    inset 0 0 0 0.5px var(--glass-border),
-    var(--shadow-glass);
-}
-
-/* Input focus ring */
+/* Global input focus ring (Superset: 3px translucent ring on the ring token) */
 input:focus,
 select:focus,
 textarea:focus {
-  @apply outline-none ring-2 ring-wp-blue ring-opacity-30 border-wp-blue;
+  @apply outline-none ring-[3px] ring-ring/50 border-ring;
 }
 
-/* Buttons — macOS 26 style: comfortable capsules, glassy secondary.
-   Shared shape + sizing here (gap for icon+label, roomy padding, a min-height
-   so every variant lines up), color per variant below. */
-.btn {
-  @apply inline-flex items-center justify-center gap-1.5 rounded-full font-medium transition-all duration-150 px-3.5 py-1.5 text-[12px] leading-none min-h-[32px] disabled:opacity-50 disabled:cursor-not-allowed;
-}
-
-.btn-primary {
-  @apply btn bg-accent text-white hover:bg-accent-hover active:brightness-90;
-}
-
-.btn-secondary {
-  @apply btn text-gray-800 shadow-card backdrop-blur-md bg-white/60 hover:bg-white/85 active:bg-white/95 dark:bg-white/10 dark:hover:bg-white/[0.16] dark:active:bg-white/20;
-}
-
-.btn-danger {
-  @apply btn bg-wp-red text-white hover:brightness-95 active:brightness-90;
-}
-
-.btn-ghost {
-  @apply btn text-gray-600 hover:bg-black/5 active:bg-black/10 dark:hover:bg-white/10 dark:active:bg-white/15;
-}
-
-/* ── macOS System Settings primitives ──────────────────────────────────── */
-
-/* Grouped card: the rounded container holding hairline-divided rows.
-   Liquid Glass: translucent tint + blur, larger continuous radius. */
-.settings-card {
-  @apply rounded-2xl overflow-hidden;
-  background: rgb(var(--surface-card) / 0.55);
-  backdrop-filter: blur(24px) saturate(180%);
-  -webkit-backdrop-filter: blur(24px) saturate(180%);
-  /* Flat like System Settings cards: hairline + highlight, no drop shadow */
-  box-shadow:
-    var(--glass-highlight),
-    inset 0 0 0 0.5px var(--glass-border);
-}
-
-/* One row inside a settings-card */
-.settings-row {
-  @apply flex items-center gap-3 px-4 min-h-[44px] py-2.5;
-}
-
-.settings-row + .settings-row,
-.settings-row-divider {
-  @apply border-t border-surface-hairline;
-}
-
-/* Clickable row (chevron navigation) */
-.settings-row-btn {
-  @apply w-full text-left transition-colors hover:bg-black/[0.03] active:bg-black/[0.06] dark:hover:bg-white/[0.04] dark:active:bg-white/[0.08];
-}
-
-/* Section label above a card group */
-.settings-section-label {
-  @apply text-[13px] font-semibold text-gray-800 mb-2 px-1;
-}
-
-/* Small colored icon tile (sidebar + rows), like System Settings */
-.icon-tile {
-  @apply rounded-[7px] flex items-center justify-center flex-shrink-0 text-white;
-}
-
-/* Form fields — in the components layer so utility overrides (e.g. pl-9 for a
-   leading icon) win over the base padding here. */
+/* ── Component classes ────────────────────────────────────────────────────
+   Everything below lives in the components layer so that utility classes at
+   the call site (rounded-*, p-*, bg-*) reliably win over these defaults. */
 @layer components {
+  /* ── Buttons ────────────────────────────────────────────────────────────
+   Superset shape: rounded-md (not capsule), h-8, 13px, 1.5 gap for icon+label.
+   Shape and sizing live here; variants add color only. `primary` is
+   deliberately monochrome — the brand blue is an accent, not a button fill. */
+  .btn {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-md font-medium transition-all duration-150 px-3 h-8 text-[13px] leading-none disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50;
+  }
+
+  .btn-primary {
+    @apply btn bg-primary text-primary-foreground hover:bg-primary/90;
+  }
+
+  /* = Superset's "outline" variant */
+  .btn-secondary {
+    @apply btn border border-border bg-background shadow-sm hover:bg-accent hover:text-accent-foreground dark:bg-input/30 dark:hover:bg-input/50;
+  }
+
+  .btn-danger {
+    @apply btn bg-destructive text-white hover:bg-destructive/90 dark:bg-destructive/70 dark:hover:bg-destructive/60;
+  }
+
+  .btn-ghost {
+    @apply btn text-muted-foreground hover:bg-accent hover:text-accent-foreground;
+  }
+
+  /* ── Surfaces ─────────────────────────────────────────────────────────────
+   Flat and hairline-bordered — no blur, no translucency anywhere. */
+
+  /* Grouped card: the rounded container holding hairline-divided rows */
+  .settings-card {
+    @apply rounded-xl border border-border bg-card shadow-sm overflow-hidden;
+  }
+
+  /* One row inside a settings-card */
+  .settings-row {
+    @apply flex items-center gap-3 px-4 min-h-[44px] py-2.5;
+  }
+
+  .settings-row + .settings-row,
+  .settings-row-divider {
+    @apply border-t border-border;
+  }
+
+  /* Clickable row (chevron navigation) */
+  .settings-row-btn {
+    @apply w-full text-left transition-colors hover:bg-accent/50 active:bg-accent;
+  }
+
+  /* Section label above a card group */
+  .settings-section-label {
+    @apply text-[13px] font-semibold text-foreground mb-2 px-1;
+  }
+
+  /* Small colored icon tile (sidebar + rows) — a deliberate WPXen carve-out
+   from Superset's all-monochrome iconography. */
+  .icon-tile {
+    @apply rounded-[7px] flex items-center justify-center flex-shrink-0 text-white;
+  }
+
+  /* Form fields — utility overrides (e.g. pl-9 for a leading icon) win over the
+   base padding here. */
   .form-input {
-    @apply w-full px-3 py-1.5 border border-gray-300/60 rounded-[10px] text-[13px] text-gray-900 bg-white/60 placeholder-gray-400 transition-colors duration-150 dark:bg-white/[0.08] dark:border-white/10;
+    @apply w-full h-8 px-3 rounded-md border border-input bg-transparent text-[13px] text-foreground placeholder:text-muted-foreground shadow-sm transition-colors duration-150 dark:bg-input/30;
   }
-}
 
-/* Modal overlay — macOS sheets dim the window without blurring it */
-.modal-overlay {
-  @apply fixed inset-0 z-50 flex items-center justify-center;
-  background: rgba(0, 0, 0, 0.32);
-}
+  /* Modal overlay */
+  .modal-overlay {
+    @apply fixed inset-0 z-50 flex items-center justify-center;
+    background: rgba(0, 0, 0, 0.5);
+  }
 
-/* ── Dialog sheet (macOS System Settings style) ───────────────────────────
-   Near-opaque rounded sheet with a title/description block top-left, form
-   content recessed in a .sheet-well, and buttons bottom-right. Radius and
-   shadow live here so every dialog matches. */
-.sheet {
-  @apply rounded-[26px];
-  background: rgb(var(--surface-card) / 0.98);
-  backdrop-filter: blur(30px) saturate(180%);
-  -webkit-backdrop-filter: blur(30px) saturate(180%);
-  box-shadow:
-    var(--glass-highlight),
-    inset 0 0 0 0.5px var(--glass-border),
-    0 0 0 0.5px rgba(0, 0, 0, 0.12),
-    0 24px 70px rgba(0, 0, 0, 0.35);
-}
+  /* ── Dialog sheet ─────────────────────────────────────────────────────────
+   Title/description block top-left, form content recessed in a .sheet-well,
+   buttons bottom-right. */
+  .sheet {
+    @apply rounded-lg border border-border bg-background shadow-lg;
+  }
 
-/* Recessed content area inside a sheet (the inner gray panel in
-   System Settings sheets like "Arrange Displays") */
-.sheet-well {
-  @apply rounded-2xl p-4;
-  background: rgba(0, 0, 0, 0.03);
-  box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.06);
-}
-
-@media (prefers-color-scheme: dark) {
+  /* Recessed content area inside a sheet */
   .sheet-well {
-    background: rgba(255, 255, 255, 0.045);
-    box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.07);
+    @apply rounded-lg bg-tertiary p-4 border border-border/60;
   }
-}
 
-/* Modal / popover panel surface (dialogs, context menus) — frosted glass.
-   Call sites keep their own radius/shadow classes. */
-.panel {
-  background: rgb(var(--surface-card) / 0.75);
-  backdrop-filter: blur(30px) saturate(180%);
-  -webkit-backdrop-filter: blur(30px) saturate(180%);
-}
+  /* Popover surface (dialogs, context menus) */
+  .panel,
+  .panel-menu {
+    @apply bg-popover text-popover-foreground border border-border rounded-lg shadow-lg;
+  }
 
-/* Popover menus overlap sharp text on the same card, where 0.75 opacity lets
-   it bleed through — use a near-opaque frosted background instead. */
-.panel-menu {
-  background: rgb(var(--surface-card) / 0.97);
-  backdrop-filter: blur(30px) saturate(180%);
-  -webkit-backdrop-filter: blur(30px) saturate(180%);
+  /* Menu items inside a .panel-menu */
+  .panel-item {
+    @apply w-full flex items-center gap-2 rounded-sm px-2 py-1.5 text-[13px] text-foreground transition-colors hover:bg-accent disabled:opacity-50 disabled:pointer-events-none;
+  }
+
+  .panel-item-danger {
+    @apply text-destructive hover:bg-destructive/10;
+  }
 }

@@ -11,15 +11,9 @@ const { validateSiteInput } = require('./validation.cjs');
 
 const DEFAULT_SITES_DIR = path.join(os.homedir(), 'Sites');
 
-function getSitesDir() {
-  return DEFAULT_SITES_DIR;
-}
-
-function ensureSitesDir(dir = DEFAULT_SITES_DIR) {
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-}
+// NB: there is deliberately no getSitesDir() helper here. The sites directory
+// is a user setting ('sites.dir'); a module-local helper returning the constant
+// would silently ignore it. Callers receive the resolved path in siteData.
 
 function getWpCliBin() {
   const prefix = brew.getBrewPrefix();
@@ -141,6 +135,8 @@ async function createWordPressSite(siteData, progressCallback) {
     adminPassword = 'admin123',
     adminEmail,
     title,
+    wpVersion: wpVersionArg,
+    locale: localeArg,
   } = siteData;
 
   const progress = progressCallback || (() => {});
@@ -158,8 +154,28 @@ async function createWordPressSite(siteData, progressCallback) {
 
   // 2. Download WordPress core (with bundled default themes/plugins — no
   // --skip-content, so the Twenty* themes ship with the install).
+  //
+  // Version and locale come from the global new-site defaults. Both are
+  // pattern-checked before becoming argv so a tampered store can't smuggle an
+  // extra wp-cli flag through them; anything unrecognised falls back to the
+  // latest en_US build rather than failing the install.
   progress({ step: 'download', message: 'Downloading WordPress...' });
-  wp(['core', 'download'], sitePath);
+  const downloadArgs = ['core', 'download'];
+  if (
+    wpVersionArg &&
+    wpVersionArg !== 'latest' &&
+    /^\d+(\.\d+){0,2}$/.test(wpVersionArg)
+  ) {
+    downloadArgs.push(`--version=${wpVersionArg}`);
+  }
+  if (
+    localeArg &&
+    /^[a-z]{2,3}(_[A-Za-z]{2,4})?$/.test(localeArg) &&
+    localeArg !== 'en_US'
+  ) {
+    downloadArgs.push(`--locale=${localeArg}`);
+  }
+  wp(downloadArgs, sitePath);
 
   // 3. Create database
   progress({ step: 'database', message: 'Creating database...' });
@@ -312,7 +328,7 @@ function selectExistingPlugins(plugins, exists) {
 
 // All-in-One WP Migration blanks active_plugins/template/stylesheet in its DB
 // export (so nothing fatals mid-restore) and re-applies them from package.json
-// in its own importer. WPHerd imports the DB directly, so without this step
+// in its own importer. WPXen imports the DB directly, so without this step
 // every plugin and the site theme come back deactivated. Replicates AI1WM's
 // final activation — direct option writes, filtered to entries whose files are
 // present (matching ai1wm_activate_plugins/template/stylesheet).
@@ -345,6 +361,23 @@ function restoreWpressActiveState(sitePath, pkg) {
   } catch {}
 }
 
+// Deletes mu-plugins left behind under the app's pre-rename (WPHerd,
+// WPDevPilot) file names. Every copy loads and redeclares the same functions —
+// a fatal error for the tunnel plugin, and a live extra magic-login route
+// holding a stale secret. Best-effort: a read-only wp-content keeps the old
+// files, which is better than failing the operation that triggered this.
+const LEGACY_PREFIXES = ['wpdevpilot', 'wpherd'];
+
+function removeLegacyMuPlugins(sitePath, suffix) {
+  const muDir = path.join(sitePath, 'wp-content', 'mu-plugins');
+  for (const prefix of LEGACY_PREFIXES) {
+    const file = path.join(muDir, `${prefix}-${suffix}`);
+    try {
+      if (fs.existsSync(file)) fs.unlinkSync(file);
+    } catch {}
+  }
+}
+
 // Drops a must-use plugin that makes WordPress emit URLs for whatever host the
 // request actually arrived on when that host is a *.trycloudflare.com share
 // domain. Without it, WP would generate `http://<site>.test` links that break
@@ -352,11 +385,11 @@ function restoreWpressActiveState(sitePath, pkg) {
 // normal local (.test) access. Best-effort — a missing wp-content is ignored.
 function ensureTunnelMuPlugin(sitePath) {
   const muDir = path.join(sitePath, 'wp-content', 'mu-plugins');
-  const file = path.join(muDir, 'wpherd-tunnel.php');
+  const file = path.join(muDir, 'wpxen-tunnel.php');
   const contents = `<?php
 /**
- * Plugin Name: WPHerd Share Tunnel
- * Description: Serves correct URLs when the site is accessed through a WPHerd Cloudflare share tunnel. Managed by WPHerd.
+ * Plugin Name: WPXen Share Tunnel
+ * Description: Serves correct URLs when the site is accessed through a WPXen Cloudflare share tunnel. Managed by WPXen.
  */
 if (!defined('ABSPATH')) {
     exit;
@@ -365,7 +398,7 @@ if (!defined('ABSPATH')) {
 /**
  * True when the current request arrived on a Cloudflare quick-tunnel share host.
  */
-function wpherd_is_tunnel_request() {
+function wpxen_is_tunnel_request() {
     return !empty($_SERVER['HTTP_HOST'])
         && substr($_SERVER['HTTP_HOST'], -18) === '.trycloudflare.com';
 }
@@ -376,7 +409,7 @@ function wpherd_is_tunnel_request() {
 // endlessly (ERR_TOO_MANY_REDIRECTS). Mark tunnel requests as HTTPS — matching
 // the edge — so is_ssl() agrees with the https site URL and the loop is gone.
 // This runs at mu-plugin load, before any admin auth/SSL redirect check.
-if (wpherd_is_tunnel_request()) {
+if (wpxen_is_tunnel_request()) {
     $_SERVER['HTTPS'] = 'on';
 }
 
@@ -384,21 +417,22 @@ if (wpherd_is_tunnel_request()) {
  * When the request host is a Cloudflare quick-tunnel domain, override the
  * home/siteurl so all generated links point at the public tunnel URL.
  */
-function wpherd_tunnel_filter_url($value) {
-    if (wpherd_is_tunnel_request()) {
+function wpxen_tunnel_filter_url($value) {
+    if (wpxen_is_tunnel_request()) {
         // Cloudflare quick tunnels are always served over https at the edge.
         return 'https://' . $_SERVER['HTTP_HOST'];
     }
     return $value;
 }
-add_filter('option_home', 'wpherd_tunnel_filter_url');
-add_filter('option_siteurl', 'wpherd_tunnel_filter_url');
+add_filter('option_home', 'wpxen_tunnel_filter_url');
+add_filter('option_siteurl', 'wpxen_tunnel_filter_url');
 `;
 
   try {
     if (!fs.existsSync(path.join(sitePath, 'wp-content'))) return false;
     if (!fs.existsSync(muDir)) fs.mkdirSync(muDir, { recursive: true });
     fs.writeFileSync(file, contents, 'utf8');
+    removeLegacyMuPlugins(sitePath, 'tunnel.php');
     return true;
   } catch {
     return false;
@@ -443,7 +477,7 @@ function listAdminUsers(sitePath) {
 // per-site secret. Idempotent — call again to switch users or rotate the secret.
 function ensureMagicLoginMuPlugin(sitePath, { userId, secret }) {
   const muDir = path.join(sitePath, 'wp-content', 'mu-plugins');
-  const file = path.join(muDir, 'wpherd-magic-login.php');
+  const file = path.join(muDir, 'wpxen-magic-login.php');
   const uid = parseInt(userId, 10);
   if (!Number.isInteger(uid) || uid <= 0) {
     throw new Error('A valid administrator must be selected.');
@@ -453,15 +487,15 @@ function ensureMagicLoginMuPlugin(sitePath, { userId, secret }) {
   }
   const contents = `<?php
 /**
- * Plugin Name: WPHerd One-Click Admin
- * Description: Passwordless admin login for local development. Managed by WPHerd — local access only.
+ * Plugin Name: WPXen One-Click Admin
+ * Description: Passwordless admin login for local development. Managed by WPXen — local access only.
  */
 if (!defined('ABSPATH')) {
     exit;
 }
 
 add_action('init', function () {
-    if (empty($_GET['wpherd_magic_login']) || !is_string($_GET['wpherd_magic_login'])) {
+    if (empty($_GET['wpxen_magic_login']) || !is_string($_GET['wpxen_magic_login'])) {
         return;
     }
     $secret  = '${secret}';
@@ -471,7 +505,7 @@ add_action('init', function () {
     if (substr($host, -18) === '.trycloudflare.com') {
         return;
     }
-    if (!hash_equals($secret, $_GET['wpherd_magic_login'])) {
+    if (!hash_equals($secret, $_GET['wpxen_magic_login'])) {
         return;
     }
     $user = get_user_by('id', $user_id);
@@ -491,14 +525,16 @@ add_action('init', function () {
   }
   if (!fs.existsSync(muDir)) fs.mkdirSync(muDir, { recursive: true });
   fs.writeFileSync(file, contents, 'utf8');
+  removeLegacyMuPlugins(sitePath, 'magic-login.php');
   return true;
 }
 
 // Removes the managed magic-login mu-plugin (when the feature is turned off).
 function removeMagicLoginMuPlugin(sitePath) {
-  const file = path.join(sitePath, 'wp-content', 'mu-plugins', 'wpherd-magic-login.php');
+  const file = path.join(sitePath, 'wp-content', 'mu-plugins', 'wpxen-magic-login.php');
   try {
     if (fs.existsSync(file)) fs.unlinkSync(file);
+    removeLegacyMuPlugins(sitePath, 'magic-login.php');
     return true;
   } catch {
     return false;
@@ -963,8 +999,6 @@ function sanitizeDbName(name) {
 
 module.exports = {
   DEFAULT_SITES_DIR,
-  getSitesDir,
-  ensureSitesDir,
   getWpCliBin,
   wp,
   wpAsync,

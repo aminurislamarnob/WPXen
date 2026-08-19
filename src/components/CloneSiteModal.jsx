@@ -6,7 +6,7 @@ import {
   Loader,
   Copy as CopyIcon,
 } from 'lucide-react';
-import { ProgressLog } from './ui';
+import { ProgressLog, Tooltip } from './ui';
 
 function slugify(value) {
   return value
@@ -98,8 +98,8 @@ export default function CloneSiteModal({ source, phpVersions, onClose, onCloned 
     >
       <div className="sheet w-[540px] max-h-[90vh] overflow-hidden animate-slide-in">
         <div className="px-6 pt-6">
-          <h2 className="text-[15px] font-bold text-gray-900">Clone Site</h2>
-          <p className="text-[13px] text-gray-500 mt-0.5">
+          <h2 className="text-[15px] font-bold text-foreground">Clone Site</h2>
+          <p className="text-[13px] text-muted-foreground mt-0.5">
             Duplicate <span className="font-semibold">{source.name}</span> into a new
             local site
           </p>
@@ -109,7 +109,7 @@ export default function CloneSiteModal({ source, phpVersions, onClose, onCloned 
           {phase === 'form' && (
             <div className="sheet-well space-y-4 animate-fade-in">
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1.5">
+                <label className="block text-xs font-medium text-foreground mb-1.5">
                   Site Name
                 </label>
                 <input
@@ -122,7 +122,7 @@ export default function CloneSiteModal({ source, phpVersions, onClose, onCloned 
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1.5">
+                  <label className="block text-xs font-medium text-foreground mb-1.5">
                     Local Domain
                   </label>
                   <input
@@ -135,7 +135,7 @@ export default function CloneSiteModal({ source, phpVersions, onClose, onCloned 
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1.5">
+                  <label className="block text-xs font-medium text-foreground mb-1.5">
                     Database Name
                   </label>
                   <input
@@ -149,7 +149,7 @@ export default function CloneSiteModal({ source, phpVersions, onClose, onCloned 
                 </div>
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1.5">
+                <label className="block text-xs font-medium text-foreground mb-1.5">
                   Site Directory
                 </label>
                 <div className="flex gap-2">
@@ -159,18 +159,19 @@ export default function CloneSiteModal({ source, phpVersions, onClose, onCloned 
                     value={formData.path}
                     onChange={(e) => setFormData((p) => ({ ...p, path: e.target.value }))}
                   />
-                  <button
-                    onClick={handleSelectFolder}
-                    title="Choose folder"
-                    aria-label="Choose folder"
-                    className="btn-secondary !px-0 w-8 flex-shrink-0"
-                  >
-                    <FolderOpen size={14} />
-                  </button>
+                  <Tooltip label="Choose folder">
+                    <button
+                      onClick={handleSelectFolder}
+                      aria-label="Choose folder"
+                      className="btn-secondary !px-0 w-8 flex-shrink-0"
+                    >
+                      <FolderOpen size={14} />
+                    </button>
+                  </Tooltip>
                 </div>
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1.5">
+                <label className="block text-xs font-medium text-foreground mb-1.5">
                   PHP Version
                 </label>
                 <select
@@ -192,7 +193,7 @@ export default function CloneSiteModal({ source, phpVersions, onClose, onCloned 
                 </select>
               </div>
               {source.https && (
-                <div className="bg-blue-50 dark:bg-blue-500/10 rounded-xl px-4 py-3 text-xs text-blue-700 dark:text-blue-300">
+                <div className="bg-highlight/10 rounded-xl px-4 py-3 text-xs text-highlight">
                   A new trusted HTTPS certificate will be issued for{' '}
                   <span className="font-semibold font-mono">{formData.domain}</span>.
                 </div>
@@ -204,11 +205,11 @@ export default function CloneSiteModal({ source, phpVersions, onClose, onCloned 
             <div className="sheet-well animate-fade-in">
               {phase === 'done' ? (
                 <div className="text-center py-4">
-                  <div className="w-14 h-14 rounded-full bg-green-100 dark:bg-green-500/15 flex items-center justify-center mx-auto mb-3">
-                    <CheckCircle size={28} className="text-wp-green" />
+                  <div className="w-14 h-14 rounded-full bg-status-running/10 flex items-center justify-center mx-auto mb-3">
+                    <CheckCircle size={28} className="text-status-running" />
                   </div>
-                  <h3 className="text-base font-bold text-gray-900">Site Cloned!</h3>
-                  <p className="text-sm text-gray-500 mt-1 mb-4">
+                  <h3 className="text-base font-bold text-foreground">Site Cloned!</h3>
+                  <p className="text-sm text-muted-foreground mt-1 mb-4">
                     Your clone is ready at{' '}
                     <button
                       onClick={() =>
@@ -216,7 +217,7 @@ export default function CloneSiteModal({ source, phpVersions, onClose, onCloned 
                           resultSite?.url || `http://${formData.domain}`
                         )
                       }
-                      className="text-wp-blue hover:underline font-medium"
+                      className="text-highlight hover:underline font-medium"
                     >
                       {formData.domain}
                     </button>
@@ -242,9 +243,9 @@ export default function CloneSiteModal({ source, phpVersions, onClose, onCloned 
                   <div className="flex items-center gap-3 mb-2">
                     <Loader
                       size={18}
-                      className="animate-spin text-wp-blue flex-shrink-0"
+                      className="animate-spin text-highlight flex-shrink-0"
                     />
-                    <p className="text-sm font-medium text-gray-700">Cloning site…</p>
+                    <p className="text-sm font-medium text-foreground">Cloning site…</p>
                   </div>
                   <ProgressLog messages={progressMessages} className="mt-4" />
                 </div>
@@ -253,7 +254,7 @@ export default function CloneSiteModal({ source, phpVersions, onClose, onCloned 
           )}
 
           {error && (
-            <div className="mt-4 flex items-start gap-2 bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400 rounded-xl px-4 py-3 text-sm">
+            <div className="mt-4 flex items-start gap-2 bg-destructive/10 text-destructive rounded-xl px-4 py-3 text-sm">
               <AlertCircle size={16} className="flex-shrink-0 mt-0.5" />
               <span>{error}</span>
             </div>

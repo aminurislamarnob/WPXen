@@ -5,7 +5,7 @@ const path = require('path');
 const siteops = require('./siteops.cjs');
 const wordpress = require('./wordpress.cjs');
 
-// Blueprints are full site snapshots: a saved WPHerd export archive plus a
+// Blueprints are full site snapshots: a saved WPXen export archive plus a
 // metadata record. Archives live at userData/blueprints/{id}.zip; the metadata
 // list lives in the store under the 'blueprints' key. Creating a site from a
 // blueprint is just an import of its archive, so AddSiteModal reuses the

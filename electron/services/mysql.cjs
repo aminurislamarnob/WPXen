@@ -138,7 +138,7 @@ function getServerBin() {
   return null;
 }
 
-// MySQL runs as a supervised child of WPHerd (see procman.cjs).
+// MySQL runs as a supervised child of WPXen (see procman.cjs).
 function buildSpec() {
   const bin = getServerBin();
   if (!bin) throw new Error('MySQL/MariaDB is not installed.');

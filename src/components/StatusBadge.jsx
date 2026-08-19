@@ -7,7 +7,7 @@ export function StatusBadge({ running, size = 'sm' }) {
     <Circle
       size={SIZE_MAP[size]}
       className={`fill-current flex-shrink-0 ${
-        running ? 'text-wp-green status-dot-running' : 'text-gray-300'
+        running ? 'text-status-running status-dot-running' : 'text-muted-foreground/50'
       }`}
     />
   );
@@ -16,10 +16,10 @@ export function StatusBadge({ running, size = 'sm' }) {
 export function ServicePill({ name, running }) {
   return (
     <span
-      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${
+      className={`inline-flex items-center gap-1.5 border px-2 py-0.5 rounded-full text-xs font-medium ${
         running
-          ? 'bg-green-100 text-green-800 dark:bg-green-500/15 dark:text-green-300'
-          : 'bg-gray-100 text-gray-500'
+          ? 'border-status-running/30 bg-status-running/10 text-status-running'
+          : 'border-border bg-muted text-muted-foreground'
       }`}
     >
       <StatusBadge running={running} size="xs" />

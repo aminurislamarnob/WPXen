@@ -19,6 +19,12 @@ const VALID_EVENT_CHANNELS = [
   'site-clone-progress',
   'site-changeurl-progress',
   'blueprint-save-progress',
+  'terminal-data',
+  'terminal-replay',
+  'terminal-exit',
+  'browser-new-window',
+  'browser-shortcut',
+  'settings-updated',
 ];
 
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -30,8 +36,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openSiteInBrowser: (url) => ipcRenderer.invoke('open-in-browser', url),
   openSiteInFinder: (sitePath) => ipcRenderer.invoke('open-in-finder', sitePath),
   openSiteInTerminal: (sitePath) => ipcRenderer.invoke('open-in-terminal', sitePath),
-  openWpAdmin: (id) => ipcRenderer.invoke('open-wp-admin', id),
-  openPhpMyAdmin: (dbName) => ipcRenderer.invoke('open-phpmyadmin', dbName),
 
   // Export / Import
   exportSite: (id) => ipcRenderer.invoke('export-site', id),
@@ -148,20 +152,105 @@ contextBridge.exposeInMainWorld('electronAPI', {
   uninstallSudoers: () => ipcRenderer.invoke('uninstall-sudoers'),
 
   // Settings
+  // Schema-backed settings. `setSettings` takes a patch of dotted keys and
+  // resolves with { ok, applied, rejected } — it never throws on a bad value.
+  getAllSettings: () => ipcRenderer.invoke('settings-get-all'),
+  setSettings: (patch) => ipcRenderer.invoke('settings-set', patch),
+  // Editors/terminals detected on this machine, for the settings pickers.
+  listExternalTools: () => ipcRenderer.invoke('list-external-tools'),
+  // Every agent including ones hidden from the launcher (settings only).
+  listAllAgents: () => ipcRenderer.invoke('agent-list-all'),
+  // Deprecated flat shape, kept for one release. Prefer the two above.
   getSettings: () => ipcRenderer.invoke('get-settings'),
   saveSettings: (settings) => ipcRenderer.invoke('save-settings', settings),
 
   // File dialogs
-  selectFolder: () => ipcRenderer.invoke('select-folder'),
+  selectFolder: (defaultPath) => ipcRenderer.invoke('select-folder', defaultPath),
 
   // System info
   getSystemInfo: () => ipcRenderer.invoke('get-system-info'),
 
-  // IPC Events (renderer listening to main)
+  // Agent Launcher / Terminal
+  listAgents: () => ipcRenderer.invoke('agent-list'),
+  listSessions: (siteId) => ipcRenderer.invoke('agent-sessions', siteId),
+  launchAgent: (siteId, agentId, targetId) =>
+    ipcRenderer.invoke('agent-launch', siteId, agentId, targetId),
+
+  // Launch Presets (global, per-Agent) & Launch Targets (per-Site)
+  getAgentPresets: () => ipcRenderer.invoke('agent-presets-get'),
+  setAgentPreset: (agentId, args) =>
+    ipcRenderer.invoke('agent-preset-set', agentId, args),
+  listLaunchTargets: (siteId) => ipcRenderer.invoke('agent-targets-list', siteId),
+  saveLaunchTarget: (siteId, target) =>
+    ipcRenderer.invoke('agent-target-save', siteId, target),
+  deleteLaunchTarget: (siteId, targetId) =>
+    ipcRenderer.invoke('agent-target-delete', siteId, targetId),
+  terminalReady: (sessionId) => ipcRenderer.invoke('terminal-ready', sessionId),
+  terminalInput: (sessionId, data) => ipcRenderer.send('terminal-input', sessionId, data),
+  terminalResize: (sessionId, cols, rows) =>
+    ipcRenderer.send('terminal-resize', sessionId, cols, rows),
+  terminalClear: (sessionId) => ipcRenderer.send('terminal-clear', sessionId),
+  terminalStop: (sessionId) => ipcRenderer.invoke('terminal-stop', sessionId),
+
+  // In-app browser. The renderer owns the <webview>; these reach its guest in
+  // the main process, keyed by the browser tab's key.
+  browserRegister: (tabKey, webContentsId) =>
+    ipcRenderer.invoke('browser-register', tabKey, webContentsId),
+  browserUnregister: (tabKey) => ipcRenderer.invoke('browser-unregister', tabKey),
+  browserNavigate: (tabKey, url) => ipcRenderer.invoke('browser-navigate', tabKey, url),
+  browserReload: (tabKey, hard) => ipcRenderer.invoke('browser-reload', tabKey, hard),
+  browserOpenDevTools: (tabKey) => ipcRenderer.invoke('browser-open-devtools', tabKey),
+  // Targets an in-app browser tab can be pointed at. These resolve a URL
+  // (installing/configuring the service on first use) instead of opening it.
+  getPhpMyAdminUrl: (dbName) => ipcRenderer.invoke('get-phpmyadmin-url', dbName),
+  getWpAdminUrl: (id) => ipcRenderer.invoke('get-wp-admin-url', id),
+  getMailpitUrl: () => ipcRenderer.invoke('get-mailpit-url'),
+  // Address-bar autocomplete + the Settings actions that wipe it.
+  browserHistoryRecord: (visit) => ipcRenderer.invoke('browser-history-record', visit),
+  browserHistorySearch: (query, limit) =>
+    ipcRenderer.invoke('browser-history-search', query, limit),
+  browserHistoryClear: () => ipcRenderer.invoke('browser-history-clear'),
+  browserClearData: () => ipcRenderer.invoke('browser-clear-data'),
+
+  listDirectory: (rootPath, dirPath) =>
+    ipcRenderer.invoke('list-directory', rootPath, dirPath),
+  terminalStatPath: (rootPath, candidate) =>
+    ipcRenderer.invoke('terminal-stat-path', rootPath, candidate),
+  openFilePath: (filePath) => ipcRenderer.invoke('open-file-path', filePath),
+  readFile: (rootPath, filePath) => ipcRenderer.invoke('read-file', rootPath, filePath),
+  writeFile: (rootPath, filePath, content) =>
+    ipcRenderer.invoke('write-file', rootPath, filePath, content),
+  revealInFinder: (rootPath, targetPath) =>
+    ipcRenderer.invoke('reveal-in-finder', rootPath, targetPath),
+  createFile: (rootPath, dirPath, name) =>
+    ipcRenderer.invoke('create-file', rootPath, dirPath, name),
+  createFolder: (rootPath, dirPath, name) =>
+    ipcRenderer.invoke('create-folder', rootPath, dirPath, name),
+  renamePath: (rootPath, targetPath, newName) =>
+    ipcRenderer.invoke('rename-path', rootPath, targetPath, newName),
+  importFiles: (rootPath, dirPath, sourcePaths) =>
+    ipcRenderer.invoke('import-files', rootPath, dirPath, sourcePaths),
+  trashPath: (rootPath, targetPath) =>
+    ipcRenderer.invoke('trash-path', rootPath, targetPath),
+  gitStatus: (rootPath) => ipcRenderer.invoke('git-status', rootPath),
+  gitFileAt: (siteRoot, repoRoot, rel, rev) =>
+    ipcRenderer.invoke('git-file-at', siteRoot, repoRoot, rel, rev),
+  gitStage: (siteRoot, repoRoot, rels) =>
+    ipcRenderer.invoke('git-stage', siteRoot, repoRoot, rels),
+  gitUnstage: (siteRoot, repoRoot, rels) =>
+    ipcRenderer.invoke('git-unstage', siteRoot, repoRoot, rels),
+  gitDiscard: (siteRoot, repoRoot, rel, status) =>
+    ipcRenderer.invoke('git-discard', siteRoot, repoRoot, rel, status),
+
+  // IPC Events (renderer listening to main). `on` returns an unsubscribe that
+  // removes only its own listener — required when several subscribers share a
+  // channel (e.g. many live terminals on 'terminal-data'). `off` (remove all)
+  // stays for single-subscriber callers that use it in cleanup.
   on: (channel, callback) => {
-    if (VALID_EVENT_CHANNELS.includes(channel)) {
-      ipcRenderer.on(channel, (_, data) => callback(data));
-    }
+    if (!VALID_EVENT_CHANNELS.includes(channel)) return () => {};
+    const wrapped = (_, data) => callback(data);
+    ipcRenderer.on(channel, wrapped);
+    return () => ipcRenderer.removeListener(channel, wrapped);
   },
   off: (channel) => {
     if (VALID_EVENT_CHANNELS.includes(channel)) {

@@ -5,7 +5,7 @@
 // module owns the child processes: spawn, log capture, crash restart with
 // backoff, graceful stop escalation, and orphan cleanup after a hard crash of
 // the app itself. Replacing `brew services` with app-owned children is what
-// keeps macOS "App Background Activity" down to just WPHerd.
+// keeps macOS "App Background Activity" down to just WPXen.
 //
 // Spec shape (see each service module's buildSpec()):
 //   {
@@ -28,7 +28,15 @@ const { spawn, execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
-const MAX_LOG_BYTES = 5 * 1024 * 1024;
+// Size at which a service log is rotated to `.old`. Configurable via
+// Settings → Services (services.logMaxSizeMb); the default matches the
+// previous hardcoded cap.
+let maxLogBytes = 5 * 1024 * 1024;
+function setMaxLogSizeMb(mb) {
+  if (typeof mb === 'number' && Number.isFinite(mb) && mb > 0) {
+    maxLogBytes = Math.round(mb * 1024 * 1024);
+  }
+}
 const RESTART_WINDOW_MS = 60_000;
 const MAX_RESTARTS_PER_WINDOW = 5;
 const BACKOFF_CAP_MS = 30_000;
@@ -41,7 +49,7 @@ function getBaseDir() {
   try {
     baseDir = require('electron').app.getPath('userData');
   } catch {
-    baseDir = path.join(require('os').tmpdir(), 'wpherd-procman');
+    baseDir = path.join(require('os').tmpdir(), 'wpxen-procman');
   }
   return baseDir;
 }
@@ -163,7 +171,7 @@ function openLogFd(name) {
   fs.mkdirSync(path.dirname(logPath), { recursive: true });
   try {
     const st = fs.statSync(logPath);
-    if (st.size > MAX_LOG_BYTES) {
+    if (st.size > maxLogBytes) {
       fs.renameSync(logPath, `${logPath}.old`);
     }
   } catch {}
@@ -356,7 +364,7 @@ async function start(spec) {
       entry.desiredRunning = false;
       setState(entry, name, 'stopped');
       throw new Error(
-        `${name} is already running outside WPHerd. Stop the other instance (e.g. \`brew services stop ${name}\`) and try again.`
+        `${name} is already running outside WPXen. Stop the other instance (e.g. \`brew services stop ${name}\`) and try again.`
       );
     }
   }
@@ -449,7 +457,7 @@ async function restart(spec) {
 function signal(name, sig) {
   const entry = registry.get(name);
   if (!entry || !entry.child) {
-    throw new Error(`${name} is not running under WPHerd.`);
+    throw new Error(`${name} is not running under WPXen.`);
   }
   entry.child.kill(sig);
 }
@@ -510,6 +518,7 @@ async function reconcileOrphans() {
 }
 
 module.exports = {
+  setMaxLogSizeMb,
   start,
   stop,
   restart,

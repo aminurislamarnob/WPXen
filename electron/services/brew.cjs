@@ -33,13 +33,19 @@ function execBrew(command) {
     .trim();
 }
 
+// A formula is installed iff it has a keg in the Cellar. We check the
+// filesystem directly rather than shelling out to `brew list` because the
+// latter tries to refresh Homebrew's JSON API cache and exits non-zero on any
+// warning — e.g. a "Permission denied" on a root-owned cache file (left behind
+// by a past `sudo brew` run) makes `brew list` fail even though the formula is
+// present, which would make WPXen report core services as missing. The
+// filesystem check is also far faster (no Ruby spawn).
 function isPackageInstalled(name) {
-  try {
-    execBrew(`list --formula ${name}`);
-    return true;
-  } catch {
-    return false;
-  }
+  const prefix = getBrewPrefix();
+  if (!prefix) return false;
+  return (
+    fs.existsSync(`${prefix}/Cellar/${name}`) || fs.existsSync(`${prefix}/opt/${name}`)
+  );
 }
 
 // Non-blocking `brew` runner for the dependency check (see asyncExec.cjs).
@@ -53,13 +59,11 @@ function execBrewAsync(command) {
   });
 }
 
+// Async-signatured for call-site compatibility, but resolved from the
+// filesystem (see isPackageInstalled) so it never depends on `brew list`'s exit
+// code or the network cache.
 async function isPackageInstalledAsync(name) {
-  try {
-    await execBrewAsync(`list --formula ${name}`);
-    return true;
-  } catch {
-    return false;
-  }
+  return isPackageInstalled(name);
 }
 
 // Runs a php binary and returns its major.minor (e.g. "8.3"), or null. Used to
@@ -78,7 +82,7 @@ function phpBinaryVersion(phpBin) {
   }
 }
 
-// Candidate versioned formulae WPHerd knows how to detect/install.
+// Candidate versioned formulae WPXen knows how to detect/install.
 const PHP_VERSION_CANDIDATES = ['8.4', '8.3', '8.2', '8.1', '8.0', '7.4'];
 
 function getInstalledPhpVersions() {
@@ -135,7 +139,10 @@ function getActivePhpVersion() {
   try {
     const phpBin = `${prefix}/bin/php`;
     if (!fs.existsSync(phpBin)) return null;
-    const out = execSync(`${phpBin} -r "echo PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;"`)
+    const out = execSync(`${phpBin} -r "echo PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;"`, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 5000,
+    })
       .toString()
       .trim();
     return out.match(/^\d+\.\d+$/) ? out : null;
@@ -305,7 +312,7 @@ function restartBrewService(name) {
 
 // Runs `brew services <action> <name>` as root.
 //
-// If the WPHerd sudoers file is installed (/etc/sudoers.d/wpherd), sudo runs
+// If the WPXen sudoers file is installed (/etc/sudoers.d/wpxen), sudo runs
 // silently with no password prompt. Otherwise falls back to an osascript
 // admin-privileges dialog — acceptable for the first run before setup.
 function execBrewServiceSudo(action, name) {
@@ -333,7 +340,7 @@ function execBrewServiceSudo(action, name) {
   const { adminOsascript } = require('./admin.cjs');
   const prefix = getBrewPrefix();
   const shellCmd = `PATH=${prefix}/bin:$PATH ${brewBin} services ${action} ${name}`;
-  const reason = `WPHerd wants to ${action} the ${name} service.`;
+  const reason = `WPXen wants to ${action} the ${name} service.`;
   execSync(adminOsascript(shellCmd, reason), {
     stdio: ['ignore', 'pipe', 'pipe'],
   });

@@ -9,7 +9,7 @@ function Toggle({ checked, onChange, disabled }) {
       onClick={() => onChange(!checked)}
       disabled={disabled}
       className={`relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full transition-colors ${
-        checked ? 'bg-wp-blue' : 'bg-gray-300'
+        checked ? 'bg-highlight' : 'bg-border'
       } ${disabled ? 'opacity-50' : ''}`}
     >
       <span
@@ -81,8 +81,8 @@ export default function WpConfigManager({ site }) {
     <div>
       <div className="flex items-start justify-between mb-5">
         <div>
-          <h2 className="text-lg font-bold text-gray-900">WP Config Manager</h2>
-          <p className="text-sm text-gray-500 mt-0.5">
+          <h2 className="text-lg font-bold text-foreground">WP Config Manager</h2>
+          <p className="text-sm text-muted-foreground mt-0.5">
             Manage common <span className="font-mono">wp-config.php</span> constants.
           </p>
         </div>
@@ -110,8 +110,8 @@ export default function WpConfigManager({ site }) {
         <div
           className={`flex items-center gap-2 px-4 py-3 rounded-xl mb-4 text-sm ${
             message.type === 'error'
-              ? 'bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400'
-              : 'bg-green-50 text-green-700 dark:bg-green-500/10 dark:text-green-400'
+              ? 'bg-destructive/10 text-destructive'
+              : 'bg-status-running/10 text-status-running'
           }`}
         >
           {message.type === 'error' ? <AlertTriangle size={15} /> : <Check size={15} />}
@@ -121,10 +121,10 @@ export default function WpConfigManager({ site }) {
 
       {loading ? (
         <div className="flex items-center justify-center py-16">
-          <Loader size={22} className="animate-spin text-wp-blue" />
+          <Loader size={22} className="animate-spin text-highlight" />
         </div>
       ) : (
-        <div className="settings-card divide-y divide-gray-100">
+        <div className="settings-card divide-y divide-border">
           {schema.map((setting) => {
             const blocked = setting.dependsOn && !draft[setting.dependsOn];
             const depLabel =
@@ -139,12 +139,14 @@ export default function WpConfigManager({ site }) {
                 }`}
               >
                 <div className="min-w-0">
-                  <h3 className="text-sm font-semibold text-gray-900">{setting.label}</h3>
-                  <p className="text-xs text-gray-500 mt-1 leading-relaxed">
+                  <h3 className="text-sm font-semibold text-foreground">
+                    {setting.label}
+                  </h3>
+                  <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
                     {setting.description}
                   </p>
                   {blocked && (
-                    <p className="text-xs text-amber-600 dark:text-amber-400 mt-1 font-medium">
+                    <p className="text-xs text-status-warning mt-1 font-medium">
                       Requires “{depLabel}” to be enabled.
                     </p>
                   )}
@@ -231,8 +233,8 @@ function ManualEditor({ site, onClose, onSaved }) {
     <div>
       <div className="flex items-start justify-between mb-5">
         <div>
-          <h2 className="text-lg font-bold text-gray-900">Edit wp-config.php</h2>
-          <p className="text-sm text-gray-500 mt-0.5">
+          <h2 className="text-lg font-bold text-foreground">Edit wp-config.php</h2>
+          <p className="text-sm text-muted-foreground mt-0.5">
             Direct file editing. A <span className="font-mono">.bak</span> copy is kept on
             save.
           </p>
@@ -261,8 +263,8 @@ function ManualEditor({ site, onClose, onSaved }) {
         <div
           className={`flex items-center gap-2 px-4 py-3 rounded-xl mb-4 text-sm ${
             message.type === 'error'
-              ? 'bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400'
-              : 'bg-green-50 text-green-700 dark:bg-green-500/10 dark:text-green-400'
+              ? 'bg-destructive/10 text-destructive'
+              : 'bg-status-running/10 text-status-running'
           }`}
         >
           {message.type === 'error' ? <AlertTriangle size={15} /> : <Check size={15} />}
@@ -272,14 +274,14 @@ function ManualEditor({ site, onClose, onSaved }) {
 
       {loading ? (
         <div className="flex items-center justify-center py-16">
-          <Loader size={22} className="animate-spin text-wp-blue" />
+          <Loader size={22} className="animate-spin text-highlight" />
         </div>
       ) : (
         <textarea
           value={contents}
           onChange={(e) => setContents(e.target.value)}
           spellCheck={false}
-          className="w-full h-[26rem] font-mono text-xs p-4 rounded-xl border border-surface-border bg-zinc-900 text-zinc-100 focus:ring-2 focus:ring-wp-blue/40 focus:border-wp-blue resize-y"
+          className="w-full h-[26rem] font-mono text-xs p-4 rounded-lg border border-border bg-background text-foreground resize-y scrollbar-thin"
         />
       )}
     </div>

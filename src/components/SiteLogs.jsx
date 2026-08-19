@@ -7,6 +7,7 @@ import {
   CheckCircle,
   AlertTriangle,
 } from 'lucide-react';
+import { Tooltip } from './ui';
 
 const LOG_TABS = [
   { id: 'debug', label: 'Debug Log' },
@@ -93,47 +94,53 @@ export default function SiteLogs({ site }) {
       {/* Header */}
       <div className="flex items-start justify-between gap-3 mb-5">
         <div>
-          <h2 className="text-lg font-bold text-gray-900">Logs</h2>
-          <p className="text-sm text-gray-500 mt-0.5">
+          <h2 className="text-lg font-bold text-foreground">Logs</h2>
+          <p className="text-sm text-muted-foreground mt-0.5">
             WordPress, nginx and PHP logs for this site.
           </p>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
-          <button
-            onClick={handleClear}
-            disabled={isBusy || loading || !hasContent}
-            title="Clear log"
-            className="btn-secondary text-sm"
-          >
-            {busy === 'clear' ? (
-              <Loader size={14} className="animate-spin" />
-            ) : (
-              <Trash2 size={14} />
-            )}
-          </button>
-          <button
-            onClick={handleDownload}
-            disabled={isBusy || loading || !log?.exists}
-            title="Download log"
-            className="btn-secondary text-sm"
-          >
-            {busy === 'download' ? (
-              <Loader size={14} className="animate-spin" />
-            ) : (
-              <Download size={14} />
-            )}
-          </button>
-          <button
-            onClick={() => {
-              setMessage(null);
-              load(tab);
-            }}
-            disabled={isBusy || loading}
-            title="Refresh"
-            className="btn-secondary text-sm"
-          >
-            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-          </button>
+          <Tooltip label="Clear log">
+            <button
+              onClick={handleClear}
+              disabled={isBusy || loading || !hasContent}
+              aria-label="Clear log"
+              className="btn-secondary text-sm"
+            >
+              {busy === 'clear' ? (
+                <Loader size={14} className="animate-spin" />
+              ) : (
+                <Trash2 size={14} />
+              )}
+            </button>
+          </Tooltip>
+          <Tooltip label="Download log">
+            <button
+              onClick={handleDownload}
+              disabled={isBusy || loading || !log?.exists}
+              aria-label="Download log"
+              className="btn-secondary text-sm"
+            >
+              {busy === 'download' ? (
+                <Loader size={14} className="animate-spin" />
+              ) : (
+                <Download size={14} />
+              )}
+            </button>
+          </Tooltip>
+          <Tooltip label="Refresh">
+            <button
+              onClick={() => {
+                setMessage(null);
+                load(tab);
+              }}
+              disabled={isBusy || loading}
+              aria-label="Refresh"
+              className="btn-secondary text-sm"
+            >
+              <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+            </button>
+          </Tooltip>
         </div>
       </div>
 
@@ -141,8 +148,8 @@ export default function SiteLogs({ site }) {
         <div
           className={`flex items-center gap-2 px-4 py-3 rounded-xl mb-4 text-sm ${
             message.type === 'error'
-              ? 'bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400'
-              : 'bg-green-50 text-green-700 dark:bg-green-500/10 dark:text-green-400'
+              ? 'bg-destructive/10 text-destructive'
+              : 'bg-status-running/10 text-status-running'
           }`}
         >
           {message.type === 'error' ? (
@@ -155,15 +162,15 @@ export default function SiteLogs({ site }) {
       )}
 
       {/* Tabs */}
-      <div className="flex items-center gap-1 border-b border-surface-border mb-4">
+      <div className="flex items-center gap-1 border-b border-border mb-4">
         {LOG_TABS.map((t) => (
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
             className={`px-3 py-2 text-sm border-b-2 -mb-px transition-colors ${
               tab === t.id
-                ? 'border-wp-blue text-wp-blue font-medium'
-                : 'border-transparent text-gray-500 hover:text-gray-700'
+                ? 'border-highlight text-highlight font-medium'
+                : 'border-transparent text-muted-foreground hover:text-foreground'
             }`}
           >
             {t.label}
@@ -180,7 +187,7 @@ export default function SiteLogs({ site }) {
         )}
         <pre
           ref={viewerRef}
-          className="w-full h-[26rem] overflow-auto font-mono text-xs leading-relaxed p-4 rounded-xl bg-zinc-900 text-zinc-100 whitespace-pre-wrap break-words select-text"
+          className="w-full h-[26rem] overflow-auto font-mono text-xs leading-relaxed p-4 rounded-lg border border-border bg-background text-foreground whitespace-pre-wrap break-words select-text scrollbar-thin"
         >
           {placeholder ?? log.content}
         </pre>
@@ -189,10 +196,13 @@ export default function SiteLogs({ site }) {
       {/* Footer info */}
       {log && (
         <div className="flex items-center justify-between mt-2">
-          <p className="text-xs text-gray-400 font-mono truncate" title={log.path}>
+          <p
+            className="text-xs text-muted-foreground font-mono truncate"
+            title={log.path}
+          >
             {log.path}
           </p>
-          <p className="text-xs text-gray-400 flex-shrink-0 ml-3">
+          <p className="text-xs text-muted-foreground flex-shrink-0 ml-3">
             {log.truncated
               ? 'Showing the last 256 KB'
               : log.exists

@@ -13,7 +13,7 @@ import {
   Loader,
   Info,
 } from 'lucide-react';
-import { Card, Row, SectionLabel, IconTile } from './ui';
+import { Card, IconTile, Row, SectionLabel, Tooltip } from './ui';
 import { StatusBadge } from './StatusBadge';
 
 const SERVICE_CONFIG = [
@@ -70,7 +70,7 @@ function ServiceRow({ config, status, onAction, loadingAction }) {
           {config.name}
           <StatusBadge running={running} size="xs" />
           <span
-            className={`text-xs font-normal ${running ? 'text-wp-green' : 'text-gray-400'}`}
+            className={`text-xs font-normal ${running ? 'text-status-running' : 'text-muted-foreground'}`}
           >
             {running ? 'Running' : 'Stopped'}
           </span>
@@ -78,7 +78,7 @@ function ServiceRow({ config, status, onAction, loadingAction }) {
       }
       subtitle={
         failed && status?.error ? (
-          <span className="text-red-600 dark:text-red-400">
+          <span className="text-destructive">
             {status.error}{' '}
             <span
               role="button"
@@ -94,23 +94,25 @@ function ServiceRow({ config, status, onAction, loadingAction }) {
         )
       }
     >
-      <button
-        onClick={() => onAction('restart', config.id)}
-        disabled={!running || isLoading}
-        title="Restart"
-        className="p-1.5 rounded-md hover:bg-black/5 dark:hover:bg-white/10 text-gray-400 disabled:opacity-30 transition-colors"
-      >
-        {isLoading ? (
-          <Loader size={13} className="animate-spin" />
-        ) : (
-          <RotateCw size={13} />
-        )}
-      </button>
+      <Tooltip label="Restart">
+        <button
+          onClick={() => onAction('restart', config.id)}
+          disabled={!running || isLoading}
+          aria-label="Restart"
+          className="p-1.5 rounded-md hover:bg-accent text-muted-foreground disabled:opacity-30 transition-colors"
+        >
+          {isLoading ? (
+            <Loader size={13} className="animate-spin" />
+          ) : (
+            <RotateCw size={13} />
+          )}
+        </button>
+      </Tooltip>
       {running ? (
         <button
           onClick={() => onAction('stop', config.id)}
           disabled={isLoading}
-          className="btn-secondary text-xs w-[72px] text-red-600 dark:text-red-400"
+          className="btn-secondary text-xs w-[72px] text-destructive"
         >
           Stop
         </button>
@@ -118,7 +120,7 @@ function ServiceRow({ config, status, onAction, loadingAction }) {
         <button
           onClick={() => onAction('start', config.id)}
           disabled={isLoading}
-          className="btn-secondary text-xs w-[72px] text-green-700 dark:text-green-400"
+          className="btn-secondary text-xs w-[72px] text-status-running"
         >
           Start
         </button>
@@ -185,7 +187,7 @@ export default function Services({ serviceStatus, refreshStatus }) {
     <div className="px-6 pb-6 max-w-[735px] mx-auto animate-fade-in">
       {/* Header actions */}
       <div className="flex items-center justify-between mb-4">
-        <p className="text-xs text-gray-500">
+        <p className="text-xs text-muted-foreground">
           {runningCount} of {visibleServices.length} services running
         </p>
         <div className="flex gap-2">
@@ -220,16 +222,12 @@ export default function Services({ serviceStatus, refreshStatus }) {
       {message && (
         <Card
           className={`mb-4 ${
-            message.type === 'error'
-              ? '!bg-red-50 dark:!bg-red-500/10'
-              : '!bg-green-50 dark:!bg-green-500/10'
+            message.type === 'error' ? '!bg-destructive/10' : '!bg-status-running/10'
           }`}
         >
           <div
             className={`flex items-center gap-2 px-4 py-3 text-[13px] ${
-              message.type === 'error'
-                ? 'text-red-700 dark:text-red-400'
-                : 'text-green-700 dark:text-green-400'
+              message.type === 'error' ? 'text-destructive' : 'text-status-running'
             }`}
           >
             {message.type === 'error' ? <XCircle size={14} /> : <CheckCircle size={14} />}
@@ -239,7 +237,7 @@ export default function Services({ serviceStatus, refreshStatus }) {
       )}
 
       {/* App-managed services */}
-      <SectionLabel>Managed by WPHerd</SectionLabel>
+      <SectionLabel>Managed by WPXen</SectionLabel>
       <Card className="mb-6">
         {appManaged.map((config) => (
           <ServiceRow
@@ -267,15 +265,15 @@ export default function Services({ serviceStatus, refreshStatus }) {
       </Card>
 
       {/* Info */}
-      <Card className="!bg-blue-50/70 dark:!bg-blue-500/10">
-        <div className="flex items-start gap-3 px-4 py-3 text-[13px] text-blue-700 dark:text-blue-300">
+      <Card className="!bg-highlight/10">
+        <div className="flex items-start gap-3 px-4 py-3 text-[13px] text-highlight">
           <Info size={14} className="flex-shrink-0 mt-0.5" />
           <p className="text-xs">
-            nginx, PHP-FPM, MySQL, and Mailpit run as part of WPHerd — they stop when the
+            nginx, PHP-FPM, MySQL, and Mailpit run as part of WPXen — they stop when the
             app quits and don&apos;t appear as background items in macOS. dnsmasq runs as
             a system service so <span className="font-mono">*.test</span> DNS keeps
             working when the app is closed. Install missing services with{' '}
-            <span className="font-mono bg-blue-100 dark:bg-blue-500/20 px-1 rounded">
+            <span className="font-mono bg-highlight/10 px-1 rounded">
               brew install nginx php mysql dnsmasq
             </span>
           </p>

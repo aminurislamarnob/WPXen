@@ -1,25 +1,20 @@
 'use strict';
 
-const { ipcMain, shell, dialog, app } = require('electron');
-const { execFile } = require('child_process');
+const {
+  ipcMain,
+  shell,
+  dialog,
+  app,
+  BrowserWindow,
+  nativeTheme,
+  session,
+} = require('electron');
 const crypto = require('crypto');
 const path = require('path');
 const os = require('os');
 
-// Only ever hand these schemes to shell.openExternal — never file:// or a
-// custom URL handler that a tampered store could smuggle in.
-function openExternalSafely(url) {
-  try {
-    const parsed = new URL(url);
-    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
-      shell.openExternal(url);
-      return true;
-    }
-  } catch {
-    // fall through
-  }
-  return false;
-}
+// The single sanctioned way out of the app — see services/safeUrl.cjs.
+const { openExternalSafely } = require('./services/safeUrl.cjs');
 
 const fs = require('fs');
 const brew = require('./services/brew.cjs');
@@ -39,10 +34,19 @@ const sudoers = require('./services/sudoers.cjs');
 const setup = require('./services/setup.cjs');
 const logs = require('./services/logs.cjs');
 const validation = require('./services/validation.cjs');
+const agents = require('./services/agents.cjs');
+const files = require('./services/files.cjs');
+const git = require('./services/git.cjs');
+const browser = require('./services/browser.cjs');
+const browserHistory = require('./services/browserHistory.cjs');
+const settingsService = require('./services/settings.cjs');
+const externalTools = require('./services/externalTools.cjs');
 const { humanize } = require('./services/errors.cjs');
 
 let store;
 let mainWindow;
+// Schema-backed settings, bound to the store in registerHandlers().
+let settings;
 let serviceStatusCache = {
   nginx: { running: false, name: 'nginx' },
   php: { running: false, name: 'PHP-FPM', version: null },
@@ -50,6 +54,62 @@ let serviceStatusCache = {
   dnsmasq: { running: false, name: 'dnsmasq' },
   mailpit: { running: false, name: 'Mailpit', installed: false },
 };
+
+// Switches a site between http and https: mints a cert (via the local CA) when
+// enabling, rewrites the vhost, reloads nginx and repoints WordPress at the new
+// URL. Returns the updated site record; the caller persists it. Shared by the
+// set-site-https handler and HTTPS-on-create.
+function applyHttps(site, enabled) {
+  let updated;
+  if (enabled) {
+    // Ensure mkcert + a trusted local CA, then mint a cert for this domain.
+    mkcert.ensureInstalled();
+    mkcert.ensureCA();
+    const { certPath, keyPath } = mkcert.generateCert(site.domain);
+    updated = {
+      ...site,
+      https: true,
+      certPath,
+      keyPath,
+      url: `https://${site.domain}`,
+    };
+  } else {
+    updated = { ...site, https: false, url: `http://${site.domain}` };
+  }
+
+  // Rewrite the vhost for the new scheme and reload nginx.
+  nginx.createSiteConfig(updated);
+  nginx.reload();
+
+  // Point WordPress at the new URL so it stops redirecting to the old
+  // scheme. Best-effort — nginx already serves the right scheme regardless.
+  try {
+    wordpress.setSiteUrl(site.path, updated.url);
+  } catch {}
+
+  return updated;
+}
+
+// Hands the agent launcher its user configuration. An empty enabled list means
+// "all agents", not "none" — see the schema note.
+function applyAgentConfig(all) {
+  const enabled = all['agents.enabled'];
+  agents.setConfig({
+    enabled: enabled && enabled.length ? enabled : null,
+    commands: all['agents.commands'],
+    custom: all['agents.custom']?.list || [],
+  });
+}
+
+// Pushes the full resolved settings to every open window so a change made in
+// one place (tray, Mail page, Settings) lands everywhere.
+function broadcastSettings(all) {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed() && win.webContents) {
+      win.webContents.send('settings-updated', all);
+    }
+  }
+}
 
 // Synchronous, instant — returns the last computed snapshot. Used by the tray
 // and the get-service-status IPC reply so neither blocks on subprocesses.
@@ -76,7 +136,7 @@ async function computeServiceStatus() {
     mailpit.isRunningAsync(),
   ]);
 
-  // Supervisor view of each converted service: whether WPHerd owns the
+  // Supervisor view of each converted service: whether WPXen owns the
   // process, its lifecycle state, and any crash-loop error for the UI. The
   // probe-based `running` booleans above stay the source of truth (they also
   // see instances we didn't spawn).
@@ -137,11 +197,48 @@ async function refreshDependencies(win, { minIntervalMs = 3000 } = {}) {
 function registerHandlers(win, storeInstance) {
   mainWindow = win;
   store = storeInstance;
+  // The in-app browser pushes guest events (new windows, and later console
+  // output) back to the renderer through this window.
+  browser.setWindow(win);
+
+  // Bind the settings schema to the store. Side effects that used to live in
+  // the save-settings ladder hang off `effects` — one place per key, run only
+  // when that key actually changed.
+  settings = settingsService.createSettings({
+    store,
+    defaults: {
+      'sites.dir': () => wordpress.DEFAULT_SITES_DIR,
+      'php.defaultVersion': () => brew.getActivePhpVersion() || '',
+    },
+    effects: {
+      'app.startAtLogin': (value) => app.setLoginItemSettings({ openAtLogin: value }),
+      'db.user': (_v, all) =>
+        mysql.setCredentials({ user: all['db.user'], password: all['db.password'] }),
+      'db.password': (_v, all) =>
+        mysql.setCredentials({ user: all['db.user'], password: all['db.password'] }),
+      'mail.catch': (value) => mailpit.setCatchEnabled(value),
+      'services.logMaxSizeMb': (value) => procman.setMaxLogSizeMb(value),
+      // themeSource forces prefers-color-scheme in the renderer, so the
+      // semantic tokens and the opaque window backdrop both follow.
+      'appearance.themeMode': (value) => {
+        nativeTheme.themeSource = value;
+      },
+      'agents.enabled': (_v, all) => applyAgentConfig(all),
+      'agents.commands': (_v, all) => applyAgentConfig(all),
+      'agents.custom': (_v, all) => applyAgentConfig(all),
+    },
+  });
+  settings.migrateLegacy();
+
+  // Apply settings that configure a module at startup rather than on change.
+  procman.setMaxLogSizeMb(settings.get('services.logMaxSizeMb'));
+  nativeTheme.themeSource = settings.get('appearance.themeMode');
+  applyAgentConfig(settings.read());
 
   // Apply persisted DB credentials so MySQL operations authenticate correctly.
   mysql.setCredentials({
-    user: store.get('settings.dbUser', 'root'),
-    password: store.get('settings.dbPassword', ''),
+    user: settings.get('db.user'),
+    password: settings.get('db.password'),
   });
 
   // Populate the status cache once at startup (non-blocking).
@@ -155,6 +252,334 @@ function registerHandlers(win, storeInstance) {
         win.webContents.send('service-status-update', getServiceStatus());
       }
     });
+  });
+
+  // ── Agent Launcher (see services/agents.cjs) ──────────────────────────────
+  // (findSite is declared below in this same function scope — hoisted.)
+  ipcMain.handle('agent-list', () => agents.listAgents());
+
+  // Every agent including hidden ones — the Agents settings section needs the
+  // full list to render its enable/disable toggles. The plain shell is left out:
+  // it has no binary to detect, no command to override, and is always available.
+  ipcMain.handle('agent-list-all', () => agents.listAgents({ all: true, shell: false }));
+
+  // The live Sessions for a Site — the renderer restores its terminal tabs.
+  ipcMain.handle('agent-sessions', (_e, siteId) => agents.listSessions(siteId));
+
+  // Launch an Agent for a Site. Always spawns a NEW Session (many per Site are
+  // allowed), returning its sessionId for the renderer to attach a terminal to.
+  // `targetId` (optional) selects a saved Launch Target on the Site; without it
+  // the Agent runs at the webroot with its global default flags applied.
+  ipcMain.handle('agent-launch', (_e, siteId, agentId, targetId) => {
+    const site = findSite(siteId);
+    if (!site) return { error: 'Site not found' };
+    const globalArgs = store.get('agentPresets', {})[agentId]?.args || '';
+    let target = null;
+    if (targetId) {
+      target = (site.launchTargets || []).find((t) => t.id === targetId) || null;
+      if (!target) return { error: 'Launch target not found' };
+    }
+    return agents.launch({ site, agentId, target, globalArgs });
+  });
+
+  // ── Launch Presets (global, per-Agent) & Launch Targets (per-Site) ─────────
+  // Global default flags typed for an Agent on every launch, keyed by agentId:
+  // { [agentId]: { args } }. `resolveLaunch` treats an absent/empty entry as
+  // "just the bare command".
+  ipcMain.handle('agent-presets-get', () => store.get('agentPresets', {}));
+
+  ipcMain.handle('agent-preset-set', (_e, agentId, args) => {
+    if (!agentId || typeof agentId !== 'string') return { error: 'Invalid agent' };
+    const presets = { ...store.get('agentPresets', {}) };
+    const trimmed = String(args || '').trim();
+    if (trimmed) presets[agentId] = { args: trimmed };
+    else delete presets[agentId]; // empty = fall back to the bare command
+    store.set('agentPresets', presets);
+    return { ok: true, presets };
+  });
+
+  // Saved Launch Targets live on the Site record, so they travel with it and
+  // are reclaimed when the Site is deleted. Shape: { id, agentId, label, cwd,
+  // args }. `cwd` may be webroot-relative or absolute; `args: null` inherits the
+  // Agent's global default.
+  ipcMain.handle('agent-targets-list', (_e, siteId) => {
+    const site = findSite(siteId);
+    return site?.launchTargets || [];
+  });
+
+  ipcMain.handle('agent-target-save', (_e, siteId, target) => {
+    const sites = store.get('sites', []);
+    const site = sites.find((s) => s.id === siteId);
+    if (!site) return { error: 'Site not found' };
+    if (!target?.agentId) return { error: 'An agent is required' };
+    const cwd = String(target.cwd || '').trim();
+    if (!cwd) return { error: 'A directory is required' };
+
+    const clean = {
+      id: target.id || crypto.randomUUID(),
+      agentId: target.agentId,
+      label: String(target.label || '').trim(),
+      cwd,
+      // Empty string means "no override" → inherit the global default (null).
+      args: String(target.args || '').trim() || null,
+    };
+
+    const list = site.launchTargets || [];
+    const idx = list.findIndex((t) => t.id === clean.id);
+    site.launchTargets =
+      idx >= 0 ? list.map((t) => (t.id === clean.id ? clean : t)) : [...list, clean];
+    store.set('sites', sites);
+    return { ok: true, target: clean, targets: site.launchTargets };
+  });
+
+  ipcMain.handle('agent-target-delete', (_e, siteId, targetId) => {
+    const sites = store.get('sites', []);
+    const site = sites.find((s) => s.id === siteId);
+    if (!site) return { error: 'Site not found' };
+    site.launchTargets = (site.launchTargets || []).filter((t) => t.id !== targetId);
+    store.set('sites', sites);
+    return { ok: true, targets: site.launchTargets };
+  });
+
+  // The embedded terminal calls this once xterm is mounted; bind the sender's
+  // window to the Session and replay the ring buffer (Q9).
+  ipcMain.handle('terminal-ready', (event, sessionId) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win) return { error: 'no window' };
+    return agents.attach(sessionId, win);
+  });
+
+  ipcMain.on('terminal-input', (_e, sessionId, data) => agents.write(sessionId, data));
+  ipcMain.on('terminal-resize', (_e, sessionId, cols, rows) =>
+    agents.resize(sessionId, cols, rows)
+  );
+  ipcMain.on('terminal-clear', (_e, sessionId) => agents.clearBuffer(sessionId));
+  ipcMain.handle('terminal-stop', (_e, sessionId) => {
+    agents.stop(sessionId);
+    return { ok: true };
+  });
+
+  // ─── In-app browser ───────────────────────────────────────────────────
+  // The renderer owns the <webview> element and re-registers its guest on
+  // every dom-ready (reparenting mints a new webContentsId); these handlers
+  // reach the guest for the things a renderer cannot do itself.
+
+  ipcMain.handle('browser-register', (_e, tabKey, webContentsId) => {
+    browser.register(tabKey, webContentsId);
+    return { ok: true };
+  });
+
+  ipcMain.handle('browser-unregister', (_e, tabKey) => {
+    browser.unregister(tabKey);
+    return { ok: true };
+  });
+
+  ipcMain.handle('browser-navigate', (_e, tabKey, url) => ({
+    ok: browser.navigate(tabKey, url),
+  }));
+
+  ipcMain.handle('browser-reload', (_e, tabKey, hard) => ({
+    ok: browser.reload(tabKey, !!hard),
+  }));
+
+  ipcMain.handle('browser-open-devtools', (_e, tabKey) => ({
+    ok: browser.openDevTools(tabKey),
+  }));
+
+  // Address-bar autocomplete, backed by the JsonStore rather than a SQL layer.
+  ipcMain.handle('browser-history-record', (_e, visit) => {
+    browserHistory.record(store, visit || {});
+    return { ok: true };
+  });
+
+  ipcMain.handle('browser-history-search', (_e, query, limit) =>
+    browserHistory.search(store, query, limit)
+  );
+
+  ipcMain.handle('browser-history-clear', () => {
+    browserHistory.clear(store);
+    return { ok: true };
+  });
+
+  // Cookies, cache and site storage for the browser's partition. Wiping it logs
+  // the user out of every site they signed into in-app, so the UI confirms.
+  ipcMain.handle('browser-clear-data', async () => {
+    try {
+      const ses = session.fromPartition(browser.PARTITION);
+      await ses.clearStorageData();
+      await ses.clearCache();
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  // Project explorer: read-only directory listing confined to a Site's root.
+  ipcMain.handle('list-directory', (_e, rootPath, dirPath) => {
+    try {
+      return { ok: true, entries: files.listDirectory(rootPath, dirPath) };
+    } catch (err) {
+      return { error: err.message };
+    }
+  });
+
+  // Validate a candidate path from terminal output for the file-link provider
+  // (confined to the site root; never throws).
+  ipcMain.handle('terminal-stat-path', (_e, rootPath, candidate) =>
+    files.statPath(rootPath, candidate)
+  );
+
+  // Open a file in the user's configured editor, falling back to the OS
+  // default when none is set or the chosen one isn't installed.
+  ipcMain.handle('open-file-path', (_e, filePath) => {
+    return externalTools.openInEditor(
+      filePath,
+      {
+        editor: settings.get('tools.editor'),
+        customCommand: settings.get('tools.editorCustomCommand'),
+      },
+      (p) => shell.openPath(p)
+    );
+  });
+
+  // Editors/terminals installed on this machine, for the settings pickers.
+  ipcMain.handle('list-external-tools', () => externalTools.listTools());
+
+  // Read a text file for the in-app code editor (confined to the site root).
+  ipcMain.handle('read-file', (_e, rootPath, filePath) => {
+    try {
+      return { ok: true, ...files.readFile(rootPath, filePath) };
+    } catch (err) {
+      return { error: err.message };
+    }
+  });
+
+  // Write edited file contents back to disk (confined to the site root).
+  ipcMain.handle('write-file', (_e, rootPath, filePath, content) => {
+    try {
+      return { ok: true, ...files.writeFile(rootPath, filePath, content) };
+    } catch (err) {
+      return { error: err.message };
+    }
+  });
+
+  // Reveal a file/folder in Finder (confined to the site root).
+  ipcMain.handle('reveal-in-finder', (_e, rootPath, targetPath) => {
+    try {
+      const { resolved } = files.assertInRoot(rootPath, targetPath);
+      shell.showItemInFolder(resolved);
+      return { ok: true };
+    } catch (err) {
+      return { error: err.message };
+    }
+  });
+
+  // Create a new empty file inside a directory.
+  ipcMain.handle('create-file', (_e, rootPath, dirPath, name) => {
+    try {
+      return { ok: true, ...files.createFile(rootPath, dirPath, name) };
+    } catch (err) {
+      return { error: err.message };
+    }
+  });
+
+  // Create a new folder inside a directory.
+  ipcMain.handle('create-folder', (_e, rootPath, dirPath, name) => {
+    try {
+      return { ok: true, ...files.createFolder(rootPath, dirPath, name) };
+    } catch (err) {
+      return { error: err.message };
+    }
+  });
+
+  // Rename a file/folder in place.
+  ipcMain.handle('rename-path', (_e, rootPath, targetPath, newName) => {
+    try {
+      return { ok: true, ...files.renamePath(rootPath, targetPath, newName) };
+    } catch (err) {
+      return { error: err.message };
+    }
+  });
+
+  // Import files/folders dropped from Finder into a directory under the site
+  // root (confined; never overwrites).
+  ipcMain.handle('import-files', (_e, rootPath, dirPath, sourcePaths) => {
+    try {
+      return { ok: true, ...files.importFiles(rootPath, dirPath, sourcePaths) };
+    } catch (err) {
+      return { error: err.message };
+    }
+  });
+
+  // Read-only git status for the explorer's Changes tab (source control view).
+  ipcMain.handle('git-status', async (_e, rootPath) => {
+    try {
+      return { ok: true, ...(await git.gitStatus(rootPath)) };
+    } catch (err) {
+      return { error: err.message };
+    }
+  });
+
+  // Read a file's contents at a git revision (HEAD or index) for the diff
+  // viewer. Read-only; git runs in `repoRoot` (which may be a nested repo),
+  // confined to the site root by an assertInRoot guard plus a rel path check.
+  ipcMain.handle('git-file-at', async (_e, siteRoot, repoRoot, rel, rev) => {
+    try {
+      files.assertInRoot(siteRoot, repoRoot);
+      return { ok: true, ...(await git.fileAt(repoRoot, rel, rev)) };
+    } catch (err) {
+      return { error: err.message };
+    }
+  });
+
+  // Stage / unstage changed paths from the Changes tab (git add / restore),
+  // targeting the specific repo the files belong to.
+  ipcMain.handle('git-stage', async (_e, siteRoot, repoRoot, rels) => {
+    try {
+      files.assertInRoot(siteRoot, repoRoot);
+      return await git.stage(repoRoot, rels);
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+  ipcMain.handle('git-unstage', async (_e, siteRoot, repoRoot, rels) => {
+    try {
+      files.assertInRoot(siteRoot, repoRoot);
+      return await git.unstage(repoRoot, rels);
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
+  // Discard a file's unstaged changes in `repoRoot`. Tracked files are reverted
+  // with git restore; untracked files are moved to the Trash (confined to the
+  // site root) — never `git clean`, so it's recoverable.
+  ipcMain.handle('git-discard', async (_e, siteRoot, repoRoot, rel, status) => {
+    try {
+      files.assertInRoot(siteRoot, repoRoot);
+      if (status === '?') {
+        const abs = path.join(path.resolve(repoRoot), rel);
+        const { root, resolved } = files.assertInRoot(siteRoot, abs);
+        if (resolved === root) throw new Error('Invalid path');
+        await shell.trashItem(resolved);
+        return { ok: true };
+      }
+      return await git.discardTracked(repoRoot, rel);
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
+  // Move a file/folder to the system Trash (confined to the site root).
+  ipcMain.handle('trash-path', async (_e, rootPath, targetPath) => {
+    try {
+      const { root, resolved } = files.assertInRoot(rootPath, targetPath);
+      if (resolved === root) throw new Error('Cannot delete the site root');
+      await shell.trashItem(resolved);
+      return { ok: true };
+    } catch (err) {
+      return { error: err.message };
+    }
   });
 
   // Heal per-site vhosts shortly after startup: regenerate each from the
@@ -192,7 +617,7 @@ function registerHandlers(win, storeInstance) {
   // Mailpit. Idempotent — only rewrites/reloads when something differs.
   setTimeout(() => {
     try {
-      if (store.get('settings.mailCatch', false) && mailpit.isInstalled()) {
+      if (settings.get('mail.catch') && mailpit.isInstalled()) {
         mailpit.setCatchEnabled(true);
       }
     } catch {}
@@ -271,7 +696,19 @@ function registerHandlers(win, storeInstance) {
         };
       }
 
-      const site = await wordpress.createWordPressSite(siteData, progress);
+      let site = await wordpress.createWordPressSite(siteData, progress);
+
+      // Optional HTTPS-on-create (Settings → Sites). Best-effort: a failure to
+      // mint a certificate must not lose a site that was otherwise created, so
+      // it degrades to plain HTTP with the reason surfaced in the progress log.
+      if (siteData.https) {
+        try {
+          progress({ message: 'Enabling HTTPS…' });
+          site = applyHttps(site, true);
+        } catch (err) {
+          progress({ message: `HTTPS setup failed (${humanize(err)}); serving HTTP.` });
+        }
+      }
 
       const updatedSites = [...sites, site];
       store.set('sites', updatedSites);
@@ -309,39 +746,12 @@ function registerHandlers(win, storeInstance) {
       const sites = store.get('sites', []);
       const idx = sites.findIndex((s) => s.id === id);
       if (idx === -1) return { success: false, error: 'Site not found' };
-      const site = sites[idx];
 
       // Switching scheme rewrites the vhost; drop any live tunnel first so its
       // server_name alias isn't silently lost (the user can re-share after).
       cloudflared.stopTunnel(id);
 
-      let updated;
-      if (enabled) {
-        // Ensure mkcert + a trusted local CA, then mint a cert for this domain.
-        mkcert.ensureInstalled();
-        mkcert.ensureCA();
-        const { certPath, keyPath } = mkcert.generateCert(site.domain);
-        updated = {
-          ...site,
-          https: true,
-          certPath,
-          keyPath,
-          url: `https://${site.domain}`,
-        };
-      } else {
-        updated = { ...site, https: false, url: `http://${site.domain}` };
-      }
-
-      // Rewrite the vhost for the new scheme and reload nginx.
-      nginx.createSiteConfig(updated);
-      nginx.reload();
-
-      // Point WordPress at the new URL so it stops redirecting to the old
-      // scheme. Best-effort — nginx already serves the right scheme regardless.
-      try {
-        wordpress.setSiteUrl(site.path, updated.url);
-      } catch {}
-
+      const updated = applyHttps(sites[idx], enabled);
       sites[idx] = updated;
       store.set('sites', sites);
       return { success: true, site: updated };
@@ -769,20 +1179,22 @@ function registerHandlers(win, storeInstance) {
   // Opens wp-admin — via the magic-login URL when one-click admin is enabled,
   // otherwise the plain /wp-admin. Kept in the main process so the secret is
   // never handed to the renderer.
-  ipcMain.handle('open-wp-admin', (_, id) => {
+  // wp-admin for a site, upgraded to a magic-login link when one-click admin is
+  // on. Shared so an in-app browser tab lands signed in just like the system
+  // browser does.
+  function resolveWpAdminUrl(id) {
     const site = store.get('sites', []).find((s) => s.id === id);
     if (!site) return { success: false, error: 'Site not found' };
     const base = site.url.replace(/\/+$/, '');
-    let target = `${base}/wp-admin`;
+    let url = `${base}/wp-admin`;
     if (site.oneClickAdmin?.enabled) {
       const secret = store.get(`magicLogin.${id}`, null);
-      if (secret) target = `${base}/?wpherd_magic_login=${secret}`;
+      if (secret) url = `${base}/?wpxen_magic_login=${secret}`;
     }
-    const ok = openExternalSafely(target);
-    return ok
-      ? { success: true }
-      : { success: false, error: 'Refused to open unsafe URL' };
-  });
+    return { success: true, url };
+  }
+
+  ipcMain.handle('get-wp-admin-url', (_, id) => resolveWpAdminUrl(id));
 
   // ─── Site config (WP Config Manager) ───────────────────────────────────
 
@@ -1122,19 +1534,33 @@ function registerHandlers(win, storeInstance) {
     }
   });
 
-  ipcMain.handle('open-phpmyadmin', async (_, dbName) => {
+  // Install (first run only), configure and serve phpMyAdmin, then hand back
+  // the deep link for `dbName`. The renderer decides where it opens — the
+  // default browser or an in-app tab — via Settings → Open links in.
+  async function resolvePhpMyAdminUrl(dbName) {
+    // Reject anything that isn't a valid DB name before it reaches the URL —
+    // same rule that gates site creation.
+    if (dbName != null && !validation.DB_NAME_RE.test(dbName)) {
+      return { success: false, error: 'Invalid database name.' };
+    }
+    await phpmyadmin.ensureReady();
+    return { success: true, url: phpmyadmin.getUrl(dbName) };
+  }
+
+  ipcMain.handle('get-phpmyadmin-url', async (_, dbName) => {
     try {
-      // Reject anything that isn't a valid DB name before it reaches the URL.
-      if (dbName != null && !/^[a-zA-Z0-9_]{1,64}$/.test(dbName)) {
-        return { success: false, error: 'Invalid database name.' };
-      }
-      await phpmyadmin.ensureReady();
-      const url = phpmyadmin.getUrl(dbName);
-      openExternalSafely(url);
-      return { success: true, url };
+      return await resolvePhpMyAdminUrl(dbName);
     } catch (err) {
       return { success: false, error: humanize(err) };
     }
+  });
+
+  // The Mailpit inbox, for opening in an in-app browser tab.
+  ipcMain.handle('get-mailpit-url', () => {
+    if (!mailpit.isInstalled()) {
+      return { success: false, error: 'Mailpit is not installed.' };
+    }
+    return { success: true, url: mailpit.getUrl() };
   });
 
   // ─── Mailpit (email catching) ──────────────────────────────────────────
@@ -1144,7 +1570,7 @@ function registerHandlers(win, storeInstance) {
     return {
       installed,
       running: installed ? await mailpit.isRunningAsync() : false,
-      catching: !!store.get('settings.mailCatch', false),
+      catching: !!settings.get('mail.catch'),
       url: mailpit.getUrl(),
     };
   });
@@ -1165,8 +1591,14 @@ function registerHandlers(win, storeInstance) {
 
   ipcMain.handle('set-mail-catching', async (_, enabled) => {
     try {
-      mailpit.setCatchEnabled(!!enabled);
-      store.set('settings.mailCatch', !!enabled);
+      // Through the schema, not the store directly, so the Settings page and
+      // the Mail page never disagree. The 'mail.catch' effect is what writes
+      // the sendmail_path override into each PHP version's conf.d.
+      const result = settings.write({ 'mail.catch': !!enabled });
+      if (!result.ok) {
+        return { success: false, error: result.rejected.map((r) => r.reason).join(', ') };
+      }
+      broadcastSettings(result.settings);
       // Catching without the sink running would black-hole mail — bring it up.
       if (enabled && !(await mailpit.isRunningAsync())) {
         try {
@@ -1288,24 +1720,15 @@ function registerHandlers(win, storeInstance) {
     return { success: true };
   });
 
+  // Opens the site folder in the terminal app chosen in Settings → External
+  // Tools, falling back to revealing it in Finder if that can't be scripted.
   ipcMain.handle('open-in-terminal', (_, sitePath) => {
-    // Build the AppleScript with execFile (no shell) and escape the path for
-    // the AppleScript string literal; `quoted form of` then shell-escapes it
-    // for `cd`. This keeps a path with spaces/quotes from injecting commands.
-    if (typeof sitePath !== 'string' || /[\n\r\0]/.test(sitePath)) {
-      return { success: false, error: 'Invalid path' };
-    }
-    const escaped = sitePath.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-    const script = [
-      'tell application "Terminal"',
-      '  activate',
-      `  do script "cd " & quoted form of "${escaped}"`,
-      'end tell',
-    ].join('\n');
-    execFile('osascript', ['-e', script], (err) => {
-      if (err) shell.showItemInFolder(sitePath);
-    });
-    return { success: true };
+    const result = externalTools.openInTerminal(
+      sitePath,
+      { terminalApp: settings.get('tools.terminalApp') },
+      (p) => shell.showItemInFolder(p)
+    );
+    return result.ok ? { success: true } : { success: false, error: result.error };
   });
 
   // ─── Services ────────────────────────────────────────────────────────
@@ -1519,7 +1942,7 @@ function registerHandlers(win, storeInstance) {
       // The new version's conf.d starts empty — re-apply the Mailpit sendmail
       // override so its mail() is caught like the others.
       try {
-        if (store.get('settings.mailCatch', false) && mailpit.isInstalled()) {
+        if (settings.get('mail.catch') && mailpit.isInstalled()) {
           mailpit.setCatchEnabled(true);
         }
       } catch {}
@@ -1626,50 +2049,67 @@ function registerHandlers(win, storeInstance) {
 
   // ─── Settings ────────────────────────────────────────────────────────
 
+  // Flat dotted map of every known setting. The renderer's useSettings() hook
+  // holds this and re-reads it on 'settings-updated'.
+  ipcMain.handle('settings-get-all', () => settings.read());
+
+  // Validated shallow patch. Always resolves — rejections come back on the
+  // result so the UI can roll the control back and say why.
+  ipcMain.handle('settings-set', (_e, patch) => {
+    try {
+      const result = settings.write(patch);
+      broadcastSettings(result.settings);
+      return result;
+    } catch (err) {
+      return {
+        ok: false,
+        applied: [],
+        rejected: [{ key: '(patch)', reason: humanize(err) }],
+      };
+    }
+  });
+
+  // Deprecated shape kept for one release so nothing breaks mid-refactor.
+  // New code should use settings-get-all / settings-set.
   ipcMain.handle('get-settings', () => {
+    const all = settings.read();
     return {
-      sitesDir: store.get('settings.sitesDir', wordpress.DEFAULT_SITES_DIR),
-      defaultPhpVersion: store.get(
-        'settings.defaultPhpVersion',
-        brew.getActivePhpVersion()
-      ),
-      startAtLogin: store.get('settings.startAtLogin', false),
-      dbUser: store.get('settings.dbUser', 'root'),
-      dbPassword: store.get('settings.dbPassword', ''),
+      sitesDir: all['sites.dir'],
+      defaultPhpVersion: all['php.defaultVersion'],
+      startAtLogin: all['app.startAtLogin'],
+      dbUser: all['db.user'],
+      dbPassword: all['db.password'],
       brewPrefix: brew.getBrewPrefix() || 'Not detected',
     };
   });
 
-  ipcMain.handle('save-settings', async (_, settings) => {
-    try {
-      if (settings.sitesDir) store.set('settings.sitesDir', settings.sitesDir);
-      if (settings.defaultPhpVersion)
-        store.set('settings.defaultPhpVersion', settings.defaultPhpVersion);
-      if (typeof settings.startAtLogin === 'boolean') {
-        store.set('settings.startAtLogin', settings.startAtLogin);
-        app.setLoginItemSettings({ openAtLogin: settings.startAtLogin });
-      }
-      if (typeof settings.dbUser === 'string')
-        store.set('settings.dbUser', settings.dbUser);
-      if (typeof settings.dbPassword === 'string')
-        store.set('settings.dbPassword', settings.dbPassword);
-      // Re-apply credentials immediately so the running session uses them.
-      mysql.setCredentials({
-        user: store.get('settings.dbUser', 'root'),
-        password: store.get('settings.dbPassword', ''),
-      });
-      return { success: true };
-    } catch (err) {
-      return { success: false, error: humanize(err) };
-    }
+  ipcMain.handle('save-settings', async (_, incoming) => {
+    const patch = {};
+    if (incoming.sitesDir) patch['sites.dir'] = incoming.sitesDir;
+    if (incoming.defaultPhpVersion)
+      patch['php.defaultVersion'] = incoming.defaultPhpVersion;
+    if (typeof incoming.startAtLogin === 'boolean')
+      patch['app.startAtLogin'] = incoming.startAtLogin;
+    if (typeof incoming.dbUser === 'string') patch['db.user'] = incoming.dbUser;
+    if (typeof incoming.dbPassword === 'string')
+      patch['db.password'] = incoming.dbPassword;
+
+    const result = settings.write(patch);
+    broadcastSettings(result.settings);
+    return result.ok
+      ? { success: true }
+      : {
+          success: false,
+          error: result.rejected.map((r) => `${r.key}: ${r.reason}`).join(', '),
+        };
   });
 
   // ─── File dialogs ────────────────────────────────────────────────────
 
-  ipcMain.handle('select-folder', async () => {
+  ipcMain.handle('select-folder', async (_e, defaultPath) => {
     const result = await dialog.showOpenDialog(mainWindow, {
       properties: ['openDirectory', 'createDirectory'],
-      defaultPath: os.homedir(),
+      defaultPath: defaultPath || os.homedir(),
     });
     return result.canceled ? null : result.filePaths[0];
   });
@@ -1705,4 +2145,10 @@ function startStatusPoller(win) {
   tick();
 }
 
-module.exports = { registerHandlers, startStatusPoller, getServiceStatus };
+// Read a setting from the main process (main.cjs uses this for window and quit
+// behaviour). Returns undefined before registerHandlers() has bound the store.
+function getSetting(key) {
+  return settings ? settings.get(key) : undefined;
+}
+
+module.exports = { registerHandlers, startStatusPoller, getServiceStatus, getSetting };

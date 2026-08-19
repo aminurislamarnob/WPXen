@@ -14,7 +14,7 @@ import {
   CheckCircle,
   Circle,
 } from 'lucide-react';
-import { Button, StepIndicator, ProgressLog, IconTile } from './ui';
+import { Button, IconTile, ProgressLog, StepIndicator, Tooltip } from './ui';
 import logo from '../assets/logo.png';
 
 const CORE_KEYS = ['nginx', 'php', 'mysql', 'dnsmasq', 'wpCli'];
@@ -32,9 +32,11 @@ const coreInstalled = (d) => !!d && CORE_KEYS.every((k) => d[k]);
 function StepHeading({ title, children }) {
   return (
     <>
-      <h1 className="text-[19px] font-bold text-gray-900 tracking-[-0.01em]">{title}</h1>
+      <h1 className="text-[19px] font-bold text-foreground tracking-[-0.01em]">
+        {title}
+      </h1>
       {children && (
-        <p className="text-[13px] leading-relaxed text-gray-500 mt-2 mb-6 max-w-[320px] mx-auto">
+        <p className="text-[13px] leading-relaxed text-muted-foreground mt-2 mb-6 max-w-[320px] mx-auto">
           {children}
         </p>
       )}
@@ -195,7 +197,7 @@ export default function Onboarding({ deps, onComplete, onCreateFirstSite }) {
         />
 
         {error && (
-          <div className="flex items-start gap-2 bg-red-50 dark:bg-red-500/10 text-red-700 dark:text-red-400 rounded-xl px-3.5 py-2.5 mb-4 text-xs text-left">
+          <div className="flex items-start gap-2 bg-destructive/10 text-destructive rounded-xl px-3.5 py-2.5 mb-4 text-xs text-left">
             <AlertCircle size={13} className="flex-shrink-0 mt-0.5" />
             <span className="break-words">{error}</span>
           </div>
@@ -205,21 +207,21 @@ export default function Onboarding({ deps, onComplete, onCreateFirstSite }) {
           <div className="text-center">
             <img
               src={logo}
-              alt="WPHerd"
+              alt="WPXen"
               className="h-9 w-auto mx-auto mb-5"
               draggable={false}
             />
-            <StepHeading title="Welcome to WPHerd">
-              Let&apos;s get your Mac set up for local WordPress development — WPHerd
+            <StepHeading title="Welcome to WPXen">
+              Let&apos;s get your Mac set up for local WordPress development — WPXen
               installs and configures everything it needs via Homebrew.
             </StepHeading>
             <div className="grid grid-cols-2 gap-2 mb-6 text-left">
               {['Homebrew', 'nginx', 'PHP', 'MySQL', 'dnsmasq', 'WP-CLI'].map((s) => (
                 <div
                   key={s}
-                  className="flex items-center gap-2 bg-black/[0.03] dark:bg-white/[0.05] rounded-lg px-3 py-2 text-[12px] font-medium text-gray-700"
+                  className="flex items-center gap-2 bg-muted rounded-lg px-3 py-2 text-[12px] font-medium text-foreground"
                 >
-                  <Download size={12} className="text-gray-400 flex-shrink-0" />
+                  <Download size={12} className="text-muted-foreground flex-shrink-0" />
                   {s}
                 </div>
               ))}
@@ -233,7 +235,7 @@ export default function Onboarding({ deps, onComplete, onCreateFirstSite }) {
         {current === 'homebrew' && (
           <div className="text-center">
             <StepHero icon={Beaker} color="orange" title="Install Homebrew">
-              Homebrew is the package manager WPHerd uses. It installs in Terminal — you
+              Homebrew is the package manager WPXen uses. It installs in Terminal — you
               may be asked for your password and to install Xcode tools.
             </StepHero>
 
@@ -248,22 +250,24 @@ export default function Onboarding({ deps, onComplete, onCreateFirstSite }) {
               </Button>
             ) : (
               <div className="space-y-3">
-                <div className="flex items-center justify-center gap-2 text-[13px] text-gray-600">
+                <div className="flex items-center justify-center gap-2 text-[13px] text-muted-foreground">
                   <Loader size={13} className="animate-spin" />
                   Waiting for Homebrew to finish installing…
                 </div>
                 {brewCmd && (
-                  <div className="flex items-center gap-2 bg-zinc-900 rounded-xl pl-3.5 pr-2 py-2">
-                    <code className="text-[11px] text-zinc-300 font-mono truncate flex-1 text-left">
+                  <div className="flex items-center gap-2 bg-tertiary border border-border rounded-md pl-3.5 pr-2 py-2">
+                    <code className="text-[11px] text-foreground font-mono truncate flex-1 text-left">
                       {brewCmd}
                     </code>
-                    <button
-                      onClick={handleCopyCmd}
-                      title="Copy command"
-                      className="text-zinc-400 hover:text-white flex-shrink-0 p-1"
-                    >
-                      {copied ? <Check size={13} /> : <Copy size={13} />}
-                    </button>
+                    <Tooltip label={copied ? 'Copied' : 'Copy command'}>
+                      <button
+                        onClick={handleCopyCmd}
+                        aria-label="Copy command"
+                        className="text-muted-foreground hover:text-foreground flex-shrink-0 p-1"
+                      >
+                        {copied ? <Check size={13} /> : <Copy size={13} />}
+                      </button>
+                    </Tooltip>
                   </div>
                 )}
                 <Button
@@ -286,25 +290,31 @@ export default function Onboarding({ deps, onComplete, onCreateFirstSite }) {
               a few minutes.
             </StepHero>
 
-            <div className="bg-black/[0.03] dark:bg-white/[0.05] rounded-xl p-2 mb-4 divide-y divide-black/[0.04] dark:divide-white/[0.06]">
+            <div className="bg-muted rounded-xl p-2 mb-4 divide-y divide-border">
               {CORE_KEYS.map((k) => (
                 <div
                   key={k}
-                  className="flex items-center gap-2.5 px-2 py-2 text-[13px] font-medium text-gray-700"
+                  className="flex items-center gap-2.5 px-2 py-2 text-[13px] font-medium text-foreground"
                 >
                   {depState?.[k] ? (
-                    <CheckCircle size={15} className="text-wp-green flex-shrink-0" />
+                    <CheckCircle
+                      size={15}
+                      className="text-status-running flex-shrink-0"
+                    />
                   ) : busy ? (
                     <Loader
                       size={14}
-                      className="text-gray-400 animate-spin flex-shrink-0"
+                      className="text-muted-foreground animate-spin flex-shrink-0"
                     />
                   ) : (
-                    <Circle size={14} className="text-gray-300 flex-shrink-0" />
+                    <Circle
+                      size={14}
+                      className="text-muted-foreground/50 flex-shrink-0"
+                    />
                   )}
                   {CORE_LABELS[k]}
                   {depState?.[k] && (
-                    <span className="ml-auto text-[11px] text-wp-green font-medium">
+                    <span className="ml-auto text-[11px] text-status-running font-medium">
                       Ready
                     </span>
                   )}
@@ -343,7 +353,7 @@ export default function Onboarding({ deps, onComplete, onCreateFirstSite }) {
         {current === 'dns' && (
           <div className="text-center">
             <StepHero icon={Globe} color="teal" title="Configure .test domains">
-              WPHerd routes <code className="font-mono text-[12px]">*.test</code> sites to
+              WPXen routes <code className="font-mono text-[12px]">*.test</code> sites to
               your Mac using dnsmasq. This needs your admin password once.
             </StepHero>
             <Button
@@ -363,7 +373,7 @@ export default function Onboarding({ deps, onComplete, onCreateFirstSite }) {
             </Button>
             <button
               onClick={next}
-              className="block mx-auto text-xs text-gray-400 hover:text-gray-600 mt-3.5"
+              className="block mx-auto text-xs text-muted-foreground hover:text-muted-foreground mt-3.5"
             >
               Skip for now
             </button>
@@ -396,7 +406,7 @@ export default function Onboarding({ deps, onComplete, onCreateFirstSite }) {
         {current === 'done' && (
           <div className="text-center">
             <StepHero icon={PartyPopper} color="purple" title="You're all set!">
-              WPHerd is ready. Create your first WordPress site or head to the dashboard.
+              WPXen is ready. Create your first WordPress site or head to the dashboard.
             </StepHero>
             <div className="space-y-2">
               <Button

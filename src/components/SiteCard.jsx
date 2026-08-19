@@ -23,6 +23,8 @@ import {
   Layers,
 } from 'lucide-react';
 import { WordPressIcon } from './icons';
+import { Tooltip } from './ui';
+import { useOpenLink } from '../lib/useOpenLink';
 
 function ContextMenu({
   site,
@@ -35,7 +37,7 @@ function ContextMenu({
 }) {
   return (
     <div
-      className="absolute right-0 top-8 z-50 panel-menu rounded-xl shadow-card-hover border border-gray-100 py-1 w-48 animate-fade-in"
+      className="absolute right-0 top-8 z-50 panel-menu p-1 w-48 animate-fade-in"
       onMouseLeave={onClose}
     >
       <button
@@ -43,18 +45,18 @@ function ContextMenu({
           onManage();
           onClose();
         }}
-        className="flex w-full items-center gap-2.5 px-3 py-2 text-xs text-gray-700 hover:bg-gray-50"
+        className="flex w-full items-center gap-2.5 px-3 py-2 text-xs text-foreground hover:bg-accent"
       >
         <SlidersHorizontal size={13} />
         Manage / Settings
       </button>
-      <div className="border-t border-gray-100 my-1" />
+      <div className="border-t border-border my-1" />
       <button
         onClick={() => {
           navigator.clipboard.writeText(site.url);
           onClose();
         }}
-        className="flex w-full items-center gap-2.5 px-3 py-2 text-xs text-gray-700 hover:bg-gray-50"
+        className="flex w-full items-center gap-2.5 px-3 py-2 text-xs text-foreground hover:bg-accent"
       >
         <Copy size={13} />
         Copy URL
@@ -64,18 +66,18 @@ function ContextMenu({
           navigator.clipboard.writeText(site.path);
           onClose();
         }}
-        className="flex w-full items-center gap-2.5 px-3 py-2 text-xs text-gray-700 hover:bg-gray-50"
+        className="flex w-full items-center gap-2.5 px-3 py-2 text-xs text-foreground hover:bg-accent"
       >
         <Copy size={13} />
         Copy Path
       </button>
-      <div className="border-t border-gray-100 my-1" />
+      <div className="border-t border-border my-1" />
       <button
         onClick={() => {
           onClone(site);
           onClose();
         }}
-        className="flex w-full items-center gap-2.5 px-3 py-2 text-xs text-gray-700 hover:bg-gray-50"
+        className="flex w-full items-center gap-2.5 px-3 py-2 text-xs text-foreground hover:bg-accent"
       >
         <CopyPlus size={13} />
         Clone…
@@ -85,7 +87,7 @@ function ContextMenu({
           onExport(site);
           onClose();
         }}
-        className="flex w-full items-center gap-2.5 px-3 py-2 text-xs text-gray-700 hover:bg-gray-50"
+        className="flex w-full items-center gap-2.5 px-3 py-2 text-xs text-foreground hover:bg-accent"
       >
         <Archive size={13} />
         Export…
@@ -95,18 +97,18 @@ function ContextMenu({
           onSaveBlueprint(site);
           onClose();
         }}
-        className="flex w-full items-center gap-2.5 px-3 py-2 text-xs text-gray-700 hover:bg-gray-50"
+        className="flex w-full items-center gap-2.5 px-3 py-2 text-xs text-foreground hover:bg-accent"
       >
         <Layers size={13} />
         Save as Blueprint…
       </button>
-      <div className="border-t border-gray-100 my-1" />
+      <div className="border-t border-border my-1" />
       <button
         onClick={() => {
           onDelete(site);
           onClose();
         }}
-        className="flex w-full items-center gap-2.5 px-3 py-2 text-xs text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-500/10"
+        className="flex w-full items-center gap-2.5 px-3 py-2 text-xs text-destructive hover:bg-destructive/10"
       >
         <Trash2 size={13} />
         Remove Site…
@@ -132,6 +134,7 @@ export default function SiteCard({
 }) {
   const navigate = useNavigate();
   const openDetail = () => navigate(`/sites/${site.id}`);
+  const openLink = useOpenLink();
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [httpsBusy, setHttpsBusy] = useState(false);
@@ -169,26 +172,38 @@ export default function SiteCard({
     setHttpsBusy(false);
   }
 
+  // phpMyAdmin installs and configures itself on first use, so this resolves
+  // before it can be opened. Always opens in the site detail's in-app browser.
   async function handlePhpMyAdmin() {
     setPmaBusy(true);
     setHttpsError(null);
-    const result = await window.electronAPI.openPhpMyAdmin(site.dbName);
-    if (!result?.success) {
+    const result = await window.electronAPI.getPhpMyAdminUrl(site.dbName);
+    if (result?.success) {
+      navigate(`/sites/${site.id}`, {
+        state: { pmaUrl: result.url, nonce: Date.now() },
+      });
+    } else {
       setHttpsError(result?.error || 'Failed to open phpMyAdmin.');
     }
     setPmaBusy(false);
+  }
+
+  async function handleWpAdmin() {
+    const result = await window.electronAPI.getWpAdminUrl(site.id);
+    if (result?.success) openLink(result.url, site.id);
+    else setHttpsError(result?.error || 'Failed to open wp-admin.');
   }
 
   const actions = [
     {
       icon: ExternalLink,
       label: 'Open',
-      onClick: () => window.electronAPI.openSiteInBrowser(site.url),
+      onClick: () => openLink(site.url, site.id),
     },
     {
       icon: WordPressIcon,
       label: 'wp-admin',
-      onClick: () => window.electronAPI.openWpAdmin(site.id),
+      onClick: handleWpAdmin,
     },
     {
       icon: pmaBusy ? Loader : HardDrive,
@@ -220,38 +235,41 @@ export default function SiteCard({
     <div className={`site-card settings-card group relative ${menuOpen ? 'z-40' : ''}`}>
       {/* Main row: tile · [ title + chips + HTTPS / domain · path ] · menu */}
       <div className="flex items-start gap-3 px-4 py-3">
-        <button
-          onClick={openDetail}
-          title="Manage site"
-          className="icon-tile w-9 h-9 bg-[#30b0c7] hover:brightness-95 transition-all flex-shrink-0"
-        >
-          <span className="text-white text-sm font-bold">
-            {site.name.charAt(0).toUpperCase()}
-          </span>
-        </button>
+        <Tooltip label="Manage site">
+          <button
+            onClick={openDetail}
+            aria-label="Manage site"
+            className="icon-tile w-9 h-9 bg-[#30b0c7] hover:brightness-95 transition-all flex-shrink-0"
+          >
+            <span className="text-white text-sm font-bold">
+              {site.name.charAt(0).toUpperCase()}
+            </span>
+          </button>
+        </Tooltip>
 
         <div className="min-w-0 flex-1">
           {/* Top line: title · version chips · db name · HTTPS */}
           <div className="flex items-center gap-2">
-            <button
-              onClick={openDetail}
-              className="text-sm font-semibold text-gray-900 truncate hover:text-wp-blue transition-colors text-left min-w-0"
-              title="Manage site"
-            >
-              {site.name}
-            </button>
+            <Tooltip label="Manage site">
+              <button
+                onClick={openDetail}
+                className="text-sm font-semibold text-foreground truncate hover:text-highlight transition-colors text-left min-w-0"
+              >
+                {site.name}
+              </button>
+            </Tooltip>
 
             <div className="flex items-center gap-1.5 flex-shrink-0 ml-auto">
-              <span className="inline-flex items-center px-2 py-0.5 bg-purple-50 text-purple-700 dark:bg-purple-500/15 dark:text-purple-300 rounded-full text-xs font-medium">
+              <span className="inline-flex items-center rounded-full border border-border bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
                 PHP {site.phpVersion}
               </span>
               {site.wpVersion && (
-                <span className="inline-flex items-center px-2 py-0.5 bg-blue-50 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300 rounded-full text-xs font-medium">
+                <span className="inline-flex items-center rounded-full border border-highlight/30 bg-highlight/10 px-2 py-0.5 text-xs font-medium text-highlight">
                   WP {site.wpVersion}
                 </span>
               )}
               <span
-                className="inline-flex items-center gap-1 px-2 py-0.5 bg-gray-100 text-gray-500 rounded-full text-xs font-mono"
+                className="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-2 py-0.5 text-xs font-mono text-muted-foreground"
                 title={site.dbName}
               >
                 <Database size={9} className="flex-shrink-0" />
@@ -259,22 +277,23 @@ export default function SiteCard({
               </span>
 
               {/* HTTPS lock toggle — click the icon to enable/disable HTTPS */}
-              <button
-                onClick={handleToggleHttps}
-                disabled={httpsBusy}
-                title={site.https ? 'Disable HTTPS' : 'Enable HTTPS'}
-                aria-label={site.https ? 'Disable HTTPS' : 'Enable HTTPS'}
-                aria-pressed={!!site.https}
-                className="p-1.5 rounded-lg hover:bg-gray-100 disabled:opacity-50 transition-colors"
-              >
-                {httpsBusy ? (
-                  <Loader size={14} className="animate-spin text-gray-400" />
-                ) : site.https ? (
-                  <Lock size={14} className="text-wp-green" />
-                ) : (
-                  <Unlock size={14} className="text-gray-400" />
-                )}
-              </button>
+              <Tooltip label={site.https ? 'Disable HTTPS' : 'Enable HTTPS'}>
+                <button
+                  onClick={handleToggleHttps}
+                  disabled={httpsBusy}
+                  aria-label={site.https ? 'Disable HTTPS' : 'Enable HTTPS'}
+                  aria-pressed={!!site.https}
+                  className="p-1.5 rounded-lg hover:bg-accent disabled:opacity-50 transition-colors"
+                >
+                  {httpsBusy ? (
+                    <Loader size={14} className="animate-spin text-muted-foreground" />
+                  ) : site.https ? (
+                    <Lock size={14} className="text-status-running" />
+                  ) : (
+                    <Unlock size={14} className="text-muted-foreground" />
+                  )}
+                </button>
+              </Tooltip>
             </div>
           </div>
 
@@ -282,13 +301,16 @@ export default function SiteCard({
           <div className="flex items-center gap-1.5 mt-0.5">
             <button
               onClick={() => window.electronAPI.openSiteInBrowser(site.url)}
-              className="text-xs text-wp-blue hover:underline flex items-center gap-1 flex-shrink-0"
+              className="text-xs text-highlight hover:underline flex items-center gap-1 flex-shrink-0"
             >
               <Globe size={10} />
               {site.domain}
             </button>
-            <span className="text-xs text-gray-400 flex-shrink-0">·</span>
-            <span className="text-xs text-gray-400 font-mono break-all" title={site.path}>
+            <span className="text-xs text-muted-foreground flex-shrink-0">·</span>
+            <span
+              className="text-xs text-muted-foreground font-mono break-all"
+              title={site.path}
+            >
               {site.path}
             </span>
           </div>
@@ -298,7 +320,7 @@ export default function SiteCard({
         <div className="relative flex-shrink-0">
           <button
             onClick={() => setMenuOpen((v) => !v)}
-            className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-gray-100 text-gray-400 transition-opacity"
+            className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-accent text-muted-foreground transition-opacity"
           >
             <MoreHorizontal size={15} />
           </button>
@@ -316,22 +338,19 @@ export default function SiteCard({
         </div>
       </div>
 
-      {httpsError && (
-        <p className="px-4 pb-2 text-xs text-red-600 dark:text-red-400">{httpsError}</p>
-      )}
+      {httpsError && <p className="px-4 pb-2 text-xs text-destructive">{httpsError}</p>}
 
       {/* Quick actions: second line, icon + label */}
-      <div className="flex items-center gap-1 px-4 py-2 border-t border-gray-100">
+      <div className="flex items-center gap-1 px-4 py-2 border-t border-border">
         {actions.map(({ icon: Icon, label, onClick, spinning, disabled, active }) => (
           <button
             key={label}
             onClick={onClick}
             disabled={disabled}
-            title={label}
             className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs transition-colors font-medium disabled:opacity-50 ${
               active
-                ? 'bg-wp-blue/10 text-wp-blue hover:bg-wp-blue/15'
-                : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+                ? 'bg-highlight/10 text-highlight hover:bg-highlight/15'
+                : 'text-muted-foreground hover:bg-accent hover:text-foreground'
             }`}
           >
             <Icon
@@ -345,30 +364,32 @@ export default function SiteCard({
 
       {/* Share tunnel panel */}
       {panelOpen && (
-        <div className="px-4 py-3 border-t border-gray-100 bg-gray-50/60 rounded-b-2xl animate-fade-in">
+        <div className="px-4 py-3 border-t border-border bg-muted/60 rounded-b-2xl animate-fade-in">
           <div className="flex items-center justify-between mb-2">
-            <span className="flex items-center gap-1.5 text-xs font-semibold text-gray-700">
+            <span className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
               <Share2 size={12} />
               Public share tunnel
             </span>
             {!tunnelActive && (
-              <button
-                onClick={() => {
-                  setShareOpen(false);
-                  if (tunnel?.status === 'error') onStopTunnel(site);
-                }}
-                className="text-gray-400 hover:text-gray-600"
-                title="Close"
-              >
-                <X size={13} />
-              </button>
+              <Tooltip label="Close">
+                <button
+                  onClick={() => {
+                    setShareOpen(false);
+                    if (tunnel?.status === 'error') onStopTunnel(site);
+                  }}
+                  aria-label="Close"
+                  className="text-muted-foreground hover:text-muted-foreground"
+                >
+                  <X size={13} />
+                </button>
+              </Tooltip>
             )}
           </div>
 
           {/* cloudflared not installed yet */}
           {cfInstalled === false ? (
             <div>
-              <p className="text-xs text-gray-500 mb-2">
+              <p className="text-xs text-muted-foreground mb-2">
                 Sharing needs Cloudflare&apos;s{' '}
                 <span className="font-mono">cloudflared</span> tool. Install it once to
                 expose sites over a public HTTPS URL.
@@ -391,8 +412,11 @@ export default function SiteCard({
                 )}
               </button>
               {cfInstalling && cfLog && (
-                <div className="mt-2 px-3 py-2 bg-zinc-900 rounded-lg">
-                  <p className="text-xs text-green-400 font-mono truncate" title={cfLog}>
+                <div className="mt-2 px-3 py-2 bg-tertiary border border-border rounded-md">
+                  <p
+                    className="text-xs text-status-running font-mono truncate"
+                    title={cfLog}
+                  >
                     {cfLog}
                   </p>
                 </div>
@@ -403,42 +427,46 @@ export default function SiteCard({
               <div className="flex items-center gap-1.5">
                 <button
                   onClick={() => window.electronAPI.openSiteInBrowser(tunnel.url)}
-                  className="flex-1 min-w-0 text-left text-xs text-wp-blue font-mono truncate hover:underline"
+                  className="flex-1 min-w-0 text-left text-xs text-highlight font-mono truncate hover:underline"
                   title={tunnel.url}
                 >
                   {tunnel.url}
                 </button>
-                <button
-                  onClick={copyTunnelUrl}
-                  title="Copy URL"
-                  className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-200"
-                >
-                  {copied ? (
-                    <Check size={13} className="text-wp-green" />
-                  ) : (
-                    <Copy size={13} />
-                  )}
-                </button>
-                <button
-                  onClick={() => onStopTunnel(site)}
-                  title="Stop sharing"
-                  className="p-1.5 rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10"
-                >
-                  <X size={13} />
-                </button>
+                <Tooltip label={copied ? 'Copied' : 'Copy URL'}>
+                  <button
+                    onClick={copyTunnelUrl}
+                    aria-label="Copy URL"
+                    className="p-1.5 rounded-lg text-muted-foreground hover:bg-border"
+                  >
+                    {copied ? (
+                      <Check size={13} className="text-status-running" />
+                    ) : (
+                      <Copy size={13} />
+                    )}
+                  </button>
+                </Tooltip>
+                <Tooltip label="Stop sharing">
+                  <button
+                    onClick={() => onStopTunnel(site)}
+                    aria-label="Stop sharing"
+                    className="p-1.5 rounded-lg text-destructive hover:bg-destructive/10"
+                  >
+                    <X size={13} />
+                  </button>
+                </Tooltip>
               </div>
-              <p className="mt-1.5 text-xs text-gray-400">
+              <p className="mt-1.5 text-xs text-muted-foreground">
                 Anyone with this link can reach your local site while it&apos;s open.
               </p>
             </div>
           ) : tunnel?.status === 'starting' ? (
-            <div className="flex items-center gap-2 text-xs text-gray-500">
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <Loader size={13} className="animate-spin" />
               Creating public URL…
             </div>
           ) : tunnel?.status === 'error' ? (
             <div>
-              <p className="text-xs text-red-600 dark:text-red-400 mb-2">
+              <p className="text-xs text-destructive mb-2">
                 {tunnel.error || 'Failed to start the tunnel.'}
               </p>
               <button
@@ -451,7 +479,7 @@ export default function SiteCard({
             </div>
           ) : (
             <div>
-              <p className="text-xs text-gray-500 mb-2">
+              <p className="text-xs text-muted-foreground mb-2">
                 Expose <span className="font-mono">{site.domain}</span> over a temporary
                 public HTTPS URL powered by Cloudflare.
               </p>

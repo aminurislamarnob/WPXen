@@ -11,14 +11,14 @@ import {
 } from 'lucide-react';
 import { StatusBadge } from './StatusBadge';
 import PhpSettings from './PhpSettings';
-import { Card, Row, SectionLabel } from './ui';
+import { Card, Row, SectionLabel, Tooltip } from './ui';
 
 // Version-number tile (like System Settings colored tiles, but numeric).
 function VersionTile({ version, active }) {
   return (
     <span
       className={`icon-tile w-[30px] h-[30px] font-mono text-[11px] font-bold ${
-        active ? 'bg-accent' : 'bg-[#af52de]'
+        active ? 'bg-highlight' : 'bg-[#af52de]'
       }`}
     >
       {version}
@@ -38,7 +38,7 @@ function VersionRow({ version, onSwitch, switching, onUpdate, updating, logLine 
           <span className="font-medium flex items-center gap-2">
             PHP {version.version}
             {version.active && (
-              <span className="flex items-center gap-1 px-1.5 py-px bg-accent/10 text-accent rounded-full text-[10px] font-medium">
+              <span className="flex items-center gap-1 px-1.5 py-px bg-highlight/10 text-highlight rounded-full text-[10px] font-medium">
                 <Star size={9} fill="currentColor" />
                 Active
               </span>
@@ -47,7 +47,7 @@ function VersionRow({ version, onSwitch, switching, onUpdate, updating, logLine 
         }
         subtitle={`${version.fullVersion}${version.socketPath ? ` · ${version.socketPath}` : ''}`}
       >
-        <span className="flex items-center gap-1.5 text-xs text-gray-500">
+        <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
           <StatusBadge running={version.running} size="xs" />
           FPM {version.running ? 'on' : 'off'}
         </span>
@@ -77,8 +77,8 @@ function VersionRow({ version, onSwitch, switching, onUpdate, updating, logLine 
         )}
       </Row>
       {isUpdating && (
-        <div className="px-4 py-2 bg-zinc-900">
-          <p className="text-xs text-green-400 font-mono truncate" title={logLine}>
+        <div className="px-4 py-2 bg-tertiary border-t border-border">
+          <p className="text-xs text-status-running font-mono truncate" title={logLine}>
             {logLine || 'Starting…'}
           </p>
         </div>
@@ -94,7 +94,7 @@ function InstallRow({ version, onInstall, installing, logLine, disabled }) {
     <>
       <Row
         icon={
-          <span className="icon-tile w-[30px] h-[30px] bg-gray-300 text-gray-600 font-mono text-[11px] font-bold">
+          <span className="icon-tile w-[30px] h-[30px] bg-border text-muted-foreground font-mono text-[11px] font-bold">
             {version}
           </span>
         }
@@ -120,8 +120,8 @@ function InstallRow({ version, onInstall, installing, logLine, disabled }) {
         </button>
       </Row>
       {isInstalling && (
-        <div className="px-4 py-2 bg-zinc-900">
-          <p className="text-xs text-green-400 font-mono truncate" title={logLine}>
+        <div className="px-4 py-2 bg-tertiary border-t border-border">
+          <p className="text-xs text-status-running font-mono truncate" title={logLine}>
             {logLine || 'Starting…'}
           </p>
         </div>
@@ -238,14 +238,12 @@ export default function PHPVersions() {
   return (
     <div className="px-6 pb-6 max-w-[735px] mx-auto animate-fade-in">
       <div className="flex items-center justify-end gap-2 mb-4">
-        <button
-          onClick={scrollToSettings}
-          title="PHP configuration"
-          className="btn-secondary"
-        >
-          <Sliders size={14} />
-          Configuration
-        </button>
+        <Tooltip label="PHP configuration">
+          <button onClick={scrollToSettings} className="btn-secondary">
+            <Sliders size={14} />
+            Configuration
+          </button>
+        </Tooltip>
         <button onClick={loadVersions} disabled={busy} className="btn-secondary">
           <RefreshCw size={12} strokeWidth={2.5} className={busy ? 'animate-spin' : ''} />
           Refresh
@@ -256,8 +254,8 @@ export default function PHPVersions() {
         <div
           className={`flex items-center gap-2 px-4 py-3 rounded-[10px] mb-4 text-[13px] animate-fade-in ${
             message.type === 'error'
-              ? 'bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400'
-              : 'bg-green-50 text-green-700 dark:bg-green-500/10 dark:text-green-400'
+              ? 'bg-destructive/10 text-destructive'
+              : 'bg-status-running/10 text-status-running'
           }`}
         >
           <CheckCircle size={14} />
@@ -267,15 +265,17 @@ export default function PHPVersions() {
 
       {loading ? (
         <div className="flex items-center justify-center py-16">
-          <Loader size={22} className="animate-spin text-accent" />
+          <Loader size={22} className="animate-spin text-highlight" />
         </div>
       ) : versions.length === 0 ? (
         <Card className="px-6 py-10 text-center">
-          <div className="w-12 h-12 rounded-xl bg-purple-50 dark:bg-purple-500/15 flex items-center justify-center mx-auto mb-3">
-            <Code2 size={22} className="text-purple-500 dark:text-purple-300" />
+          <div className="w-12 h-12 rounded-xl bg-muted flex items-center justify-center mx-auto mb-3">
+            <Code2 size={22} className="text-muted-foreground" />
           </div>
-          <h3 className="text-[13px] font-bold text-gray-700">No PHP versions found</h3>
-          <p className="text-xs text-gray-400 mt-1">Install one below to get started.</p>
+          <h3 className="text-[13px] font-bold text-foreground">No PHP versions found</h3>
+          <p className="text-xs text-muted-foreground mt-1">
+            Install one below to get started.
+          </p>
         </Card>
       ) : (
         <>
@@ -312,7 +312,7 @@ export default function PHPVersions() {
               />
             ))}
           </Card>
-          <p className="text-[11px] text-gray-400 mt-1.5 px-1">
+          <p className="text-[11px] text-muted-foreground mt-1.5 px-1">
             Installs <span className="font-mono">php@&lt;version&gt;</span> via Homebrew.
             This can take a few minutes. PHP 8.0 and 7.4 are EOL and come from the{' '}
             <span className="font-mono">shivammathur/php</span> tap.
