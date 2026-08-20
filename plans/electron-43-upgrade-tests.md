@@ -428,3 +428,33 @@ artifact, not an app defect**: requiring node-pty from the unpacked directory
 directly makes its naive `.replace('app.asar', 'app.asar.unpacked')` double into
 `app.asar.unpacked.unpacked`. Loading through the asar, as the app does, is
 correct. Anyone re-running B12 headlessly should load via the `app.asar` path.
+
+---
+
+## G. Run 2 — after merging `develop` (2026-08-21, `chore/electron-43-upgrade` @ `ddd0419`)
+
+Run 1 tested the upgrade against a branch that had since fallen 15 commits
+behind `develop` — the agents work (one-click installs, three new providers,
+the wrapper-shim detection fix, the PHP-probe memoisation) had never been built
+or tested on Electron 43. `develop` was merged in for this run; it merged
+without conflicts, the two changesets not overlapping.
+
+| ID  |     | Note                                                                                                                                                                                                             |
+| --- | --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A1  | ✅  | Full gate on the merged tree, locally and on CI (run 32405881541, 42s). **459 tests** = `develop`'s 420 + this branch's 39-test ratchet, so nothing was dropped in the merge                                     |
+| B12 | ✅  | **Now complete — the human half too.** Packaged app launched: 1 main process + 3 renderer helpers, alive and stable, no new `DiagnosticReports` entry. `pty.node` and `spawn-helper` both in `app.asar.unpacked` |
+
+Still unrun, unchanged from Run 1: **B1, B2, B4, B5, B7–B11** (window chrome,
+browser guest and scheme guard, Cmd-key interception, quit path, single
+instance), **C1–C18**, **D1–D6**. CI compiles and tests; it never opens a
+window, so these remain the cases where a 15-version Chromium jump would
+actually show.
+
+### Notes
+
+- Nothing in the merged agents code is Electron-version-sensitive — it is
+  `fs`/`execSync` in the main process and plain React in the renderer — which
+  is why a clean merge plus a green gate is meaningful here rather than
+  coincidental.
+- The `assets/bin` warning and the unsigned-build warning both reproduced
+  exactly as in Run 1. Still pre-existing, still not upgrade-related.
