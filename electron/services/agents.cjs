@@ -88,6 +88,28 @@ const REGISTRY = [
     installer: { kind: 'script', url: 'https://mimo.xiaomi.com/install' },
   },
   {
+    id: 'copilot',
+    name: 'Copilot',
+    cmd: 'copilot --allow-tool=write',
+    install: 'npm install -g @github/copilot',
+    // A `copilot-cli` cask also exists and its artifact is the `copilot`
+    // binary, so it would work here — npm is the vendor's documented channel
+    // and what this entry was specified as. Switching to
+    // { kind: 'brew', name: 'copilot-cli', cask: true } is a one-line change
+    // if the npm global's node-version tie ever becomes a support burden.
+    installer: { kind: 'npm', package: '@github/copilot' },
+  },
+  {
+    id: 'grok',
+    name: 'Grok',
+    cmd: 'grok --always-approve',
+    install: 'curl -fsSL https://x.ai/cli/install.sh | bash',
+    // No Homebrew package — the `grok` formula in core is an unrelated regex
+    // tool (and deprecated), so installing it would shadow this CLI's name
+    // with something that isn't it. Vendor script only.
+    installer: { kind: 'script', url: 'https://x.ai/cli/install.sh' },
+  },
+  {
     id: 'codex',
     name: 'Codex',
     cmd: 'codex --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust',

@@ -111,6 +111,10 @@ export function CodexIcon({ size = 16, className = '', ...props }) {
 }
 
 // Agent id (see REGISTRY in electron/services/agents.cjs) -> brand mark.
+// `copilot` and `grok` have no entry yet and fall back to the terminal glyph
+// below — an approximated brand mark is worse than an honest generic one, so
+// they stay unmapped until their real marks are vendored into
+// reference/providers-icon like the rest.
 export const PROVIDER_ICONS = {
   claude: ClaudeIcon,
   commandcode: CommandCodeIcon,

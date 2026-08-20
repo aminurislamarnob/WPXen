@@ -349,6 +349,8 @@ export const SETTINGS_ITEMS = [
       'enabled',
       'claude',
       'codex',
+      'copilot',
+      'grok',
       'gemini',
       'opencode',
       'launcher',
