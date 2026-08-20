@@ -230,6 +230,50 @@ function resolveShellEnv() {
   return cachedEnv;
 }
 
+// Some tools put a launcher of their own on PATH under the *agent's* name — a
+// small shell script that finds the real binary elsewhere on PATH and execs it,
+// and prints an error if there isn't one. Superset does this for a dozen agent
+// names in ~/.superset/bin.
+//
+// Such a shim is executable, so the plain X_OK check below treats it as the
+// CLI. That's a false positive whenever the real binary isn't installed: the
+// launcher reports the agent as ready, hides its Install button, and launching
+// it prints the shim's "not found in PATH" instead of starting anything.
+//
+// Skipping the shim is right in *both* directions, which is what makes this
+// safe rather than a special case. If the real CLI exists further along PATH we
+// find it, and running it directly is what the shim would have done anyway; if
+// it doesn't, we correctly report the agent as missing and offer the install.
+//
+// Recognised by content rather than by directory: the marker travels with the
+// file, so a wrapper dir that moves or gets renamed is still caught, and a real
+// CLI that happens to live in one of those dirs is not.
+const WRAPPER_MARKERS = [/superset[- ]agent[- ]wrapper/i];
+const WRAPPER_PROBE_BYTES = 512;
+
+function isWrapperShim(candidate) {
+  let fd;
+  try {
+    fd = fs.openSync(candidate, 'r');
+    const buf = Buffer.alloc(WRAPPER_PROBE_BYTES);
+    const read = fs.readSync(fd, buf, 0, WRAPPER_PROBE_BYTES, 0);
+    const head = buf.slice(0, read).toString('utf8');
+    // Only a script can be one of these; a compiled binary never is, and
+    // reading 512 bytes of one would just be noise to match against.
+    if (!head.startsWith('#!')) return false;
+    return WRAPPER_MARKERS.some((re) => re.test(head));
+  } catch {
+    // Unreadable is not the same as wrapped — leave the X_OK verdict alone.
+    return false;
+  } finally {
+    if (fd !== undefined) {
+      try {
+        fs.closeSync(fd);
+      } catch {}
+    }
+  }
+}
+
 // Resolve an executable against the snapshot PATH. Returns absolute path or null.
 function resolveBin(cmd, env) {
   for (const dir of (env.PATH || '').split(':')) {
@@ -237,6 +281,7 @@ function resolveBin(cmd, env) {
     const candidate = path.join(dir, cmd);
     try {
       fs.accessSync(candidate, fs.constants.X_OK);
+      if (isWrapperShim(candidate)) continue;
       return candidate;
     } catch {}
   }
@@ -776,6 +821,8 @@ module.exports = {
   setConfig,
   effectiveRegistry,
   listAgents,
+  resolveBin,
+  isWrapperShim,
   installAgent,
   brewInstallArgs,
   npmInstallArgs,
