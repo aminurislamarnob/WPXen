@@ -53,6 +53,15 @@ Two processes, separated by file extension:
 - **Main process** — `electron/*.cjs` (CommonJS). Node access, runs all system commands.
 - **Renderer** — `src/**/*.jsx` (React 18 + React Router 6 + Tailwind, built by Vite).
 
+⚠️ **Only the renderer hot-reloads.** Vite HMR picks up `src/**` instantly, but
+the main process does not reload — `npm run dev` keeps running the `electron/**`
+code it started with. So **restart `npm run dev` after any change under
+`electron/`**, and do it as the last step of the work rather than waiting to be
+asked: without it the app silently goes on executing the old handlers, and
+whoever is testing is testing something other than what was just written. The
+symptom is a change that "didn't do anything" — a new `ipcMain.handle` that
+isn't registered, a service function still on its previous behaviour.
+
 The two communicate **only** through the contextBridge in `electron/preload.cjs`, which
 exposes `window.electronAPI`. There is no `nodeIntegration`; the renderer cannot touch
 Node directly. When adding a feature that crosses the boundary you must touch three places:
