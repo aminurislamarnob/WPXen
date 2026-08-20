@@ -367,3 +367,64 @@ reproduces in dev, pack, or both, and whether it predates the upgrade (check
 against `develop` at Electron 28 before calling it a regression). B-section
 failures block the upgrade; C/D failures are judged individually — pre-existing
 issues get filed, not fixed in this branch.
+
+---
+
+## F. Run 1 — results (2026-08-20, `chore/electron-43-upgrade` @ `cfde8d4`)
+
+Machine: macOS 25.5.0, arm64. Everything below was executed headlessly — the
+automated gate, plus three probes that drive the risky paths without a GUI.
+**Sections B (except B3/B6-API/B12/B13), C and D are not yet run**; they need
+eyes on pixels, real user gestures, or live Homebrew services.
+
+| ID                     |       | Note                                                                                                                                                                                                                                                                                           |
+| ---------------------- | ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A1                     | ✅    | Four steps in order, 408 tests. `format:check` first flagged the two untracked plan docs — reformatted, not a code issue                                                                                                                                                                       |
+| A2                     | ✅    | 39 tests; exactly the five allowlisted files at 1 each                                                                                                                                                                                                                                         |
+| A3                     | ✅    | Hoisting a require into `browser.cjs` fails the test **by name**, quotes the offending line, and gives the lazy-resolve advice. Reverted                                                                                                                                                       |
+| A4                     | ✅    | `browser.cjs:18` is still a column-0 comment quoting the require; suite green                                                                                                                                                                                                                  |
+| A5                     | ✅    | No hits in `.github/`; one historical mention in CLAUDE.md explaining why the env var is gone                                                                                                                                                                                                  |
+| A6                     | ✅    | `npm ci` in 4s, **no** download line, no `path.txt`/`dist/`                                                                                                                                                                                                                                    |
+| A7                     | ✅    | electron 43.4.1, electron-builder 26.15.3, @electron/rebuild 4.2.0                                                                                                                                                                                                                             |
+| A8                     | ✅    | 29 tests; Back-enabled/Forward-disabled assertions still assert `enabled` flags                                                                                                                                                                                                                |
+| B3                     | ✅    | **The plan's single biggest assumption.** Real pty spawned inside an Electron 43 main process: `electron 43.4.1 / node 24.18.1 / modules 148`, pid allocated, `echo` round-tripped, `resize(120,40)` clean. No N-API version error, no `Module did not self-register`                          |
+| B6                     | ⚠️ ✅ | **API half only.** Hidden window driven A→B→back→forward against the real Electron 43 API, calling exactly what `browser.cjs:200-207` now calls: `canGoBack` false→true, `goBack()` lands on A, `canGoForward` true, `goForward()` lands on B. The right-click menu itself still needs a human |
+| B12                    | ⚠️ ✅ | **Build + terminal halves.** `npm run pack` clean under builder 26; node-pty rebuilt for 43.4.1; packaged node-pty loaded _through `app.asar`_ resolves `helperPath` into `app.asar.unpacked` and spawns. **No `asarUnpack` stanza needed.** Launching the packaged app still needs a human    |
+| B13                    | ✅    | `LSMinimumSystemVersion` = `12.0`                                                                                                                                                                                                                                                              |
+| D7                     | ⚠️ ✅ | **Main-process half.** Dev app idled for minutes with zero main-process output — no `(electron) '...' is deprecated` lines, no errors. (The one "deprecated" string in the log is Vite's own CJS-API notice, pre-existing.) Renderer console still needs devtools                              |
+| B1, B2, B4, B5, B7–B11 | ⏭     | Need GUI/gestures                                                                                                                                                                                                                                                                              |
+| C1–C18                 | ⏭     | Need live Homebrew services and real site lifecycle                                                                                                                                                                                                                                            |
+| D1–D6                  | ⏭     | Need devtools and visual inspection                                                                                                                                                                                                                                                            |
+
+### Loose ends resolved
+
+Both of the plan's Step 5 flagged risks turned out benign under builder 26:
+
+- **`assets/bin`** — builder 26 _tolerates_ the non-existent `extraResources`
+  source (two `file source doesn't exist` warnings, no error). Stanza left in
+  place per the plan's "drop it only if v26 errors"; still worth deleting
+  separately, since nothing references it.
+- **`asarUnpack` for node-pty** — not needed. `pty.node` _and_ `spawn-helper`
+  both land in `app.asar.unpacked` via builder's default heuristic, and the
+  spawn works from there.
+
+### New observations
+
+- **`@electron/rebuild` is now redundant.** Builder 26 bundles it and says so:
+  `@electron/rebuild already used by electron-builder, please consider to remove
+excess dependency from devDependencies`. The bump to `^4.2.0` is consistent,
+  but the dependency is a deletion candidate.
+- **CI actions are on deprecated Node 20.** `actions/checkout@v4` and
+  `actions/setup-node@v4` are being force-run on Node 24 by the runner. A
+  warning, not a failure; `@v5` for both is a separate one-liner.
+- **Packaged app is unsigned** (`0 valid identities found`), so Gatekeeper
+  blocks first open — right-click → Open, or clear the quarantine xattr. This
+  predates the upgrade.
+
+### Methodology note
+
+A `posix_spawnp failed` from the packaged node-pty during this run was a **probe
+artifact, not an app defect**: requiring node-pty from the unpacked directory
+directly makes its naive `.replace('app.asar', 'app.asar.unpacked')` double into
+`app.asar.unpacked.unpacked`. Loading through the asar, as the app does, is
+correct. Anyone re-running B12 headlessly should load via the `app.asar` path.
