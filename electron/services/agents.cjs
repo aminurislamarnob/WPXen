@@ -15,14 +15,35 @@ const pty = require('node-pty');
 
 // ── Registry ────────────────────────────────────────────────────────────────
 // Curated, data-shaped so user-defined Agents can drop in later (Q5). `cmd` is
-// the binary we detect on PATH and spawn; `install` is the hint shown when it's
-// not found (Q7 — we don't auto-install).
+// the command typed into the session — binary plus any default flags — and
+// `install` is the hint shown when it's not found. Only the FIRST token is
+// detected on PATH, which is what lets `cmd` carry flags at all.
+//
+// The `--dangerously-*` flags are deliberate: WPXen drives these agents inside
+// a local dev site the user already owns, and stopping at an approval prompt
+// on every file write makes the pane useless. They are defaults, not a policy
+// — Settings → Agents → Launch Commands overrides any of them per agent.
+//
+// `installer` is the optional one-click install target, tagged by kind:
+//
+//   { kind: 'brew', name, cask }  → brew install [--cask] <name>
+//   { kind: 'npm', package }      → npm install -g <package>
+//   { kind: 'script', url }       → the vendor's install script, over https
+//
+// Prefer 'brew' whenever a package exists: it is undoable, auditable, and
+// already the app's dependency channel. The other two are for CLIs shipped no
+// other way, and each carries a caveat the UI states rather than hides — an
+// npm global lives in the active node version's prefix and cannot be undone
+// from here, and a script executes vendor code fetched over the network.
+// Entries with none of the three keep a text-only `install` hint and get no
+// button. WPXen still never installs anything on its own; the user clicks (Q7).
 const REGISTRY = [
   {
     id: 'claude',
     name: 'Claude Code',
-    cmd: 'claude',
+    cmd: 'claude --dangerously-skip-permissions',
     install: 'npm install -g @anthropic-ai/claude-code',
+    installer: { kind: 'brew', name: 'claude-code', cask: true },
   },
   {
     // command-code installs four aliases for one entry point: cmd, cmdc,
@@ -33,6 +54,10 @@ const REGISTRY = [
     name: 'Command Code',
     cmd: 'cmd',
     install: 'npm install -g command-code',
+    // npm-only — no Homebrew package exists (searched: only unrelated hits).
+    // Pinned to @latest so a click always gets the current release rather than
+    // silently satisfying itself with a stale cached version.
+    installer: { kind: 'npm', package: 'command-code@latest' },
   },
   // Antigravity and MiMo Code ship as standalone binaries rather than npm
   // globals, so `install` describes the source instead of giving a
@@ -43,20 +68,62 @@ const REGISTRY = [
   {
     id: 'antigravity',
     name: 'Antigravity',
-    cmd: 'agy',
+    cmd: 'agy --dangerously-skip-permissions',
     install: 'Bundled with the Antigravity IDE',
+    // `antigravity-cli`, not `antigravity` — the latter is the IDE, which
+    // carries `agy` but installs an .app rather than the binary. This cask's
+    // artifact is `antigravity -> agy (Binary)`, i.e. the thing detection
+    // looks for, so it lands straight on PATH.
+    installer: { kind: 'brew', name: 'antigravity-cli', cask: true },
   },
   {
     id: 'mimo',
     name: 'MiMo Code',
     cmd: 'mimo',
-    install: 'Install the MiMo Code CLI',
+    install: 'curl -fsSL https://mimo.xiaomi.com/install | bash',
+    // No Homebrew package exists. The vendor script needs no sudo, installs to
+    // ~/.mimocode/bin, and appends a PATH line to the user's shell rc — which
+    // is what makes `mimo` detectable afterwards, so we let it (the UI says so
+    // rather than doing it quietly).
+    installer: { kind: 'script', url: 'https://mimo.xiaomi.com/install' },
+  },
+  {
+    id: 'copilot',
+    name: 'Copilot',
+    cmd: 'copilot --allow-tool=write',
+    install: 'npm install -g @github/copilot',
+    // A `copilot-cli` cask also exists and its artifact is the `copilot`
+    // binary, so it would work here — npm is the vendor's documented channel
+    // and what this entry was specified as. Switching to
+    // { kind: 'brew', name: 'copilot-cli', cask: true } is a one-line change
+    // if the npm global's node-version tie ever becomes a support burden.
+    installer: { kind: 'npm', package: '@github/copilot' },
+  },
+  {
+    id: 'grok',
+    name: 'Grok',
+    cmd: 'grok --always-approve',
+    install: 'curl -fsSL https://x.ai/cli/install.sh | bash',
+    // No Homebrew package — the `grok` formula in core is an unrelated regex
+    // tool (and deprecated), so installing it would shadow this CLI's name
+    // with something that isn't it. Vendor script only.
+    installer: { kind: 'script', url: 'https://x.ai/cli/install.sh' },
+  },
+  {
+    id: 'cursor',
+    name: 'Cursor Agent',
+    cmd: 'cursor-agent',
+    install: 'curl https://cursor.com/install -fsS | bash',
+    // No Homebrew package. Installs to ~/.local/bin and appends a PATH line to
+    // the shell rc, same shape as MiMo's.
+    installer: { kind: 'script', url: 'https://cursor.com/install' },
   },
   {
     id: 'codex',
     name: 'Codex',
-    cmd: 'codex',
+    cmd: 'codex --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust',
     install: 'npm install -g @openai/codex',
+    installer: { kind: 'brew', name: 'codex', cask: true },
   },
 ];
 
@@ -110,6 +177,10 @@ function effectiveRegistry() {
   return [...byId.values()].map((a) => ({
     ...a,
     cmd: config.commands[a.id]?.trim() || a.cmd,
+    // What `cmd` would be with no override. Settings shows it as the field's
+    // placeholder and as what Reset restores — reading that off `cmd` would
+    // echo the override back as if it were the default.
+    defaultCmd: a.cmd,
   }));
 }
 
@@ -172,6 +243,50 @@ function resolveShellEnv() {
   return cachedEnv;
 }
 
+// Some tools put a launcher of their own on PATH under the *agent's* name — a
+// small shell script that finds the real binary elsewhere on PATH and execs it,
+// and prints an error if there isn't one. Superset does this for a dozen agent
+// names in ~/.superset/bin.
+//
+// Such a shim is executable, so the plain X_OK check below treats it as the
+// CLI. That's a false positive whenever the real binary isn't installed: the
+// launcher reports the agent as ready, hides its Install button, and launching
+// it prints the shim's "not found in PATH" instead of starting anything.
+//
+// Skipping the shim is right in *both* directions, which is what makes this
+// safe rather than a special case. If the real CLI exists further along PATH we
+// find it, and running it directly is what the shim would have done anyway; if
+// it doesn't, we correctly report the agent as missing and offer the install.
+//
+// Recognised by content rather than by directory: the marker travels with the
+// file, so a wrapper dir that moves or gets renamed is still caught, and a real
+// CLI that happens to live in one of those dirs is not.
+const WRAPPER_MARKERS = [/superset[- ]agent[- ]wrapper/i];
+const WRAPPER_PROBE_BYTES = 512;
+
+function isWrapperShim(candidate) {
+  let fd;
+  try {
+    fd = fs.openSync(candidate, 'r');
+    const buf = Buffer.alloc(WRAPPER_PROBE_BYTES);
+    const read = fs.readSync(fd, buf, 0, WRAPPER_PROBE_BYTES, 0);
+    const head = buf.slice(0, read).toString('utf8');
+    // Only a script can be one of these; a compiled binary never is, and
+    // reading 512 bytes of one would just be noise to match against.
+    if (!head.startsWith('#!')) return false;
+    return WRAPPER_MARKERS.some((re) => re.test(head));
+  } catch {
+    // Unreadable is not the same as wrapped — leave the X_OK verdict alone.
+    return false;
+  } finally {
+    if (fd !== undefined) {
+      try {
+        fs.closeSync(fd);
+      } catch {}
+    }
+  }
+}
+
 // Resolve an executable against the snapshot PATH. Returns absolute path or null.
 function resolveBin(cmd, env) {
   for (const dir of (env.PATH || '').split(':')) {
@@ -179,6 +294,7 @@ function resolveBin(cmd, env) {
     const candidate = path.join(dir, cmd);
     try {
       fs.accessSync(candidate, fs.constants.X_OK);
+      if (isWrapperShim(candidate)) continue;
       return candidate;
     } catch {}
   }
@@ -202,7 +318,11 @@ function listAgents({ all = false, shell = true } = {}) {
         id: a.id,
         name: a.name,
         cmd: a.cmd,
+        defaultCmd: a.defaultCmd,
         install: a.install,
+        // Present only when a one-click install is available; the UI keys the
+        // Install button off this and branches on `kind` for its wording.
+        installer: a.installer ? { ...a.installer } : null,
         isCustom: !!a.isCustom,
         isShell: false,
         enabled: !config.enabled || config.enabled.includes(a.id),
@@ -218,12 +338,237 @@ function listAgents({ all = false, shell = true } = {}) {
     ...providers,
     {
       ...SHELL_AGENT,
+      installer: null,
       isCustom: false,
       enabled: true,
       detected: true,
       path: getUserShell(),
     },
   ];
+}
+
+// ── One-click install ────────────────────────────────────────────────────────
+// Two mechanisms, and the ordering between them is deliberate. Homebrew is
+// preferred wherever a package exists: undoable, auditable, already the app's
+// dependency channel. npm-global hints stay text-only — `npm install -g` needs
+// a node version WPXen doesn't manage, writes outside the Homebrew prefix, and
+// has no clean undo.
+//
+// A vendor script is the fallback for CLIs distributed no other way. It runs
+// code fetched from the network, which is a real step up in trust from `brew
+// install`, so it is opt-in per registry entry, https-only, and the button
+// states what it will do rather than presenting it as the same act.
+//
+// brew.cjs is required lazily so this module stays importable outside Electron
+// (brew.cjs itself is safe, but the seam below is what tests swap).
+const deps = {
+  runBrewStreaming: (args, onProgress) =>
+    require('./brew.cjs').runBrewStreaming(args, onProgress),
+  isBrewInstalled: () => require('./brew.cjs').isBrewInstalled(),
+  runScriptStreaming: (url, onProgress) => runVendorScript(url, onProgress),
+  runNpmStreaming: (args, onProgress) => runNpmInstall(args, onProgress),
+};
+
+function __setDeps(next) {
+  Object.assign(deps, next);
+}
+
+// Builds the brew argv for an Agent's package. Pure, so the arg shape is
+// testable without spawning anything.
+function brewInstallArgs(target) {
+  if (!target || typeof target.name !== 'string' || !target.name.trim()) {
+    throw new Error('No Homebrew package for this agent');
+  }
+  // The name is ours, not user input — but it lands in an argv, so refuse
+  // anything that isn't a plain formula/cask token rather than trusting the
+  // registry to stay well-formed forever.
+  if (!/^[a-z0-9][a-z0-9@/._-]*$/i.test(target.name)) {
+    throw new Error(`Invalid Homebrew package name: ${target.name}`);
+  }
+  return target.cask ? ['install', '--cask', target.name] : ['install', target.name];
+}
+
+// Validates a script installer's URL. https only, no embedded credentials —
+// this is the one place WPXen runs code it did not ship, so the transport has
+// to be authenticated or the exercise is theatre.
+function installScriptUrl(target) {
+  if (!target || typeof target.url !== 'string' || !target.url.trim()) {
+    throw new Error('No install script for this agent');
+  }
+  let parsed;
+  try {
+    parsed = new URL(target.url);
+  } catch {
+    throw new Error(`Invalid install script URL: ${target.url}`);
+  }
+  if (parsed.protocol !== 'https:') {
+    throw new Error(`Install scripts must be served over https: ${target.url}`);
+  }
+  if (parsed.username || parsed.password) {
+    throw new Error('Install script URL must not carry credentials');
+  }
+  return parsed.toString();
+}
+
+// Builds the npm argv for a global install. Pure, like brewInstallArgs, and
+// guarded the same way: the spec lands in an argv, so anything that isn't a
+// plain package name (optionally scoped, optionally with a @version or tag)
+// is refused rather than trusted to be harmless.
+function npmInstallArgs(target) {
+  if (!target || typeof target.package !== 'string' || !target.package.trim()) {
+    throw new Error('No npm package for this agent');
+  }
+  const spec = target.package.trim();
+  if (!/^(@[a-z0-9][\w.-]*\/)?[a-z0-9][\w.-]*(@[\w.^~*-]+)?$/i.test(spec)) {
+    throw new Error(`Invalid npm package spec: ${spec}`);
+  }
+  return ['install', '-g', spec];
+}
+
+// Runs `npm install -g …` under the user's login-shell environment, so it uses
+// whatever node they actually have (nvm, Homebrew, Volta) rather than whatever
+// Electron was launched with.
+//
+// Known limitation, surfaced in the UI rather than hidden: a global install
+// lands in the *active* node version's prefix. Switch node and the CLI is gone
+// from PATH, and WPXen has no way to undo the install the way `brew uninstall`
+// would. That is why brew is still preferred wherever a package exists.
+function runNpmInstall(args, onProgress) {
+  const { spawn } = require('child_process');
+  const env = resolveShellEnv();
+
+  if (!resolveBin('npm', env)) {
+    return Promise.reject(new Error('npm was not found on your PATH'));
+  }
+
+  return new Promise((resolve, reject) => {
+    let tail = '';
+    const child = spawn('npm', args, { env });
+    const emit = (buf) => {
+      const text = buf.toString();
+      tail = (tail + text).slice(-4000);
+      for (const line of text.split('\n')) {
+        const trimmed = line.trim();
+        if (trimmed && typeof onProgress === 'function') onProgress(trimmed);
+      }
+    };
+    child.stdout.on('data', emit);
+    child.stderr.on('data', emit);
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code === 0) return resolve();
+      // npm puts the useful line behind `npm error`/`npm ERR!` noise; prefer it
+      // over the raw tail, the way runBrewStreaming prefers brew's `Error:`.
+      const match = tail.match(/^npm (?:error|ERR!)\s+(.+)$/m);
+      reject(new Error(match ? match[1].trim() : tail.trim() || `npm exited ${code}`));
+    });
+  });
+}
+
+// A shell script, not an HTML error page a CDN served with a 200, and not an
+// empty body from a truncated transfer. Split out from the runner so the guard
+// is testable without touching the network.
+function assertShellScript(body) {
+  if (!body || !body.trim()) {
+    throw new Error('Downloaded installer is empty — refusing to run it');
+  }
+  if (!body.trim().startsWith('#!')) {
+    throw new Error('Downloaded installer is not a shell script — refusing to run it');
+  }
+  return true;
+}
+
+// Fetches a vendor install script and runs it, streaming output line by line.
+//
+// Deliberately NOT `curl … | bash` through a shell: both halves are spawned
+// with argv arrays, so nothing in the URL can become shell syntax. Downloading
+// first also means a truncated response or an error page a CDN served with a
+// 200 fails the shape check below instead of being executed halfway.
+function runVendorScript(url, onProgress) {
+  const { spawn } = require('child_process');
+  const script = path.join(
+    os.tmpdir(),
+    `wpxen-agent-install-${Date.now()}-${process.pid}.sh`
+  );
+
+  const tail = { value: '' };
+  const stream = (child) =>
+    new Promise((resolve, reject) => {
+      const emit = (buf) => {
+        const text = buf.toString();
+        tail.value = (tail.value + text).slice(-4000);
+        for (const line of text.split('\n')) {
+          const trimmed = line.trim();
+          if (trimmed && typeof onProgress === 'function') onProgress(trimmed);
+        }
+      };
+      child.stdout?.on('data', emit);
+      child.stderr?.on('data', emit);
+      child.on('error', reject);
+      child.on('close', resolve);
+    });
+
+  return (async () => {
+    try {
+      const fetched = await stream(
+        spawn('curl', [
+          '-fsSL',
+          '--proto',
+          '=https',
+          '--max-time',
+          '120',
+          '-o',
+          script,
+          url,
+        ])
+      );
+      if (fetched !== 0) {
+        throw new Error(`Could not download the install script (curl exit ${fetched})`);
+      }
+
+      assertShellScript(fs.readFileSync(script, 'utf8'));
+
+      const ran = await stream(spawn('bash', [script], { env: resolveShellEnv() }));
+      if (ran !== 0) {
+        throw new Error(tail.value.trim() || `Install script failed (exit ${ran})`);
+      }
+    } finally {
+      try {
+        fs.unlinkSync(script);
+      } catch {}
+    }
+  })();
+}
+
+// Installs an Agent's CLI, streaming the installer's output line by line.
+// Resolves once it exits 0; the caller re-runs listAgents to pick up the new
+// binary (detection is a live PATH probe, so nothing needs invalidating).
+async function installAgent(id, onProgress) {
+  const agent = effectiveRegistry().find((a) => a.id === id);
+  if (!agent) throw new Error(`Unknown agent: ${id}`);
+  if (!agent.installer) {
+    throw new Error(
+      `${agent.name} has no one-click install — install it with: ${agent.install}`
+    );
+  }
+
+  if (agent.installer.kind === 'brew') {
+    if (!deps.isBrewInstalled()) throw new Error('Homebrew is not installed');
+    await deps.runBrewStreaming(brewInstallArgs(agent.installer), onProgress);
+    return;
+  }
+
+  if (agent.installer.kind === 'npm') {
+    await deps.runNpmStreaming(npmInstallArgs(agent.installer), onProgress);
+    return;
+  }
+
+  if (agent.installer.kind === 'script') {
+    await deps.runScriptStreaming(installScriptUrl(agent.installer), onProgress);
+    return;
+  }
+
+  throw new Error(`Unknown installer kind: ${agent.installer.kind}`);
 }
 
 // ── Launch resolution (Launch Presets & Targets) ─────────────────────────────
@@ -490,6 +835,13 @@ module.exports = {
   setConfig,
   effectiveRegistry,
   listAgents,
+  resolveBin,
+  isWrapperShim,
+  installAgent,
+  brewInstallArgs,
+  npmInstallArgs,
+  installScriptUrl,
+  assertShellScript,
   listSessions,
   resolveLaunch,
   launch,
@@ -502,4 +854,5 @@ module.exports = {
   hasActiveSessions,
   activeSiteIds,
   stopAll,
+  __setDeps,
 };

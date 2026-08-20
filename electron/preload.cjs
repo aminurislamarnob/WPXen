@@ -8,6 +8,7 @@ const VALID_EVENT_CHANNELS = [
   'service-status-update',
   'site-create-progress',
   'php-install-progress',
+  'agent-install-progress',
   'dependencies-update',
   'notification',
   'tunnel-update',
@@ -172,6 +173,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Agent Launcher / Terminal
   listAgents: () => ipcRenderer.invoke('agent-list'),
+  installAgent: (agentId) => ipcRenderer.invoke('agent-install', agentId),
   listSessions: (siteId) => ipcRenderer.invoke('agent-sessions', siteId),
   launchAgent: (siteId, agentId, targetId) =>
     ipcRenderer.invoke('agent-launch', siteId, agentId, targetId),

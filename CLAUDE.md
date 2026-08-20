@@ -53,6 +53,15 @@ Two processes, separated by file extension:
 - **Main process** — `electron/*.cjs` (CommonJS). Node access, runs all system commands.
 - **Renderer** — `src/**/*.jsx` (React 18 + React Router 6 + Tailwind, built by Vite).
 
+⚠️ **Only the renderer hot-reloads.** Vite HMR picks up `src/**` instantly, but
+the main process does not reload — `npm run dev` keeps running the `electron/**`
+code it started with. So **restart `npm run dev` after any change under
+`electron/`**, and do it as the last step of the work rather than waiting to be
+asked: without it the app silently goes on executing the old handlers, and
+whoever is testing is testing something other than what was just written. The
+symptom is a change that "didn't do anything" — a new `ipcMain.handle` that
+isn't registered, a service function still on its previous behaviour.
+
 The two communicate **only** through the contextBridge in `electron/preload.cjs`, which
 exposes `window.electronAPI`. There is no `nodeIntegration`; the renderer cannot touch
 Node directly. When adding a feature that crosses the boundary you must touch three places:
@@ -143,7 +152,40 @@ no daemon** (see `docs/adr/0001-main-process-pty-no-daemon.md`), so it survives
 the window hiding to the tray and is reaped on quit; reattach after a window
 reopen is served from an in-memory ring buffer. The provider registry is
 data-shaped: `cmd` is the binary detected on `$PATH` and spawned, `install` is
-the hint shown when it isn't found (WPXen never auto-installs).
+the hint shown when it isn't found, and the optional `installer` is the
+one-click target, tagged by kind:
+
+- `{ kind: 'brew', name, cask }` → `brew install [--cask] <name>`
+- `{ kind: 'npm', package }` → `npm install -g <package>`
+- `{ kind: 'script', url }` → the vendor's install script, https only
+
+**Prefer `brew`, and verify the package before adding one.** `brew info` must
+show it exists _and_ that its artifact is the binary `cmd` looks for — a cask
+that installs an `.app` passes the name check and still leaves the agent
+undetected (this is exactly how `antigravity` vs `antigravity-cli` went wrong
+once). A wrong entry fails at click time, not review time.
+
+`kind: 'script'` is the escape hatch for CLIs distributed no other way, and it
+is a real step up in trust: it downloads and executes vendor code. Guardrails
+that must stay — https-only with no embedded credentials (`installScriptUrl`),
+fetch-then-run rather than `curl | bash` so nothing in the URL can become shell
+syntax and a CDN error page can't execute halfway, and UI wording that names
+the host rather than dressing it up as the same act as `brew install`. Note
+these scripts commonly append a `PATH` line to the user's shell rc — that's
+usually what makes detection work afterwards, so it's allowed but must be
+disclosed, not silent.
+
+`kind: 'npm'` is for CLIs published only to npm. It runs under the login-shell
+environment so it uses the node the user actually has (nvm, Volta, Homebrew),
+and `npmInstallArgs` guards the spec the same way brew's does — a scoped name
+with an optional `@version` or tag, nothing that could pass as a flag. Its
+caveat is real and belongs in the tooltip, not in a comment nobody reads: a
+global install lands in the **active node version's prefix**, so switching node
+makes the CLI vanish, and WPXen has no undo for it the way `brew uninstall`
+gives one.
+
+Entries with none of the three keep a text-only hint and get no button. WPXen
+still never installs anything unprompted; the user clicks.
 
 ### In-app browser
 

@@ -7,6 +7,12 @@ import { ProviderIcon } from './providerIcons';
 // providers (Agents); clicking one opens that Agent's terminal in the selected
 // Site's directory (route /agents/<siteId>/<agentId>). Leaving Agents mode goes
 // through the window-control back arrow (⌘[), same as anywhere else.
+//
+// Only agents that are both enabled and actually installed appear here. The
+// list repeats under every Site, so an uninstallable row costs one dead line
+// per site rather than one overall — and every row here is a launcher, so a
+// row that can't launch is noise. Settings → Agents is where the full set
+// lives, with the install buttons; this tree is for getting to work.
 export default function AgentsSidebar() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -27,7 +33,9 @@ export default function AgentsSidebar() {
         window.electronAPI.listAgents(),
       ]);
       setSites(s || []);
-      setAgents(a || []);
+      // listAgents() already applies the enabled filter; `detected` is the
+      // other half. The plain Terminal reports detected, so it survives this.
+      setAgents((a || []).filter((agent) => agent.detected));
     })();
   }, []);
 
@@ -75,41 +83,37 @@ export default function AgentsSidebar() {
 
               {isOpen && (
                 <div className="ml-[18px] mt-0.5 space-y-0.5 border-l border-sidebar-border pl-2">
-                  {agents.map((agent) => {
-                    // Each click spawns a NEW Session (many per Site allowed);
-                    // the pane reads spawn+nonce from navigation state.
-                    return (
-                      <button
-                        key={agent.id}
-                        disabled={!agent.detected}
-                        title={
-                          agent.isShell
-                            ? 'Open a shell in this site’s folder'
-                            : agent.detected
-                              ? 'Open a new session'
-                              : `Not installed · ${agent.install}`
-                        }
-                        onClick={() =>
-                          navigate(`/agents/${encodeURIComponent(site.id)}`, {
-                            state: { spawn: agent.id, nonce: Date.now() },
-                          })
-                        }
-                        className={`w-full flex items-center gap-1.5 px-2 py-[5px] rounded-md text-[13px] ${
-                          agent.detected
-                            ? 'text-sidebar-foreground/80 hover:bg-sidebar-accent'
-                            : 'text-muted-foreground/60 cursor-not-allowed'
-                        }`}
-                      >
-                        <ProviderIcon
-                          agentId={agent.id}
-                          brand={agent.detected}
-                          size={13}
-                          className="flex-shrink-0"
-                        />
-                        <span className="truncate">{agent.name}</span>
-                      </button>
-                    );
-                  })}
+                  {/* Each click spawns a NEW Session (many per Site allowed);
+                      the pane reads spawn+nonce from navigation state. */}
+                  {agents.map((agent) => (
+                    <button
+                      key={agent.id}
+                      title={
+                        agent.isShell
+                          ? 'Open a shell in this site’s folder'
+                          : 'Open a new session'
+                      }
+                      onClick={() =>
+                        navigate(`/agents/${encodeURIComponent(site.id)}`, {
+                          state: { spawn: agent.id, nonce: Date.now() },
+                        })
+                      }
+                      className="w-full min-w-0 flex items-center gap-1.5 px-2 py-[5px] rounded-md text-[13px] text-sidebar-foreground/80 hover:bg-sidebar-accent"
+                    >
+                      <ProviderIcon
+                        agentId={agent.id}
+                        brand
+                        size={13}
+                        className="flex-shrink-0"
+                      />
+                      <span className="truncate">{agent.name}</span>
+                    </button>
+                  ))}
+                  {agents.length === 0 && (
+                    <p className="px-2 py-1 text-xs text-muted-foreground">
+                      No agents installed.
+                    </p>
+                  )}
                 </div>
               )}
             </div>
