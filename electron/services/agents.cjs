@@ -168,6 +168,10 @@ function effectiveRegistry() {
   return [...byId.values()].map((a) => ({
     ...a,
     cmd: config.commands[a.id]?.trim() || a.cmd,
+    // What `cmd` would be with no override. Settings shows it as the field's
+    // placeholder and as what Reset restores — reading that off `cmd` would
+    // echo the override back as if it were the default.
+    defaultCmd: a.cmd,
   }));
 }
 
@@ -305,6 +309,7 @@ function listAgents({ all = false, shell = true } = {}) {
         id: a.id,
         name: a.name,
         cmd: a.cmd,
+        defaultCmd: a.defaultCmd,
         install: a.install,
         // Present only when a one-click install is available; the UI keys the
         // Install button off this and branches on `kind` for its wording.
