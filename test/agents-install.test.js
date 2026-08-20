@@ -6,6 +6,7 @@ import agents from '../electron/services/agents.cjs';
 // modules load through Node's loader, out of vi.mock's reach (CLAUDE.md).
 let brewCalls;
 let scriptCalls;
+let npmCalls;
 
 const CLEAN_CONFIG = { enabled: null, commands: {}, custom: [] };
 
@@ -13,6 +14,7 @@ beforeEach(() => {
   agents.setConfig(CLEAN_CONFIG);
   brewCalls = [];
   scriptCalls = [];
+  npmCalls = [];
   agents.__setDeps({
     isBrewInstalled: () => true,
     runBrewStreaming: (args, onProgress) => {
@@ -23,6 +25,11 @@ beforeEach(() => {
     runScriptStreaming: (url, onProgress) => {
       scriptCalls.push(url);
       onProgress?.('Installing mimocode');
+      return Promise.resolve();
+    },
+    runNpmStreaming: (args, onProgress) => {
+      npmCalls.push(args);
+      onProgress?.('added 1 package');
       return Promise.resolve();
     },
   });
@@ -37,6 +44,7 @@ const registry = () => agents.effectiveRegistry();
 const byKind = (kind) => registry().filter((a) => a.installer?.kind === kind);
 const firstBrew = () => byKind('brew')[0];
 const firstScript = () => byKind('script')[0];
+const firstNpm = () => byKind('npm')[0];
 
 describe('brewInstallArgs', () => {
   it('installs a formula without --cask', () => {
@@ -65,6 +73,39 @@ describe('brewInstallArgs', () => {
     for (const name of ['bad name', 'foo; whoami', '--force', '$(id)', '-x']) {
       expect(() => agents.brewInstallArgs({ name })).toThrow(
         /Invalid Homebrew package name/
+      );
+    }
+  });
+});
+
+describe('npmInstallArgs', () => {
+  it('builds a global install', () => {
+    expect(agents.npmInstallArgs({ package: 'command-code@latest' })).toEqual([
+      'install',
+      '-g',
+      'command-code@latest',
+    ]);
+  });
+
+  it('accepts a scoped package', () => {
+    expect(agents.npmInstallArgs({ package: '@anthropic-ai/claude-code' })).toEqual([
+      'install',
+      '-g',
+      '@anthropic-ai/claude-code',
+    ]);
+  });
+
+  it('refuses a missing or empty spec', () => {
+    expect(() => agents.npmInstallArgs(null)).toThrow(/No npm package/);
+    expect(() => agents.npmInstallArgs({ package: '  ' })).toThrow(/No npm package/);
+  });
+
+  // Same reasoning as brew: the spec lands in an argv, so a flag or shell
+  // metacharacter smuggled through the registry must fail loudly.
+  it('refuses anything that is not a plain package spec', () => {
+    for (const spec of ['a b', 'x; whoami', '--global', '$(id)', '-g']) {
+      expect(() => agents.npmInstallArgs({ package: spec })).toThrow(
+        /Invalid npm package spec/
       );
     }
   });
@@ -121,12 +162,16 @@ describe('assertShellScript', () => {
 describe('registry installers', () => {
   it('offers at least one of each kind', () => {
     expect(byKind('brew').length).toBeGreaterThan(0);
+    expect(byKind('npm').length).toBeGreaterThan(0);
     expect(byKind('script').length).toBeGreaterThan(0);
   });
 
   it('every declared installer is well-formed for its kind', () => {
     for (const agent of byKind('brew')) {
       expect(() => agents.brewInstallArgs(agent.installer), agent.id).not.toThrow();
+    }
+    for (const agent of byKind('npm')) {
+      expect(() => agents.npmInstallArgs(agent.installer), agent.id).not.toThrow();
     }
     for (const agent of byKind('script')) {
       expect(() => agents.installScriptUrl(agent.installer), agent.id).not.toThrow();
@@ -136,7 +181,7 @@ describe('registry installers', () => {
   it('has no installer of an unrecognised kind', () => {
     for (const agent of registry()) {
       if (!agent.installer) continue;
-      expect(['brew', 'script'], agent.id).toContain(agent.installer.kind);
+      expect(['brew', 'npm', 'script'], agent.id).toContain(agent.installer.kind);
     }
   });
 
@@ -186,6 +231,28 @@ describe('installAgent', () => {
     const onScript = vi.fn();
     await agents.installAgent(firstScript().id, onScript);
     expect(onScript).toHaveBeenCalledWith('Installing mimocode');
+  });
+
+  it('runs npm install -g for an npm-kind agent', async () => {
+    const target = firstNpm();
+    await agents.installAgent(target.id);
+    expect(npmCalls).toEqual([agents.npmInstallArgs(target.installer)]);
+    expect(brewCalls).toEqual([]);
+    expect(scriptCalls).toEqual([]);
+  });
+
+  it('does not require Homebrew for an npm-kind agent', async () => {
+    agents.__setDeps({ isBrewInstalled: () => false });
+    await agents.installAgent(firstNpm().id);
+    expect(npmCalls).toHaveLength(1);
+  });
+
+  it('propagates an npm failure instead of reporting success', async () => {
+    agents.__setDeps({
+      runNpmStreaming: () =>
+        Promise.reject(new Error('404 Not Found - command-code@latest')),
+    });
+    await expect(agents.installAgent(firstNpm().id)).rejects.toThrow(/404 Not Found/);
   });
 
   it('rejects an unknown agent id', async () => {

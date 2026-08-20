@@ -20,15 +20,17 @@ const pty = require('node-pty');
 //
 // `installer` is the optional one-click install target, tagged by kind:
 //
-//   { kind: 'brew', name, cask } → brew install [--cask] <name>
-//   { kind: 'script', url }      → the vendor's install script, over https
+//   { kind: 'brew', name, cask }  → brew install [--cask] <name>
+//   { kind: 'npm', package }      → npm install -g <package>
+//   { kind: 'script', url }       → the vendor's install script, over https
 //
 // Prefer 'brew' whenever a package exists: it is undoable, auditable, and
-// already the app's dependency channel. 'script' is the escape hatch for CLIs
-// distributed no other way — it executes vendor code, so the URL must be https
-// and the UI says plainly what is about to run. Entries with neither keep a
-// text-only `install` hint and get no button. WPXen still never installs
-// anything on its own; the user has to click (Q7).
+// already the app's dependency channel. The other two are for CLIs shipped no
+// other way, and each carries a caveat the UI states rather than hides — an
+// npm global lives in the active node version's prefix and cannot be undone
+// from here, and a script executes vendor code fetched over the network.
+// Entries with none of the three keep a text-only `install` hint and get no
+// button. WPXen still never installs anything on its own; the user clicks (Q7).
 const REGISTRY = [
   {
     id: 'claude',
@@ -46,6 +48,10 @@ const REGISTRY = [
     name: 'Command Code',
     cmd: 'cmd',
     install: 'npm install -g command-code',
+    // npm-only — no Homebrew package exists (searched: only unrelated hits).
+    // Pinned to @latest so a click always gets the current release rather than
+    // silently satisfying itself with a stale cached version.
+    installer: { kind: 'npm', package: 'command-code@latest' },
   },
   // Antigravity and MiMo Code ship as standalone binaries rather than npm
   // globals, so `install` describes the source instead of giving a
@@ -273,6 +279,7 @@ const deps = {
     require('./brew.cjs').runBrewStreaming(args, onProgress),
   isBrewInstalled: () => require('./brew.cjs').isBrewInstalled(),
   runScriptStreaming: (url, onProgress) => runVendorScript(url, onProgress),
+  runNpmStreaming: (args, onProgress) => runNpmInstall(args, onProgress),
 };
 
 function __setDeps(next) {
@@ -314,6 +321,61 @@ function installScriptUrl(target) {
     throw new Error('Install script URL must not carry credentials');
   }
   return parsed.toString();
+}
+
+// Builds the npm argv for a global install. Pure, like brewInstallArgs, and
+// guarded the same way: the spec lands in an argv, so anything that isn't a
+// plain package name (optionally scoped, optionally with a @version or tag)
+// is refused rather than trusted to be harmless.
+function npmInstallArgs(target) {
+  if (!target || typeof target.package !== 'string' || !target.package.trim()) {
+    throw new Error('No npm package for this agent');
+  }
+  const spec = target.package.trim();
+  if (!/^(@[a-z0-9][\w.-]*\/)?[a-z0-9][\w.-]*(@[\w.^~*-]+)?$/i.test(spec)) {
+    throw new Error(`Invalid npm package spec: ${spec}`);
+  }
+  return ['install', '-g', spec];
+}
+
+// Runs `npm install -g …` under the user's login-shell environment, so it uses
+// whatever node they actually have (nvm, Homebrew, Volta) rather than whatever
+// Electron was launched with.
+//
+// Known limitation, surfaced in the UI rather than hidden: a global install
+// lands in the *active* node version's prefix. Switch node and the CLI is gone
+// from PATH, and WPXen has no way to undo the install the way `brew uninstall`
+// would. That is why brew is still preferred wherever a package exists.
+function runNpmInstall(args, onProgress) {
+  const { spawn } = require('child_process');
+  const env = resolveShellEnv();
+
+  if (!resolveBin('npm', env)) {
+    return Promise.reject(new Error('npm was not found on your PATH'));
+  }
+
+  return new Promise((resolve, reject) => {
+    let tail = '';
+    const child = spawn('npm', args, { env });
+    const emit = (buf) => {
+      const text = buf.toString();
+      tail = (tail + text).slice(-4000);
+      for (const line of text.split('\n')) {
+        const trimmed = line.trim();
+        if (trimmed && typeof onProgress === 'function') onProgress(trimmed);
+      }
+    };
+    child.stdout.on('data', emit);
+    child.stderr.on('data', emit);
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code === 0) return resolve();
+      // npm puts the useful line behind `npm error`/`npm ERR!` noise; prefer it
+      // over the raw tail, the way runBrewStreaming prefers brew's `Error:`.
+      const match = tail.match(/^npm (?:error|ERR!)\s+(.+)$/m);
+      reject(new Error(match ? match[1].trim() : tail.trim() || `npm exited ${code}`));
+    });
+  });
 }
 
 // A shell script, not an HTML error page a CDN served with a 200, and not an
@@ -406,6 +468,11 @@ async function installAgent(id, onProgress) {
   if (agent.installer.kind === 'brew') {
     if (!deps.isBrewInstalled()) throw new Error('Homebrew is not installed');
     await deps.runBrewStreaming(brewInstallArgs(agent.installer), onProgress);
+    return;
+  }
+
+  if (agent.installer.kind === 'npm') {
+    await deps.runNpmStreaming(npmInstallArgs(agent.installer), onProgress);
     return;
   }
 
@@ -683,6 +750,7 @@ module.exports = {
   listAgents,
   installAgent,
   brewInstallArgs,
+  npmInstallArgs,
   installScriptUrl,
   assertShellScript,
   listSessions,

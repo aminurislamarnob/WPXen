@@ -147,6 +147,7 @@ the hint shown when it isn't found, and the optional `installer` is the
 one-click target, tagged by kind:
 
 - `{ kind: 'brew', name, cask }` → `brew install [--cask] <name>`
+- `{ kind: 'npm', package }` → `npm install -g <package>`
 - `{ kind: 'script', url }` → the vendor's install script, https only
 
 **Prefer `brew`, and verify the package before adding one.** `brew info` must
@@ -165,10 +166,17 @@ these scripts commonly append a `PATH` line to the user's shell rc — that's
 usually what makes detection work afterwards, so it's allowed but must be
 disclosed, not silent.
 
-Entries with neither keep a text-only hint and get no button. `npm install -g`
-stays text deliberately: it needs a node version WPXen doesn't manage, writes
-outside the brew prefix, and has no clean undo. WPXen still never installs
-anything unprompted; the user clicks.
+`kind: 'npm'` is for CLIs published only to npm. It runs under the login-shell
+environment so it uses the node the user actually has (nvm, Volta, Homebrew),
+and `npmInstallArgs` guards the spec the same way brew's does — a scoped name
+with an optional `@version` or tag, nothing that could pass as a flag. Its
+caveat is real and belongs in the tooltip, not in a comment nobody reads: a
+global install lands in the **active node version's prefix**, so switching node
+makes the CLI vanish, and WPXen has no undo for it the way `brew uninstall`
+gives one.
+
+Entries with none of the three keep a text-only hint and get no button. WPXen
+still never installs anything unprompted; the user clicks.
 
 ### In-app browser
 

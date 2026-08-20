@@ -1,13 +1,18 @@
 // How an agent's one-click installer describes itself in the UI.
 //
-// The two kinds are not equivalent and shouldn't read as if they were: `brew
-// install` pulls a vetted package from a channel the app already depends on,
-// while a script installer executes vendor code fetched over the network. The
-// button looks the same, so the words carry the difference.
+// The three kinds are not equivalent and shouldn't read as if they were.
+// `brew install` pulls a vetted package from a channel the app already depends
+// on; `npm install -g` writes into whichever node version happens to be active
+// and can't be undone from here; a script installer executes vendor code
+// fetched over the network. The button looks the same in every case, so the
+// words have to carry the difference.
 export function installerCommand(installer) {
   if (!installer) return '';
   if (installer.kind === 'brew') {
     return `brew install${installer.cask ? ' --cask' : ''} ${installer.name}`;
+  }
+  if (installer.kind === 'npm') {
+    return `npm install -g ${installer.package}`;
   }
   if (installer.kind === 'script') {
     return `curl -fsSL ${installer.url} | bash`;
@@ -33,6 +38,9 @@ export function installerTooltip(installer) {
     return `Run the vendor install script · ${installerCommand(installer)} · downloads and executes code from ${
       new URL(installer.url).host
     }, and may add a PATH line to your shell config`;
+  }
+  if (installer.kind === 'npm') {
+    return `Install globally with npm · ${installerCommand(installer)} · installs into your active node version, and can only be removed with npm uninstall -g`;
   }
   return `Install with Homebrew · ${installerCommand(installer)}`;
 }
