@@ -52,11 +52,11 @@ const REGISTRY = [
     name: 'Antigravity',
     cmd: 'agy',
     install: 'Bundled with the Antigravity IDE',
-    // The cask installs the IDE, which is what carries `agy` — so unlike the
-    // others this one may still read as undetected afterwards, until the user
-    // enables the CLI from inside the IDE. Offering it beats sending them to
-    // a download page.
-    brew: { name: 'antigravity', cask: true },
+    // `antigravity-cli`, not `antigravity` — the latter is the IDE, which
+    // carries `agy` but installs an .app rather than the binary. This cask's
+    // artifact is `antigravity -> agy (Binary)`, i.e. the thing detection
+    // looks for, so it lands straight on PATH.
+    brew: { name: 'antigravity-cli', cask: true },
   },
   {
     id: 'mimo',

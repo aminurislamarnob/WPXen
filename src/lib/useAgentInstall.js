@@ -44,10 +44,11 @@ export function useAgentInstall({ onInstalled } = {}) {
           text: `${agent.name} installed.`,
         });
       } else if (outcome.success) {
-        // brew exited 0 but the binary still isn't on PATH. Antigravity's cask
-        // installs the IDE that carries `agy`, so this is an expected outcome
-        // for it rather than a failure — say what happened instead of showing
-        // a success the launcher will immediately contradict.
+        // brew exited 0 but the binary still isn't on PATH — a cask whose
+        // artifact is an .app rather than a binary, or somewhere PATH doesn't
+        // reach. Every current entry installs a binary, so this shouldn't
+        // fire; it's here so a future one can't report a success the launcher
+        // immediately contradicts.
         setResult({
           type: 'info',
           agentId: agent.id,
