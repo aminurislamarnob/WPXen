@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { ChevronRight, ChevronDown, Globe } from 'lucide-react';
+import { ChevronRight, ChevronDown, Globe, Download, Loader } from 'lucide-react';
 import { ProviderIcon } from './providerIcons';
+import { useAgentInstall } from '../lib/useAgentInstall';
 
 // The Agents-mode sidebar: a Sites tree. Each Site collapses to its available
 // providers (Agents); clicking one opens that Agent's terminal in the selected
@@ -20,6 +21,13 @@ export default function AgentsSidebar() {
   const [agents, setAgents] = useState([]);
   const [expanded, setExpanded] = useState(() => new Set());
 
+  const refreshAgents = useCallback(() => {
+    window.electronAPI
+      .listAgents()
+      .then((a) => setAgents(a || []))
+      .catch(() => {});
+  }, []);
+
   useEffect(() => {
     (async () => {
       const [s, a] = await Promise.all([
@@ -30,6 +38,12 @@ export default function AgentsSidebar() {
       setAgents(a || []);
     })();
   }, []);
+
+  // An install here re-probes detection, so the row it was offered on turns
+  // into a launchable agent without a reload.
+  const { installing, logLine, result, install } = useAgentInstall({
+    onInstalled: refreshAgents,
+  });
 
   // Keep the selected Site expanded.
   useEffect(() => {
@@ -78,36 +92,84 @@ export default function AgentsSidebar() {
                   {agents.map((agent) => {
                     // Each click spawns a NEW Session (many per Site allowed);
                     // the pane reads spawn+nonce from navigation state.
+                    const isInstalling = installing === agent.id;
+                    // The install affordance rides on the row rather than
+                    // replacing it: the row stays the launcher, and the icon
+                    // is the way out of a dead one. Only agents with a vetted
+                    // Homebrew package get it — the rest keep the tooltip.
+                    const canInstall = !agent.detected && !!agent.brew;
+                    const failed =
+                      result?.agentId === agent.id && result.type === 'error';
+
                     return (
-                      <button
+                      <div
                         key={agent.id}
-                        disabled={!agent.detected}
-                        title={
-                          agent.isShell
-                            ? 'Open a shell in this site’s folder'
-                            : agent.detected
-                              ? 'Open a new session'
-                              : `Not installed · ${agent.install}`
-                        }
-                        onClick={() =>
-                          navigate(`/agents/${encodeURIComponent(site.id)}`, {
-                            state: { spawn: agent.id, nonce: Date.now() },
-                          })
-                        }
-                        className={`w-full flex items-center gap-1.5 px-2 py-[5px] rounded-md text-[13px] ${
-                          agent.detected
-                            ? 'text-sidebar-foreground/80 hover:bg-sidebar-accent'
-                            : 'text-muted-foreground/60 cursor-not-allowed'
+                        className={`group flex items-center rounded-md ${
+                          agent.detected ? 'hover:bg-sidebar-accent' : ''
                         }`}
                       >
-                        <ProviderIcon
-                          agentId={agent.id}
-                          brand={agent.detected}
-                          size={13}
-                          className="flex-shrink-0"
-                        />
-                        <span className="truncate">{agent.name}</span>
-                      </button>
+                        <button
+                          disabled={!agent.detected}
+                          title={
+                            agent.isShell
+                              ? 'Open a shell in this site’s folder'
+                              : agent.detected
+                                ? 'Open a new session'
+                                : isInstalling
+                                  ? logLine || `Installing ${agent.brew?.name}…`
+                                  : failed
+                                    ? result.text
+                                    : `Not installed · ${agent.install}`
+                          }
+                          onClick={() =>
+                            navigate(`/agents/${encodeURIComponent(site.id)}`, {
+                              state: { spawn: agent.id, nonce: Date.now() },
+                            })
+                          }
+                          className={`flex-1 min-w-0 flex items-center gap-1.5 px-2 py-[5px] rounded-md text-[13px] ${
+                            agent.detected
+                              ? 'text-sidebar-foreground/80'
+                              : 'text-muted-foreground/60 cursor-not-allowed'
+                          }`}
+                        >
+                          <ProviderIcon
+                            agentId={agent.id}
+                            brand={agent.detected}
+                            size={13}
+                            className="flex-shrink-0"
+                          />
+                          <span className="truncate">{agent.name}</span>
+                        </button>
+
+                        {canInstall && (
+                          <button
+                            onClick={() => install(agent)}
+                            disabled={!!installing}
+                            aria-label={`Install ${agent.name} with Homebrew`}
+                            title={
+                              isInstalling
+                                ? logLine || `Installing ${agent.brew.name}…`
+                                : `Install with Homebrew · brew install${
+                                    agent.brew.cask ? ' --cask' : ''
+                                  } ${agent.brew.name}`
+                            }
+                            className={`flex-shrink-0 mr-1 p-1 rounded-md text-muted-foreground/70 hover:text-foreground hover:bg-sidebar-accent disabled:cursor-not-allowed ${
+                              // Stays put while installing or after a failure;
+                              // otherwise it's hover/focus-revealed so the tree
+                              // doesn't read as a wall of buttons.
+                              isInstalling || failed
+                                ? 'opacity-100'
+                                : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100'
+                            } ${failed ? 'text-destructive' : ''}`}
+                          >
+                            {isInstalling ? (
+                              <Loader size={12} className="animate-spin" />
+                            ) : (
+                              <Download size={12} />
+                            )}
+                          </button>
+                        )}
+                      </div>
                     );
                   })}
                 </div>

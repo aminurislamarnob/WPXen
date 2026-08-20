@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Download, Loader, Plus, Trash2 } from 'lucide-react';
 import { Button, Card, SectionLabel, SettingsRow, Toggle, Tooltip } from '../../ui';
 import { TextSetting } from '../controls';
 import { useSettings } from '../../../lib/useSettings';
 import { useSettingsContext } from '../SettingsLayout';
+import { useAgentInstall } from '../../../lib/useAgentInstall';
 
 export default function AgentsSection() {
   const { settings, setSetting } = useSettings();
@@ -11,11 +12,6 @@ export default function AgentsSection() {
   const [agents, setAgents] = useState(null);
   const [draft, setDraft] = useState({ id: '', name: '', cmd: '' });
   const [addError, setAddError] = useState('');
-  // id of the agent currently installing, its last brew output line, and the
-  // outcome banner. One install at a time — brew takes a lock anyway.
-  const [installing, setInstalling] = useState(null);
-  const [logLine, setLogLine] = useState('');
-  const [installResult, setInstallResult] = useState(null);
 
   const refresh = useCallback(() => {
     window.electronAPI
@@ -26,43 +22,12 @@ export default function AgentsSection() {
 
   useEffect(refresh, [refresh]);
 
-  // brew streams for minutes; keep only the newest line so the row doesn't
-  // grow. The ref keeps the listener stable without re-subscribing per install.
-  const installingRef = useRef(null);
-  useEffect(() => {
-    installingRef.current = installing;
-  }, [installing]);
-
-  useEffect(() => {
-    const handleProgress = (data) => {
-      if (data && data.agentId === installingRef.current) setLogLine(data.line);
-    };
-    window.electronAPI.on('agent-install-progress', handleProgress);
-    return () => window.electronAPI.off('agent-install-progress');
-  }, []);
-
-  async function installAgent(agent) {
-    setInstalling(agent.id);
-    setLogLine('');
-    setInstallResult(null);
-    const result = await window.electronAPI.installAgent(agent.id);
-    if (result.success && result.detected) {
-      setInstallResult({ type: 'success', text: `${agent.name} installed.` });
-    } else if (result.success) {
-      // brew succeeded but the binary still isn't on PATH — Antigravity's cask
-      // installs the IDE that carries `agy`, and a new shell may be needed for
-      // anything else. Say so rather than showing a bare success.
-      setInstallResult({
-        type: 'info',
-        text: `${agent.name} installed, but ${agent.cmd} isn’t on PATH yet — open a new terminal, or enable its CLI from the app.`,
-      });
-    } else {
-      setInstallResult({ type: 'error', text: result.error });
-    }
-    setInstalling(null);
-    setLogLine('');
-    refresh();
-  }
+  const {
+    installing,
+    logLine,
+    result: installResult,
+    install: installAgent,
+  } = useAgentInstall({ onInstalled: refresh });
 
   const enabled = settings['agents.enabled'] || [];
   const commands = settings['agents.commands'] || {};
