@@ -1,6 +1,6 @@
 'use strict';
 
-const { execSync, execFileSync, spawn } = require('child_process');
+const { execSync, execFileSync } = require('child_process');
 const fs = require('fs');
 const brew = require('./brew.cjs');
 const execAsync = require('./asyncExec.cjs');
@@ -240,61 +240,6 @@ function getInstallablePhpVersions() {
     .map((version) => ({ version, installed: installed.has(version) }));
 }
 
-// Runs `brew <args...>`, streaming each output line to `onProgress`. Resolves on
-// success; rejects with the tail of brew's output on failure. No sudo needed —
-// brew writes into the Homebrew prefix.
-function runBrewStreaming(args, onProgress) {
-  return new Promise((resolve, reject) => {
-    const brewBin = brew.getBrewPath();
-    if (!brewBin) {
-      reject(new Error('Homebrew is not installed'));
-      return;
-    }
-
-    const prefix = brew.getBrewPrefix();
-    const child = spawn(brewBin, args, {
-      env: {
-        ...process.env,
-        PATH: `${prefix}/bin:${process.env.PATH}`,
-        // Skip the slow auto-update on every run; keeps output focused.
-        HOMEBREW_NO_AUTO_UPDATE: '1',
-        HOMEBREW_NO_ENV_HINTS: '1',
-      },
-    });
-
-    // brew writes most progress to stderr; keep a rolling tail for the error.
-    let tail = '';
-    const emit = (buf) => {
-      const text = buf.toString();
-      tail = (tail + text).slice(-4000);
-      for (const line of text.split('\n')) {
-        const trimmed = line.trim();
-        if (trimmed && typeof onProgress === 'function') onProgress(trimmed);
-      }
-    };
-
-    child.stdout.on('data', emit);
-    child.stderr.on('data', emit);
-    child.on('error', reject);
-    child.on('close', (code) => {
-      if (code === 0) {
-        resolve();
-        return;
-      }
-      // brew prefixes real failures with "Error:". Prefer that over the raw
-      // tail so unrelated warnings — e.g. Homebrew 6's multi-line "taps are
-      // not trusted" notice about other taps on the machine — can't mask the
-      // actual error in the UI.
-      const errIdx = tail.search(/^Error[:!]/m);
-      const message =
-        errIdx !== -1
-          ? tail.slice(errIdx).trim()
-          : tail.trim() || `brew ${args.join(' ')} failed (exit ${code})`;
-      reject(new Error(message));
-    });
-  });
-}
-
 // Homebrew 6.0 turned on HOMEBREW_REQUIRE_TAP_TRUST by default, so it refuses
 // to load formulae from untrusted third-party taps — which breaks install and
 // upgrade of the EOL PHP versions WPXen pulls from shivammathur/php (they fail
@@ -307,8 +252,8 @@ const WPXEN_PHP_TAP = 'shivammathur/php';
 
 async function ensurePhpTapTrusted(onProgress) {
   // Tap must exist before it can be trusted or its formulae loaded.
-  await runBrewStreaming(['tap', WPXEN_PHP_TAP], onProgress).catch(() => {});
-  await runBrewStreaming(['trust', WPXEN_PHP_TAP], onProgress).catch(() => {});
+  await brew.runBrewStreaming(['tap', WPXEN_PHP_TAP], onProgress).catch(() => {});
+  await brew.runBrewStreaming(['trust', WPXEN_PHP_TAP], onProgress).catch(() => {});
 }
 
 // Installs a PHP version via Homebrew (core or the shivammathur/php tap).
@@ -319,7 +264,7 @@ async function installPhpVersion(version, onProgress) {
   if (TAP_PHP_VERSIONS.includes(version)) {
     await ensurePhpTapTrusted(onProgress);
   }
-  return runBrewStreaming(['install', installFormulaFor(version)], onProgress);
+  return brew.runBrewStreaming(['install', installFormulaFor(version)], onProgress);
 }
 
 // Upgrades an installed PHP version to its latest patch release.
@@ -336,7 +281,7 @@ async function updatePhpVersion(version, onProgress) {
   if (TAP_PHP_VERSIONS.includes(version)) {
     await ensurePhpTapTrusted(onProgress);
   }
-  return runBrewStreaming(['upgrade', formula], onProgress);
+  return brew.runBrewStreaming(['upgrade', formula], onProgress);
 }
 
 function switchActivePhpVersion(version) {
@@ -742,7 +687,6 @@ module.exports = {
   getInstallablePhpVersions,
   installPhpVersion,
   updatePhpVersion,
-  runBrewStreaming,
   switchActivePhpVersion,
   getBrewServiceName,
   getPhpIniSettings,

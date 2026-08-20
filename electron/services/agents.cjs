@@ -16,13 +16,20 @@ const pty = require('node-pty');
 // ── Registry ────────────────────────────────────────────────────────────────
 // Curated, data-shaped so user-defined Agents can drop in later (Q5). `cmd` is
 // the binary we detect on PATH and spawn; `install` is the hint shown when it's
-// not found (Q7 — we don't auto-install).
+// not found.
+//
+// `brew` is the optional one-click install target: `{ name, cask }`, fed
+// straight to `brew install [--cask] <name>`. Only entries with a package that
+// actually exists in Homebrew carry one — the rest keep a text-only `install`
+// hint, and the UI shows no button for them. WPXen still never installs
+// anything on its own; the user has to click (Q7).
 const REGISTRY = [
   {
     id: 'claude',
     name: 'Claude Code',
     cmd: 'claude',
     install: 'npm install -g @anthropic-ai/claude-code',
+    brew: { name: 'claude-code', cask: true },
   },
   {
     // command-code installs four aliases for one entry point: cmd, cmdc,
@@ -45,6 +52,11 @@ const REGISTRY = [
     name: 'Antigravity',
     cmd: 'agy',
     install: 'Bundled with the Antigravity IDE',
+    // The cask installs the IDE, which is what carries `agy` — so unlike the
+    // others this one may still read as undetected afterwards, until the user
+    // enables the CLI from inside the IDE. Offering it beats sending them to
+    // a download page.
+    brew: { name: 'antigravity', cask: true },
   },
   {
     id: 'mimo',
@@ -57,6 +69,7 @@ const REGISTRY = [
     name: 'Codex',
     cmd: 'codex',
     install: 'npm install -g @openai/codex',
+    brew: { name: 'codex', cask: true },
   },
 ];
 
@@ -203,6 +216,9 @@ function listAgents({ all = false, shell = true } = {}) {
         name: a.name,
         cmd: a.cmd,
         install: a.install,
+        // Present only when a one-click Homebrew install is available; the UI
+        // keys the Install button off this.
+        brew: a.brew ? { ...a.brew } : null,
         isCustom: !!a.isCustom,
         isShell: false,
         enabled: !config.enabled || config.enabled.includes(a.id),
@@ -218,12 +234,63 @@ function listAgents({ all = false, shell = true } = {}) {
     ...providers,
     {
       ...SHELL_AGENT,
+      brew: null,
       isCustom: false,
       enabled: true,
       detected: true,
       path: getUserShell(),
     },
   ];
+}
+
+// ── One-click install ────────────────────────────────────────────────────────
+// Homebrew is the only installer WPXen drives. npm-global hints stay text-only:
+// a `npm install -g` needs a node version WPXen doesn't manage and writes
+// outside the Homebrew prefix, so there is no sane way to undo it — brew has
+// `uninstall`, an audit trail, and is already the app's dependency channel.
+//
+// brew.cjs is required lazily so this module stays importable outside Electron
+// (brew.cjs itself is safe, but the seam below is what tests swap).
+const deps = {
+  runBrewStreaming: (args, onProgress) =>
+    require('./brew.cjs').runBrewStreaming(args, onProgress),
+  isBrewInstalled: () => require('./brew.cjs').isBrewInstalled(),
+};
+
+function __setDeps(next) {
+  Object.assign(deps, next);
+}
+
+// Builds the brew argv for an Agent's package. Pure, so the arg shape is
+// testable without spawning anything.
+function brewInstallArgs(target) {
+  if (!target || typeof target.name !== 'string' || !target.name.trim()) {
+    throw new Error('No Homebrew package for this agent');
+  }
+  // The name is ours, not user input — but it lands in an argv, so refuse
+  // anything that isn't a plain formula/cask token rather than trusting the
+  // registry to stay well-formed forever.
+  if (!/^[a-z0-9][a-z0-9@/._-]*$/i.test(target.name)) {
+    throw new Error(`Invalid Homebrew package name: ${target.name}`);
+  }
+  return target.cask ? ['install', '--cask', target.name] : ['install', target.name];
+}
+
+// Installs an Agent's CLI via Homebrew, streaming brew's output line by line.
+// Resolves once brew exits 0; the caller re-runs listAgents to pick up the new
+// binary (detection is a live PATH probe, so nothing needs invalidating).
+async function installAgent(id, onProgress) {
+  const agent = effectiveRegistry().find((a) => a.id === id);
+  if (!agent) throw new Error(`Unknown agent: ${id}`);
+  if (!agent.brew) {
+    throw new Error(
+      `${agent.name} has no Homebrew package — install it with: ${agent.install}`
+    );
+  }
+  if (!deps.isBrewInstalled()) {
+    throw new Error('Homebrew is not installed');
+  }
+  await deps.runBrewStreaming(brewInstallArgs(agent.brew), onProgress);
 }
 
 // ── Launch resolution (Launch Presets & Targets) ─────────────────────────────
@@ -490,6 +557,8 @@ module.exports = {
   setConfig,
   effectiveRegistry,
   listAgents,
+  installAgent,
+  brewInstallArgs,
   listSessions,
   resolveLaunch,
   launch,
@@ -502,4 +571,5 @@ module.exports = {
   hasActiveSessions,
   activeSiteIds,
   stopAll,
+  __setDeps,
 };

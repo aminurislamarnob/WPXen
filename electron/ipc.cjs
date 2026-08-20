@@ -263,6 +263,28 @@ function registerHandlers(win, storeInstance) {
   // it has no binary to detect, no command to override, and is always available.
   ipcMain.handle('agent-list-all', () => agents.listAgents({ all: true, shell: false }));
 
+  // One-click Homebrew install for an Agent's CLI, streaming brew's output the
+  // same way the PHP version installer does. Only agents carrying a vetted
+  // `brew` target reach here; the service rejects the rest.
+  ipcMain.handle('agent-install', async (event, agentId) => {
+    try {
+      const progress = (line) => {
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('agent-install-progress', { agentId, line });
+        }
+      };
+      await agents.installAgent(agentId, progress);
+      // A cask can drop its binary somewhere brew has just linked, so re-probe
+      // rather than trusting the caller's stale list.
+      const agent = agents
+        .listAgents({ all: true, shell: false })
+        .find((a) => a.id === agentId);
+      return { success: true, detected: !!agent?.detected, path: agent?.path || null };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
   // The live Sessions for a Site — the renderer restores its terminal tabs.
   ipcMain.handle('agent-sessions', (_e, siteId) => agents.listSessions(siteId));
 

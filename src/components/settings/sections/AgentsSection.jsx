@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
-import { Loader, Plus, Trash2 } from 'lucide-react';
-import { Card, SectionLabel, SettingsRow, Toggle, Tooltip } from '../../ui';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Download, Loader, Plus, Trash2 } from 'lucide-react';
+import { Button, Card, SectionLabel, SettingsRow, Toggle, Tooltip } from '../../ui';
 import { TextSetting } from '../controls';
 import { useSettings } from '../../../lib/useSettings';
 import { useSettingsContext } from '../SettingsLayout';
@@ -11,6 +11,11 @@ export default function AgentsSection() {
   const [agents, setAgents] = useState(null);
   const [draft, setDraft] = useState({ id: '', name: '', cmd: '' });
   const [addError, setAddError] = useState('');
+  // id of the agent currently installing, its last brew output line, and the
+  // outcome banner. One install at a time — brew takes a lock anyway.
+  const [installing, setInstalling] = useState(null);
+  const [logLine, setLogLine] = useState('');
+  const [installResult, setInstallResult] = useState(null);
 
   const refresh = useCallback(() => {
     window.electronAPI
@@ -20,6 +25,44 @@ export default function AgentsSection() {
   }, []);
 
   useEffect(refresh, [refresh]);
+
+  // brew streams for minutes; keep only the newest line so the row doesn't
+  // grow. The ref keeps the listener stable without re-subscribing per install.
+  const installingRef = useRef(null);
+  useEffect(() => {
+    installingRef.current = installing;
+  }, [installing]);
+
+  useEffect(() => {
+    const handleProgress = (data) => {
+      if (data && data.agentId === installingRef.current) setLogLine(data.line);
+    };
+    window.electronAPI.on('agent-install-progress', handleProgress);
+    return () => window.electronAPI.off('agent-install-progress');
+  }, []);
+
+  async function installAgent(agent) {
+    setInstalling(agent.id);
+    setLogLine('');
+    setInstallResult(null);
+    const result = await window.electronAPI.installAgent(agent.id);
+    if (result.success && result.detected) {
+      setInstallResult({ type: 'success', text: `${agent.name} installed.` });
+    } else if (result.success) {
+      // brew succeeded but the binary still isn't on PATH — Antigravity's cask
+      // installs the IDE that carries `agy`, and a new shell may be needed for
+      // anything else. Say so rather than showing a bare success.
+      setInstallResult({
+        type: 'info',
+        text: `${agent.name} installed, but ${agent.cmd} isn’t on PATH yet — open a new terminal, or enable its CLI from the app.`,
+      });
+    } else {
+      setInstallResult({ type: 'error', text: result.error });
+    }
+    setInstalling(null);
+    setLogLine('');
+    refresh();
+  }
 
   const enabled = settings['agents.enabled'] || [];
   const commands = settings['agents.commands'] || {};
@@ -98,11 +141,30 @@ export default function AgentsSection() {
               }
               title={agent.name}
               subtitle={
-                agent.detected
-                  ? `${agent.cmd} · ${agent.path}`
-                  : `Not installed — ${agent.install || `${agent.cmd} not found on PATH`}`
+                installing === agent.id
+                  ? logLine || `Installing ${agent.brew?.name}…`
+                  : agent.detected
+                    ? `${agent.cmd} · ${agent.path}`
+                    : agent.brew
+                      ? `Not installed — brew install${agent.brew.cask ? ' --cask' : ''} ${agent.brew.name}`
+                      : `Not installed — ${agent.install || `${agent.cmd} not found on PATH`}`
               }
             >
+              {!agent.detected && agent.brew && (
+                <Button
+                  variant="secondary"
+                  onClick={() => installAgent(agent)}
+                  disabled={!!installing}
+                  aria-label={`Install ${agent.name} with Homebrew`}
+                >
+                  {installing === agent.id ? (
+                    <Loader size={13} className="animate-spin" />
+                  ) : (
+                    <Download size={13} />
+                  )}
+                  {installing === agent.id ? 'Installing…' : 'Install'}
+                </Button>
+              )}
               {agent.isCustom && (
                 <Tooltip label="Remove agent">
                   <button
@@ -122,9 +184,23 @@ export default function AgentsSection() {
             </SettingsRow>
           ))}
         </Card>
+        {installResult && (
+          <p
+            className={`text-[11px] mt-1.5 px-1 ${
+              installResult.type === 'error'
+                ? 'text-destructive'
+                : installResult.type === 'success'
+                  ? 'text-status-running'
+                  : 'text-muted-foreground'
+            }`}
+          >
+            {installResult.text}
+          </p>
+        )}
         <p className="text-[11px] text-muted-foreground mt-1.5 px-1">
           Disabled agents stay installed — they just don’t appear in a site’s agent
-          launcher.
+          launcher. Install runs Homebrew; agents without a Homebrew package show their
+          own install command instead.
         </p>
       </div>
 

@@ -143,7 +143,16 @@ no daemon** (see `docs/adr/0001-main-process-pty-no-daemon.md`), so it survives
 the window hiding to the tray and is reaped on quit; reattach after a window
 reopen is served from an in-memory ring buffer. The provider registry is
 data-shaped: `cmd` is the binary detected on `$PATH` and spawned, `install` is
-the hint shown when it isn't found (WPXen never auto-installs).
+the hint shown when it isn't found, and the optional `brew` (`{ name, cask }`)
+is the one-click install target fed to `brew install [--cask] <name>`.
+
+Only entries whose package **actually exists in Homebrew** carry a `brew` —
+verify with `brew info` before adding one, because a wrong name fails at click
+time, not at review time. The rest keep a text-only hint and get no button.
+WPXen still never installs anything unprompted; the user clicks. Homebrew is
+the only installer it drives — `npm install -g` hints stay text, since they
+need a node version WPXen doesn't manage and write outside the brew prefix,
+so there's no clean way to undo them.
 
 ### In-app browser
 

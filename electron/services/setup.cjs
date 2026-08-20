@@ -15,7 +15,6 @@
 
 const { execFile } = require('child_process');
 const brew = require('./brew.cjs');
-const php = require('./php.cjs');
 
 // Homebrew formula names WPXen needs. Note the formula is `wp-cli` while the
 // dependency key `checkAllDependencies` reports is `wpCli`. Plain `php` = the
@@ -43,7 +42,7 @@ async function installCoreDeps(onProgress) {
     return { installed: [] };
   }
 
-  await php.runBrewStreaming(['install', ...missing], onProgress);
+  await brew.runBrewStreaming(['install', ...missing], onProgress);
   brew.invalidateDependencyCache();
   return { installed: missing };
 }

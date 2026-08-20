@@ -1,6 +1,6 @@
 'use strict';
 
-const { execSync } = require('child_process');
+const { execSync, spawn } = require('child_process');
 const fs = require('fs');
 const execAsync = require('./asyncExec.cjs');
 
@@ -358,8 +358,64 @@ function restartBrewServiceSudo(name) {
   execBrewServiceSudo('restart', name);
 }
 
+// Runs `brew <args...>`, streaming each output line to `onProgress`. Resolves on
+// success; rejects with the tail of brew's output on failure. No sudo needed —
+// brew writes into the Homebrew prefix.
+function runBrewStreaming(args, onProgress) {
+  return new Promise((resolve, reject) => {
+    const brewBin = getBrewPath();
+    if (!brewBin) {
+      reject(new Error('Homebrew is not installed'));
+      return;
+    }
+
+    const prefix = getBrewPrefix();
+    const child = spawn(brewBin, args, {
+      env: {
+        ...process.env,
+        PATH: `${prefix}/bin:${process.env.PATH}`,
+        // Skip the slow auto-update on every run; keeps output focused.
+        HOMEBREW_NO_AUTO_UPDATE: '1',
+        HOMEBREW_NO_ENV_HINTS: '1',
+      },
+    });
+
+    // brew writes most progress to stderr; keep a rolling tail for the error.
+    let tail = '';
+    const emit = (buf) => {
+      const text = buf.toString();
+      tail = (tail + text).slice(-4000);
+      for (const line of text.split('\n')) {
+        const trimmed = line.trim();
+        if (trimmed && typeof onProgress === 'function') onProgress(trimmed);
+      }
+    };
+
+    child.stdout.on('data', emit);
+    child.stderr.on('data', emit);
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      // brew prefixes real failures with "Error:". Prefer that over the raw
+      // tail so unrelated warnings — e.g. Homebrew 6's multi-line "taps are
+      // not trusted" notice about other taps on the machine — can't mask the
+      // actual error in the UI.
+      const errIdx = tail.search(/^Error[:!]/m);
+      const message =
+        errIdx !== -1
+          ? tail.slice(errIdx).trim()
+          : tail.trim() || `brew ${args.join(' ')} failed (exit ${code})`;
+      reject(new Error(message));
+    });
+  });
+}
+
 module.exports = {
   getBrewPrefix,
+  runBrewStreaming,
   getBrewPath,
   isBrewInstalled,
   execBrew,
