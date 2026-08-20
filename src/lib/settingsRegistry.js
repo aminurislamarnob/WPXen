@@ -351,6 +351,7 @@ export const SETTINGS_ITEMS = [
       'codex',
       'copilot',
       'grok',
+      'cursor',
       'gemini',
       'opencode',
       'launcher',
@@ -363,7 +364,7 @@ export const SETTINGS_ITEMS = [
     id: 'agents.commands',
     section: 'agents',
     title: 'Launch commands',
-    description: 'Override the command an agent starts with',
+    description: 'Override the command an agent starts with — expand its row',
     keywords: [
       'agents',
       'command',

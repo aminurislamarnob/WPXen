@@ -110,6 +110,15 @@ const REGISTRY = [
     installer: { kind: 'script', url: 'https://x.ai/cli/install.sh' },
   },
   {
+    id: 'cursor',
+    name: 'Cursor Agent',
+    cmd: 'cursor-agent',
+    install: 'curl https://cursor.com/install -fsS | bash',
+    // No Homebrew package. Installs to ~/.local/bin and appends a PATH line to
+    // the shell rc, same shape as MiMo's.
+    installer: { kind: 'script', url: 'https://cursor.com/install' },
+  },
+  {
     id: 'codex',
     name: 'Codex',
     cmd: 'codex --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust',

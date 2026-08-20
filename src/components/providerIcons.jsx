@@ -1,10 +1,12 @@
 // Provider brand marks for the Agent Launcher, matching the lucide-react API
 // (`size`, `className`) so they drop into the same render paths as lucide icons.
 //
-// Sourced from reference/providers-icon. The upstream files are authored as
-// white-on-dark brand marks; the fills/strokes here are rewritten to
-// currentColor so each icon inherits its surrounding text color and stays
-// legible in both light and dark appearance.
+// Sourced from reference/providers-icon, and for the later additions from
+// Superset's own preset icons (superset-sh/superset,
+// packages/ui/src/assets/icons/preset-icons — the `-white` variants). The
+// upstream files are authored as white-on-dark brand marks; the fills/strokes
+// here are rewritten to currentColor so each icon inherits its surrounding
+// text color and stays legible in both light and dark appearance.
 
 import { Terminal } from 'lucide-react';
 
@@ -110,16 +112,87 @@ export function CodexIcon({ size = 16, className = '', ...props }) {
   );
 }
 
+export function CopilotIcon({ size = 16, className = '', ...props }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      className={className}
+      {...props}
+    >
+      <path d="M23.922 16.992c-.861 1.495-5.859 5.023-11.922 5.023-6.063 0-11.061-3.528-11.922-5.023A.641.641 0 0 1 0 16.736v-2.869a.841.841 0 0 1 .053-.22c.372-.935 1.347-2.292 2.605-2.656.167-.429.414-1.055.644-1.517a10.195 10.195 0 0 1-.052-1.086c0-1.331.282-2.499 1.132-3.368.397-.406.89-.717 1.474-.952 1.399-1.136 3.392-2.093 6.122-2.093 2.731 0 4.767.957 6.166 2.093.584.235 1.077.546 1.474.952.85.869 1.132 2.037 1.132 3.368 0 .368-.014.733-.052 1.086.23.462.477 1.088.644 1.517 1.258.364 2.233 1.721 2.605 2.656a.832.832 0 0 1 .053.22v2.869a.641.641 0 0 1-.078.256ZM12.172 11h-.344a4.323 4.323 0 0 1-.355.508C10.703 12.455 9.555 13 7.965 13c-1.725 0-2.989-.359-3.782-1.259a2.005 2.005 0 0 1-.085-.104L4 11.741v6.585c1.435.779 4.514 2.179 8 2.179 3.486 0 6.565-1.4 8-2.179v-6.585l-.098-.104s-.033.045-.085.104c-.793.9-2.057 1.259-3.782 1.259-1.59 0-2.738-.545-3.508-1.492a4.323 4.323 0 0 1-.355-.508h-.016.016Zm.641-2.935c.136 1.057.403 1.913.878 2.497.442.544 1.134.938 2.344.938 1.573 0 2.292-.337 2.657-.751.384-.435.558-1.15.558-2.361 0-1.14-.243-1.847-.705-2.319-.477-.488-1.319-.862-2.824-1.025-1.487-.161-2.192.138-2.533.529-.269.307-.437.808-.438 1.578v.021c0 .265.021.562.063.893Zm-1.626 0c.042-.331.063-.628.063-.894v-.02c-.001-.77-.169-1.271-.438-1.578-.341-.391-1.046-.69-2.533-.529-1.505.163-2.347.537-2.824 1.025-.462.472-.705 1.179-.705 2.319 0 1.211.175 1.926.558 2.361.365.414 1.084.751 2.657.751 1.21 0 1.902-.394 2.344-.938.475-.584.742-1.44.878-2.497Z" />
+      <path d="M14.5 14.25a1 1 0 0 1 1 1v2a1 1 0 0 1-2 0v-2a1 1 0 0 1 1-1Zm-5 0a1 1 0 0 1 1 1v2a1 1 0 0 1-2 0v-2a1 1 0 0 1 1-1Z" />
+    </svg>
+  );
+}
+
+export function GrokIcon({ size = 16, className = '', ...props }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      className={className}
+      {...props}
+    >
+      <path
+        d="M6.469 8.776L16.512 23h-4.464L2.005 8.776H6.47zm-.004 7.9l2.233 3.164L6.467 23H2l4.465-6.324zM22 2.582V23h-3.659V7.764L22 2.582zM22 1l-9.952 14.095-2.233-3.163L17.533 1H22z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
+// Cursor's mark is the one that isn't flat: five tones shading a cube. Flatten
+// it to a single fill and it reads as a blob, so the facets are kept — as
+// opacities of currentColor rather than the upstream greys, which would go
+// invisible on a light card (its top face is #fff). Ordered lightest face to
+// darkest, this shades correctly in both appearances.
+export function CursorIcon({ size = 16, className = '', ...props }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width={size}
+      height={size}
+      viewBox="0 0 466.73 533.32"
+      fill="currentColor"
+      className={className}
+      {...props}
+    >
+      <path
+        d="M233.37,266.66l231.16,133.46c-1.42,2.46-3.48,4.56-6.03,6.03l-216.06,124.74c-5.61,3.24-12.53,3.24-18.14,0L8.24,406.15c-2.55-1.47-4.61-3.57-6.03-6.03l231.16-133.46h0Z"
+        opacity="0.45"
+      />
+      <path
+        d="M233.37,0v266.66L2.21,400.12c-1.42-2.46-2.21-5.3-2.21-8.24v-250.44c0-5.89,3.14-11.32,8.24-14.27L224.29,2.43c2.81-1.62,5.94-2.43,9.07-2.43h.01Z"
+        opacity="0.3"
+      />
+      <path
+        d="M464.52,133.2c-1.42-2.46-3.48-4.56-6.03-6.03L242.43,2.43c-2.8-1.62-5.93-2.43-9.06-2.43v266.66l231.16,133.46c1.42-2.46,2.21-5.3,2.21-8.24v-250.44c0-2.95-.78-5.77-2.21-8.24h-.01Z"
+        opacity="0.2"
+      />
+      <path
+        d="M448.35,142.54c1.31,2.26,1.49,5.16,0,7.74l-209.83,363.42c-1.41,2.46-5.16,1.45-5.16-1.38v-239.48c0-1.91-.51-3.75-1.44-5.36l216.42-124.95h.01Z"
+        opacity="0.8"
+      />
+      <path d="M448.35,142.54l-216.42,124.95c-.92-1.6-2.26-2.96-3.92-3.92L20.62,143.83c-2.46-1.41-1.45-5.16,1.38-5.16h419.65c2.98,0,5.4,1.61,6.7,3.87Z" />
+    </svg>
+  );
+}
+
 // Agent id (see REGISTRY in electron/services/agents.cjs) -> brand mark.
-// `copilot` and `grok` have no entry yet and fall back to the terminal glyph
-// below — an approximated brand mark is worse than an honest generic one, so
-// they stay unmapped until their real marks are vendored into
-// reference/providers-icon like the rest.
 export const PROVIDER_ICONS = {
   claude: ClaudeIcon,
   commandcode: CommandCodeIcon,
   antigravity: AntigravityIcon,
   mimo: MimoIcon,
+  copilot: CopilotIcon,
+  grok: GrokIcon,
+  cursor: CursorIcon,
   codex: CodexIcon,
 };
 
@@ -129,6 +202,8 @@ export const PROVIDER_ICONS = {
 //   commandcode  favicon samples 75% black + 15% white, zero saturation
 //   antigravity  app icon is ~79% white glyph; blue is a backdrop, not the mark
 //   mimo         no published brand color found
+//   copilot      GitHub's mark is black-on-light / white-on-dark
+//   grok         xAI's mark is likewise pure black/white
 // An id missing here keeps currentColor, which is the faithful treatment.
 export const PROVIDER_BRAND = {
   claude: '#d97757',
