@@ -26,15 +26,22 @@ hides every test failure behind it — when a run goes red, check which step
 stopped rather than assuming the first error is the only one. Run all four
 locally before pushing.
 
-⚠️ **CI installs with `ELECTRON_SKIP_BINARY_DOWNLOAD=1`.** Nothing in
-lint/test/build needs the ~100MB binary, but it means `node_modules/electron`
-has no `path.txt` and its `index.js` **throws from module scope** instead of
-exporting an API. So any `electron/**` module that a test imports — directly or
-transitively — must **not** `require('electron')` at the top level; resolve it
-lazily inside the function that uses it, the way `siteops.cjs`,
-`blueprints.cjs`, `procman.cjs`, `browser.cjs` and `safeUrl.cjs` do. A top-level
-require passes locally (where the binary exists) and fails only on the runner,
-so to reproduce, temporarily move `node_modules/electron/path.txt` aside.
+⚠️ **Never `require('electron')` at module scope** in anything a test
+imports — directly or transitively. Tests load main-process modules under plain
+Node, where `electron`'s `index.js` runs `getElectronPath()` at module scope: it
+resolves no API surface, and on a missing `path.txt` it **spawns a ~100MB binary
+download**. Resolve the require lazily inside the function that uses it, the way
+`siteops.cjs`, `blueprints.cjs`, `procman.cjs`, `browser.cjs` and `safeUrl.cjs`
+do.
+
+The enforcement is `test/no-module-scope-electron.test.js`, a ratchet with an
+explicit per-file allowlist (the five entry points no test imports:
+`main.cjs`, `preload.cjs`, `tray.cjs`, `store.cjs`, `ipc.cjs`). It only ever
+tightens — exceeding a count fails, and dropping below one fails too, so the
+entry has to be lowered in the same change. Historically the guard was CI's
+`ELECTRON_SKIP_BINARY_DOWNLOAD=1`, which made a top-level require throw on the
+runner; Electron 42 deleted the `postinstall` download and that env var with it,
+so the failure became a silent download instead. Hence the ratchet.
 
 ## Architecture
 
@@ -188,8 +195,8 @@ renderer helpers.
   therefore expose their own seam: a `deps` object plus a `__setDeps()` export
   (`browser.cjs`, `externalTools.cjs`). Follow that pattern rather than
   reaching for `vi.mock`.
-- Keep in mind the `ELECTRON_SKIP_BINARY_DOWNLOAD` constraint above when a new
-  test imports a main-process module.
+- Keep the no-module-scope-`require('electron')` rule above in mind when a new
+  test imports a main-process module; the ratchet test enforces it.
 
 ### Renderer layout
 

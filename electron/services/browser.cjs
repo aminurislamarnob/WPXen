@@ -14,12 +14,13 @@
 
 const { openExternalSafely } = require('./safeUrl.cjs');
 
-// electron is resolved on access rather than at module scope. CI installs with
-// ELECTRON_SKIP_BINARY_DOWNLOAD=1, where `require('electron')` throws instead of
-// handing back the API surface — at module scope that takes down the whole test
-// file at import time, before a single pure helper can run. Undefined is a fine
-// answer there; `guest()` already treats a missing registry as "no guest", and
-// off the runner these getters only ever fire inside a real main process.
+// electron is resolved on access rather than at module scope. Tests import this
+// module under plain Node, where a module-scope `require('electron')` resolves
+// no API surface and, since Electron 42 dropped the postinstall guard, kicks off
+// a ~100MB binary download at import time — before a single pure helper can run.
+// Undefined is a fine answer there; `guest()` already treats a missing registry
+// as "no guest", and off the runner these getters only ever fire inside a real
+// main process. Enforced by test/no-module-scope-electron.test.js.
 function fromElectron(name) {
   try {
     return require('electron')[name];
@@ -197,8 +198,16 @@ function attachContextMenu(tabKey, wc) {
     }
 
     items.push(
-      { label: 'Back', enabled: wc.canGoBack(), click: () => wc.goBack() },
-      { label: 'Forward', enabled: wc.canGoForward(), click: () => wc.goForward() },
+      {
+        label: 'Back',
+        enabled: wc.navigationHistory.canGoBack(),
+        click: () => wc.navigationHistory.goBack(),
+      },
+      {
+        label: 'Forward',
+        enabled: wc.navigationHistory.canGoForward(),
+        click: () => wc.navigationHistory.goForward(),
+      },
       { label: 'Reload', click: () => wc.reload() }
     );
 

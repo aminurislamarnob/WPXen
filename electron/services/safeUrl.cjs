@@ -12,8 +12,8 @@ function openExternalSafely(url) {
     const parsed = new URL(url);
     if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
       // Required here, not at module scope: services/browser.cjs pulls this in,
-      // and the test suite runs under ELECTRON_SKIP_BINARY_DOWNLOAD=1 where a
-      // top-level require throws on import.
+      // and the test suite imports it under plain Node, where a top-level
+      // require resolves no API (and triggers a binary download).
       require('electron').shell.openExternal(url);
       return true;
     }
