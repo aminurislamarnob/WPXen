@@ -5,6 +5,7 @@ import { TextSetting } from '../controls';
 import { useSettings } from '../../../lib/useSettings';
 import { useSettingsContext } from '../SettingsLayout';
 import { useAgentInstall } from '../../../lib/useAgentInstall';
+import { installerSubtitle, installerTooltip } from '../../../lib/installerLabel';
 
 export default function AgentsSection() {
   const { settings, setSetting } = useSettings();
@@ -107,20 +108,21 @@ export default function AgentsSection() {
               title={agent.name}
               subtitle={
                 installing === agent.id
-                  ? logLine || `Installing ${agent.brew?.name}…`
+                  ? logLine || 'Installing…'
                   : agent.detected
                     ? `${agent.cmd} · ${agent.path}`
-                    : agent.brew
-                      ? `Not installed — brew install${agent.brew.cask ? ' --cask' : ''} ${agent.brew.name}`
+                    : agent.installer
+                      ? installerSubtitle(agent.installer)
                       : `Not installed — ${agent.install || `${agent.cmd} not found on PATH`}`
               }
             >
-              {!agent.detected && agent.brew && (
+              {!agent.detected && agent.installer && (
                 <Button
                   variant="secondary"
                   onClick={() => installAgent(agent)}
                   disabled={!!installing}
-                  aria-label={`Install ${agent.name} with Homebrew`}
+                  title={installerTooltip(agent.installer)}
+                  aria-label={`Install ${agent.name} — ${installerTooltip(agent.installer)}`}
                 >
                   {installing === agent.id ? (
                     <Loader size={13} className="animate-spin" />

@@ -143,16 +143,32 @@ no daemon** (see `docs/adr/0001-main-process-pty-no-daemon.md`), so it survives
 the window hiding to the tray and is reaped on quit; reattach after a window
 reopen is served from an in-memory ring buffer. The provider registry is
 data-shaped: `cmd` is the binary detected on `$PATH` and spawned, `install` is
-the hint shown when it isn't found, and the optional `brew` (`{ name, cask }`)
-is the one-click install target fed to `brew install [--cask] <name>`.
+the hint shown when it isn't found, and the optional `installer` is the
+one-click target, tagged by kind:
 
-Only entries whose package **actually exists in Homebrew** carry a `brew` —
-verify with `brew info` before adding one, because a wrong name fails at click
-time, not at review time. The rest keep a text-only hint and get no button.
-WPXen still never installs anything unprompted; the user clicks. Homebrew is
-the only installer it drives — `npm install -g` hints stay text, since they
-need a node version WPXen doesn't manage and write outside the brew prefix,
-so there's no clean way to undo them.
+- `{ kind: 'brew', name, cask }` → `brew install [--cask] <name>`
+- `{ kind: 'script', url }` → the vendor's install script, https only
+
+**Prefer `brew`, and verify the package before adding one.** `brew info` must
+show it exists _and_ that its artifact is the binary `cmd` looks for — a cask
+that installs an `.app` passes the name check and still leaves the agent
+undetected (this is exactly how `antigravity` vs `antigravity-cli` went wrong
+once). A wrong entry fails at click time, not review time.
+
+`kind: 'script'` is the escape hatch for CLIs distributed no other way, and it
+is a real step up in trust: it downloads and executes vendor code. Guardrails
+that must stay — https-only with no embedded credentials (`installScriptUrl`),
+fetch-then-run rather than `curl | bash` so nothing in the URL can become shell
+syntax and a CDN error page can't execute halfway, and UI wording that names
+the host rather than dressing it up as the same act as `brew install`. Note
+these scripts commonly append a `PATH` line to the user's shell rc — that's
+usually what makes detection work afterwards, so it's allowed but must be
+disclosed, not silent.
+
+Entries with neither keep a text-only hint and get no button. `npm install -g`
+stays text deliberately: it needs a node version WPXen doesn't manage, writes
+outside the brew prefix, and has no clean undo. WPXen still never installs
+anything unprompted; the user clicks.
 
 ### In-app browser
 

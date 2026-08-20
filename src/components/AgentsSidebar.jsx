@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { ChevronRight, ChevronDown, Globe, Download, Loader } from 'lucide-react';
 import { ProviderIcon } from './providerIcons';
 import { useAgentInstall } from '../lib/useAgentInstall';
+import { installerTooltip } from '../lib/installerLabel';
 
 // The Agents-mode sidebar: a Sites tree. Each Site collapses to its available
 // providers (Agents); clicking one opens that Agent's terminal in the selected
@@ -97,7 +98,7 @@ export default function AgentsSidebar() {
                     // replacing it: the row stays the launcher, and the icon
                     // is the way out of a dead one. Only agents with a vetted
                     // Homebrew package get it — the rest keep the tooltip.
-                    const canInstall = !agent.detected && !!agent.brew;
+                    const canInstall = !agent.detected && !!agent.installer;
                     const failed =
                       result?.agentId === agent.id && result.type === 'error';
 
@@ -116,7 +117,7 @@ export default function AgentsSidebar() {
                               : agent.detected
                                 ? 'Open a new session'
                                 : isInstalling
-                                  ? logLine || `Installing ${agent.brew?.name}…`
+                                  ? logLine || 'Installing…'
                                   : failed
                                     ? result.text
                                     : `Not installed · ${agent.install}`
@@ -145,13 +146,11 @@ export default function AgentsSidebar() {
                           <button
                             onClick={() => install(agent)}
                             disabled={!!installing}
-                            aria-label={`Install ${agent.name} with Homebrew`}
+                            aria-label={`Install ${agent.name} — ${installerTooltip(agent.installer)}`}
                             title={
                               isInstalling
-                                ? logLine || `Installing ${agent.brew.name}…`
-                                : `Install with Homebrew · brew install${
-                                    agent.brew.cask ? ' --cask' : ''
-                                  } ${agent.brew.name}`
+                                ? logLine || 'Installing…'
+                                : installerTooltip(agent.installer)
                             }
                             className={`flex-shrink-0 mr-1 p-1 rounded-md text-muted-foreground/70 hover:text-foreground hover:bg-sidebar-accent disabled:cursor-not-allowed ${
                               // Stays put while installing or after a failure;

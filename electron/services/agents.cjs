@@ -18,10 +18,16 @@ const pty = require('node-pty');
 // the binary we detect on PATH and spawn; `install` is the hint shown when it's
 // not found.
 //
-// `brew` is the optional one-click install target: `{ name, cask }`, fed
-// straight to `brew install [--cask] <name>`. Only entries with a package that
-// actually exists in Homebrew carry one — the rest keep a text-only `install`
-// hint, and the UI shows no button for them. WPXen still never installs
+// `installer` is the optional one-click install target, tagged by kind:
+//
+//   { kind: 'brew', name, cask } → brew install [--cask] <name>
+//   { kind: 'script', url }      → the vendor's install script, over https
+//
+// Prefer 'brew' whenever a package exists: it is undoable, auditable, and
+// already the app's dependency channel. 'script' is the escape hatch for CLIs
+// distributed no other way — it executes vendor code, so the URL must be https
+// and the UI says plainly what is about to run. Entries with neither keep a
+// text-only `install` hint and get no button. WPXen still never installs
 // anything on its own; the user has to click (Q7).
 const REGISTRY = [
   {
@@ -29,7 +35,7 @@ const REGISTRY = [
     name: 'Claude Code',
     cmd: 'claude',
     install: 'npm install -g @anthropic-ai/claude-code',
-    brew: { name: 'claude-code', cask: true },
+    installer: { kind: 'brew', name: 'claude-code', cask: true },
   },
   {
     // command-code installs four aliases for one entry point: cmd, cmdc,
@@ -56,20 +62,25 @@ const REGISTRY = [
     // carries `agy` but installs an .app rather than the binary. This cask's
     // artifact is `antigravity -> agy (Binary)`, i.e. the thing detection
     // looks for, so it lands straight on PATH.
-    brew: { name: 'antigravity-cli', cask: true },
+    installer: { kind: 'brew', name: 'antigravity-cli', cask: true },
   },
   {
     id: 'mimo',
     name: 'MiMo Code',
     cmd: 'mimo',
-    install: 'Install the MiMo Code CLI',
+    install: 'curl -fsSL https://mimo.xiaomi.com/install | bash',
+    // No Homebrew package exists. The vendor script needs no sudo, installs to
+    // ~/.mimocode/bin, and appends a PATH line to the user's shell rc — which
+    // is what makes `mimo` detectable afterwards, so we let it (the UI says so
+    // rather than doing it quietly).
+    installer: { kind: 'script', url: 'https://mimo.xiaomi.com/install' },
   },
   {
     id: 'codex',
     name: 'Codex',
     cmd: 'codex',
     install: 'npm install -g @openai/codex',
-    brew: { name: 'codex', cask: true },
+    installer: { kind: 'brew', name: 'codex', cask: true },
   },
 ];
 
@@ -216,9 +227,9 @@ function listAgents({ all = false, shell = true } = {}) {
         name: a.name,
         cmd: a.cmd,
         install: a.install,
-        // Present only when a one-click Homebrew install is available; the UI
-        // keys the Install button off this.
-        brew: a.brew ? { ...a.brew } : null,
+        // Present only when a one-click install is available; the UI keys the
+        // Install button off this and branches on `kind` for its wording.
+        installer: a.installer ? { ...a.installer } : null,
         isCustom: !!a.isCustom,
         isShell: false,
         enabled: !config.enabled || config.enabled.includes(a.id),
@@ -234,7 +245,7 @@ function listAgents({ all = false, shell = true } = {}) {
     ...providers,
     {
       ...SHELL_AGENT,
-      brew: null,
+      installer: null,
       isCustom: false,
       enabled: true,
       detected: true,
@@ -244,10 +255,16 @@ function listAgents({ all = false, shell = true } = {}) {
 }
 
 // ── One-click install ────────────────────────────────────────────────────────
-// Homebrew is the only installer WPXen drives. npm-global hints stay text-only:
-// a `npm install -g` needs a node version WPXen doesn't manage and writes
-// outside the Homebrew prefix, so there is no sane way to undo it — brew has
-// `uninstall`, an audit trail, and is already the app's dependency channel.
+// Two mechanisms, and the ordering between them is deliberate. Homebrew is
+// preferred wherever a package exists: undoable, auditable, already the app's
+// dependency channel. npm-global hints stay text-only — `npm install -g` needs
+// a node version WPXen doesn't manage, writes outside the Homebrew prefix, and
+// has no clean undo.
+//
+// A vendor script is the fallback for CLIs distributed no other way. It runs
+// code fetched from the network, which is a real step up in trust from `brew
+// install`, so it is opt-in per registry entry, https-only, and the button
+// states what it will do rather than presenting it as the same act.
 //
 // brew.cjs is required lazily so this module stays importable outside Electron
 // (brew.cjs itself is safe, but the seam below is what tests swap).
@@ -255,6 +272,7 @@ const deps = {
   runBrewStreaming: (args, onProgress) =>
     require('./brew.cjs').runBrewStreaming(args, onProgress),
   isBrewInstalled: () => require('./brew.cjs').isBrewInstalled(),
+  runScriptStreaming: (url, onProgress) => runVendorScript(url, onProgress),
 };
 
 function __setDeps(next) {
@@ -276,21 +294,127 @@ function brewInstallArgs(target) {
   return target.cask ? ['install', '--cask', target.name] : ['install', target.name];
 }
 
-// Installs an Agent's CLI via Homebrew, streaming brew's output line by line.
-// Resolves once brew exits 0; the caller re-runs listAgents to pick up the new
+// Validates a script installer's URL. https only, no embedded credentials —
+// this is the one place WPXen runs code it did not ship, so the transport has
+// to be authenticated or the exercise is theatre.
+function installScriptUrl(target) {
+  if (!target || typeof target.url !== 'string' || !target.url.trim()) {
+    throw new Error('No install script for this agent');
+  }
+  let parsed;
+  try {
+    parsed = new URL(target.url);
+  } catch {
+    throw new Error(`Invalid install script URL: ${target.url}`);
+  }
+  if (parsed.protocol !== 'https:') {
+    throw new Error(`Install scripts must be served over https: ${target.url}`);
+  }
+  if (parsed.username || parsed.password) {
+    throw new Error('Install script URL must not carry credentials');
+  }
+  return parsed.toString();
+}
+
+// A shell script, not an HTML error page a CDN served with a 200, and not an
+// empty body from a truncated transfer. Split out from the runner so the guard
+// is testable without touching the network.
+function assertShellScript(body) {
+  if (!body || !body.trim()) {
+    throw new Error('Downloaded installer is empty — refusing to run it');
+  }
+  if (!body.trim().startsWith('#!')) {
+    throw new Error('Downloaded installer is not a shell script — refusing to run it');
+  }
+  return true;
+}
+
+// Fetches a vendor install script and runs it, streaming output line by line.
+//
+// Deliberately NOT `curl … | bash` through a shell: both halves are spawned
+// with argv arrays, so nothing in the URL can become shell syntax. Downloading
+// first also means a truncated response or an error page a CDN served with a
+// 200 fails the shape check below instead of being executed halfway.
+function runVendorScript(url, onProgress) {
+  const { spawn } = require('child_process');
+  const script = path.join(
+    os.tmpdir(),
+    `wpxen-agent-install-${Date.now()}-${process.pid}.sh`
+  );
+
+  const tail = { value: '' };
+  const stream = (child) =>
+    new Promise((resolve, reject) => {
+      const emit = (buf) => {
+        const text = buf.toString();
+        tail.value = (tail.value + text).slice(-4000);
+        for (const line of text.split('\n')) {
+          const trimmed = line.trim();
+          if (trimmed && typeof onProgress === 'function') onProgress(trimmed);
+        }
+      };
+      child.stdout?.on('data', emit);
+      child.stderr?.on('data', emit);
+      child.on('error', reject);
+      child.on('close', resolve);
+    });
+
+  return (async () => {
+    try {
+      const fetched = await stream(
+        spawn('curl', [
+          '-fsSL',
+          '--proto',
+          '=https',
+          '--max-time',
+          '120',
+          '-o',
+          script,
+          url,
+        ])
+      );
+      if (fetched !== 0) {
+        throw new Error(`Could not download the install script (curl exit ${fetched})`);
+      }
+
+      assertShellScript(fs.readFileSync(script, 'utf8'));
+
+      const ran = await stream(spawn('bash', [script], { env: resolveShellEnv() }));
+      if (ran !== 0) {
+        throw new Error(tail.value.trim() || `Install script failed (exit ${ran})`);
+      }
+    } finally {
+      try {
+        fs.unlinkSync(script);
+      } catch {}
+    }
+  })();
+}
+
+// Installs an Agent's CLI, streaming the installer's output line by line.
+// Resolves once it exits 0; the caller re-runs listAgents to pick up the new
 // binary (detection is a live PATH probe, so nothing needs invalidating).
 async function installAgent(id, onProgress) {
   const agent = effectiveRegistry().find((a) => a.id === id);
   if (!agent) throw new Error(`Unknown agent: ${id}`);
-  if (!agent.brew) {
+  if (!agent.installer) {
     throw new Error(
-      `${agent.name} has no Homebrew package — install it with: ${agent.install}`
+      `${agent.name} has no one-click install — install it with: ${agent.install}`
     );
   }
-  if (!deps.isBrewInstalled()) {
-    throw new Error('Homebrew is not installed');
+
+  if (agent.installer.kind === 'brew') {
+    if (!deps.isBrewInstalled()) throw new Error('Homebrew is not installed');
+    await deps.runBrewStreaming(brewInstallArgs(agent.installer), onProgress);
+    return;
   }
-  await deps.runBrewStreaming(brewInstallArgs(agent.brew), onProgress);
+
+  if (agent.installer.kind === 'script') {
+    await deps.runScriptStreaming(installScriptUrl(agent.installer), onProgress);
+    return;
+  }
+
+  throw new Error(`Unknown installer kind: ${agent.installer.kind}`);
 }
 
 // ── Launch resolution (Launch Presets & Targets) ─────────────────────────────
@@ -559,6 +683,8 @@ module.exports = {
   listAgents,
   installAgent,
   brewInstallArgs,
+  installScriptUrl,
+  assertShellScript,
   listSessions,
   resolveLaunch,
   launch,
