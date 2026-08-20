@@ -143,8 +143,14 @@ export default function AgentsSection() {
                   </button>
                 </Tooltip>
               )}
+              {/* Reads off while the CLI is missing, because that is what the
+                  launcher actually does — an uninstalled agent never appears
+                  there regardless of this setting, and a lit switch would
+                  claim otherwise. The stored preference is untouched, so it
+                  springs back to whatever it was once the agent installs. */}
               <Toggle
-                checked={agent.enabled}
+                checked={agent.detected && agent.enabled}
+                disabled={!agent.detected}
                 onChange={(v) => toggleAgent(agent.id, v)}
                 label={`Show ${agent.name} in the launcher`}
               />
@@ -165,9 +171,10 @@ export default function AgentsSection() {
           </p>
         )}
         <p className="text-[11px] text-muted-foreground mt-1.5 px-1">
-          Disabled agents stay installed — they just don’t appear in a site’s agent
-          launcher. Install runs Homebrew; agents without a Homebrew package show their
-          own install command instead.
+          A site’s agent launcher lists the agents that are both installed and enabled.
+          Disabling one here leaves it installed — it just stops appearing there. An agent
+          that isn’t installed can’t be toggled; install it first, and its stored
+          preference applies.
         </p>
       </div>
 
