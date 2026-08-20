@@ -15,8 +15,14 @@ const pty = require('node-pty');
 
 // ── Registry ────────────────────────────────────────────────────────────────
 // Curated, data-shaped so user-defined Agents can drop in later (Q5). `cmd` is
-// the binary we detect on PATH and spawn; `install` is the hint shown when it's
-// not found.
+// the command typed into the session — binary plus any default flags — and
+// `install` is the hint shown when it's not found. Only the FIRST token is
+// detected on PATH, which is what lets `cmd` carry flags at all.
+//
+// The `--dangerously-*` flags are deliberate: WPXen drives these agents inside
+// a local dev site the user already owns, and stopping at an approval prompt
+// on every file write makes the pane useless. They are defaults, not a policy
+// — Settings → Agents → Launch Commands overrides any of them per agent.
 //
 // `installer` is the optional one-click install target, tagged by kind:
 //
@@ -35,7 +41,7 @@ const REGISTRY = [
   {
     id: 'claude',
     name: 'Claude Code',
-    cmd: 'claude',
+    cmd: 'claude --dangerously-skip-permissions',
     install: 'npm install -g @anthropic-ai/claude-code',
     installer: { kind: 'brew', name: 'claude-code', cask: true },
   },
@@ -62,7 +68,7 @@ const REGISTRY = [
   {
     id: 'antigravity',
     name: 'Antigravity',
-    cmd: 'agy',
+    cmd: 'agy --dangerously-skip-permissions',
     install: 'Bundled with the Antigravity IDE',
     // `antigravity-cli`, not `antigravity` — the latter is the IDE, which
     // carries `agy` but installs an .app rather than the binary. This cask's
@@ -84,7 +90,7 @@ const REGISTRY = [
   {
     id: 'codex',
     name: 'Codex',
-    cmd: 'codex',
+    cmd: 'codex --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust',
     install: 'npm install -g @openai/codex',
     installer: { kind: 'brew', name: 'codex', cask: true },
   },

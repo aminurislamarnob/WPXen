@@ -31,8 +31,9 @@ describe('effectiveRegistry', () => {
   });
 
   it('ignores a blank or whitespace-only override', () => {
+    const shipped = BUILT_IN.find((a) => a.id === 'claude').cmd;
     agents.setConfig({ commands: { claude: '   ' } });
-    expect(agents.effectiveRegistry().find((a) => a.id === 'claude').cmd).toBe('claude');
+    expect(agents.effectiveRegistry().find((a) => a.id === 'claude').cmd).toBe(shipped);
   });
 
   it('appends a custom agent and marks it as such', () => {
