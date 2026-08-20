@@ -66,20 +66,50 @@ async function isPackageInstalledAsync(name) {
   return isPackageInstalled(name);
 }
 
+// Memoised because this is the app's most expensive probe by a wide margin.
+// Each call spawns a PHP interpreter (~45ms), getInstalledPhpVersions() calls
+// it once per installed version, and a dozen call sites plus the window-focus
+// dependency re-check run that — 181ms of *blocked main thread* on a machine
+// with four PHP versions, which is a spinning cursor every time the window is
+// focused.
+//
+// Keyed on the binary's identity rather than its path: same inode, size and
+// mtime is the same binary and therefore the same version. statSync follows
+// the opt symlink, so a `brew upgrade` that repoints php@8.4 at a different
+// keg changes the key and re-probes — which is the exact staleness this
+// function exists to catch, so the cache can't defeat its own purpose.
+const phpVersionCache = new Map();
+
 // Runs a php binary and returns its major.minor (e.g. "8.3"), or null. Used to
 // verify a formula's *actual* version rather than trusting its name — an `opt`
 // symlink can be stale (e.g. php@8.4 -> Cellar/php/8.5.7 after an upgrade).
 function phpBinaryVersion(phpBin) {
+  let key;
+  try {
+    const st = fs.statSync(phpBin);
+    key = `${st.ino}:${st.size}:${st.mtimeMs}`;
+    const hit = phpVersionCache.get(phpBin);
+    if (hit && hit.key === key) return hit.value;
+  } catch {
+    // Gone or unreadable — nothing to run, and nothing worth caching.
+    phpVersionCache.delete(phpBin);
+    return null;
+  }
+
+  let value = null;
   try {
     const out = execSync(`${phpBin} -r "echo PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;"`, {
       stdio: ['ignore', 'pipe', 'pipe'],
     })
       .toString()
       .trim();
-    return /^\d+\.\d+$/.test(out) ? out : null;
+    if (/^\d+\.\d+$/.test(out)) value = out;
   } catch {
-    return null;
+    value = null;
   }
+
+  phpVersionCache.set(phpBin, { key, value });
+  return value;
 }
 
 // Candidate versioned formulae WPXen knows how to detect/install.
@@ -422,6 +452,9 @@ module.exports = {
   isPackageInstalled,
   isPackageInstalledAsync,
   getInstalledPhpVersions,
+  // Exported for the cache-invalidation test — a memoised probe whose
+  // invalidation isn't tested is just a stale value waiting to happen.
+  phpBinaryVersion,
   phpFormulaForVersion,
   getOutdatedFormulae,
   getActivePhpVersion,
