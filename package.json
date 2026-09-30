@@ -1,7 +1,7 @@
 {
   "name": "wpxen",
   "productName": "WPXen",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "AI-native WordPress development environment for macOS",
   "main": "electron/main.cjs",
   "scripts": {
@@ -16,7 +16,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "postinstall": "node scripts/fix-pty-permissions.cjs"
   },
   "engines": {
     "node": ">=18.0.0",
@@ -118,6 +119,7 @@
           "**/*"
         ]
       }
-    ]
+    ],
+    "afterPack": "scripts/fix-pty-permissions.cjs"
   }
 }

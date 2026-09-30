@@ -23,6 +23,7 @@ module.exports = [
   {
     files: [
       'electron/**/*.cjs',
+      'scripts/**/*.cjs',
       'eslint.config.js',
       'postcss.config.js',
       'tailwind.config.js',
