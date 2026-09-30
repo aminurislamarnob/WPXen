@@ -6,6 +6,8 @@
 
 const { execFileSync } = require('child_process');
 const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const brew = require('./brew.cjs');
 
 function getMkcertPath() {
@@ -42,13 +44,74 @@ function getCertDir() {
   return dir;
 }
 
-// Installs the mkcert local CA into the system trust store. Idempotent — a
-// no-op if already installed. The first run may show a macOS admin prompt to
-// add the root certificate to the keychain.
+// Installs the mkcert local CA into the trust store. Idempotent — a no-op once
+// the root is trusted.
+//
+// `mkcert -install` can't do the macOS step itself from here: it runs
+// `sudo security add-trusted-cert -d`, and an app launched from Finder has no
+// terminal for sudo to prompt on ("failed to execute \"security
+// add-trusted-cert\": exit status 1"). Running that as root behind the admin
+// dialog doesn't work either — macOS refuses admin-domain trust changes from a
+// process with no UI ("The authorization was denied since no user interaction
+// was possible"). So the CA is created as the user (TRUST_STORES=nss skips the
+// system store but still covers Firefox) and trusted in the *user* domain via
+// the login keychain, which shows macOS's own trust-settings prompt and is
+// honoured by Safari, Chrome and anything else on the system keychain APIs.
 function ensureCA() {
   const mkcert = getMkcertPath();
   if (!mkcert) throw new Error('mkcert is not installed.');
-  execFileSync(mkcert, ['-install'], { stdio: 'pipe' });
+  if (isCaTrusted()) return;
+
+  execFileSync(mkcert, ['-install'], {
+    stdio: 'pipe',
+    env: { ...process.env, TRUST_STORES: 'nss' },
+  });
+  const caRoot = getCaRoot();
+  if (!caRoot || !fs.existsSync(`${caRoot}/rootCA.pem`)) {
+    throw new Error('mkcert did not create its local certificate authority.');
+  }
+
+  try {
+    execFileSync('security', userTrustArgs(caRoot, os.homedir()), {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  } catch (err) {
+    const detail = String(err.stderr || err.message || '').trim();
+    throw new Error(
+      `macOS did not trust the local certificate authority${detail ? `: ${detail}` : '.'}`
+    );
+  }
+
+  if (!isCaTrusted()) {
+    throw new Error('The local certificate authority was not trusted by macOS.');
+  }
+}
+
+// `security` arguments that trust the CA root for the current user.
+function userTrustArgs(caRoot, home) {
+  return [
+    'add-trusted-cert',
+    '-r',
+    'trustRoot',
+    '-k',
+    path.join(home, 'Library/Keychains/login.keychain-db'),
+    path.join(caRoot, 'rootCA.pem'),
+  ];
+}
+
+// Whether macOS actually trusts mkcert's root — not merely whether the file
+// exists, which it does even after a failed keychain step.
+function isCaTrusted() {
+  const caRoot = getCaRoot();
+  if (!caRoot || !fs.existsSync(`${caRoot}/rootCA.pem`)) return false;
+  try {
+    execFileSync('security', ['verify-cert', '-c', `${caRoot}/rootCA.pem`], {
+      stdio: 'ignore',
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // Generates (or overwrites) a trusted cert + key for `domain`. Returns their
@@ -86,13 +149,11 @@ function getCaRoot() {
   }
 }
 
-// Read-only status for the Settings CA row: is mkcert present, and has its
-// local root CA been generated (and therefore installed into the trust store)?
+// Read-only status for the Settings CA row: is mkcert present, and does macOS
+// trust its local root CA?
 function getCaStatus() {
   if (!isInstalled()) return { installed: false, trusted: false, caRoot: null };
-  const caRoot = getCaRoot();
-  const trusted = !!(caRoot && fs.existsSync(`${caRoot}/rootCA.pem`));
-  return { installed: true, trusted, caRoot };
+  return { installed: true, trusted: isCaTrusted(), caRoot: getCaRoot() };
 }
 
 function removeCert(domain) {
@@ -111,6 +172,8 @@ module.exports = {
   ensureInstalled,
   getCertDir,
   ensureCA,
+  isCaTrusted,
+  userTrustArgs,
   generateCert,
   removeCert,
   getCaRoot,
