@@ -12,6 +12,7 @@ import {
 } from '../../lib/tasks';
 import { AvatarStack, LabelChip, StartButton, StateBadge } from './parts';
 import { Markdown } from './markdown';
+import { BoardSkeleton, ListSkeleton } from './skeletons';
 import { GrantAccessBanner } from './TasksSetup';
 
 // The Projects tab: GitHub Projects v2 owned by you and your organisations,
@@ -418,9 +419,11 @@ export default function ProjectsView({
           </button>
         </div>
       ) : !projects || (current && !data) ? (
-        <div className="px-4 py-12 text-center text-[13px] text-muted-foreground">
-          Loading…
-        </div>
+        view === 'table' ? (
+          <ListSkeleton rows={8} />
+        ) : (
+          <BoardSkeleton />
+        )
       ) : list.length === 0 ? (
         <div className="bg-card border border-border rounded-xl shadow-sm px-6 py-10 text-center">
           <p className="text-[14px] font-medium text-foreground">No projects</p>

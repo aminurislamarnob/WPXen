@@ -13,12 +13,14 @@ import {
 import { Tooltip } from '../ui';
 import { sessionsFor, timeAgo } from '../../lib/tasks';
 import { LabelChip, StartButton } from './parts';
+import { RowsSkeleton } from './skeletons';
 
 // The PRs tab's table: ID, title with its context, then GitHub's three
 // verdicts — Review, Checks, Merge — and Updated. The values are already
 // normalised by services/github.cjs (normalizeReview / Checks / Merge).
 
-const GRID = 'grid-cols-[60px_1fr_108px_84px_92px_76px_72px_28px]';
+export const PULL_GRID = 'grid-cols-[60px_1fr_108px_84px_92px_76px_72px_28px]';
+const GRID = PULL_GRID;
 
 function Pill({ tone = 'muted', icon: Icon, children, title }) {
   const tones = {
@@ -132,9 +134,7 @@ export default function PullTable({
         <span />
       </div>
       {loading ? (
-        <div className="px-4 py-10 text-center text-[13px] text-muted-foreground">
-          Loading…
-        </div>
+        <RowsSkeleton grid={GRID} cells={3} />
       ) : items.length === 0 ? (
         <div className="px-4 py-10 text-center text-[13px] text-muted-foreground">
           Nothing to show.

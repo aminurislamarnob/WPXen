@@ -302,6 +302,7 @@ function normalizeIssue(item, repo) {
     state: item.state === 'closed' ? 'closed' : 'open',
     stateReason: item.state_reason || null,
     author: item.user?.login || null,
+    authorAvatar: item.user?.avatar_url || null,
     labels: (item.labels || []).map((l) => ({ name: l.name, color: l.color || null })),
     assignees: (item.assignees || []).map(person).filter(Boolean),
     comments: item.comments || 0,
@@ -503,6 +504,7 @@ function normalizePull(node, repo, mergeInfo) {
     stateReason: node.merged || node.state === 'MERGED' ? 'merged' : null,
     draft: !!node.isDraft,
     author: node.author?.login || null,
+    authorAvatar: node.author?.avatarUrl || null,
     headRef: node.headRefName || null,
     baseRef: node.baseRefName || null,
     labels: (node.labels?.nodes || []).map((l) => ({
@@ -731,6 +733,7 @@ function normalizePullDetail(pr, repo) {
     merged,
     draft: !!pr.draft,
     author: pr.user?.login || null,
+    authorAvatar: pr.user?.avatar_url || null,
     body: pr.body || '',
     headRef: pr.head?.ref || null,
     baseRef: pr.base?.ref || null,

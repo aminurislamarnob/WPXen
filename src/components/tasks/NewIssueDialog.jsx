@@ -1,17 +1,11 @@
 import { useState } from 'react';
 import { Loader2 } from 'lucide-react';
-import { MarkdownEditor } from './markdown';
+import MarkdownComposer from './MarkdownComposer';
 
 // "+" New issue: title, markdown body, and which repo it goes to. `repos` are
 // the picker's repo options ({ repo, label }); `defaultRepo` the one the list
 // is scoped to, if just one. Resolves through `onCreated(issue)`.
-export default function NewIssueDialog({
-  repos,
-  defaultRepo,
-  onLink,
-  onCreated,
-  onClose,
-}) {
+export default function NewIssueDialog({ repos, defaultRepo, onCreated, onClose }) {
   const [repo, setRepo] = useState(defaultRepo || repos[0]?.repo || '');
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
@@ -65,13 +59,12 @@ export default function NewIssueDialog({
           aria-label="Title"
           className="form-input"
         />
-        <MarkdownEditor
+        <MarkdownComposer
           value={body}
           onChange={setBody}
-          onLink={onLink}
           onSubmit={create}
-          rows={8}
-          placeholder="Describe the issue — markdown"
+          minHeightClassName="min-h-40"
+          placeholder="Describe the issue…"
         />
         {error && <p className="text-[12px] text-destructive">{error}</p>}
         <div className="flex justify-end gap-2">

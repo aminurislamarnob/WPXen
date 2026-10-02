@@ -107,6 +107,7 @@ describe('searchIssues', () => {
             state: 'open',
             stateReason: null,
             author: 'ana',
+            authorAvatar: null,
             labels: [{ name: 'bug', color: 'd73a4a' }],
             assignees: [{ login: 'bo', avatarUrl: 'https://avatars/bo' }],
             comments: 2,
