@@ -1,15 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import {
-  Check,
-  CheckCircle,
-  CircleDot,
-  CircleSlash,
-  Loader2,
-  Search,
-} from 'lucide-react';
+import { Check, CheckCircle, CircleDot, CircleSlash, Search } from 'lucide-react';
 import { labelColor } from '../../lib/tasks';
 import { Avatar } from './parts';
+import { Bone } from './skeletons';
 
 // Popovers for changing an issue: Status, Assignees and Labels. They render
 // into a portal at fixed coordinates under their anchor, because the list's
@@ -180,8 +174,15 @@ export function MultiPicker({ kind, repo, anchor, selected, onApply, onClose }) 
       </div>
       <div className="max-h-64 overflow-y-auto">
         {loading ? (
-          <div className="flex items-center gap-1.5 px-2.5 py-2 text-[12px] text-muted-foreground">
-            <Loader2 size={12} className="animate-spin" /> Loading…
+          <div role="status" aria-label="Loading" className="space-y-0.5">
+            {['62%', '48%', '74%', '55%'].map((w) => (
+              <div key={w} className="flex items-center gap-2 px-2.5 py-1.5">
+                <Bone
+                  className={`${kind === 'labels' ? 'size-2.5' : 'size-4'} rounded-full`}
+                />
+                <Bone className="h-3" style={{ width: w }} />
+              </div>
+            ))}
           </div>
         ) : error ? (
           <div className="px-2.5 py-2 text-[12px] text-destructive">{error}</div>

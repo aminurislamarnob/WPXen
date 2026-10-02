@@ -18,6 +18,7 @@ import { Avatar, LabelChip, StartButton, StateBadge } from './parts';
 import { CommentCard, None, SidebarSection, TimelineEvent } from './timeline';
 import { ProviderIcon } from '../providerIcons';
 import { MarkdownEditor } from './markdown';
+import { DetailsSkeleton } from './skeletons';
 import { MultiPicker, StatusMenu } from './pickers';
 import { useIssueMutation } from './useIssueMutation';
 
@@ -208,9 +209,7 @@ export default function IssueDetails({
           </button>
         </div>
       ) : !issue ? (
-        <div className="px-4 py-16 text-center text-[13px] text-muted-foreground">
-          Loading…
-        </div>
+        <DetailsSkeleton />
       ) : (
         <>
           {titleDraft !== null ? (

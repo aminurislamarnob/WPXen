@@ -34,7 +34,8 @@ import { useIssueMutation } from './useIssueMutation';
 import { useOpenLink } from '../../lib/useOpenLink';
 import { AvatarStack, LabelChip, StartButton, StateBadge, stateIcon } from './parts';
 import StartDialog from './StartDialog';
-import PullTable from './PullTable';
+import PullTable, { PULL_GRID } from './PullTable';
+import { BoardSkeleton, Bone, RowsSkeleton } from './skeletons';
 import PullDetails from './PullDetails';
 import ProjectsView from './ProjectsView';
 import { useAgentSessions } from '../../lib/useAgentSessions';
@@ -66,6 +67,9 @@ import {
 // Every repo is searched separately, so a failing one reports its own error
 // above the list while the rest still show. A quiet refresh runs every 60 s
 // while the page is visible; ↻ forces one past the main process's cache.
+
+// The Issues table's columns: ID, title, assignees, status, updated, Start, ⋮.
+const ISSUE_GRID = 'grid-cols-[64px_1fr_104px_92px_84px_72px_28px]';
 
 const SELECTION_KEY = 'wpxen.tasks.selection';
 const TAB_KEY = 'wpxen.tasks.tab';
@@ -374,7 +378,28 @@ export default function Tasks() {
           )}
         </div>
 
-        {preflight && !ready ? (
+        {!preflight || (ready && !sites) ? (
+          // Checking gh, then finding the Sites' repos: the page's shape,
+          // pulsing, until there's something real to show.
+          tab === 'projects' ? (
+            <BoardSkeleton />
+          ) : (
+            <>
+              <div className="flex items-center gap-2 mb-3">
+                <Bone className="h-8 w-16" />
+                <Bone className="h-8 w-28" />
+                <Bone className="h-8 w-24" />
+                <Bone className="h-8 flex-1" />
+              </div>
+              <div className="bg-card border border-border rounded-xl shadow-sm overflow-hidden">
+                <RowsSkeleton
+                  grid={tab === 'pulls' ? PULL_GRID : ISSUE_GRID}
+                  cells={tab === 'pulls' ? 3 : 2}
+                />
+              </div>
+            </>
+          )
+        ) : preflight && !ready ? (
           <SetupBanner
             preflight={preflight}
             onRetry={() => loadSetup({ force: true })}
@@ -474,7 +499,7 @@ export default function Tasks() {
               {tab === 'pulls' ? (
                 <PullTable
                   items={paged?.items || []}
-                  loading={loading && !results}
+                  loading={loading}
                   onOpen={openDetails}
                   onMenu={(pr, anchor) => setRowMenu({ issue: pr, anchor })}
                   linked={linked}
@@ -484,7 +509,7 @@ export default function Tasks() {
               ) : (
                 <IssueTable
                   items={paged?.items || []}
-                  loading={loading && !results}
+                  loading={loading}
                   onOpen={openDetails}
                   linked={linked}
                   onStart={(issue) => setStarting({ issue })}
@@ -622,7 +647,9 @@ function IssueTable({ items, loading, onOpen, onEdit, linked, onStart, onOpenSes
   const now = Date.now();
   return (
     <div className="bg-card border border-border rounded-xl shadow-sm overflow-hidden">
-      <div className="grid grid-cols-[64px_1fr_104px_92px_84px_72px_28px] gap-3 px-4 h-9 items-center border-b border-border text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+      <div
+        className={`grid ${ISSUE_GRID} gap-3 px-4 h-9 items-center border-b border-border text-[11px] font-medium uppercase tracking-wide text-muted-foreground`}
+      >
         <span>ID</span>
         <span>Title / context</span>
         <span>Assignees</span>
@@ -632,9 +659,7 @@ function IssueTable({ items, loading, onOpen, onEdit, linked, onStart, onOpenSes
         <span />
       </div>
       {loading ? (
-        <div className="px-4 py-10 text-center text-[13px] text-muted-foreground">
-          Loading…
-        </div>
+        <RowsSkeleton grid={ISSUE_GRID} cells={2} />
       ) : items.length === 0 ? (
         <div className="px-4 py-10 text-center text-[13px] text-muted-foreground">
           Nothing to show.
@@ -710,7 +735,7 @@ function IssueRow({ issue, now, onOpen, onEdit, sessions, onStart, onOpenSession
       tabIndex={0}
       onClick={() => onOpen(issue)}
       onKeyDown={(e) => e.key === 'Enter' && onOpen(issue)}
-      className="grid grid-cols-[64px_1fr_104px_92px_84px_72px_28px] gap-3 px-4 py-2.5 items-center border-b border-border last:border-b-0 cursor-pointer hover:bg-accent/50"
+      className={`grid ${ISSUE_GRID} gap-3 px-4 py-2.5 items-center border-b border-border last:border-b-0 cursor-pointer hover:bg-accent/50`}
     >
       <span className="flex items-center gap-1.5 text-[12.5px] text-muted-foreground tabular-nums">
         <Icon

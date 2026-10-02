@@ -20,6 +20,7 @@ import { Avatar, LabelChip, StartButton } from './parts';
 import { ProviderIcon } from '../providerIcons';
 import { CommentCard, None, SidebarSection, TimelineEvent } from './timeline';
 import { MergeBadge, pullIcon } from './PullTable';
+import { DetailsSkeleton, ListSkeleton } from './skeletons';
 
 // One PR inside Tasks, read-only: Conversation (description, comments,
 // reviews with their verdicts), Files (each changed file, with its diff in
@@ -60,14 +61,6 @@ function ErrorCard({ error, onRetry }) {
   );
 }
 
-function Loading() {
-  return (
-    <div className="px-4 py-12 text-center text-[13px] text-muted-foreground">
-      Loading…
-    </div>
-  );
-}
-
 const STATUS_LETTER = {
   added: ['A', 'text-status-running'],
   removed: ['D', 'text-destructive'],
@@ -84,7 +77,7 @@ function FilesTab({ data, onRetry }) {
     [current]
   );
 
-  if (!data) return <Loading />;
+  if (!data) return <ListSkeleton />;
   if (data.error) return <ErrorCard error={data.error} onRetry={onRetry} />;
   if (files.length === 0) {
     return <p className="text-[13px] text-muted-foreground">No changed files.</p>;
@@ -163,7 +156,7 @@ const CHECK_ICON = {
 };
 
 function ChecksTab({ data, onRetry, onLink }) {
-  if (!data) return <Loading />;
+  if (!data) return <ListSkeleton rows={8} />;
   if (data.error) return <ErrorCard error={data.error} onRetry={onRetry} />;
   if (data.checks.length === 0) {
     return (
@@ -318,7 +311,7 @@ export default function PullDetails({
       {data?.error ? (
         <ErrorCard error={data.error} onRetry={() => load({ force: true })} />
       ) : !pull ? (
-        <Loading />
+        <DetailsSkeleton tabs />
       ) : (
         <>
           <h1 className="text-[20px] font-semibold text-foreground leading-snug">
