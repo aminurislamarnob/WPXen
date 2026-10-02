@@ -1127,10 +1127,16 @@ describe('projects', () => {
     const draft = github.normalizeProjectItem({
       id: 'PVTI_2',
       type: 'DRAFT_ISSUE',
-      content: { __typename: 'DraftIssue', title: 'Idea' },
+      content: { __typename: 'DraftIssue', title: 'Idea', body: 'Sketch **this**' },
       fieldValues: { nodes: [] },
     });
-    expect(draft).toMatchObject({ kind: 'draft', title: 'Idea', repo: null, url: null });
+    expect(draft).toMatchObject({
+      kind: 'draft',
+      title: 'Idea',
+      body: 'Sketch **this**',
+      repo: null,
+      url: null,
+    });
   });
 
   it('pages through a project’s items and drops archived ones', async () => {
@@ -1183,5 +1189,55 @@ describe('projects', () => {
       code: 'missing-scope',
       scope: 'read:project',
     });
+  });
+});
+
+describe('moving a project card', () => {
+  const ref = { projectId: 'PVT_x', itemId: 'PVTI_1', fieldId: 'PVTF_status' };
+
+  it('sets the Status option', async () => {
+    fakeGh(() => JSON.stringify({ data: { updateProjectV2ItemFieldValue: {} } }));
+    expect(await github.setProjectItemOption({ ...ref, optionId: 'f75ad846' })).toEqual({
+      ok: true,
+    });
+    expect(calls).toHaveLength(1);
+    const [query, ...vars] = calls[0].slice(3).filter((a) => a !== '-f');
+    expect(query).toMatch(/^query=mutation.*updateProjectV2ItemFieldValue/s);
+    expect(query).toMatch(/singleSelectOptionId: \$optionId/);
+    expect(vars).toEqual([
+      'projectId=PVT_x',
+      'itemId=PVTI_1',
+      'fieldId=PVTF_status',
+      'optionId=f75ad846',
+    ]);
+  });
+
+  it('clears it for No Status', async () => {
+    fakeGh(() => JSON.stringify({ data: {} }));
+    await github.setProjectItemOption({ ...ref, optionId: null });
+    expect(calls[0].find((a) => a.startsWith('query='))).toMatch(
+      /clearProjectV2ItemFieldValue/
+    );
+    expect(calls[0]).not.toContain('optionId=null');
+  });
+
+  it('names the missing project scope, and refuses bad ids without calling gh', async () => {
+    fakeGh(() => {
+      throw ghError(
+        "gh: Your token has not been granted the required scopes to execute this query. The 'updateProjectV2ItemFieldValue' field requires one of the following scopes: ['project'], but your token has only been granted the: ['repo'] scopes."
+      );
+    });
+    expect(
+      (await github.setProjectItemOption({ ...ref, optionId: 'o1' })).error
+    ).toMatchObject({
+      code: 'missing-scope',
+      scope: 'project',
+    });
+    const before = calls.length;
+    expect(
+      (await github.setProjectItemOption({ ...ref, itemId: 'x y', optionId: 'o1' })).error
+        .code
+    ).toBe('validation');
+    expect(calls.length).toBe(before);
   });
 });

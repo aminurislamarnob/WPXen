@@ -1,15 +1,29 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Columns3, RefreshCw, Table2 } from 'lucide-react';
+import { AlertTriangle, Columns3, RefreshCw, Table2, X } from 'lucide-react';
 import { SegmentedTabs, Tooltip } from '../ui';
 import { useOpenLink } from '../../lib/useOpenLink';
-import { boardColumns, projectColor } from '../../lib/tasks';
-import { AvatarStack, LabelChip, StateBadge } from './parts';
+import {
+  NO_STATUS,
+  boardColumns,
+  hasScope,
+  moveItem,
+  projectColor,
+  sessionsFor,
+} from '../../lib/tasks';
+import { AvatarStack, LabelChip, StartButton, StateBadge } from './parts';
+import { Markdown } from './markdown';
 import { GrantAccessBanner } from './TasksSetup';
 
 // The Projects tab: GitHub Projects v2 owned by you and your organisations,
 // as a Board (columns from the Status field) or a read-only Table of the
 // project's fields. Projects need the `read:project` scope; without it the
 // tab offers Grant access and loads once it lands.
+//
+// On the Board, dragging a card to another column sets its Status — shown at
+// once, rolled back with a message if GitHub refuses. That write needs the
+// `project` scope, asked for before the first move. Issue and PR items open
+// their Tasks details; drafts show their body; Start → appears on items whose
+// repo is checked out in a Site.
 
 const PROJECT_KEY = 'wpxen.tasks.project';
 const VIEW_KEY = 'wpxen.tasks.projectView';
@@ -50,11 +64,24 @@ function ItemRef({ item }) {
   );
 }
 
-function Card({ item, onOpen }) {
+// Drag payload type — our own, so a dropped file or link is ignored.
+const DRAG_TYPE = 'application/x-wpxen-project-item';
+
+function Card({ item, onOpen, draggable, start }) {
   return (
-    <button
+    <div
+      role="button"
+      tabIndex={0}
+      draggable={draggable}
+      onDragStart={(e) => {
+        e.dataTransfer.setData(DRAG_TYPE, item.id);
+        e.dataTransfer.effectAllowed = 'move';
+      }}
       onClick={() => onOpen(item)}
-      className="w-full text-left bg-card border border-border rounded-lg shadow-sm px-3 py-2 hover:border-ring/60"
+      onKeyDown={(e) => e.key === 'Enter' && onOpen(item)}
+      className={`w-full text-left bg-card border border-border rounded-lg shadow-sm px-3 py-2 hover:border-ring/60 ${
+        draggable ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'
+      }`}
     >
       <div className="text-[12.5px] font-medium text-foreground leading-snug line-clamp-3">
         {item.title}
@@ -71,32 +98,94 @@ function Card({ item, onOpen }) {
           ))}
         </div>
       )}
-    </button>
+      {start && <div className="mt-2 flex justify-end">{start}</div>}
+    </div>
   );
 }
 
-function Board({ data, onOpen }) {
+// `onMove(item, option)` when a card is dropped on another column (option
+// null = No Status). Without a Status field there's nothing to move between.
+function Board({ data, onOpen, onMove, renderStart }) {
   const field = data.fields.find((f) => f.id === data.statusFieldId) || null;
   const columns = boardColumns(data.items, field);
+  const [over, setOver] = useState(null); // column id under a drag
   return (
     <div className="flex gap-3 overflow-x-auto pb-2">
       {columns.map((col) => (
         <div
           key={col.id}
-          className="w-[260px] flex-shrink-0 rounded-xl border border-border bg-tertiary/60 p-2"
+          onDragOver={(e) => {
+            if (!field || !e.dataTransfer.types.includes(DRAG_TYPE)) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            setOver(col.id);
+          }}
+          onDragLeave={(e) => {
+            if (!e.currentTarget.contains(e.relatedTarget)) setOver(null);
+          }}
+          onDrop={(e) => {
+            setOver(null);
+            const id = e.dataTransfer.getData(DRAG_TYPE);
+            const item = data.items.find((i) => i.id === id);
+            if (!field || !item) return;
+            e.preventDefault();
+            const option =
+              col.id === NO_STATUS ? null : field.options.find((o) => o.id === col.id);
+            const currentId = item.values[field.id]?.optionId || null;
+            if ((option?.id || null) !== currentId) onMove(item, field, option || null);
+          }}
+          className={`w-[260px] flex-shrink-0 rounded-xl border p-2 transition-colors ${
+            over === col.id
+              ? 'border-highlight bg-highlight/5'
+              : 'border-border bg-tertiary/60'
+          }`}
         >
           <div className="flex items-center gap-2 px-1 pb-2 text-[12px] font-medium text-foreground">
             <Swatch color={col.color} />
             <span className="truncate">{col.name}</span>
             <span className="text-muted-foreground tabular-nums">{col.items.length}</span>
           </div>
-          <div className="space-y-2">
+          <div className="space-y-2 min-h-[40px]">
             {col.items.map((item) => (
-              <Card key={item.id} item={item} onOpen={onOpen} />
+              <Card
+                key={item.id}
+                item={item}
+                onOpen={onOpen}
+                draggable={!!field}
+                start={renderStart(item)}
+              />
             ))}
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+// A draft has no page anywhere — its title and body are all there is.
+function DraftDialog({ item, onLink, onClose }) {
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50"
+      onMouseDown={(e) => e.target === e.currentTarget && onClose()}
+      onKeyDown={(e) => e.key === 'Escape' && onClose()}
+    >
+      <div className="panel w-[520px] max-w-[92vw] p-4 space-y-3">
+        <div className="flex items-center gap-2">
+          <span className="rounded-sm border border-border px-1 text-[10.5px] text-muted-foreground">
+            Draft
+          </span>
+          <p className="text-[13.5px] font-semibold text-foreground">{item.title}</p>
+        </div>
+        <div className="max-h-[60vh] overflow-y-auto">
+          <Markdown text={item.body} onLink={onLink} empty="No description." />
+        </div>
+        <div className="flex justify-end">
+          <button autoFocus className="btn btn-secondary" onClick={onClose}>
+            Close
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -158,7 +247,13 @@ function Table({ data, onOpen }) {
   );
 }
 
-export default function ProjectsView({ siteIdFor }) {
+export default function ProjectsView({
+  siteIdFor,
+  onOpenItem,
+  linked,
+  onStart,
+  onOpenSession,
+}) {
   const openLink = useOpenLink();
   const [projects, setProjects] = useState(null); // { projects } | { error }
   const [projectId, setProjectId] = useState(() => readStored(PROJECT_KEY));
@@ -167,6 +262,15 @@ export default function ProjectsView({ siteIdFor }) {
   );
   const [data, setData] = useState(null); // getProject result
   const [loading, setLoading] = useState(false);
+  const [moveError, setMoveError] = useState(null);
+  const [needScope, setNeedScope] = useState(null); // 'project' while asking
+  const [draft, setDraft] = useState(null); // a draft item being read
+  // The login's scopes, to ask for `project` before the first move rather
+  // than after a failed one. null scopes (unknown) → just try.
+  const [preflight, setPreflight] = useState(null);
+  useEffect(() => {
+    window.electronAPI.tasksPreflight().then(setPreflight);
+  }, []);
 
   const loadProjects = useCallback(async ({ force = false } = {}) => {
     setProjects(await window.electronAPI.tasksProjects({ force }));
@@ -200,7 +304,45 @@ export default function ProjectsView({ siteIdFor }) {
   }, [current]);
   useEffect(() => writeStored(VIEW_KEY, view), [view]);
 
-  const onOpen = (item) => item.url && openLink(item.url, siteIdFor(item.repo));
+  const onLink = (url) => openLink(url);
+  const onOpen = (item) => {
+    if (item.kind === 'draft') setDraft(item);
+    else if (item.kind === 'issue' || item.kind === 'pr') onOpenItem(item);
+  };
+
+  // Optimistic: the card moves now; GitHub's refusal puts it back.
+  const onMove = async (item, field, option) => {
+    setMoveError(null);
+    if (!hasScope(preflight, 'project')) {
+      setNeedScope('project');
+      return;
+    }
+    const before = data;
+    setData((d) => moveItem(d, item.id, field.id, option));
+    const res = await window.electronAPI.tasksProjectMove({
+      projectId: current.id,
+      itemId: item.id,
+      fieldId: field.id,
+      optionId: option?.id ?? null,
+    });
+    if (res?.error) {
+      setData(before);
+      if (res.error.code === 'missing-scope') setNeedScope(res.error.scope || 'project');
+      else setMoveError(`Couldn’t move “${item.title}”: ${res.error.message}`);
+    }
+  };
+
+  // Start → for open issues and PRs whose repo is checked out in a Site.
+  const renderStart = (item) =>
+    (item.kind === 'issue' || item.kind === 'pr') &&
+    item.state === 'open' &&
+    siteIdFor(item.repo) ? (
+      <StartButton
+        sessions={sessionsFor(linked, item)}
+        onStart={() => onStart(item)}
+        onOpenSession={onOpenSession}
+      />
+    ) : null;
   const refresh = () => {
     loadProjects({ force: true });
     loadProject({ force: true });
@@ -288,8 +430,38 @@ export default function ProjectsView({ siteIdFor }) {
         </div>
       ) : (
         <>
+          {needScope && (
+            <div className="mb-3">
+              <GrantAccessBanner
+                scope={needScope}
+                reason="Moving cards writes to the project, which needs the project scope."
+                onGranted={(pre) => {
+                  setPreflight(pre);
+                  setNeedScope(null);
+                }}
+              />
+            </div>
+          )}
+          {moveError && (
+            <div className="mb-3 flex items-center gap-2 rounded-md border border-border bg-destructive/10 px-3 py-2 text-[12.5px] text-destructive">
+              <AlertTriangle size={13} />
+              <span className="flex-1">{moveError}</span>
+              <button
+                aria-label="Dismiss"
+                className="hover:text-foreground"
+                onClick={() => setMoveError(null)}
+              >
+                <X size={13} />
+              </button>
+            </div>
+          )}
           {view === 'board' ? (
-            <Board data={data} onOpen={onOpen} />
+            <Board
+              data={data}
+              onOpen={onOpen}
+              onMove={onMove}
+              renderStart={renderStart}
+            />
           ) : (
             <Table data={data} onOpen={onOpen} />
           )}
@@ -298,6 +470,9 @@ export default function ProjectsView({ siteIdFor }) {
             {data.truncated && ' · showing the first 500'}
           </p>
         </>
+      )}
+      {draft && (
+        <DraftDialog item={draft} onLink={onLink} onClose={() => setDraft(null)} />
       )}
     </div>
   );

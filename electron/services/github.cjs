@@ -948,7 +948,7 @@ const PROJECT_QUERY = `
                 assignees(first: 10) { nodes { login avatarUrl } }
                 labels(first: 10) { nodes { name color } }
               }
-              ... on DraftIssue { title }
+              ... on DraftIssue { title body }
             }
             fieldValues(first: 30) {
               nodes {
@@ -1078,6 +1078,8 @@ function normalizeProjectItem(node) {
       name: l.name,
       color: l.color || null,
     })),
+    // Only drafts carry their body here — they have no page to open.
+    body: kind === 'draft' ? c.body || '' : undefined,
     values,
   };
 }
@@ -1119,6 +1121,50 @@ async function getProject({ id, force = false } = {}) {
       truncated,
     };
   });
+}
+
+// Moving a card: set (or, for No Status, clear) an item's single-select
+// field. Needs the `project` scope — the error names it, so the page can
+// offer Grant access.
+const SET_OPTION_MUTATION = `mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
+  updateProjectV2ItemFieldValue(input: {
+    projectId: $projectId, itemId: $itemId, fieldId: $fieldId,
+    value: { singleSelectOptionId: $optionId }
+  }) { projectV2Item { id } }
+}`;
+
+const CLEAR_FIELD_MUTATION = `mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!) {
+  clearProjectV2ItemFieldValue(input: {
+    projectId: $projectId, itemId: $itemId, fieldId: $fieldId
+  }) { projectV2Item { id } }
+}`;
+
+const NODE_ID = /^[A-Za-z0-9_-]{4,200}$/;
+
+async function setProjectItemOption({
+  projectId,
+  itemId,
+  fieldId,
+  optionId = null,
+} = {}) {
+  const ids = [projectId, itemId, fieldId];
+  if (!ids.every((v) => NODE_ID.test(String(v || '')))) {
+    return { error: { code: 'validation', message: 'Not a project item.' } };
+  }
+  if (optionId != null && !/^[A-Za-z0-9_-]{1,100}$/.test(String(optionId))) {
+    return { error: { code: 'validation', message: 'Not a Status option.' } };
+  }
+  try {
+    if (optionId == null) {
+      await graphqlVars(CLEAR_FIELD_MUTATION, { projectId, itemId, fieldId });
+    } else {
+      await graphqlVars(SET_OPTION_MUTATION, { projectId, itemId, fieldId, optionId });
+    }
+    detailCache.delete(`project:${projectId}`);
+    return { ok: true };
+  } catch (err) {
+    return { error: classifyError(err) };
+  }
 }
 
 // ── Writes ───────────────────────────────────────────────────────────────────
@@ -1339,6 +1385,7 @@ module.exports = {
   normalizeProjectItem,
   listProjects,
   getProject,
+  setProjectItemOption,
   addComment,
   setIssueState,
   editIssue,

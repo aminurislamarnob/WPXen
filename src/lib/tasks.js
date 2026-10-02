@@ -342,3 +342,19 @@ const PROJECT_COLORS = {
 export function projectColor(name) {
   return PROJECT_COLORS[String(name || '').toUpperCase()] || null;
 }
+
+// A card moved to another Status column, before GitHub confirms it: the
+// item's value for `fieldId` becomes `option` (null → No Status). Returns
+// a new board; the caller keeps the old one to roll back to.
+export function moveItem(board, itemId, fieldId, option) {
+  return {
+    ...board,
+    items: board.items.map((item) => {
+      if (item.id !== itemId) return item;
+      const values = { ...item.values };
+      if (option) values[fieldId] = { text: option.name, optionId: option.id };
+      else delete values[fieldId];
+      return { ...item, values };
+    }),
+  };
+}
