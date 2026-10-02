@@ -11,6 +11,10 @@ import {
   AlertTriangle,
   ChevronLeft,
   ChevronRight,
+  Copy,
+  ExternalLink,
+  MoreVertical,
+  SlidersHorizontal,
   Plus,
   CircleDot,
   RefreshCw,
@@ -21,12 +25,16 @@ import { SegmentedTabs, Tooltip } from '../ui';
 import { SetupBanner } from './TasksSetup';
 import IssueDetails from './IssueDetails';
 import NewIssueDialog from './NewIssueDialog';
-import { MultiPicker, StatusMenu } from './pickers';
+import FiltersMenu from './FiltersMenu';
+import { MultiPicker, Popover, StatusMenu } from './pickers';
 import { useIssueMutation } from './useIssueMutation';
 import { useOpenLink } from '../../lib/useOpenLink';
 import { AvatarStack, LabelChip, StateBadge, stateIcon } from './parts';
 import {
   ALL,
+  ISSUE_CHIPS,
+  activeFilterCount,
+  chipMatches,
   DEFAULT_ISSUE_QUERY,
   buildPickerTree,
   detailPath,
@@ -49,8 +57,6 @@ import {
 
 const SELECTION_KEY = 'wpxen.tasks.selection';
 const REFRESH_MS = 60_000;
-
-const ISSUE_CHIPS = [{ label: 'Open', query: DEFAULT_ISSUE_QUERY }];
 
 function readStored(key) {
   try {
@@ -77,6 +83,8 @@ export default function Tasks() {
   const [selection, setSelection] = useState(() => readStored(SELECTION_KEY) || ALL);
   const [query, setQuery] = useState(DEFAULT_ISSUE_QUERY);
   const [draft, setDraft] = useState(DEFAULT_ISSUE_QUERY);
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
   const [page, setPage] = useState(1);
   const [results, setResults] = useState(null); // merged
   const [loading, setLoading] = useState(false);
@@ -179,6 +187,9 @@ export default function Tasks() {
   const repoOptions = tree
     .filter((o) => o.value.startsWith('repo:'))
     .map((o) => ({ repo: o.repos[0], label: o.repos[0] }));
+
+  const [filtersAnchor, setFiltersAnchor] = useState(null);
+  const [rowMenu, setRowMenu] = useState(null); // { issue, anchor }
 
   const refresh = async () => {
     await loadSetup({ force: true });
@@ -299,7 +310,7 @@ export default function Tasks() {
                     key={c.label}
                     onClick={() => applyQuery(c.query)}
                     className={`h-8 px-3 rounded-md text-[13px] font-medium transition-colors ${
-                      query === c.query
+                      chipMatches(query, c.query)
                         ? 'bg-muted text-foreground'
                         : 'text-muted-foreground hover:bg-accent hover:text-foreground'
                     }`}
@@ -307,6 +318,18 @@ export default function Tasks() {
                     {c.label}
                   </button>
                 ))}
+                <button
+                  className="btn btn-secondary"
+                  onClick={(e) => setFiltersAnchor(e.currentTarget)}
+                >
+                  <SlidersHorizontal size={13} />
+                  Filters
+                  {activeFilterCount(query) > 0 && (
+                    <span className="rounded-full bg-muted px-1.5 text-[11px] tabular-nums">
+                      {activeFilterCount(query)}
+                    </span>
+                  )}
+                </button>
                 <form
                   className="relative flex-1"
                   onSubmit={(e) => {
@@ -360,7 +383,11 @@ export default function Tasks() {
                 items={paged?.items || []}
                 loading={loading && !results}
                 onOpen={openDetails}
-                onEdit={(kind, issue, anchor) => setRowPopover({ kind, issue, anchor })}
+                onEdit={(kind, issue, anchor) =>
+                  kind === 'menu'
+                    ? setRowMenu({ issue, anchor })
+                    : setRowPopover({ kind, issue, anchor })
+                }
               />
 
               {results && (
@@ -435,6 +462,25 @@ export default function Tasks() {
           onClose={() => setRowPopover(null)}
         />
       )}
+      {filtersAnchor && (
+        <FiltersMenu
+          anchor={filtersAnchor}
+          draft={draft}
+          onDraft={setDraft}
+          onClose={() => {
+            setFiltersAnchor(null);
+            applyQuery(draftRef.current);
+          }}
+        />
+      )}
+      {rowMenu && (
+        <RowMenu
+          issue={rowMenu.issue}
+          anchor={rowMenu.anchor}
+          onLink={(url) => openLink(url, siteIdFor(rowMenu.issue.repo))}
+          onClose={() => setRowMenu(null)}
+        />
+      )}
       {creating && (
         <NewIssueDialog
           repos={repoOptions}
@@ -456,12 +502,13 @@ function IssueTable({ items, loading, onOpen, onEdit }) {
   const now = Date.now();
   return (
     <div className="bg-card border border-border rounded-xl shadow-sm overflow-hidden">
-      <div className="grid grid-cols-[72px_1fr_120px_96px_120px] gap-3 px-4 h-9 items-center border-b border-border text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+      <div className="grid grid-cols-[72px_1fr_120px_96px_96px_28px] gap-3 px-4 h-9 items-center border-b border-border text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
         <span>ID</span>
         <span>Title / context</span>
         <span>Assignees</span>
         <span>Status</span>
         <span>Updated</span>
+        <span />
       </div>
       {loading ? (
         <div className="px-4 py-10 text-center text-[13px] text-muted-foreground">
@@ -483,6 +530,31 @@ function IssueTable({ items, loading, onOpen, onEdit }) {
         ))
       )}
     </div>
+  );
+}
+
+function RowMenu({ issue, anchor, onLink, onClose }) {
+  const item = (Icon, label, fn) => (
+    <button
+      onClick={() => {
+        onClose();
+        fn();
+      }}
+      className="flex w-full items-center gap-2 rounded-sm px-2.5 py-1.5 text-left text-[12.5px] text-foreground hover:bg-accent"
+    >
+      <Icon size={13} className="text-muted-foreground" />
+      {label}
+    </button>
+  );
+  return (
+    <Popover anchor={anchor} onClose={onClose} width={190}>
+      {item(ExternalLink, 'Open on GitHub', () => onLink(issue.url))}
+      {item(Copy, 'Copy link', () =>
+        navigator.clipboard?.writeText(issue.url).catch(() => {
+          // clipboard unavailable — Open on GitHub still works
+        })
+      )}
+    </Popover>
   );
 }
 
@@ -513,7 +585,7 @@ function IssueRow({ issue, now, onOpen, onEdit }) {
       tabIndex={0}
       onClick={() => onOpen(issue)}
       onKeyDown={(e) => e.key === 'Enter' && onOpen(issue)}
-      className="grid grid-cols-[72px_1fr_120px_96px_120px] gap-3 px-4 py-2.5 items-center border-b border-border last:border-b-0 cursor-pointer hover:bg-accent/50"
+      className="grid grid-cols-[72px_1fr_120px_96px_96px_28px] gap-3 px-4 py-2.5 items-center border-b border-border last:border-b-0 cursor-pointer hover:bg-accent/50"
     >
       <span className="flex items-center gap-1.5 text-[12.5px] text-muted-foreground tabular-nums">
         <Icon
@@ -550,6 +622,9 @@ function IssueRow({ issue, now, onOpen, onEdit }) {
       <span className="text-[12px] text-muted-foreground">
         {timeAgo(issue.updatedAt, now)}
       </span>
+      <RowEdit label="More" onClick={(a) => onEdit('menu', issue, a)}>
+        <MoreVertical size={14} className="text-muted-foreground" />
+      </RowEdit>
     </div>
   );
 }

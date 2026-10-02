@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import {
+  ASSIGNED_TO_ME_QUERY,
+  activeFilterCount,
+  applyFilters,
+  chipMatches,
+  parseFilters,
+  tokenizeQuery,
   detailPath,
   parseDetailPath,
   ghSetupCommand,
@@ -214,5 +220,68 @@ describe('detail routes', () => {
     ]) {
       expect(parseDetailPath(rest)).toBeNull();
     }
+  });
+});
+
+describe('chips and Filters ↔ query', () => {
+  it('keeps a quoted value with its qualifier', () => {
+    expect(tokenizeQuery('label:"good first issue"  bug is:open')).toEqual([
+      'label:"good first issue"',
+      'bug',
+      'is:open',
+    ]);
+  });
+
+  it('lights a chip while the query holds exactly its terms', () => {
+    expect(chipMatches('is:open', 'is:open')).toBe(true);
+    expect(chipMatches('is:open is:issue assignee:@me', ASSIGNED_TO_ME_QUERY)).toBe(true);
+    expect(chipMatches('is:open bug', 'is:open')).toBe(false);
+    expect(chipMatches('', 'is:open')).toBe(false);
+  });
+
+  it('reads the Filters out of a hand-written query', () => {
+    expect(
+      parseFilters(
+        'crash is:closed author:ana assignee:@me label:bug label:"needs review"'
+      )
+    ).toEqual({
+      status: 'closed',
+      author: 'ana',
+      assignee: '@me',
+      labels: ['bug', 'needs review'],
+    });
+    expect(parseFilters('crash')).toEqual({
+      status: 'all',
+      author: '',
+      assignee: '',
+      labels: [],
+    });
+  });
+
+  it('writes Filters back, keeping every other term', () => {
+    const q = applyFilters('crash is:open sort:created-asc label:old', {
+      status: 'closed',
+      author: 'ana',
+      assignee: '',
+      labels: ['needs review'],
+    });
+    expect(q).toBe('crash sort:created-asc is:closed author:ana label:"needs review"');
+  });
+
+  it('round-trips: query → Filters → query → Filters', () => {
+    const filters = {
+      status: 'open',
+      author: 'bo',
+      assignee: '@me',
+      labels: ['bug', 'good first issue'],
+    };
+    const q = applyFilters('free text', filters);
+    expect(parseFilters(q)).toEqual(filters);
+    expect(applyFilters(q, parseFilters(q))).toBe(q);
+  });
+
+  it('counts the Filters a query applies', () => {
+    expect(activeFilterCount('is:open label:a label:b author:x')).toBe(4);
+    expect(activeFilterCount('crash')).toBe(0);
   });
 });

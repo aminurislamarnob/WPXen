@@ -175,3 +175,90 @@ export function parseDetailPath(rest) {
   if (!Number.isInteger(number) || number <= 0 || String(number) !== num) return null;
   return { repo: `${owner}/${name}`, number };
 }
+
+// ── Chips and Filters ↔ query ────────────────────────────────────────────────
+// The search box is the single source of truth: the preset chips and the
+// Filters dropdown both read the query and write qualifiers back into it, so
+// hand-editing the text and using the controls never disagree.
+
+export const ASSIGNED_TO_ME_QUERY = 'assignee:@me is:issue is:open';
+
+export const ISSUE_CHIPS = [
+  { label: 'Open', query: DEFAULT_ISSUE_QUERY },
+  { label: 'Assigned to me', query: ASSIGNED_TO_ME_QUERY },
+];
+
+// Splits a query into terms, keeping a quoted value with its qualifier:
+// `label:"good first issue" bug` → ['label:"good first issue"', 'bug'].
+export function tokenizeQuery(query) {
+  return String(query || '').match(/(?:[^\s"]+|"[^"]*")+/g) || [];
+}
+
+const unquote = (v) => v.replace(/^"(.*)"$/, '$1');
+const quote = (v) => (/\s/.test(v) ? `"${v}"` : v);
+
+// A chip is lit while the query holds exactly its terms, in any order.
+export function chipMatches(query, chipQuery) {
+  const norm = (q) =>
+    tokenizeQuery(q)
+      .map((t) => t.toLowerCase())
+      .sort()
+      .join(' ');
+  return norm(query) === norm(chipQuery);
+}
+
+const STATUS_TERM = /^(is|state):(open|closed)$/i;
+const FILTER_TERM = /^(author|assignee|label):(.+)$/i;
+
+// The Filters the dropdown shows for a query:
+//   { status: 'open' | 'closed' | 'all', author, assignee, labels: [] }
+// Only the first author / assignee counts, as on GitHub; labels stack.
+export function parseFilters(query) {
+  const f = { status: 'all', author: '', assignee: '', labels: [] };
+  for (const term of tokenizeQuery(query)) {
+    const s = term.match(STATUS_TERM);
+    if (s) {
+      f.status = s[2].toLowerCase();
+      continue;
+    }
+    const m = term.match(FILTER_TERM);
+    if (!m) continue;
+    const key = m[1].toLowerCase();
+    const value = unquote(m[2]);
+    if (key === 'label') f.labels.push(value);
+    else if (!f[key]) f[key] = value;
+  }
+  return f;
+}
+
+// Writes `filters` into `query`: the qualifiers they own are replaced, every
+// other term (free text, sort:, is:issue…) is kept where it was.
+export function applyFilters(query, filters) {
+  const kept = tokenizeQuery(query).filter(
+    (t) => !STATUS_TERM.test(t) && !FILTER_TERM.test(t)
+  );
+  const add = [];
+  if (filters.status === 'open' || filters.status === 'closed') {
+    add.push(`is:${filters.status}`);
+  }
+  const author = String(filters.author || '').trim();
+  const assignee = String(filters.assignee || '').trim();
+  if (author) add.push(`author:${quote(author)}`);
+  if (assignee) add.push(`assignee:${quote(assignee)}`);
+  for (const label of filters.labels || []) {
+    const l = String(label).trim();
+    if (l) add.push(`label:${quote(l)}`);
+  }
+  return [...kept, ...add].join(' ');
+}
+
+// How many Filters a query applies — the count on the Filters button.
+export function activeFilterCount(query) {
+  const f = parseFilters(query);
+  return (
+    (f.status !== 'all' ? 1 : 0) +
+    (f.author ? 1 : 0) +
+    (f.assignee ? 1 : 0) +
+    f.labels.length
+  );
+}
