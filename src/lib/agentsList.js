@@ -79,3 +79,58 @@ export function buildActivity(projects) {
   const rank = (s) => ACTIVITY_RANK[s.state] ?? 2;
   return rows.sort((a, b) => rank(a) - rank(b) || b.changedAt - a.changedAt);
 }
+
+// Sidebar Options (the sliders menu). Per-viewer, stored in localStorage by
+// the sidebar; these are the defaults and the transforms they drive.
+export const DEFAULT_LIST_OPTIONS = {
+  projectSort: 'manual', // manual | recent | name
+  sessionSort: 'attention', // attention | launch
+  hideExited: false,
+  hideEmpty: false,
+  display: 'detailed', // detailed | compact
+};
+
+// Attention order within a project: what needs the user, then what's busy,
+// then what's ready to review, then what has ended.
+const SESSION_RANK = {
+  'needs-input': 0,
+  working: 1,
+  done: 2,
+  idle: 2,
+  exited: 3,
+  error: 3,
+};
+const ENDED_STATES = new Set(['exited', 'error']);
+
+// Apply sort + filter options to buildProjects() output. Input sessions are
+// in launch order, so 'launch' leaves them as they are.
+export function applyListOptions(projects, options = DEFAULT_LIST_OPTIONS) {
+  const o = { ...DEFAULT_LIST_OPTIONS, ...options };
+  let out = projects.map(({ site, sessions }) => {
+    let list = o.hideExited
+      ? sessions.filter((s) => !ENDED_STATES.has(s.state))
+      : sessions;
+    if (o.sessionSort === 'attention') {
+      list = [...list].sort(
+        (a, b) =>
+          (SESSION_RANK[a.state] ?? 4) - (SESSION_RANK[b.state] ?? 4) ||
+          b.changedAt - a.changedAt
+      );
+    }
+    return { site, sessions: list };
+  });
+  if (o.hideEmpty) out = out.filter((p) => p.sessions.length > 0);
+  if (o.projectSort === 'name') {
+    out = [...out].sort((a, b) => a.site.name.localeCompare(b.site.name));
+  } else if (o.projectSort === 'recent') {
+    // Most recent status change among a project's sessions; none sorts last.
+    const latest = (p) => Math.max(-Infinity, ...p.sessions.map((s) => s.changedAt));
+    out = [...out].sort((a, b) => latest(b) - latest(a));
+  }
+  return out;
+}
+
+// How many filters are on — the count badge on the Options button.
+export function activeFilterCount(options) {
+  return (options?.hideExited ? 1 : 0) + (options?.hideEmpty ? 1 : 0);
+}

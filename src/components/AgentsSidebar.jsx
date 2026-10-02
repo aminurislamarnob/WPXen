@@ -10,6 +10,8 @@ import {
   X,
   FolderPlus,
   FolderMinus,
+  SlidersHorizontal,
+  Check,
   Bell,
   BellOff,
 } from 'lucide-react';
@@ -17,7 +19,15 @@ import { ProviderIcon } from './providerIcons';
 import { Tooltip, ConfirmDialog } from './ui';
 import LaunchMenu from './LaunchMenu';
 import AgentStatusGlyph from './AgentStatusGlyph';
-import { buildProjects, buildActivity, formatAge, mostUrgent } from '../lib/agentsList';
+import {
+  buildProjects,
+  buildActivity,
+  formatAge,
+  mostUrgent,
+  applyListOptions,
+  activeFilterCount,
+  DEFAULT_LIST_OPTIONS,
+} from '../lib/agentsList';
 import {
   useAgentSessions,
   useAgentProjects,
@@ -51,6 +61,76 @@ function writeActivityView(on) {
   }
 }
 
+// Sort / filter / display choices from the Options menu, same storage rules.
+const LIST_OPTIONS_KEY = 'wpxen.agentsListOptions';
+function readListOptions() {
+  try {
+    return {
+      ...DEFAULT_LIST_OPTIONS,
+      ...JSON.parse(localStorage.getItem(LIST_OPTIONS_KEY) || '{}'),
+    };
+  } catch {
+    return DEFAULT_LIST_OPTIONS;
+  }
+}
+function writeListOptions(options) {
+  try {
+    localStorage.setItem(LIST_OPTIONS_KEY, JSON.stringify(options));
+  } catch {
+    // Storage unavailable — the choice just won't survive a reload.
+  }
+}
+
+// The Options menu: radio groups for sorting and density, toggles for the
+// filters. Each choice applies immediately; the menu stays open.
+function OptionsMenu({ anchor, options, onChange, onClose }) {
+  const item = (checked, label, patch) => (
+    <button
+      key={label}
+      onClick={() => onChange({ ...options, ...patch })}
+      className="w-full flex items-center gap-2 px-3 py-1 text-left text-[13px] text-foreground hover:bg-accent"
+    >
+      <span className="w-3.5 flex-shrink-0">{checked && <Check size={13} />}</span>
+      {label}
+    </button>
+  );
+  const radio = (key, value, label) =>
+    item(options[key] === value, label, { [key]: value });
+  const toggle = (key, label) => item(!!options[key], label, { [key]: !options[key] });
+  const heading = (text) => (
+    <div className="px-3 pt-1.5 pb-0.5 text-[11px] font-medium text-muted-foreground">
+      {text}
+    </div>
+  );
+  const rule = <div className="my-1 h-px bg-border" />;
+  return (
+    <>
+      <div className="fixed inset-0 z-40" onClick={onClose} />
+      <div
+        className="panel fixed z-50 min-w-[220px] py-1"
+        style={{ left: anchor.x, top: anchor.y }}
+      >
+        {heading('Sort projects')}
+        {radio('projectSort', 'manual', 'Manual (drag to reorder)')}
+        {radio('projectSort', 'recent', 'Recent activity')}
+        {radio('projectSort', 'name', 'Name')}
+        {rule}
+        {heading('Sort sessions')}
+        {radio('sessionSort', 'attention', 'Attention first')}
+        {radio('sessionSort', 'launch', 'Launch order')}
+        {rule}
+        {heading('Filters')}
+        {toggle('hideExited', 'Hide exited sessions')}
+        {toggle('hideEmpty', 'Hide projects with no sessions')}
+        {rule}
+        {heading('Display')}
+        {radio('display', 'detailed', 'Detailed')}
+        {radio('display', 'compact', 'Compact')}
+      </div>
+    </>
+  );
+}
+
 // Current time, re-read every `ms` so row ages ("4m") stay fresh.
 function useNow(ms) {
   const [now, setNow] = useState(() => Date.now());
@@ -82,13 +162,15 @@ function RowAction({ label, onClick, children }) {
 // One agent Session: status glyph, provider mark, title, and how long since
 // its status last changed. Unread rows are bold. On hover the age gives way to
 // a read/unread toggle, plus dismiss on an exited row.
-export function SessionRow({ session: s, now, selected, onOpen, siteName }) {
+export function SessionRow({ session: s, now, selected, onOpen, siteName, compact }) {
   const ended = s.state === 'exited' || s.state === 'error';
   return (
     <div
       onClick={onOpen}
       title={siteName ? `${siteName} · ${s.displayTitle}` : s.displayTitle}
-      className={`group/row w-full min-w-0 flex items-center gap-1.5 pl-1.5 pr-1 py-[5px] rounded-md text-[13px] cursor-pointer ${
+      className={`group/row w-full min-w-0 flex items-center gap-1.5 pl-1.5 pr-1 ${
+        compact ? 'py-[2px] text-[12.5px]' : 'py-[5px] text-[13px]'
+      } rounded-md cursor-pointer ${
         selected
           ? 'bg-sidebar-accent text-sidebar-foreground'
           : 'text-sidebar-foreground/80 hover:bg-sidebar-accent'
@@ -110,9 +192,11 @@ export function SessionRow({ session: s, now, selected, onOpen, siteName }) {
           <span className="font-normal text-muted-foreground"> · {siteName}</span>
         )}
       </span>
-      <span className="text-[11px] text-muted-foreground tabular-nums flex-shrink-0 group-hover/row:hidden">
-        {formatAge(now - s.changedAt)}
-      </span>
+      {!compact && (
+        <span className="text-[11px] text-muted-foreground tabular-nums flex-shrink-0 group-hover/row:hidden">
+          {formatAge(now - s.changedAt)}
+        </span>
+      )}
       <RowAction
         label={s.unread ? 'Mark as read' : 'Mark as unread'}
         onClick={() => window.electronAPI.markSessionRead(s.sessionId, s.unread)}
@@ -148,6 +232,13 @@ export default function AgentsSidebar() {
   const [branches, setBranches] = useState({}); // siteId -> branch | null
   const [collapsed, setCollapsed] = useState(() => new Set());
   const [activityView, setActivityView] = useState(readActivityView);
+  const [listOptions, setListOptions] = useState(readListOptions);
+  const [optionsMenu, setOptionsMenu] = useState(null); // { x, y }
+  const [dragging, setDragging] = useState(null); // siteId being dragged
+  const updateListOptions = (next) => {
+    setListOptions(next);
+    writeListOptions(next);
+  };
   const [launchMenu, setLaunchMenu] = useState(null); // { siteId, x, y }
   const [addMenu, setAddMenu] = useState(null); // { x, y } — Add project picker
   // New workspace menu; `siteId: null` shows the project list first.
@@ -230,6 +321,20 @@ export default function AgentsSidebar() {
   };
 
   const activity = activityView ? buildActivity(projects) : null;
+  const shown = applyListOptions(projects, listOptions);
+  const compact = listOptions.display === 'compact';
+  const filters = activeFilterCount(listOptions);
+  const canDrag = listOptions.projectSort === 'manual';
+
+  // Manual order: move the dragged project into the slot of the one dropped on.
+  const dropOn = (targetId) => {
+    const from = dragging;
+    setDragging(null);
+    if (!from || from === targetId) return;
+    const order = projectIds.filter((id) => id !== from);
+    order.splice(projectIds.indexOf(targetId), 0, from);
+    window.electronAPI.reorderAgentProjects(order);
+  };
   const anyUnread = sessions.some((s) => s.unread);
   const toggleActivity = () => {
     setActivityView((v) => {
@@ -265,6 +370,31 @@ export default function AgentsSidebar() {
             )}
           </button>
         </Tooltip>
+        {!activityView && (
+          <Tooltip
+            label={
+              filters
+                ? `Options — ${filters} filter${filters > 1 ? 's' : ''} on`
+                : 'Options'
+            }
+          >
+            <button
+              onClick={(e) => {
+                const pos = menuBelow(e);
+                setOptionsMenu((m) => (m ? null : pos));
+              }}
+              aria-label="Options"
+              className="relative p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-sidebar-accent"
+            >
+              <SlidersHorizontal size={14} />
+              {filters > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 min-w-[13px] h-[13px] px-[3px] rounded-full bg-highlight text-white text-[9px] font-semibold leading-[13px] text-center">
+                  {filters}
+                </span>
+              )}
+            </button>
+          </Tooltip>
+        )}
         {!activityView && (
           <Tooltip label="Add project">
             <button
@@ -302,6 +432,7 @@ export default function AgentsSidebar() {
               key={s.sessionId}
               session={s}
               siteName={s.siteName}
+              compact={compact}
               now={now}
               selected={s.sessionId === selected}
               onOpen={() => openSession(s.siteId, s.sessionId)}
@@ -318,7 +449,7 @@ export default function AgentsSidebar() {
       <nav
         className={`flex-1 px-3 overflow-y-auto space-y-0.5 ${activity ? 'hidden' : ''}`}
       >
-        {projects.map(({ site, sessions: rows }) => {
+        {shown.map(({ site, sessions: rows }) => {
           const isOpen = !collapsed.has(site.id);
           // Collapsed, the project stands in for its sessions: their most
           // urgent glyph replaces the globe, and any unread makes it bold.
@@ -326,9 +457,20 @@ export default function AgentsSidebar() {
           const anyUnread = !isOpen && rows.some((r) => r.unread);
           const branch = branches[site.id];
           return (
-            <div key={site.id}>
+            <div
+              key={site.id}
+              onDragOver={(e) => {
+                if (dragging) e.preventDefault();
+              }}
+              onDrop={() => dropOn(site.id)}
+            >
               <div
+                draggable={canDrag}
+                onDragStart={() => setDragging(site.id)}
+                onDragEnd={() => setDragging(null)}
                 className={`group flex items-center gap-1.5 pl-2 pr-1 py-[5px] rounded-md text-[13px] hover:bg-sidebar-accent cursor-pointer ${
+                  dragging === site.id ? 'opacity-50' : ''
+                } ${
                   site.id === activeSite
                     ? 'text-sidebar-foreground'
                     : 'text-sidebar-foreground/90'
@@ -355,7 +497,7 @@ export default function AgentsSidebar() {
                   {site.name}
                 </span>
                 <span className="flex-1" />
-                {branch && (
+                {branch && !compact && (
                   <span
                     className="flex items-center gap-0.5 min-w-0 max-w-[45%] text-[11px] text-muted-foreground group-hover:hidden"
                     title={branch}
@@ -396,6 +538,7 @@ export default function AgentsSidebar() {
                     <SessionRow
                       key={s.sessionId}
                       session={s}
+                      compact={compact}
                       now={now}
                       selected={s.sessionId === selected}
                       onOpen={() => openSession(site.id, s.sessionId)}
@@ -416,6 +559,11 @@ export default function AgentsSidebar() {
             No projects yet. Use Add project to pick a site to work on with agents.
           </p>
         )}
+        {projects.length > 0 && shown.length === 0 && (
+          <p className="px-2 py-1 text-xs text-muted-foreground leading-relaxed">
+            Every project is hidden by a filter. Check Options.
+          </p>
+        )}
       </nav>
 
       {launchMenu && (
@@ -424,6 +572,15 @@ export default function AgentsSidebar() {
           anchor={launchMenu}
           onClose={() => setLaunchMenu(null)}
           onLaunch={(agentId, targetId) => launch(launchMenu.siteId, agentId, targetId)}
+        />
+      )}
+
+      {optionsMenu && (
+        <OptionsMenu
+          anchor={optionsMenu}
+          options={listOptions}
+          onChange={updateListOptions}
+          onClose={() => setOptionsMenu(null)}
         />
       )}
 

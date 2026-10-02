@@ -5,6 +5,9 @@ import {
   formatAge,
   mostUrgent,
   buildActivity,
+  applyListOptions,
+  activeFilterCount,
+  DEFAULT_LIST_OPTIONS,
 } from '../src/lib/agentsList';
 
 const site = (id, name = id) => ({ id, name });
@@ -156,5 +159,79 @@ describe('buildActivity', () => {
       'mid-error',
       'old-done',
     ]);
+  });
+});
+
+describe('applyListOptions', () => {
+  const s = (sessionId, state, changedAt) => ({ sessionId, state, changedAt });
+  const projects = [
+    {
+      site: { id: 'b', name: 'Blog' },
+      sessions: [s('b1', 'done', 5), s('b2', 'exited', 50)],
+    },
+    { site: { id: 'z', name: 'Zoo' }, sessions: [] },
+    {
+      site: { id: 'a', name: 'Acme' },
+      sessions: [s('a1', 'exited', 1), s('a2', 'working', 2), s('a3', 'needs-input', 3)],
+    },
+  ];
+  const ids = (out) => out.map((p) => p.site.id);
+  const sessionIds = (p) => p.sessions.map((x) => x.sessionId);
+
+  it('defaults to manual order with sessions in attention order', () => {
+    const out = applyListOptions(projects);
+    expect(ids(out)).toEqual(['b', 'z', 'a']);
+    expect(sessionIds(out[2])).toEqual(['a3', 'a2', 'a1']);
+  });
+
+  it('keeps launch order when asked', () => {
+    const out = applyListOptions(projects, { sessionSort: 'launch' });
+    expect(sessionIds(out[2])).toEqual(['a1', 'a2', 'a3']);
+  });
+
+  it('breaks attention ties by most recent change', () => {
+    const out = applyListOptions([
+      {
+        site: { id: 'x', name: 'X' },
+        sessions: [s('old', 'done', 1), s('new', 'done', 9)],
+      },
+    ]);
+    expect(sessionIds(out[0])).toEqual(['new', 'old']);
+  });
+
+  it('sorts projects by name', () => {
+    expect(ids(applyListOptions(projects, { projectSort: 'name' }))).toEqual([
+      'a',
+      'b',
+      'z',
+    ]);
+  });
+
+  it('sorts projects by most recent activity, empty last', () => {
+    expect(ids(applyListOptions(projects, { projectSort: 'recent' }))).toEqual([
+      'b',
+      'a',
+      'z',
+    ]);
+  });
+
+  it('hides exited and errored sessions', () => {
+    const out = applyListOptions(projects, { hideExited: true });
+    expect(sessionIds(out[0])).toEqual(['b1']);
+    expect(sessionIds(out[2])).toEqual(['a3', 'a2']);
+  });
+
+  it('hides projects with no sessions, after the exited filter', () => {
+    const only = [{ site: { id: 'q', name: 'Q' }, sessions: [s('q1', 'exited', 1)] }];
+    expect(applyListOptions(only, { hideEmpty: true })).toHaveLength(1);
+    expect(applyListOptions(only, { hideEmpty: true, hideExited: true })).toHaveLength(0);
+  });
+});
+
+describe('activeFilterCount', () => {
+  it('counts the filters that are on', () => {
+    expect(activeFilterCount(DEFAULT_LIST_OPTIONS)).toBe(0);
+    expect(activeFilterCount({ hideExited: true })).toBe(1);
+    expect(activeFilterCount({ hideExited: true, hideEmpty: true })).toBe(2);
   });
 });
