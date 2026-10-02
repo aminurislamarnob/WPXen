@@ -368,6 +368,11 @@ const deps = {
   isBrewInstalled: () => require('./brew.cjs').isBrewInstalled(),
   runScriptStreaming: (url, onProgress) => runVendorScript(url, onProgress),
   runNpmStreaming: (args, onProgress) => runNpmInstall(args, onProgress),
+  // The pty layer, so tests can launch Sessions without a real shell.
+  spawnPty: (file, args, opts) => pty.spawn(file, args, opts),
+  shellEnv: () => resolveShellEnv(),
+  userShell: () => getUserShell(),
+  homedir: () => os.homedir(),
 };
 
 function __setDeps(next) {
@@ -622,6 +627,7 @@ const sessions = new Map(); // sessionId -> session
 // and stops are flushed immediately.
 const CHANGE_DEBOUNCE_MS = 200;
 const changeListeners = new Set();
+const floatingListeners = new Set();
 let changeTimer = null;
 
 function onSessionsChanged(cb) {
@@ -629,16 +635,30 @@ function onSessionsChanged(cb) {
   return () => changeListeners.delete(cb);
 }
 
+// The Floating Workspace's own feed — its terminals never reach the Site feed
+// above, so everything keyed on that (Projects, keep-awake, tray) ignores them.
+function onFloatingSessionsChanged(cb) {
+  floatingListeners.add(cb);
+  return () => floatingListeners.delete(cb);
+}
+
 function emitChange({ immediate = false } = {}) {
   if (changeTimer && !immediate) return;
   if (changeTimer) clearTimeout(changeTimer);
   const fire = () => {
     changeTimer = null;
-    const list = listAllSessions();
-    for (const cb of changeListeners) {
-      try {
-        cb(list);
-      } catch {}
+    const feeds = [
+      [changeListeners, listAllSessions],
+      [floatingListeners, listFloatingSessions],
+    ];
+    for (const [listeners, list] of feeds) {
+      if (listeners.size === 0) continue;
+      const rows = list();
+      for (const cb of listeners) {
+        try {
+          cb(rows);
+        } catch {}
+      }
     }
   };
   if (immediate) fire();
@@ -668,6 +688,12 @@ function onAlert(cb) {
 }
 
 function deliverAlerts(session) {
+  // Floating terminals are scratch shells: their status still lights the
+  // launcher's dot, but they never raise a native notification.
+  if (session.scope === 'floating') {
+    session.tracker.drainEvents();
+    return;
+  }
   for (const kind of session.tracker.drainEvents()) {
     const ok = notifier.decide({
       sessionId: session.sessionId,
@@ -720,30 +746,44 @@ function listSessions(siteId) {
 function listAllSessions() {
   const out = [];
   for (const s of sessions.values()) {
-    const snap = s.tracker.snapshot();
-    out.push({
-      sessionId: s.sessionId,
-      siteId: s.siteId,
-      agentId: s.agentId,
-      agentName: s.agentName,
-      targetId: s.targetId,
-      label: s.label,
-      startedAt: s.startedAt,
-      exited: s.exited,
-      exitCode: s.exitCode,
-      title: snap.title,
-      state: snap.state,
-      changedAt: snap.changedAt,
-      unread: snap.unread,
-      // An AI-provider Session rather than the plain shell — keep-awake's
-      // Agent mode counts only these.
-      isAgent: s.agentId !== SHELL_ID,
-      // Last pty output, for keep-awake's stale cutoff. Not itself a change
-      // event: readers that need it fresh call listAllSessions() again.
-      lastOutputAt: s.lastOutputAt,
-    });
+    if (s.scope === 'floating') continue;
+    out.push(sessionRow(s));
   }
   return out;
+}
+
+// The Floating Workspace's terminals, live and exited, oldest first.
+function listFloatingSessions() {
+  const out = [];
+  for (const s of sessions.values()) {
+    if (s.scope === 'floating') out.push({ ...sessionRow(s), cwd: s.cwd });
+  }
+  return out;
+}
+
+function sessionRow(s) {
+  const snap = s.tracker.snapshot();
+  return {
+    sessionId: s.sessionId,
+    siteId: s.siteId,
+    agentId: s.agentId,
+    agentName: s.agentName,
+    targetId: s.targetId,
+    label: s.label,
+    startedAt: s.startedAt,
+    exited: s.exited,
+    exitCode: s.exitCode,
+    title: snap.title,
+    state: snap.state,
+    changedAt: snap.changedAt,
+    unread: snap.unread,
+    // An AI-provider Session rather than the plain shell — keep-awake's
+    // Agent mode counts only these.
+    isAgent: s.agentId !== SHELL_ID,
+    // Last pty output, for keep-awake's stale cutoff. Not itself a change
+    // event: readers that need it fresh call listAllSessions() again.
+    lastOutputAt: s.lastOutputAt,
+  };
 }
 
 // Launch an Agent for a Site. Always creates a NEW Session so multiple can run
@@ -766,6 +806,51 @@ function launch({ site, agentId, target = null, globalArgs = '' }) {
     target,
   });
 
+  return startSession({
+    cwd,
+    command,
+    meta: {
+      scope: 'site',
+      siteId: site.id,
+      agentId: agent.id,
+      agentName: agent.name,
+      targetId: target?.id || null,
+      label,
+    },
+    failLabel: agent.name,
+  });
+}
+
+// A Floating Workspace terminal: a plain shell in `cwd`, owned by no Site. It
+// runs on the same pty engine (ring buffer, status tracking, reaped on quit)
+// but stays out of everything that means "a Site's Sessions" — the Projects
+// list, keep-awake, the tray count, notifications and the quit warning. A
+// leading `~` is expanded here, since the renderer doesn't know the home dir.
+function launchFloating({ cwd } = {}) {
+  const raw = String(cwd || '~').trim() || '~';
+  const home = deps.homedir();
+  const resolved =
+    raw === '~' ? home : raw.startsWith('~/') ? path.join(home, raw.slice(2)) : raw;
+  if (!path.isAbsolute(resolved)) return { error: `Directory not found: ${raw}` };
+  return startSession({
+    cwd: path.normalize(resolved),
+    command: '',
+    meta: {
+      scope: 'floating',
+      siteId: null,
+      agentId: SHELL_ID,
+      agentName: SHELL_AGENT.name,
+      targetId: null,
+      label: null,
+    },
+    failLabel: 'the shell',
+  });
+}
+
+// Spawn the pty for a resolved launch and register its Session. `meta` carries
+// who owns it (a Site's agent, or the Floating Workspace); `command` is typed
+// into the shell once it settles, or nothing for a plain shell.
+function startSession({ cwd, command, meta, failLabel }) {
   // A Target's directory can go stale (a deleted worktree, a moved plugin).
   // Fail loudly before spawning a shell in a bad cwd rather than dropping the
   // user into their home dir with no explanation.
@@ -776,15 +861,15 @@ function launch({ site, agentId, target = null, globalArgs = '' }) {
   }
 
   const sessionId = randomUUID();
-  const env = resolveShellEnv();
+  const env = deps.shellEnv();
   // Spawn the user's interactive login SHELL — not the agent binary directly —
   // and type the agent command into it. Exiting the agent CLI then drops back to
   // a normal shell prompt (like Superset), and the Session only ends when the
   // shell itself exits. `-il` sources the user's rc files.
-  const shell = getUserShell();
+  const shell = deps.userShell();
   let term;
   try {
-    term = pty.spawn(shell, ['-il'], {
+    term = deps.spawnPty(shell, ['-il'], {
       name: 'xterm-256color',
       cols: 80,
       rows: 24,
@@ -803,7 +888,7 @@ function launch({ site, agentId, target = null, globalArgs = '' }) {
       },
     });
   } catch (err) {
-    return { error: `Failed to launch ${agent.name}: ${err.message}` };
+    return { error: `Failed to launch ${failLabel}: ${err.message}` };
   }
 
   // A plain shell has nothing to type — the pty is already what was asked for.
@@ -811,11 +896,7 @@ function launch({ site, agentId, target = null, globalArgs = '' }) {
 
   const session = {
     sessionId,
-    siteId: site.id,
-    agentId: agent.id,
-    agentName: agent.name,
-    targetId: target?.id || null,
-    label,
+    ...meta,
     cwd,
     pty: term,
     buffer: '',
@@ -824,7 +905,7 @@ function launch({ site, agentId, target = null, globalArgs = '' }) {
     exitCode: null,
     startedAt: Date.now(),
     lastOutputAt: Date.now(),
-    tracker: createTracker({ agent: agent.id !== SHELL_ID }),
+    tracker: createTracker({ agent: meta.agentId !== SHELL_ID }),
     // `started` gates the type-the-command step; a shell session has already
     // arrived at what the user wanted, so it starts out done.
     started: startsImmediately,
@@ -916,12 +997,14 @@ function write(sessionId, data) {
 }
 
 // What's on screen: the Session selected in the Agents pane (null when the
-// pane isn't showing) and whether the window has focus. A Session counts as
-// viewed only when both hold — selected in a background window isn't seen.
-const view = { selected: null, focused: false };
+// pane isn't showing), the Floating Workspace's active terminal (null while
+// the panel is minimised) and whether the window has focus. A Session counts
+// as viewed only when the window is focused — selected in a background window
+// isn't seen.
+const view = { selected: null, floating: null, focused: false };
 
 function isOnScreen(sessionId) {
-  return view.focused && view.selected === sessionId;
+  return view.focused && (view.selected === sessionId || view.floating === sessionId);
 }
 
 function setView(patch) {
@@ -978,15 +1061,19 @@ function stop(sessionId) {
   emitChange({ immediate: true });
 }
 
+// Live Site Sessions only — a Floating Workspace shell is scratch and doesn't
+// hold up quitting.
 function hasActiveSessions() {
-  for (const s of sessions.values()) if (!s.exited) return true;
+  for (const s of sessions.values()) if (!s.exited && s.scope !== 'floating') return true;
   return false;
 }
 
 // Distinct Site ids that have a live Session — for the quit-confirmation dialog.
 function activeSiteIds() {
   const ids = new Set();
-  for (const s of sessions.values()) if (!s.exited) ids.add(s.siteId);
+  for (const s of sessions.values()) {
+    if (!s.exited && s.scope !== 'floating') ids.add(s.siteId);
+  }
   return [...ids];
 }
 
@@ -1008,9 +1095,12 @@ module.exports = {
   assertShellScript,
   listSessions,
   listAllSessions,
+  listFloatingSessions,
   onSessionsChanged,
+  onFloatingSessionsChanged,
   resolveLaunch,
   launch,
+  launchFloating,
   attach,
   write,
   setView,

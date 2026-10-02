@@ -234,7 +234,18 @@ function attachContextMenu(tabKey, wc) {
 // alone so their variants still reach the page.
 function attachKeyInterception(tabKey, wc) {
   on(tabKey, wc, 'before-input-event', (event, input) => {
-    if (input.type !== 'keyDown' || input.shift || input.alt) return;
+    if (input.type !== 'keyDown') return;
+    // ⌘⌥A toggles the Floating Workspace. Matched by code: with Option held,
+    // `key` is the layout's composed character (å), not "a".
+    if (input.meta && input.alt && !input.control && input.code === 'KeyA') {
+      event.preventDefault();
+      send('browser-shortcut', {
+        tabKey,
+        key: input.shift ? 'floating-max' : 'floating',
+      });
+      return;
+    }
+    if (input.shift || input.alt) return;
     if (!(input.meta || input.control)) return;
 
     const key = String(input.key || '').toLowerCase();

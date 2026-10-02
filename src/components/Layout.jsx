@@ -5,6 +5,7 @@ import logo from '../assets/logo.png';
 import ActivityBar from './ActivityBar';
 import AgentsSidebar from './AgentsSidebar';
 import KeepAwakeButton from './KeepAwakeButton';
+import FloatingWorkspace from './FloatingWorkspace';
 import { Tooltip } from './ui';
 import { NAV_GROUPS } from '../lib/navItems';
 import { ACTIVITY_BAR_WIDTH, WINDOW_CONTROLS_END, agentsLabel } from '../lib/activityBar';
@@ -200,6 +201,10 @@ export default function Layout({ serviceStatus }) {
           <Outlet context={{ sidebarCollapsed, agentsMode, controlsInset }} />
         </div>
       </main>
+
+      {/* Floating Workspace — launcher + panel, on every page. Before the
+          window controls, which must stay the last child (see below). */}
+      <FloatingWorkspace />
 
       {/* Window controls, docked just after the native macOS traffic lights.
           Absolutely positioned so they stay put whether the sidebar is shown
