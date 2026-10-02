@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Coffee } from 'lucide-react';
+import { Tooltip } from './ui';
 import { useSettings } from '../lib/useSettings';
 import { KEEP_AWAKE_MODES, keepAwakeMode, useKeepAwakeStatus } from '../lib/useKeepAwake';
 
@@ -48,25 +49,31 @@ export default function KeepAwakeButton() {
 
   return (
     <>
-      <button
-        ref={buttonRef}
-        onClick={toggle}
-        aria-haspopup="menu"
-        aria-expanded={!!anchor}
-        aria-label={`Keep computer awake: ${mode.label}, ${stateLabel}`}
-        title={`Keep computer awake · ${mode.label} · ${stateLabel}`}
-        className={`no-drag flex items-center gap-1.5 h-6 px-1.5 rounded-sm text-[11px] transition-colors hover:bg-sidebar-accent ${
-          active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
-        }`}
+      <Tooltip
+        label={`Keep computer awake, ${mode.label} · ${stateLabel}`}
+        side="top"
+        arrow
+        disabled={!!anchor}
       >
-        <Coffee size={12} strokeWidth={2.2} />
-        {mode.label}
-        <span
-          className={`size-1.5 rounded-full ${
-            active ? 'bg-foreground' : 'bg-muted-foreground/40'
+        <button
+          ref={buttonRef}
+          onClick={toggle}
+          aria-haspopup="menu"
+          aria-expanded={!!anchor}
+          aria-label={`Keep computer awake: ${mode.label}, ${stateLabel}`}
+          className={`no-drag flex items-center gap-1.5 h-6 px-1.5 rounded-sm text-[11px] transition-colors hover:bg-sidebar-accent ${
+            active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
           }`}
-        />
-      </button>
+        >
+          <Coffee size={12} strokeWidth={2.2} />
+          {mode.label}
+          <span
+            className={`size-1.5 rounded-full ${
+              active ? 'bg-foreground' : 'bg-muted-foreground/40'
+            }`}
+          />
+        </button>
+      </Tooltip>
 
       {anchor && (
         <>
