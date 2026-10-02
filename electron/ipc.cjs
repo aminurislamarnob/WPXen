@@ -37,6 +37,7 @@ const setup = require('./services/setup.cjs');
 const logs = require('./services/logs.cjs');
 const validation = require('./services/validation.cjs');
 const agents = require('./services/agents.cjs');
+const notes = require('./services/notes.cjs');
 const agentProjects = require('./services/agentProjects.cjs');
 const files = require('./services/files.cjs');
 const git = require('./services/git.cjs');
@@ -391,6 +392,29 @@ function registerHandlers(win, storeInstance) {
   });
   ipcMain.handle('agent-floating-sessions', () => agents.listFloatingSessions());
   ipcMain.handle('agent-launch-floating', (_e, cwd) => agents.launchFloating({ cwd }));
+
+  // Floating Workspace notes (services/notes.cjs). Reads and writes are
+  // confined to the notes folder plus files the user picked below.
+  notes.restorePicked(store.get('floatingNotesPicked', []));
+  notes.onPickedChange((list) => store.set('floatingNotesPicked', list));
+  ipcMain.handle('notes-create', () => notes.createNote());
+  ipcMain.handle('notes-read', (_e, file) => notes.readNote(file));
+  ipcMain.handle('notes-save', (_e, file, content, mtimeMs, opts) =>
+    notes.saveNote(file, content, mtimeMs, { force: !!opts?.force })
+  );
+  ipcMain.handle('notes-discard', (_e, file, edited) =>
+    notes.discardIfUntouched(file, { edited: !!edited })
+  );
+  ipcMain.handle('notes-open-dialog', async () => {
+    const result = await dialog.showOpenDialog(win, {
+      defaultPath: notes.notesDir(),
+      properties: ['openFile'],
+      filters: [{ name: 'Markdown', extensions: ['md', 'markdown'] }],
+    });
+    if (result.canceled || !result.filePaths[0]) return null;
+    const file = result.filePaths[0];
+    return notes.allow(file) ? file : null;
+  });
   // Dismissing a row is the same teardown as closing its tab.
   ipcMain.handle('agent-session-dismiss', (_e, sessionId) => {
     agents.stop(sessionId);

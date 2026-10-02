@@ -343,4 +343,58 @@ textarea:focus {
   .panel-item-danger {
     @apply text-destructive hover:bg-destructive/10;
   }
+
+  /* Rendered markdown — a Floating Workspace note's Preview. There's no
+     typography plugin, so the handful of elements markdown produces are
+     styled here on the semantic tokens. */
+  .note-preview {
+    @apply text-[13.5px] leading-relaxed text-foreground;
+  }
+  .note-preview > * + * {
+    @apply mt-3;
+  }
+  .note-preview h1 {
+    @apply text-xl font-semibold;
+  }
+  .note-preview h2 {
+    @apply text-lg font-semibold;
+  }
+  .note-preview h3,
+  .note-preview h4 {
+    @apply text-[14px] font-semibold;
+  }
+  .note-preview ul {
+    @apply list-disc pl-5;
+  }
+  .note-preview ol {
+    @apply list-decimal pl-5;
+  }
+  .note-preview a {
+    @apply text-highlight underline underline-offset-2 cursor-pointer;
+  }
+  .note-preview code {
+    @apply rounded-sm bg-muted px-1 py-0.5 font-mono text-[12px];
+  }
+  .note-preview pre {
+    @apply rounded-md bg-tertiary p-3 overflow-x-auto;
+  }
+  .note-preview pre code {
+    @apply bg-transparent p-0;
+  }
+  .note-preview blockquote {
+    @apply border-l-2 border-border pl-3 text-muted-foreground;
+  }
+  .note-preview hr {
+    @apply border-border;
+  }
+  .note-preview table {
+    @apply border-collapse text-[12.5px];
+  }
+  .note-preview th,
+  .note-preview td {
+    @apply border border-border px-2 py-1;
+  }
+  .note-preview img {
+    @apply max-w-full;
+  }
 }

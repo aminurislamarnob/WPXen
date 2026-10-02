@@ -203,6 +203,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setFloatingView: (sessionId) => ipcRenderer.send('agent-floating-view', sessionId),
   setFloatingFocus: (focused) => ipcRenderer.send('floating-focus', !!focused),
 
+  // Floating Workspace notes
+  notesCreate: () => ipcRenderer.invoke('notes-create'),
+  notesRead: (file) => ipcRenderer.invoke('notes-read', file),
+  notesSave: (file, content, mtimeMs, opts) =>
+    ipcRenderer.invoke('notes-save', file, content, mtimeMs, opts),
+  notesDiscard: (file, edited) => ipcRenderer.invoke('notes-discard', file, edited),
+  notesOpenDialog: () => ipcRenderer.invoke('notes-open-dialog'),
+
   // Launch Presets (global, per-Agent) & Launch Targets (per-Site)
   getAgentPresets: () => ipcRenderer.invoke('agent-presets-get'),
   setAgentPreset: (agentId, args) =>
