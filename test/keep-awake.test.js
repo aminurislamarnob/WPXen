@@ -288,3 +288,175 @@ describe('status publishing', () => {
     expect(statuses).toEqual([{ mode: 'agent', active: false, workingCount: 0 }]);
   });
 });
+
+describe('Agent mode', () => {
+  let sessions;
+  let notify;
+
+  // A Session snapshot as agents.listAllSessions() returns it.
+  const session = (over = {}) => ({
+    sessionId: 's1',
+    isAgent: true,
+    state: 'working',
+    exited: false,
+    lastOutputAt: Date.now(),
+    ...over,
+  });
+
+  function watch(initial) {
+    sessions = initial;
+    keepAwake.watchSessions({
+      list: () => sessions,
+      subscribe: (cb) => {
+        notify = cb;
+        return () => {
+          notify = null;
+        };
+      },
+    });
+  }
+
+  // Replace the list and fire the change feed, the way agents.cjs does.
+  async function change(next) {
+    sessions = next;
+    notify?.(next);
+    await tick();
+  }
+
+  beforeEach(() => {
+    keepAwake.setMode('agent');
+  });
+
+  it('holds while an agent Session is working', async () => {
+    watch([session()]);
+    await tick();
+    expect(liveCaffeinate()).toBe(1);
+    expect(keepAwake.getStatus()).toEqual({
+      mode: 'agent',
+      active: true,
+      workingCount: 1,
+    });
+  });
+
+  it.each(['done', 'needs-input', 'idle', 'exited', 'error'])(
+    'releases immediately when the agent moves to %s',
+    async (state) => {
+      watch([session()]);
+      await tick();
+      await change([session({ state })]);
+      expect(liveCaffeinate()).toBe(0);
+      expect(keepAwake.getStatus()).toEqual({
+        mode: 'agent',
+        active: false,
+        workingCount: 0,
+      });
+    }
+  );
+
+  it('ignores a plain shell Session even while its title spins', async () => {
+    watch([session({ isAgent: false })]);
+    await tick();
+    expect(spawn).not.toHaveBeenCalled();
+    expect(keepAwake.getStatus().workingCount).toBe(0);
+  });
+
+  it('ignores an exited Session whatever its last state', async () => {
+    watch([session({ exited: true })]);
+    await tick();
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('holds until every working agent has stopped', async () => {
+    watch([session({ sessionId: 'a' }), session({ sessionId: 'b' })]);
+    await tick();
+    expect(keepAwake.getStatus().workingCount).toBe(2);
+
+    await change([
+      session({ sessionId: 'a', state: 'done' }),
+      session({ sessionId: 'b' }),
+    ]);
+    expect(liveCaffeinate()).toBe(1);
+    expect(keepAwake.getStatus().workingCount).toBe(1);
+
+    await change([
+      session({ sessionId: 'a', state: 'done' }),
+      session({ sessionId: 'b', state: 'done' }),
+    ]);
+    expect(liveCaffeinate()).toBe(0);
+  });
+
+  it('a Session silent for 2 hours stops counting, released by the timer alone', async () => {
+    watch([session()]);
+    await tick();
+    expect(liveCaffeinate()).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(keepAwake.STALE_AFTER_MS - 1);
+    expect(liveCaffeinate()).toBe(1);
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(liveCaffeinate()).toBe(0);
+    expect(keepAwake.getStatus()).toEqual({
+      mode: 'agent',
+      active: false,
+      workingCount: 0,
+    });
+  });
+
+  it('output since the last change keeps a Session counting past the cutoff', async () => {
+    const s = session();
+    watch([s]);
+    await tick();
+    // Output arrives without a change event: lastOutputAt advances in place.
+    await vi.advanceTimersByTimeAsync(keepAwake.STALE_AFTER_MS / 2);
+    s.lastOutputAt = Date.now();
+    await vi.advanceTimersByTimeAsync(keepAwake.STALE_AFTER_MS / 2);
+    expect(liveCaffeinate()).toBe(1);
+    await vi.advanceTimersByTimeAsync(keepAwake.STALE_AFTER_MS / 2);
+    expect(liveCaffeinate()).toBe(0);
+  });
+
+  it('a Session already stale when seen never counts', async () => {
+    watch([session({ lastOutputAt: Date.now() - keepAwake.STALE_AFTER_MS })]);
+    await tick();
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('On and Off ignore Session changes', async () => {
+    watch([]);
+    keepAwake.setMode('off');
+    await change([session()]);
+    expect(spawn).not.toHaveBeenCalled();
+
+    keepAwake.setMode('on');
+    await tick();
+    await change([session({ state: 'done' })]);
+    expect(liveCaffeinate()).toBe(1);
+  });
+
+  it('switching to Agent mode picks up agents already working', async () => {
+    keepAwake.setMode('off');
+    watch([session()]);
+    await tick();
+    expect(spawn).not.toHaveBeenCalled();
+    keepAwake.setMode('agent');
+    await tick();
+    expect(liveCaffeinate()).toBe(1);
+  });
+
+  it('resume drops Sessions that went stale while the Mac slept', async () => {
+    watch([session()]);
+    await tick();
+    // Wall-clock jumps across sleep without the timer having fired yet.
+    vi.setSystemTime(Date.now() + keepAwake.STALE_AFTER_MS + 1);
+    keepAwake.handleResume();
+    await tick();
+    expect(liveCaffeinate()).toBe(0);
+  });
+
+  it('dispose stops watching Sessions', async () => {
+    watch([session()]);
+    await tick();
+    keepAwake.dispose();
+    expect(notify).toBeNull();
+  });
+});

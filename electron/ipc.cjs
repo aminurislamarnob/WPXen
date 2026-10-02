@@ -268,6 +268,10 @@ function registerHandlers(win, storeInstance) {
     }
   });
   keepAwake.setMode(settings.get('agents.keepAwake'));
+  keepAwake.watchSessions({
+    list: agents.listAllSessions,
+    subscribe: agents.onSessionsChanged,
+  });
   powerMonitor.on('resume', () => keepAwake.handleResume());
 
   // Apply persisted DB credentials so MySQL operations authenticate correctly.

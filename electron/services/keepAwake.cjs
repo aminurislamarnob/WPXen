@@ -26,6 +26,27 @@ const MODES = ['on', 'agent', 'off'];
 // An unexpected caffeinate exit is retried after this long rather than in a
 // tight loop, mirroring Orca's MACOS_SYSTEM_SLEEP_ASSERTION_RETRY_MS.
 const RETRY_MS = 30_000;
+// A Session silent this long stops counting as working, even if its title
+// still shows a spinner — a backstop so a hung agent can't keep the Mac awake
+// forever (Orca's AGENT_AWAKE_STATUS_STALE_AFTER_MS). Deliberately long: a
+// test run or build inside a tool call can be quiet for many minutes.
+const STALE_AFTER_MS = 2 * 60 * 60 * 1000;
+
+// Which Sessions keep the Mac awake in Agent mode: AI-provider Sessions (not
+// the plain shell, whose spinner might just be `npm install`) that are
+// `working` and have produced output within STALE_AFTER_MS. `needs-input` does
+// not count — an agent waiting on you is doing no work.
+function countsAsWorking(session, now) {
+  return (
+    !!session &&
+    session.isAgent === true &&
+    session.state === 'working' &&
+    !session.exited &&
+    typeof session.lastOutputAt === 'number' &&
+    now - session.lastOutputAt < STALE_AFTER_MS
+  );
+}
+
 function fromElectron(name) {
   try {
     return require('electron')[name];
@@ -69,6 +90,12 @@ let retryTimer = null;
 let exitLogged = false;
 let lastPublished = null;
 const listeners = new Set();
+// Session source, bound by watchSessions(). The pulled list — not a change
+// payload — is what gets counted, because lastOutputAt advances without
+// emitting a change and would otherwise be read stale.
+let listSessions = null;
+let unwatch = null;
+let staleTimer = null;
 
 function wanted() {
   return mode === 'on' || (mode === 'agent' && workingCount > 0);
@@ -208,6 +235,49 @@ function apply() {
   publish();
 }
 
+// ─── Agent sessions ────────────────────────────────────────────────────────
+
+function clearStaleTimer() {
+  if (staleTimer) clearTimeout(staleTimer);
+  staleTimer = null;
+}
+
+// Recounts working Sessions and arms a timer for the moment the oldest one
+// would cross the stale cutoff — so a hung agent releases the hold with no
+// other event. When it fires, the list is pulled again: if that Session has
+// produced output since, it simply keeps counting.
+function recount() {
+  clearStaleTimer();
+  const now = Date.now();
+  let count = 0;
+  let nextExpiry = Infinity;
+  for (const s of (listSessions && listSessions()) || []) {
+    if (!countsAsWorking(s, now)) continue;
+    count += 1;
+    nextExpiry = Math.min(nextExpiry, s.lastOutputAt + STALE_AFTER_MS);
+  }
+  workingCount = count;
+  if (count > 0) staleTimer = setTimeout(update, Math.max(0, nextExpiry - now));
+}
+
+function update() {
+  recount();
+  apply();
+}
+
+/**
+ * Binds the agent Session feed. `list()` returns every Session's snapshot
+ * ({ isAgent, state, exited, lastOutputAt, … }); `subscribe(cb)` registers for
+ * changes and returns an unsubscribe. Agent mode releases the hold the moment
+ * nothing counts — there is no grace period.
+ */
+function watchSessions({ list, subscribe }) {
+  if (unwatch) unwatch();
+  listSessions = list;
+  unwatch = subscribe ? subscribe(() => update()) : null;
+  update();
+}
+
 // ─── Public API ────────────────────────────────────────────────────────────
 
 function setMode(next) {
@@ -217,14 +287,19 @@ function setMode(next) {
 }
 
 // After a wake from sleep the assertion may have been lost (caffeinate killed
-// while suspended); re-applying is idempotent when everything is still held.
+// while suspended) and Sessions may have gone stale while the clock ran on;
+// re-applying is idempotent when everything is still held.
 function handleResume() {
-  apply();
+  update();
 }
 
 // Releases everything. Called from before-quit; also resets state for tests.
 function dispose() {
   release();
+  clearStaleTimer();
+  if (unwatch) unwatch();
+  unwatch = null;
+  listSessions = null;
   mode = 'off';
   workingCount = 0;
   lastPublished = null;
@@ -235,6 +310,9 @@ module.exports = {
   CAFFEINATE,
   MODES,
   RETRY_MS,
+  STALE_AFTER_MS,
+  countsAsWorking,
+  watchSessions,
   setMode,
   getStatus,
   onStatusChange,
