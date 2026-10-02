@@ -65,6 +65,17 @@ export default function Layout({ serviceStatus }) {
     };
   }, [navigate]);
 
+  // A clicked agent notification (or tray entry) opens its session.
+  useEffect(
+    () =>
+      window.electronAPI.on('agent-open-session', ({ siteId, sessionId }) =>
+        navigate(`/agents/${encodeURIComponent(siteId)}`, {
+          state: { focus: sessionId, nonce: Date.now() },
+        })
+      ),
+    [navigate]
+  );
+
   const q = filter.trim().toLowerCase();
   const groups = q
     ? NAV_GROUPS.map((g) => g.filter((i) => i.label.toLowerCase().includes(q))).filter(

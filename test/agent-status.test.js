@@ -4,6 +4,8 @@ import {
   cleanTitle,
   classifyTitle,
   isTerminalReply,
+  createNotifier,
+  NOTIFY_COOLDOWN_MS,
 } from '../electron/services/agentStatus.cjs';
 
 const osc = (text, term = '\x07') => `\x1b]0;${text}${term}`;
@@ -300,5 +302,89 @@ describe('isTerminalReply', () => {
     expect(isTerminalReply('\r')).toBe(false);
     expect(isTerminalReply('y')).toBe(false);
     expect(isTerminalReply('\x1b[A')).toBe(false); // arrow up
+  });
+});
+
+describe('agent status tracker — alert events', () => {
+  it('reports done, needs-input, bell and error, oldest first, once', () => {
+    const t = createTracker();
+    t.output(osc('⠐ Task'));
+    t.output(osc('✳ Task'));
+    t.output('\x07');
+    expect(t.drainEvents()).toEqual(['done', 'needs-input', 'bell']);
+    expect(t.drainEvents()).toEqual([]);
+    t.exit(1);
+    expect(t.drainEvents()).toEqual(['error']);
+  });
+
+  it('reports nothing for work starting or a clean exit', () => {
+    const t = createTracker();
+    t.output(osc('⠐ Task'));
+    t.exit(0);
+    expect(t.drainEvents()).toEqual([]);
+  });
+
+  it('still reports events for the session on screen (gating is the notifier’s job)', () => {
+    const t = createTracker();
+    t.view(true);
+    t.output(osc('⠐ Task'));
+    t.output(osc('✳ Task'));
+    expect(t.drainEvents()).toEqual(['done']);
+  });
+});
+
+describe('createNotifier', () => {
+  const all = {
+    enabled: true,
+    onDone: true,
+    onNeedsInput: true,
+    onBell: true,
+    suppressWhenFocused: true,
+  };
+  const ask = (n, over = {}) =>
+    n.decide({ sessionId: 's1', kind: 'done', onScreen: false, settings: all, ...over });
+
+  it('notifies an off-screen event', () => {
+    expect(ask(createNotifier())).toBe(true);
+  });
+
+  it('suppresses the session on screen when suppress-when-focused is on', () => {
+    const n = createNotifier();
+    expect(ask(n, { onScreen: true })).toBe(false);
+    expect(
+      ask(n, { onScreen: true, settings: { ...all, suppressWhenFocused: false } })
+    ).toBe(true);
+  });
+
+  it('allows one notification per session per cooldown window', () => {
+    let t = 0;
+    const n = createNotifier({ now: () => t });
+    expect(ask(n)).toBe(true);
+    t += 1000;
+    expect(ask(n, { kind: 'bell' })).toBe(false);
+    expect(ask(n, { sessionId: 's2' })).toBe(true); // other sessions unaffected
+    t += NOTIFY_COOLDOWN_MS;
+    expect(ask(n)).toBe(true);
+  });
+
+  it('honours each trigger switch, with error riding on done', () => {
+    const n = () => createNotifier();
+    expect(ask(n(), { settings: { ...all, onDone: false } })).toBe(false);
+    expect(ask(n(), { kind: 'error', settings: { ...all, onDone: false } })).toBe(false);
+    expect(
+      ask(n(), { kind: 'needs-input', settings: { ...all, onNeedsInput: false } })
+    ).toBe(false);
+    expect(ask(n(), { kind: 'bell', settings: { ...all, onBell: false } })).toBe(false);
+    expect(ask(n(), { kind: 'bell', settings: { ...all, onDone: false } })).toBe(true);
+  });
+
+  it('the master switch turns everything off', () => {
+    expect(ask(createNotifier(), { settings: { ...all, enabled: false } })).toBe(false);
+  });
+
+  it('a suppressed or switched-off event does not start the cooldown', () => {
+    const n = createNotifier({ now: () => 0 });
+    expect(ask(n, { onScreen: true })).toBe(false);
+    expect(ask(n)).toBe(true);
   });
 });

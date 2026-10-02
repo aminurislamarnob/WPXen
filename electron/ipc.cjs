@@ -8,6 +8,7 @@ const {
   BrowserWindow,
   nativeTheme,
   session,
+  Notification,
 } = require('electron');
 const crypto = require('crypto');
 const path = require('path');
@@ -99,6 +100,17 @@ function applyAgentConfig(all) {
     enabled: enabled && enabled.length ? enabled : null,
     commands: all['agents.commands'],
     custom: all['agents.custom']?.list || [],
+  });
+}
+
+// Hands the session manager the notification switches it gates alerts on.
+function applyNotificationConfig(all) {
+  agents.setNotificationSettings({
+    enabled: all['agents.notifications.enabled'],
+    onDone: all['agents.notifications.onDone'],
+    onNeedsInput: all['agents.notifications.onNeedsInput'],
+    onBell: all['agents.notifications.onBell'],
+    suppressWhenFocused: all['agents.notifications.suppressWhenFocused'],
   });
 }
 
@@ -227,6 +239,12 @@ function registerHandlers(win, storeInstance) {
       'agents.enabled': (_v, all) => applyAgentConfig(all),
       'agents.commands': (_v, all) => applyAgentConfig(all),
       'agents.custom': (_v, all) => applyAgentConfig(all),
+      'agents.notifications.enabled': (_v, all) => applyNotificationConfig(all),
+      'agents.notifications.onDone': (_v, all) => applyNotificationConfig(all),
+      'agents.notifications.onNeedsInput': (_v, all) => applyNotificationConfig(all),
+      'agents.notifications.onBell': (_v, all) => applyNotificationConfig(all),
+      'agents.notifications.suppressWhenFocused': (_v, all) =>
+        applyNotificationConfig(all),
     },
   });
   settings.migrateLegacy();
@@ -235,6 +253,7 @@ function registerHandlers(win, storeInstance) {
   procman.setMaxLogSizeMb(settings.get('services.logMaxSizeMb'));
   nativeTheme.themeSource = settings.get('appearance.themeMode');
   applyAgentConfig(settings.read());
+  applyNotificationConfig(settings.read());
 
   // Apply persisted DB credentials so MySQL operations authenticate correctly.
   mysql.setCredentials({
@@ -349,6 +368,41 @@ function registerHandlers(win, storeInstance) {
     return { ok: true };
   });
   ipcMain.handle('git-branch', (_e, rootPath) => git.currentBranch(rootPath));
+
+  // Native notifications for agent alerts (gated in agents.cjs). Clicking one
+  // brings the window up on that session; the renderer navigates.
+  const liveNotifications = new Set(); // keep a ref, or GC can drop the click
+  agents.onAlert((alert) => {
+    if (!Notification.isSupported()) return;
+    const site = findSite(alert.siteId);
+    const where = site ? ` · ${site.name}` : '';
+    const body = {
+      done: alert.title,
+      error: `Exited with an error — ${alert.title}`,
+      'needs-input': `Needs your input — ${alert.title}`,
+      bell: alert.title,
+    }[alert.kind];
+    const n = new Notification({
+      title: `${alert.agentName}${where}`,
+      body,
+      silent: settings.get('agents.notifications.sound') === 'none',
+    });
+    liveNotifications.add(n);
+    const drop = () => liveNotifications.delete(n);
+    n.on('close', drop);
+    n.on('click', () => {
+      drop();
+      if (win && !win.isDestroyed()) {
+        win.show();
+        win.focus();
+        win.webContents.send('agent-open-session', {
+          siteId: alert.siteId,
+          sessionId: alert.sessionId,
+        });
+      }
+    });
+    n.show();
+  });
 
   // Unread bookkeeping needs to know what's actually on screen: the Session
   // the Agents pane shows (renderer-reported) and whether the window is

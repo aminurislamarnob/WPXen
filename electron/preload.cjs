@@ -25,6 +25,7 @@ const VALID_EVENT_CHANNELS = [
   'terminal-exit',
   'agent-sessions-update',
   'agent-projects-update',
+  'agent-open-session',
   'browser-new-window',
   'browser-shortcut',
   'settings-updated',

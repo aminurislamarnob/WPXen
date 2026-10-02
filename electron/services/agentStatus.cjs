@@ -151,6 +151,10 @@ function createTracker({ now = Date.now, agent = true } = {}) {
   let dirty = false;
   let onScreen = false; // selected in the Agents pane AND the window focused
   let beforeInput = 'idle'; // the state needs-input interrupted
+  // Alert-worthy moments since the last drain — 'done' | 'needs-input' |
+  // 'bell' | 'error'. Whether one becomes a notification is the notifier's
+  // call (see createNotifier); the tracker only reports what happened.
+  let events = [];
 
   const touch = () => {
     dirty = true;
@@ -172,7 +176,10 @@ function createTracker({ now = Date.now, agent = true } = {}) {
     snap.state = state;
     snap.changedAt = now();
     touch();
-    if (ATTENTION.has(state)) attention();
+    if (ATTENTION.has(state)) {
+      attention();
+      events.push(state);
+    }
   };
 
   // The one entry point every source goes through.
@@ -208,6 +215,7 @@ function createTracker({ now = Date.now, agent = true } = {}) {
       if (ENDED.has(snap.state)) return;
       if (agent) apply({ state: 'needs-input', source: 'bell' });
       attention();
+      events.push('bell');
     },
   });
 
@@ -260,14 +268,55 @@ function createTracker({ now = Date.now, agent = true } = {}) {
       setUnread(true);
       return flush();
     },
+    // Alert events since the last call, oldest first.
+    drainEvents() {
+      const out = events;
+      events = [];
+      return out;
+    },
     snapshot() {
       return { ...snap };
     },
   };
 }
 
+// Burst guard: one notification per Session within this window, so a bell
+// and the completion right behind it don't both pop up.
+const NOTIFY_COOLDOWN_MS = 5000;
+
+// Which setting switches each event kind. A crash rides on "done": it is how
+// the work ended, and a separate switch for it would be one nobody turns off.
+const TRIGGER_SETTING = {
+  done: 'onDone',
+  error: 'onDone',
+  'needs-input': 'onNeedsInput',
+  bell: 'onBell',
+};
+
+// Decides whether a tracker event becomes a native notification.
+// `settings` is { enabled, onDone, onNeedsInput, onBell, suppressWhenFocused }.
+function createNotifier({ now = Date.now } = {}) {
+  const last = new Map(); // sessionId -> time of its last notification
+
+  return {
+    decide({ sessionId, kind, onScreen, settings }) {
+      if (!settings.enabled || !settings[TRIGGER_SETTING[kind]]) return false;
+      if (settings.suppressWhenFocused && onScreen) return false;
+      const prev = last.get(sessionId);
+      if (prev !== undefined && now() - prev < NOTIFY_COOLDOWN_MS) return false;
+      last.set(sessionId, now());
+      return true;
+    },
+    forget(sessionId) {
+      last.delete(sessionId);
+    },
+  };
+}
+
 module.exports = {
   createTracker,
+  createNotifier,
+  NOTIFY_COOLDOWN_MS,
   createOscParser,
   cleanTitle,
   classifyTitle,

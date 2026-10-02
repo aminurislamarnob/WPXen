@@ -12,7 +12,7 @@ const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
 const pty = require('node-pty');
-const { createTracker, isTerminalReply } = require('./agentStatus.cjs');
+const { createTracker, createNotifier, isTerminalReply } = require('./agentStatus.cjs');
 
 // ── Registry ────────────────────────────────────────────────────────────────
 // Curated, data-shaped so user-defined Agents can drop in later (Q5). `cmd` is
@@ -645,6 +645,54 @@ function emitChange({ immediate = false } = {}) {
   else changeTimer = setTimeout(fire, CHANGE_DEBOUNCE_MS);
 }
 
+// Native alerts. The tracker reports what happened, the notifier decides what
+// deserves a notification, and whoever registered with onAlert delivers it —
+// ipc.cjs, with Electron's Notification — so this module stays electron-free.
+const notifier = createNotifier();
+const alertListeners = new Set();
+let notifySettings = {
+  enabled: true,
+  onDone: true,
+  onNeedsInput: true,
+  onBell: true,
+  suppressWhenFocused: true,
+};
+
+function setNotificationSettings(next) {
+  notifySettings = { ...notifySettings, ...next };
+}
+
+function onAlert(cb) {
+  alertListeners.add(cb);
+  return () => alertListeners.delete(cb);
+}
+
+function deliverAlerts(session) {
+  for (const kind of session.tracker.drainEvents()) {
+    const ok = notifier.decide({
+      sessionId: session.sessionId,
+      kind,
+      onScreen: isOnScreen(session.sessionId),
+      settings: notifySettings,
+    });
+    if (!ok) continue;
+    const snap = session.tracker.snapshot();
+    const alert = {
+      kind,
+      sessionId: session.sessionId,
+      siteId: session.siteId,
+      agentId: session.agentId,
+      agentName: session.agentName,
+      title: snap.title || session.label || session.agentName,
+    };
+    for (const cb of alertListeners) {
+      try {
+        cb(alert);
+      } catch {}
+    }
+  }
+}
+
 function getSession(sessionId) {
   return sessions.get(sessionId) || null;
 }
@@ -804,6 +852,7 @@ function launch({ site, agentId, target = null, globalArgs = '' }) {
       const after = session.tracker.snapshot();
       emitChange({ immediate: after.state !== before || after.unread !== unreadBefore });
     }
+    deliverAlerts(session);
     session.buffer += data;
     if (session.buffer.length > MAX_BUFFER) {
       session.buffer = session.buffer.slice(session.buffer.length - MAX_BUFFER);
@@ -818,6 +867,7 @@ function launch({ site, agentId, target = null, globalArgs = '' }) {
     session.exited = true;
     session.exitCode = exitCode;
     session.tracker.exit(exitCode);
+    deliverAlerts(session);
     const win = session.window;
     if (win && !win.isDestroyed()) {
       win.webContents.send('terminal-exit', { sessionId, code: exitCode });
@@ -916,6 +966,7 @@ function stop(sessionId) {
     }, 3000);
   }
   sessions.delete(sessionId);
+  notifier.forget(sessionId);
   emitChange({ immediate: true });
 }
 
@@ -956,6 +1007,8 @@ module.exports = {
   write,
   setView,
   markRead,
+  onAlert,
+  setNotificationSettings,
   clearBuffer,
   resize,
   stop,
