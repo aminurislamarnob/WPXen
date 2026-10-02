@@ -219,6 +219,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   tasksRepos: (opts) => ipcRenderer.invoke('tasks-repos', opts),
   tasksSearchIssues: (opts) => ipcRenderer.invoke('tasks-search-issues', opts),
   tasksIssue: (opts) => ipcRenderer.invoke('tasks-issue', opts),
+  tasksIssueComment: (opts) => ipcRenderer.invoke('tasks-issue-comment', opts),
+  tasksIssueState: (opts) => ipcRenderer.invoke('tasks-issue-state', opts),
+  tasksIssueEdit: (opts) => ipcRenderer.invoke('tasks-issue-edit', opts),
+  tasksIssueAssignees: (opts) => ipcRenderer.invoke('tasks-issue-assignees', opts),
+  tasksIssueLabels: (opts) => ipcRenderer.invoke('tasks-issue-labels', opts),
+  tasksIssueCreate: (opts) => ipcRenderer.invoke('tasks-issue-create', opts),
+  tasksRepoAssignees: (opts) => ipcRenderer.invoke('tasks-repo-assignees', opts),
+  tasksRepoLabels: (opts) => ipcRenderer.invoke('tasks-repo-labels', opts),
 
   // Launch Presets (global, per-Agent) & Launch Targets (per-Site)
   getAgentPresets: () => ipcRenderer.invoke('agent-presets-get'),
