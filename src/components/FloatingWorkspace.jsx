@@ -3,6 +3,8 @@ import { useLocation } from 'react-router-dom';
 import {
   ChevronDown,
   EyeOff,
+  FileText,
+  FolderOpen,
   Globe,
   Maximize2,
   Minimize2,
@@ -14,6 +16,7 @@ import {
 } from 'lucide-react';
 import Terminal from './Terminal';
 import BrowserPane from './browser/BrowserPane';
+import NotePane from './NotePane';
 import { Favicon } from './browser/BrowserToolbar';
 import AgentStatusGlyph from './AgentStatusGlyph';
 import { Tooltip } from './ui';
@@ -28,6 +31,7 @@ import {
   resolveContext,
   terminalTabTitle,
   browserTabTitle,
+  noteTabTitle,
   workspaceReducer,
   LAYOUT_STORAGE_KEY,
   parseLayout,
@@ -50,6 +54,7 @@ import { trackPointer, useFloatingGeometry } from '../lib/useFloatingGeometry';
 // so they stay out of the Projects list, keep-awake and the tray. Browser
 // tabs are the in-app browser (BrowserPane + webviewCache, shared partition
 // and history) under `floating-browser:` keys, which the Agents pane ignores.
+// Note tabs are markdown files edited in NotePane (services/notes.cjs).
 //
 // The panel stays mounted while it has tabs and is only hidden with CSS when
 // minimised: the active terminal stays attached and every Session keeps
@@ -89,6 +94,8 @@ const chordOf = (e) => {
 const NEW_TAB_ACTIONS = [
   { key: 'terminal', label: 'New Terminal', icon: TerminalSquare },
   { key: 'browser', label: 'New Browser Tab', icon: Globe },
+  { key: 'note', label: 'New Note', icon: FileText },
+  { key: 'open-note', label: 'Open Note…', icon: FolderOpen },
 ];
 
 // The 8 resize handles: edge or corner, and where it sits on the panel.
@@ -388,7 +395,12 @@ export default function FloatingWorkspace() {
 
   const closeTab = (tab) => {
     dispatch({ type: 'close', id: tab.id });
-    if (tab.kind === 'browser') {
+    if (tab.kind === 'note') {
+      // An untitled note nobody typed in is deleted, so the folder doesn't
+      // fill up with empty files. Pending edits are saved by the editor as it
+      // unmounts.
+      window.electronAPI.notesDiscard(tab.path, !!tab.edited);
+    } else if (tab.kind === 'browser') {
       // The page outlives its React component by design; closing the tab is
       // the one moment it's torn down for real.
       webviewCache.dispose(tab.id);
@@ -529,8 +541,41 @@ export default function FloatingWorkspace() {
     dispatch({ type: 'move', id, index });
   };
 
+  // A fresh untitled note in the notes folder.
+  const newNote = async () => {
+    setError(null);
+    const res = await window.electronAPI.notesCreate();
+    if (res?.error) return setError(res.error);
+    dispatch({
+      type: 'add',
+      tab: { kind: 'note', id: newTabId('note'), path: res.path, edited: false },
+    });
+    setOpen(true);
+  };
+
+  // An existing markdown file, picked from a dialog that starts in the notes
+  // folder. A note already open just gets focused.
+  const openNote = async () => {
+    setError(null);
+    const file = await window.electronAPI.notesOpenDialog();
+    if (!file) return;
+    const existing = workspaceRef.current.tabs.find(
+      (t) => t.kind === 'note' && t.path === file
+    );
+    if (existing) dispatch({ type: 'activate', id: existing.id });
+    else {
+      dispatch({
+        type: 'add',
+        tab: { kind: 'note', id: newTabId('note'), path: file, edited: false },
+      });
+    }
+    setOpen(true);
+  };
+
   const newTabOf = (kind) => {
     if (kind === 'browser') newBrowser();
+    else if (kind === 'note') newNote();
+    else if (kind === 'open-note') openNote();
     else newTerminal();
   };
 
@@ -614,6 +659,8 @@ export default function FloatingWorkspace() {
                   >
                     {tab.kind === 'browser' ? (
                       <Favicon src={browserState[tab.id]?.favicon} />
+                    ) : tab.kind === 'note' ? (
+                      <FileText size={13} className="flex-shrink-0" />
                     ) : session &&
                       ['working', 'needs-input', 'done'].includes(session.state) ? (
                       <AgentStatusGlyph state={session.state} />
@@ -623,7 +670,9 @@ export default function FloatingWorkspace() {
                     <span className="truncate max-w-[160px]">
                       {tab.kind === 'browser'
                         ? browserTabTitle(tab, browserState[tab.id])
-                        : terminalTabTitle(tab, session)}
+                        : tab.kind === 'note'
+                          ? noteTabTitle(tab)
+                          : terminalTabTitle(tab, session)}
                     </span>
                     {session?.unread && !isActive && (
                       <span className="size-1.5 rounded-full bg-status-warning" />
@@ -704,7 +753,16 @@ export default function FloatingWorkspace() {
               active?.kind === 'browser' ? 'flex flex-col' : ''
             }`}
           >
-            {active?.kind === 'browser' ? (
+            {active?.kind === 'note' ? (
+              <NotePane
+                key={active.id}
+                path={active.path}
+                onEdited={() =>
+                  dispatch({ type: 'update', id: active.id, patch: { edited: true } })
+                }
+                onOpenLink={openLink}
+              />
+            ) : active?.kind === 'browser' ? (
               <BrowserPane
                 key={active.id}
                 tabKey={active.id}

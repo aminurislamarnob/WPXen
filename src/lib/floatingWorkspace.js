@@ -6,7 +6,7 @@
 // A tab is one of:
 //   { kind: 'terminal', id, sessionId, cwd }
 //   { kind: 'browser', id, url }   — `id` doubles as the webview cache key
-// (note tabs join in their own ticket). `id` is the tab's own identity,
+//   { kind: 'note', id, path, edited } `id` is the tab's own identity,
 // separate from the sessionId, so a Restart can swap the Session underneath
 // without the tab moving or losing focus.
 
@@ -155,6 +155,15 @@ export function browserTabTitle(tab, state) {
   return 'New Tab';
 }
 
+// A note tab shows its file name.
+export function noteTabTitle(tab) {
+  return (
+    String(tab.path || '')
+      .split('/')
+      .pop() || 'Note'
+  );
+}
+
 // Whether the minimised launcher should show its attention dot.
 export function needsAttention(sessions) {
   return sessions.some((s) => !s.exited && (s.unread || s.state === 'needs-input'));
@@ -166,6 +175,7 @@ export function needsAttention(sessions) {
 // (ADR 0001: no daemon, nothing outlives the app).
 
 export const LAYOUT_STORAGE_KEY = 'wpxen.floatingWorkspace.tabs';
+const NOTE_PATH = /^\/.+\.(md|markdown)$/i;
 const RESTORABLE_URL = /^(https?:\/\/|about:blank$)/i;
 
 export function serializeLayout(state) {
@@ -173,6 +183,7 @@ export function serializeLayout(state) {
     .map((t) => {
       if (t.kind === 'terminal') return { kind: 'terminal', id: t.id, cwd: t.cwd };
       if (t.kind === 'browser') return { kind: 'browser', id: t.id, url: t.url };
+      if (t.kind === 'note') return { kind: 'note', id: t.id, path: t.path };
       return null;
     })
     .filter(Boolean);
@@ -203,6 +214,10 @@ export function parseLayout(raw) {
       const url =
         typeof t.url === 'string' && RESTORABLE_URL.test(t.url) ? t.url : 'about:blank';
       tabs.push({ kind: 'browser', id: t.id, url });
+    } else if (t.kind === 'note') {
+      // The main process re-checks every path; this only drops junk early.
+      if (typeof t.path !== 'string' || !NOTE_PATH.test(t.path)) continue;
+      tabs.push({ kind: 'note', id: t.id, path: t.path, edited: false });
     } else {
       continue;
     }

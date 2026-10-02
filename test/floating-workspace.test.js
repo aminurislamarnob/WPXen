@@ -12,6 +12,7 @@ import {
   parseLayout,
   newTabId,
   browserTabTitle,
+  noteTabTitle,
 } from '../src/lib/floatingWorkspace';
 
 const term = (id, extra = {}) => ({
@@ -332,5 +333,43 @@ describe('browser tabs', () => {
       'blog.test:8080'
     );
     expect(browserTabTitle(browser('x', 'about:blank'), null)).toBe('New Tab');
+  });
+});
+
+describe('note tabs', () => {
+  const note = (id, path) => ({ kind: 'note', id, path, edited: true });
+
+  it('round-trip through the saved layout by path, forgetting the edited flag', () => {
+    const s = workspaceReducer(EMPTY_WORKSPACE, {
+      type: 'add',
+      tab: note('n', '/Users/me/Library/Application Support/WPXen/notes/untitled.md'),
+    });
+    expect(parseLayout(serializeLayout(s))).toEqual({
+      tabs: [
+        {
+          kind: 'note',
+          id: 'n',
+          path: '/Users/me/Library/Application Support/WPXen/notes/untitled.md',
+          edited: false,
+        },
+      ],
+      activeId: 'n',
+    });
+  });
+
+  it('drops saved notes that are not absolute markdown paths', () => {
+    const raw = JSON.stringify({
+      tabs: [
+        { kind: 'note', id: 'a', path: 'relative.md' },
+        { kind: 'note', id: 'b', path: '/etc/hosts' },
+        { kind: 'note', id: 'c' },
+        { kind: 'note', id: 'd', path: '/tmp/plan.markdown' },
+      ],
+    });
+    expect(parseLayout(raw).tabs.map((t) => t.id)).toEqual(['d']);
+  });
+
+  it('are titled by file name', () => {
+    expect(noteTabTitle(note('n', '/x/notes/untitled-2.md'))).toBe('untitled-2.md');
   });
 });
