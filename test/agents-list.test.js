@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildProjects, sessionTitle } from '../src/lib/agentsList';
+import { buildProjects, sessionTitle, formatAge } from '../src/lib/agentsList';
 
 const site = (id, name = id) => ({ id, name });
 let seq = 0;
@@ -82,5 +82,18 @@ describe('sessionTitle', () => {
     const two = session('a', 'claude');
     expect(sessionTitle(one, [one, two])).toBe('Claude #1');
     expect(sessionTitle(two, [one, two])).toBe('Claude #2');
+  });
+});
+
+describe('formatAge', () => {
+  it('reads as now, minutes, hours, days', () => {
+    expect(formatAge(5_000)).toBe('now');
+    expect(formatAge(4 * 60_000)).toBe('4m');
+    expect(formatAge(3 * 3_600_000 + 59 * 60_000)).toBe('3h');
+    expect(formatAge(2 * 86_400_000)).toBe('2d');
+  });
+
+  it('never goes negative under clock skew', () => {
+    expect(formatAge(-10_000)).toBe('now');
   });
 });

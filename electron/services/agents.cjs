@@ -684,6 +684,8 @@ function listAllSessions() {
       exited: s.exited,
       exitCode: s.exitCode,
       title: snap.title,
+      state: snap.state,
+      changedAt: snap.changedAt,
     });
   }
   return out;
@@ -766,7 +768,8 @@ function launch({ site, agentId, target = null, globalArgs = '' }) {
     exited: false,
     exitCode: null,
     startedAt: Date.now(),
-    tracker: createTracker(),
+    // Keyword title rules are for agents; a plain shell's title is a path.
+    tracker: createTracker({ keywords: agent.id !== SHELL_ID }),
     // `started` gates the type-the-command step; a shell session has already
     // arrived at what the user wanted, so it starts out done.
     started: startsImmediately,
@@ -792,7 +795,11 @@ function launch({ site, agentId, target = null, globalArgs = '' }) {
 
   term.onData((data) => {
     scheduleRun();
-    if (session.tracker.output(data)) emitChange();
+    const before = session.tracker.snapshot().state;
+    if (session.tracker.output(data)) {
+      // Status flips go out at once; title-only churn (spinner frames) waits.
+      emitChange({ immediate: session.tracker.snapshot().state !== before });
+    }
     session.buffer += data;
     if (session.buffer.length > MAX_BUFFER) {
       session.buffer = session.buffer.slice(session.buffer.length - MAX_BUFFER);
@@ -806,6 +813,7 @@ function launch({ site, agentId, target = null, globalArgs = '' }) {
   term.onExit(({ exitCode }) => {
     session.exited = true;
     session.exitCode = exitCode;
+    session.tracker.exit(exitCode);
     const win = session.window;
     if (win && !win.isDestroyed()) {
       win.webContents.send('terminal-exit', { sessionId, code: exitCode });

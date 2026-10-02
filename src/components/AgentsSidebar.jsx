@@ -14,7 +14,8 @@ import {
 import { ProviderIcon } from './providerIcons';
 import { Tooltip, ConfirmDialog } from './ui';
 import LaunchMenu from './LaunchMenu';
-import { buildProjects } from '../lib/agentsList';
+import AgentStatusGlyph from './AgentStatusGlyph';
+import { buildProjects, formatAge } from '../lib/agentsList';
 import {
   useAgentSessions,
   useAgentProjects,
@@ -29,6 +30,60 @@ import {
 // (Add project) or starts a Session in the current one (New workspace).
 // Leaving Agents mode goes through the activity bar to its left
 // (ActivityBar.jsx) or the back arrow (⌘[).
+// Current time, re-read every `ms` so row ages ("4m") stay fresh.
+function useNow(ms) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), ms);
+    return () => clearInterval(id);
+  }, [ms]);
+  return now;
+}
+
+// One agent Session: status glyph, provider mark, title, and how long since
+// its status last changed. Exited rows get a dismiss button on hover.
+function SessionRow({ session: s, now, selected, onOpen }) {
+  const ended = s.state === 'exited' || s.state === 'error';
+  return (
+    <div
+      onClick={onOpen}
+      title={s.displayTitle}
+      className={`group/row w-full min-w-0 flex items-center gap-1.5 pl-1.5 pr-1 py-[5px] rounded-md text-[13px] cursor-pointer ${
+        selected
+          ? 'bg-sidebar-accent text-sidebar-foreground'
+          : 'text-sidebar-foreground/80 hover:bg-sidebar-accent'
+      }`}
+    >
+      <AgentStatusGlyph state={s.state} />
+      <ProviderIcon agentId={s.agentId} brand size={13} className="flex-shrink-0" />
+      <span className={`truncate flex-1 ${ended ? 'text-muted-foreground' : ''}`}>
+        {s.displayTitle}
+      </span>
+      <span
+        className={`text-[11px] text-muted-foreground tabular-nums flex-shrink-0 ${
+          ended ? 'group-hover/row:hidden' : ''
+        }`}
+      >
+        {formatAge(now - s.changedAt)}
+      </span>
+      {ended && (
+        <Tooltip label="Dismiss">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              window.electronAPI.dismissSession(s.sessionId);
+            }}
+            aria-label="Dismiss session"
+            className="hidden group-hover/row:flex p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent"
+          >
+            <X size={12} />
+          </button>
+        </Tooltip>
+      )}
+    </div>
+  );
+}
+
 export default function AgentsSidebar() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -41,6 +96,7 @@ export default function AgentsSidebar() {
   const sessions = useAgentSessions();
   const projectIds = useAgentProjects();
   const selected = useSelectedSession();
+  const now = useNow(30_000);
   const [sites, setSites] = useState([]);
   const [branches, setBranches] = useState({}); // siteId -> branch | null
   const [collapsed, setCollapsed] = useState(() => new Set());
@@ -140,7 +196,8 @@ export default function AgentsSidebar() {
             onClick={(e) => {
               // Refresh first: the picker must offer sites created since mount.
               window.electronAPI.getSites().then((s) => setSites(s || []));
-              setAddMenu((m) => (m ? null : menuBelow(e)));
+              const pos = menuBelow(e);
+              setAddMenu((m) => (m ? null : pos));
             }}
             aria-label="Add project"
             className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-sidebar-accent"
@@ -150,9 +207,10 @@ export default function AgentsSidebar() {
         </Tooltip>
         <Tooltip label="New workspace">
           <button
-            onClick={(e) =>
-              setNewMenu((m) => (m ? null : { ...menuBelow(e), siteId: current }))
-            }
+            onClick={(e) => {
+              const pos = menuBelow(e);
+              setNewMenu((m) => (m ? null : { ...pos, siteId: current }));
+            }}
             aria-label="New workspace"
             className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-sidebar-accent"
           >
@@ -227,38 +285,13 @@ export default function AgentsSidebar() {
               {isOpen && (
                 <div className="ml-[18px] mt-0.5 space-y-0.5 border-l border-sidebar-border pl-2">
                   {rows.map((s) => (
-                    <div
+                    <SessionRow
                       key={s.sessionId}
-                      onClick={() => openSession(site.id, s.sessionId)}
-                      title={s.displayTitle}
-                      className={`group/row w-full min-w-0 flex items-center gap-1.5 pl-2 pr-1 py-[5px] rounded-md text-[13px] cursor-pointer ${
-                        s.sessionId === selected
-                          ? 'bg-sidebar-accent text-sidebar-foreground'
-                          : 'text-sidebar-foreground/80 hover:bg-sidebar-accent'
-                      } ${s.exited ? 'opacity-60' : ''}`}
-                    >
-                      <ProviderIcon
-                        agentId={s.agentId}
-                        brand
-                        size={13}
-                        className="flex-shrink-0"
-                      />
-                      <span className="truncate flex-1">{s.displayTitle}</span>
-                      {s.exited && (
-                        <Tooltip label="Dismiss">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              window.electronAPI.dismissSession(s.sessionId);
-                            }}
-                            aria-label="Dismiss session"
-                            className="hidden group-hover/row:flex p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent"
-                          >
-                            <X size={12} />
-                          </button>
-                        </Tooltip>
-                      )}
-                    </div>
+                      session={s}
+                      now={now}
+                      selected={s.sessionId === selected}
+                      onOpen={() => openSession(site.id, s.sessionId)}
+                    />
                   ))}
                   {rows.length === 0 && (
                     <p className="px-2 py-1 text-xs text-muted-foreground">
