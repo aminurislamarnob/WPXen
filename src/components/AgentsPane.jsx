@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { useParams, useLocation, useOutletContext } from 'react-router-dom';
+import { useParams, useLocation, useNavigate, useOutletContext } from 'react-router-dom';
 import {
   Terminal as TerminalIcon,
   Plus,
@@ -23,6 +23,7 @@ import { ConfirmDialog, Tooltip } from './ui';
 import * as sessionCache from '../lib/terminal/sessionCache';
 import * as webviewCache from '../lib/browser/webviewCache';
 import { useSettings } from '../lib/useSettings';
+import { LAST_AGENTS_SITE_KEY, resolveLastSite } from '../lib/activityBar';
 
 // Strip a leading emoji/symbol + space from an OSC title (agents like Claude
 // Code prefix a status glyph) so the tab label reads cleanly.
@@ -45,9 +46,10 @@ const BROWSER_TARGETS = [
 export default function AgentsPane() {
   const { siteId } = useParams();
   const location = useLocation();
+  const navigate = useNavigate();
   // When the sidebar is hidden the explorer sits under the floating window
   // controls; inset its tab bar so they don't overlap.
-  const { sidebarCollapsed } = useOutletContext() || {};
+  const { controlsInset } = useOutletContext() || {};
   const { settings } = useSettings();
 
   const [meta, setMeta] = useState({ siteName: siteId });
@@ -388,12 +390,42 @@ export default function AgentsPane() {
     });
   };
 
+  // Remember the open Site, so coming back to a bare /agents — from the
+  // activity bar or the main nav — lands on it instead of the empty state.
+  useEffect(() => {
+    if (siteId) localStorage.setItem(LAST_AGENTS_SITE_KEY, siteId);
+  }, [siteId]);
+
+  // Bare /agents: reopen the remembered Site if it still exists. Keyed on the
+  // navigation, since this instance is reused across /agents and /agents/:id.
+  const [restoreFailedFor, setRestoreFailedFor] = useState(null);
+  useEffect(() => {
+    if (siteId) return;
+    const last = localStorage.getItem(LAST_AGENTS_SITE_KEY);
+    if (!last) return;
+    let cancelled = false;
+    window.electronAPI.getSites().then((sites) => {
+      if (cancelled) return;
+      const id = resolveLastSite(last, sites);
+      if (id) navigate(`/agents/${encodeURIComponent(id)}`, { replace: true });
+      else setRestoreFailedFor(location.key);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [siteId, location.key, navigate]);
+
   // closeFile closes over activeKey, so the IPC subscription above reaches it
   // through a ref rather than resubscribing on every tab switch.
   const closeFileRef = useRef(closeFile);
   closeFileRef.current = closeFile;
 
   if (!siteId) {
+    // Reopening the last Site (effect above) — render nothing rather than
+    // flashing the empty state on the way there.
+    if (localStorage.getItem(LAST_AGENTS_SITE_KEY) && restoreFailedFor !== location.key) {
+      return null;
+    }
     return (
       <div className="h-full flex flex-col items-center justify-center text-center px-6">
         <div className="icon-tile w-12 h-12 bg-[#af52de] mb-4">
@@ -438,7 +470,7 @@ export default function AgentsPane() {
                   rootName={meta.siteName}
                   onOpenFile={openFile}
                   onOpenDiff={openDiff}
-                  insetForControls={sidebarCollapsed}
+                  controlsInset={controlsInset}
                   activeFilePath={activeFileTab?.path}
                 />
               </div>

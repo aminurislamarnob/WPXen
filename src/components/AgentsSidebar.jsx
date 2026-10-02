@@ -6,7 +6,7 @@ import { ProviderIcon } from './providerIcons';
 // The Agents-mode sidebar: a Sites tree. Each Site collapses to its available
 // providers (Agents); clicking one opens that Agent's terminal in the selected
 // Site's directory (route /agents/<siteId>/<agentId>). Leaving Agents mode goes
-// through the window-control back arrow (⌘[), same as anywhere else.
+// through the activity bar to its left (ActivityBar.jsx) or the back arrow (⌘[).
 //
 // Only agents that are both enabled and actually installed appear here. The
 // list repeats under every Site, so an uninstallable row costs one dead line
