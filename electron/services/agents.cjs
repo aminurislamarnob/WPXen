@@ -1087,6 +1087,7 @@ module.exports = {
   effectiveRegistry,
   listAgents,
   resolveBin,
+  resolveShellEnv,
   isWrapperShim,
   installAgent,
   brewInstallArgs,

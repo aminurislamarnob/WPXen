@@ -1,0 +1,118 @@
+// Tasks page model — the pure half of the GitHub Issues / PRs page: the
+// project picker, merging per-repo results, paging and age labels. No React,
+// no IPC, so it unit-tests in plain Node; Tasks.jsx is the glue.
+
+export const PAGE_SIZE = 24;
+export const DEFAULT_ISSUE_QUERY = 'is:open';
+export const ALL = 'all';
+
+// ── Picker ───────────────────────────────────────────────────────────────────
+// The project picker is a Site → repo tree under "All". Each option carries
+// the repos it selects, so the page never has to re-derive scope.
+//
+//   { value: 'all',               label, depth: 0, repos: [every repo] }
+//   { value: 'site:<siteId>',     label, depth: 0, repos: [the Site's repos] }
+//   { value: 'repo:<owner/name>', label, depth: 1, repos: [one repo], siteId }
+
+export function buildPickerTree(sites) {
+  const options = [];
+  const all = [];
+  for (const site of sites || []) {
+    const repos = (site.repos || []).map((r) => r.repo);
+    if (repos.length === 0) continue;
+    all.push(...repos);
+    options.push({
+      value: `site:${site.siteId}`,
+      label: site.siteName,
+      depth: 0,
+      siteId: site.siteId,
+      repos,
+    });
+    for (const r of site.repos) {
+      options.push({
+        value: `repo:${r.repo}`,
+        label: r.repo,
+        depth: 1,
+        siteId: site.siteId,
+        repos: [r.repo],
+      });
+    }
+  }
+  const unique = [...new Set(all)];
+  return [{ value: ALL, label: 'All projects', depth: 0, repos: unique }, ...options];
+}
+
+// The option for a stored or linked selection, falling back to "All" when it
+// no longer exists (a Site removed, a remote changed).
+export function resolveSelection(tree, value) {
+  return tree.find((o) => o.value === value) || tree[0] || null;
+}
+
+export function siteSelection(siteId) {
+  return `site:${siteId}`;
+}
+
+// ── Results ──────────────────────────────────────────────────────────────────
+// Per-repo results ({ repo, total, items } | { repo, error }) become one list,
+// newest activity first, with the failures kept beside it. `truncated` names
+// repos with more matches than one request returns, so the page can say so
+// rather than imply it's showing everything.
+
+export function mergeResults(results) {
+  const seen = new Set();
+  const items = [];
+  const errors = [];
+  const truncated = [];
+  let total = 0;
+  for (const r of results || []) {
+    if (r.error) {
+      errors.push({ repo: r.repo, error: r.error });
+      continue;
+    }
+    total += r.total || 0;
+    if ((r.total || 0) > (r.items || []).length) truncated.push(r.repo);
+    for (const item of r.items || []) {
+      const key = `${item.repo}#${item.number}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      items.push(item);
+    }
+  }
+  items.sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+  return { items, errors, total, truncated };
+}
+
+export function paginate(items, page, size = PAGE_SIZE) {
+  const pageCount = Math.max(1, Math.ceil(items.length / size));
+  const current = Math.min(Math.max(1, page || 1), pageCount);
+  const start = (current - 1) * size;
+  return { items: items.slice(start, start + size), page: current, pageCount };
+}
+
+// ── Labels ───────────────────────────────────────────────────────────────────
+
+// "just now", "5 minutes ago", "3 hours ago", "2 days ago", then a date.
+export function timeAgo(iso, now = Date.now()) {
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return '';
+  const s = Math.max(0, Math.floor((now - t) / 1000));
+  if (s < 60) return 'just now';
+  const plural = (n, unit) => `${n} ${unit}${n === 1 ? '' : 's'} ago`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return plural(m, 'minute');
+  const h = Math.floor(m / 60);
+  if (h < 24) return plural(h, 'hour');
+  const d = Math.floor(h / 24);
+  if (d < 60) return plural(d, 'day');
+  return new Date(t).toLocaleDateString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  });
+}
+
+// A GitHub label's hex colour as text that stays readable on either theme:
+// the colour itself for the dot, a translucent fill behind the name.
+export function labelColor(hex) {
+  return /^[0-9a-f]{6}$/i.test(hex || '') ? `#${hex}` : null;
+}

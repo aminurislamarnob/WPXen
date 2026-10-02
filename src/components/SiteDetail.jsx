@@ -21,6 +21,7 @@ import {
   X,
   KeyRound,
   Pencil,
+  ListTodo,
 } from 'lucide-react';
 import { Toggle, Tooltip } from './ui';
 import ChangeUrlModal from './ChangeUrlModal';
@@ -60,6 +61,7 @@ const NAV = [
 ];
 
 function Overview({ site, onSaved, onOpenPma }) {
+  const navigate = useNavigate();
   const openLink = useOpenLink();
   const [pmaBusy, setPmaBusy] = useState(false);
   const [tunnel, setTunnel] = useState(null);
@@ -212,6 +214,12 @@ function Overview({ site, onSaved, onOpenPma }) {
       icon: Terminal,
       label: 'Terminal',
       onClick: () => window.electronAPI.openSiteInTerminal(site.path),
+    },
+    {
+      // The Site's GitHub issues, on the Tasks page.
+      icon: ListTodo,
+      label: 'Issues',
+      onClick: () => navigate(`/tasks?site=${encodeURIComponent(site.id)}`),
     },
     {
       icon: tunnel?.status === 'starting' ? Loader : Share2,
