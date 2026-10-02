@@ -443,6 +443,24 @@ function registerHandlers(win, storeInstance) {
   ipcMain.on('agent-floating-view', (_e, sessionId) =>
     agents.setView({ floating: sessionId || null })
   );
+
+  // ⌘W inside the Floating Workspace closes its active tab, not the window.
+  // The default app menu owns ⌘W (Close Window → hide to tray) and a renderer
+  // keydown can't cancel a menu accelerator, so the chord is taken here,
+  // ahead of both — but only while the renderer reports focus in the panel.
+  let floatingFocused = false;
+  ipcMain.on('floating-focus', (_e, focused) => {
+    floatingFocused = !!focused;
+  });
+  if (win) {
+    win.webContents.on('before-input-event', (event, input) => {
+      if (!floatingFocused || input.type !== 'keyDown') return;
+      if (!input.meta || input.control || input.alt || input.shift) return;
+      if (String(input.key || '').toLowerCase() !== 'w') return;
+      event.preventDefault();
+      win.webContents.send('floating-shortcut', { key: 'w' });
+    });
+  }
   ipcMain.handle('agent-session-mark', (_e, sessionId, read) => {
     agents.markRead(sessionId, !!read);
     return { ok: true };

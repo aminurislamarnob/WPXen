@@ -25,6 +25,7 @@ const VALID_EVENT_CHANNELS = [
   'terminal-exit',
   'agent-sessions-update',
   'agent-floating-sessions-update',
+  'floating-shortcut',
   'agent-projects-update',
   'agent-open-session',
   'browser-new-window',
@@ -200,6 +201,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   launchFloatingTerminal: (cwd) => ipcRenderer.invoke('agent-launch-floating', cwd),
   listFloatingSessions: () => ipcRenderer.invoke('agent-floating-sessions'),
   setFloatingView: (sessionId) => ipcRenderer.send('agent-floating-view', sessionId),
+  setFloatingFocus: (focused) => ipcRenderer.send('floating-focus', !!focused),
 
   // Launch Presets (global, per-Agent) & Launch Targets (per-Site)
   getAgentPresets: () => ipcRenderer.invoke('agent-presets-get'),

@@ -56,9 +56,11 @@ export function translateLineEditChord(e) {
 // (clipboard pipeline, app menu accelerators). Ghostty's mac rule: every Cmd
 // chord bubbles — Cmd+keys never encode text into the pty. This is what makes
 // plain Cmd+C / Cmd+V behave natively in TUIs instead of leaking CSI-u
-// sequences.
+// sequences. Ctrl+Tab / Ctrl+Shift+Tab also bubble: they switch tabs (the
+// Floating Workspace's tab strip), and a shell has no use for them.
 export function shouldBubbleChord(e) {
-  return e.metaKey;
+  if (e.metaKey) return true;
+  return e.code === 'Tab' && e.ctrlKey && !e.altKey;
 }
 
 // Terminals pad each line to the grid width, so a raw selection copies with
