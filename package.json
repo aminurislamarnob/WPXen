@@ -121,5 +121,11 @@
       }
     ],
     "afterPack": "scripts/fix-pty-permissions.cjs"
+  },
+  "allowScripts": {
+    "electron@28.3.3": true,
+    "node-pty@1.1.0": true,
+    "esbuild@0.21.5": true,
+    "fsevents@2.3.3": true
   }
 }
