@@ -322,6 +322,11 @@ app.on('before-quit', (e) => {
   try {
     require('./services/browser.cjs').unregisterAll();
   } catch {}
+  // Release the sleep assertion now rather than waiting for caffeinate's -w
+  // to notice the app is gone.
+  try {
+    require('./services/keepAwake.cjs').dispose();
+  } catch {}
 
   // Allow the window to actually close on quit
   if (mainWindow) {

@@ -735,6 +735,12 @@ function listAllSessions() {
       state: snap.state,
       changedAt: snap.changedAt,
       unread: snap.unread,
+      // An AI-provider Session rather than the plain shell — keep-awake's
+      // Agent mode counts only these.
+      isAgent: s.agentId !== SHELL_ID,
+      // Last pty output, for keep-awake's stale cutoff. Not itself a change
+      // event: readers that need it fresh call listAllSessions() again.
+      lastOutputAt: s.lastOutputAt,
     });
   }
   return out;
@@ -817,6 +823,7 @@ function launch({ site, agentId, target = null, globalArgs = '' }) {
     exited: false,
     exitCode: null,
     startedAt: Date.now(),
+    lastOutputAt: Date.now(),
     tracker: createTracker({ agent: agent.id !== SHELL_ID }),
     // `started` gates the type-the-command step; a shell session has already
     // arrived at what the user wanted, so it starts out done.
@@ -843,6 +850,7 @@ function launch({ site, agentId, target = null, globalArgs = '' }) {
   if (!startsImmediately) setTimeout(runAgent, 1200); // fallback: no output first
 
   term.onData((data) => {
+    session.lastOutputAt = Date.now();
     scheduleRun();
     const before = session.tracker.snapshot().state;
     const unreadBefore = session.tracker.snapshot().unread;

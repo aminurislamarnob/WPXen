@@ -148,6 +148,10 @@ const SETTINGS = {
     values: ['system', 'none'],
     default: 'system',
   },
+  // Keep computer awake (services/keepAwake.cjs). 'agent' holds a sleep
+  // assertion only while an agent Session is working. Off by default: an
+  // update must never silently change how the Mac sleeps.
+  'agents.keepAwake': { type: 'enum', values: ['on', 'agent', 'off'], default: 'off' },
   // User-defined agents: [{ id, name, cmd }]
   'agents.custom': {
     type: 'object',
