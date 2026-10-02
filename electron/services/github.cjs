@@ -146,7 +146,7 @@ function classifyError(err) {
       'GitHub rejected the request.',
     ],
     [
-      /could not resolve host|network|timed? ?out|ETIMEDOUT|ECONNRESET|ECONNREFUSED|ENOTFOUND/i,
+      /could not resolve host|network|timed? ?out|ETIMEDOUT|ECONNRESET|ECONNREFUSED|ENOTFOUND|HTTP 5\d\d|respond to your request in time/i,
       'network',
       'Couldn’t reach GitHub — check your connection.',
     ],
@@ -345,6 +345,220 @@ async function searchIssues({ repos, query = '', force = false } = {}) {
     valid.map(async (repo) => {
       try {
         return await searchRepo(repo, query, 'issue', force);
+      } catch (err) {
+        return { repo, error: classifyError(err) };
+      }
+    })
+  );
+  return { results };
+}
+
+// ── Pull requests ────────────────────────────────────────────────────────────
+// PR rows need what search/issues doesn't carry — the review decision, the
+// checks rollup and the merge state — so PRs come from GraphQL search instead.
+// The check counts are GitHub's own tallies, not a walk over every check run.
+//
+// Merge state is asked for in a second, parallel search: GitHub computes it
+// on demand, and together with the checks rollup a busy repo's search times
+// out (HTTP 502) where either alone answers. Merge state is also the one
+// column a row can do without, so if that half fails the list still shows.
+
+const PULLS_PER_REPO = 50;
+
+const PULLS_QUERY = `query($q: String!) {
+  search(query: $q, type: ISSUE, first: ${PULLS_PER_REPO}) {
+    issueCount
+    nodes {
+      ... on PullRequest {
+        number title url state isDraft merged createdAt updatedAt
+        author { login avatarUrl }
+        headRefName baseRefName
+        reviewDecision
+        labels(first: 20) { nodes { name color } }
+        assignees(first: 10) { nodes { login avatarUrl } }
+        comments { totalCount }
+        commits(last: 1) { nodes { commit { statusCheckRollup {
+          state
+          contexts {
+            checkRunCountsByState { state count }
+            statusContextCountsByState { state count }
+          }
+        } } } }
+      }
+    }
+  }
+}`;
+
+const MERGE_QUERY = `query($q: String!) {
+  search(query: $q, type: ISSUE, first: ${PULLS_PER_REPO}) {
+    nodes { ... on PullRequest { number mergeable mergeStateStatus } }
+  }
+}`;
+
+const REVIEW = {
+  APPROVED: 'approved',
+  CHANGES_REQUESTED: 'changes-requested',
+  REVIEW_REQUIRED: 'review-required',
+};
+
+function normalizeReview(decision) {
+  return REVIEW[decision] || null;
+}
+
+// Check runs and commit statuses folded into GitHub's three buckets. Skipped
+// and neutral runs count as passing, as GitHub's "All checks have passed"
+// does; stale and cancelled ones as failing, as its red X does.
+const CHECK_BUCKETS = {
+  SUCCESS: 'passing',
+  NEUTRAL: 'passing',
+  SKIPPED: 'passing',
+  COMPLETED: 'passing',
+  FAILURE: 'failing',
+  ERROR: 'failing',
+  TIMED_OUT: 'failing',
+  CANCELLED: 'failing',
+  ACTION_REQUIRED: 'failing',
+  STARTUP_FAILURE: 'failing',
+  STALE: 'failing',
+  PENDING: 'pending',
+  QUEUED: 'pending',
+  IN_PROGRESS: 'pending',
+  WAITING: 'pending',
+  REQUESTED: 'pending',
+  EXPECTED: 'pending',
+};
+
+const ROLLUP_STATE = {
+  SUCCESS: 'passing',
+  FAILURE: 'failing',
+  ERROR: 'failing',
+  PENDING: 'pending',
+  EXPECTED: 'pending',
+};
+
+// → { state: passing | failing | pending, passing, failing, pending, total }
+//   or null when the head commit has no checks at all.
+function normalizeChecks(rollup) {
+  if (!rollup) return null;
+  const counts = { passing: 0, failing: 0, pending: 0 };
+  const tallies = [
+    ...(rollup.contexts?.checkRunCountsByState || []),
+    ...(rollup.contexts?.statusContextCountsByState || []),
+  ];
+  for (const { state, count } of tallies) {
+    const bucket = CHECK_BUCKETS[state];
+    if (bucket && count > 0) counts[bucket] += count;
+  }
+  const total = counts.passing + counts.failing + counts.pending;
+  if (total === 0 && !rollup.state) return null;
+  const state =
+    ROLLUP_STATE[rollup.state] ||
+    (counts.failing ? 'failing' : counts.pending ? 'pending' : 'passing');
+  return { state, ...counts, total };
+}
+
+// merged | closed | draft | conflicts | ready | blocked | behind | unknown —
+// the order GitHub's merge box checks them in.
+function normalizeMerge(pr) {
+  if (pr.merged || pr.state === 'MERGED') return 'merged';
+  if (pr.state === 'CLOSED') return 'closed';
+  if (pr.isDraft) return 'draft';
+  if (pr.mergeable === 'CONFLICTING' || pr.mergeStateStatus === 'DIRTY')
+    return 'conflicts';
+  switch (pr.mergeStateStatus) {
+    case 'CLEAN':
+    case 'HAS_HOOKS':
+    case 'UNSTABLE':
+      return 'ready';
+    case 'BLOCKED':
+      return 'blocked';
+    case 'BEHIND':
+      return 'behind';
+    default:
+      return 'unknown';
+  }
+}
+
+// `mergeInfo` — { mergeable, mergeStateStatus } from the merge search, or
+// undefined when that half failed.
+function normalizePull(node, repo, mergeInfo) {
+  const rollup = node.commits?.nodes?.[0]?.commit?.statusCheckRollup || null;
+  const people = (list) =>
+    (list?.nodes || []).filter(Boolean).map((u) => ({
+      login: u.login,
+      avatarUrl: u.avatarUrl || null,
+    }));
+  return {
+    kind: 'pr',
+    repo,
+    number: node.number,
+    title: node.title || '',
+    url: node.url,
+    state: node.state === 'OPEN' ? 'open' : 'closed',
+    stateReason: node.merged || node.state === 'MERGED' ? 'merged' : null,
+    draft: !!node.isDraft,
+    author: node.author?.login || null,
+    headRef: node.headRefName || null,
+    baseRef: node.baseRefName || null,
+    labels: (node.labels?.nodes || []).map((l) => ({
+      name: l.name,
+      color: l.color || null,
+    })),
+    assignees: people(node.assignees),
+    comments: node.comments?.totalCount || 0,
+    review: normalizeReview(node.reviewDecision),
+    checks: normalizeChecks(rollup),
+    merge: normalizeMerge({ ...node, ...mergeInfo }),
+    createdAt: node.createdAt,
+    updatedAt: node.updatedAt,
+  };
+}
+
+// A GraphQL query through gh; GraphQL's own errors (which come back with a
+// 200) are thrown like gh's, so classifyError reads them the same way.
+async function graphql(query, q) {
+  const data = JSON.parse(
+    await gh(['api', 'graphql', '-f', `q=${q}`, '-f', `query=${query}`])
+  );
+  if (data.errors?.length) {
+    const err = new Error('graphql');
+    err.stderr = data.errors.map((e) => e.message).join('\n');
+    throw err;
+  }
+  return data.data || {};
+}
+
+async function searchPullRepo(repo, query, force) {
+  const q = buildSearchQuery(query, repo, 'pr');
+  const key = `pr-graphql\n${q}`;
+  const hit = searchCache.get(key);
+  if (!force && hit && deps.now() - hit.at < SEARCH_CACHE_MS) return hit.value;
+
+  const [rows, merges] = await Promise.all([
+    graphql(PULLS_QUERY, q),
+    graphql(MERGE_QUERY, q).catch(() => null),
+  ]);
+  const mergeBy = new Map(
+    (merges?.search?.nodes || []).filter((n) => n?.number).map((n) => [n.number, n])
+  );
+  const search = rows.search || {};
+  const value = {
+    repo,
+    total: search.issueCount || 0,
+    items: (search.nodes || [])
+      .filter((n) => n && n.number)
+      .map((n) => normalizePull(n, repo, mergeBy.get(n.number))),
+  };
+  searchCache.set(key, { at: deps.now(), value });
+  return value;
+}
+
+async function searchPulls({ repos, query = '', force = false } = {}) {
+  const valid = [...new Set((repos || []).filter((r) => REPO_SLUG.test(String(r))))];
+  const results = await Promise.all(
+    valid.map(async (repo) => {
+      try {
+        return await searchPullRepo(repo, query, force);
       } catch (err) {
         return { repo, error: classifyError(err) };
       }
@@ -625,6 +839,7 @@ function repoLabels({ repo, force = false } = {}) {
 
 module.exports = {
   MAX_CONCURRENT,
+  PULLS_PER_REPO,
   SEARCH_PER_PAGE,
   classifyError,
   preflight,
@@ -635,6 +850,11 @@ module.exports = {
   buildSearchQuery,
   normalizeIssue,
   searchIssues,
+  normalizeReview,
+  normalizeChecks,
+  normalizeMerge,
+  normalizePull,
+  searchPulls,
   normalizeTimeline,
   getIssue,
   addComment,

@@ -218,6 +218,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   tasksInstallGh: () => ipcRenderer.invoke('tasks-install-gh'),
   tasksRepos: (opts) => ipcRenderer.invoke('tasks-repos', opts),
   tasksSearchIssues: (opts) => ipcRenderer.invoke('tasks-search-issues', opts),
+  tasksSearchPulls: (opts) => ipcRenderer.invoke('tasks-search-pulls', opts),
   tasksIssue: (opts) => ipcRenderer.invoke('tasks-issue', opts),
   tasksStartInspect: (opts) => ipcRenderer.invoke('tasks-start-inspect', opts),
   tasksStart: (opts) => ipcRenderer.invoke('tasks-start', opts),

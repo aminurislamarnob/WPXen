@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  PR_CHIPS,
   linkedSessions,
   sessionsFor,
   ASSIGNED_TO_ME_QUERY,
@@ -250,12 +251,14 @@ describe('chips and Filters ↔ query', () => {
       status: 'closed',
       author: 'ana',
       assignee: '@me',
+      reviewer: '',
       labels: ['bug', 'needs review'],
     });
     expect(parseFilters('crash')).toEqual({
       status: 'all',
       author: '',
       assignee: '',
+      reviewer: '',
       labels: [],
     });
   });
@@ -275,6 +278,7 @@ describe('chips and Filters ↔ query', () => {
       status: 'open',
       author: 'bo',
       assignee: '@me',
+      reviewer: '',
       labels: ['bug', 'good first issue'],
     };
     const q = applyFilters('free text', filters);
@@ -305,5 +309,27 @@ describe('linked Sessions', () => {
       sessionsFor(map, { repo: 'acme/shop', number: 7 }).map((s) => s.sessionId)
     ).toEqual(['b', 'a']);
     expect(sessionsFor(map, { repo: 'acme/shop', number: 8 })).toEqual([]);
+  });
+});
+
+describe('PR chips and Filters', () => {
+  it('lights Mine and Needs my review from their queries', () => {
+    const [, mine, review] = PR_CHIPS;
+    expect(chipMatches('is:open author:@me', mine.query)).toBe(true);
+    expect(chipMatches('review-requested:@me is:open', review.query)).toBe(true);
+  });
+
+  it('round-trips merged status and the reviewer', () => {
+    const filters = {
+      status: 'merged',
+      author: '',
+      assignee: '',
+      reviewer: 'ana',
+      labels: ['release'],
+    };
+    const q = applyFilters('fix', filters);
+    expect(q).toBe('fix is:merged review-requested:ana label:release');
+    expect(parseFilters(q)).toEqual(filters);
+    expect(activeFilterCount(q)).toBe(3);
   });
 });

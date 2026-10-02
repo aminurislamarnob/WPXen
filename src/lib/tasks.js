@@ -188,6 +188,12 @@ export const ISSUE_CHIPS = [
   { label: 'Assigned to me', query: ASSIGNED_TO_ME_QUERY },
 ];
 
+export const PR_CHIPS = [
+  { label: 'Open', query: 'is:open' },
+  { label: 'Mine', query: 'author:@me is:open' },
+  { label: 'Needs my review', query: 'review-requested:@me is:open' },
+];
+
 // Splits a query into terms, keeping a quoted value with its qualifier:
 // `label:"good first issue" bug` → ['label:"good first issue"', 'bug'].
 export function tokenizeQuery(query) {
@@ -207,14 +213,23 @@ export function chipMatches(query, chipQuery) {
   return norm(query) === norm(chipQuery);
 }
 
-const STATUS_TERM = /^(is|state):(open|closed)$/i;
-const FILTER_TERM = /^(author|assignee|label):(.+)$/i;
+const STATUS_TERM = /^(is|state):(open|closed|merged)$/i;
+const FILTER_TERM = /^(author|assignee|label|review-requested):(.+)$/i;
+// Qualifier → Filters field.
+const FILTER_FIELD = {
+  author: 'author',
+  assignee: 'assignee',
+  label: 'labels',
+  'review-requested': 'reviewer',
+};
 
 // The Filters the dropdown shows for a query:
-//   { status: 'open' | 'closed' | 'all', author, assignee, labels: [] }
-// Only the first author / assignee counts, as on GitHub; labels stack.
+//   { status: 'open' | 'closed' | 'merged' | 'all', author, assignee,
+//     reviewer, labels: [] }
+// Only the first author / assignee / reviewer counts, as on GitHub; labels
+// stack. Issues use assignee, PRs reviewer (review-requested:).
 export function parseFilters(query) {
-  const f = { status: 'all', author: '', assignee: '', labels: [] };
+  const f = { status: 'all', author: '', assignee: '', reviewer: '', labels: [] };
   for (const term of tokenizeQuery(query)) {
     const s = term.match(STATUS_TERM);
     if (s) {
@@ -223,9 +238,9 @@ export function parseFilters(query) {
     }
     const m = term.match(FILTER_TERM);
     if (!m) continue;
-    const key = m[1].toLowerCase();
+    const key = FILTER_FIELD[m[1].toLowerCase()];
     const value = unquote(m[2]);
-    if (key === 'label') f.labels.push(value);
+    if (key === 'labels') f.labels.push(value);
     else if (!f[key]) f[key] = value;
   }
   return f;
@@ -238,13 +253,15 @@ export function applyFilters(query, filters) {
     (t) => !STATUS_TERM.test(t) && !FILTER_TERM.test(t)
   );
   const add = [];
-  if (filters.status === 'open' || filters.status === 'closed') {
+  if (['open', 'closed', 'merged'].includes(filters.status)) {
     add.push(`is:${filters.status}`);
   }
   const author = String(filters.author || '').trim();
   const assignee = String(filters.assignee || '').trim();
+  const reviewer = String(filters.reviewer || '').trim();
   if (author) add.push(`author:${quote(author)}`);
   if (assignee) add.push(`assignee:${quote(assignee)}`);
+  if (reviewer) add.push(`review-requested:${quote(reviewer)}`);
   for (const label of filters.labels || []) {
     const l = String(label).trim();
     if (l) add.push(`label:${quote(l)}`);
@@ -259,6 +276,7 @@ export function activeFilterCount(query) {
     (f.status !== 'all' ? 1 : 0) +
     (f.author ? 1 : 0) +
     (f.assignee ? 1 : 0) +
+    (f.reviewer ? 1 : 0) +
     f.labels.length
   );
 }
