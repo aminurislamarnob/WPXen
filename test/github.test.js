@@ -216,6 +216,14 @@ describe('classifyError', () => {
   });
 });
 
+const USER_RESPONSE = [
+  'HTTP/2.0 200 OK',
+  'Content-Type: application/json; charset=utf-8',
+  'X-Oauth-Scopes: gist, read:org, repo',
+  '',
+  '{"login":"ana","id":1}',
+].join('\r\n');
+
 describe('preflight', () => {
   it('reports a missing gh', async () => {
     fakeGh(() => {
@@ -226,7 +234,8 @@ describe('preflight', () => {
 
   it('reports a signed-out gh', async () => {
     fakeGh((args) => {
-      if (args[0] === 'auth') throw ghError('You are not logged into any GitHub hosts.');
+      if (args[0] === 'api')
+        throw ghError('To get started with GitHub CLI, please run:  gh auth login');
       return 'gh version 2.60.0';
     });
     expect(await github.preflight()).toMatchObject({
@@ -236,13 +245,66 @@ describe('preflight', () => {
     });
   });
 
-  it('reports a ready gh', async () => {
-    fakeGh(() => '');
-    expect(await github.preflight()).toEqual({ installed: true, authenticated: true });
-    expect(calls).toEqual([
-      ['--version'],
-      ['auth', 'status', '--hostname', 'github.com'],
-    ]);
+  it('reports a ready gh with its login and OAuth scopes', async () => {
+    fakeGh((args) => (args[0] === 'api' ? USER_RESPONSE : 'gh version 2.60.0'));
+    expect(await github.preflight()).toEqual({
+      installed: true,
+      authenticated: true,
+      login: 'ana',
+      scopes: ['gist', 'read:org', 'repo'],
+    });
+    expect(calls).toEqual([['--version'], ['api', '-i', 'user']]);
+  });
+
+  it('reports unknown scopes when the token carries none to report', async () => {
+    fakeGh((args) =>
+      args[0] === 'api' ? 'HTTP/2.0 200 OK\nServer: github.com\n\n{"login":"ana"}' : ''
+    );
+    expect(await github.preflight()).toMatchObject({ login: 'ana', scopes: null });
+  });
+});
+
+describe('classifyError — missing scope', () => {
+  it('names the scope GitHub asked for', () => {
+    const err = ghError(
+      'gh: GraphQL: Your token has not been granted the required scopes',
+      {
+        stdout:
+          "Your token has not been granted the required scopes to execute this query. The 'projectsV2' field requires one of the following scopes: ['read:project'], but your token has only been granted the: ['gist', 'read:org', 'repo'] scopes.",
+      }
+    );
+    expect(github.classifyError(err)).toMatchObject({
+      code: 'missing-scope',
+      scope: 'read:project',
+    });
+  });
+});
+
+describe('installGh', () => {
+  it('installs the gh formula through brew, streaming progress, then re-checks', async () => {
+    const brewCalls = [];
+    const lines = [];
+    github.__setDeps({
+      runBrewStreaming: async (args, onProgress) => {
+        brewCalls.push(args);
+        onProgress('==> Pouring gh');
+      },
+      runGh: async (args) => (args[0] === 'api' ? USER_RESPONSE : 'gh version 2.60.0'),
+      now: () => now,
+    });
+    const status = await github.installGh((l) => lines.push(l));
+    expect(brewCalls).toEqual([['install', 'gh']]);
+    expect(lines).toEqual(['==> Pouring gh']);
+    expect(status).toMatchObject({ installed: true, authenticated: true });
+  });
+
+  it("surfaces brew's failure", async () => {
+    github.__setDeps({
+      runBrewStreaming: async () => {
+        throw new Error('Homebrew is not installed');
+      },
+    });
+    await expect(github.installGh(() => {})).rejects.toThrow(/Homebrew/);
   });
 });
 

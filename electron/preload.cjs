@@ -9,6 +9,7 @@ const VALID_EVENT_CHANNELS = [
   'site-create-progress',
   'php-install-progress',
   'agent-install-progress',
+  'tasks-gh-install-progress',
   'dependencies-update',
   'notification',
   'tunnel-update',
@@ -198,7 +199,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('agent-launch', siteId, agentId, targetId),
 
   // Floating Workspace terminals (no owning Site)
-  launchFloatingTerminal: (cwd) => ipcRenderer.invoke('agent-launch-floating', cwd),
+  launchFloatingTerminal: (cwd, command) =>
+    ipcRenderer.invoke('agent-launch-floating', cwd, command),
   listFloatingSessions: () => ipcRenderer.invoke('agent-floating-sessions'),
   setFloatingView: (sessionId) => ipcRenderer.send('agent-floating-view', sessionId),
   setFloatingFocus: (focused) => ipcRenderer.send('floating-focus', !!focused),
@@ -213,6 +215,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Tasks (GitHub via the gh CLI)
   tasksPreflight: () => ipcRenderer.invoke('tasks-preflight'),
+  tasksInstallGh: () => ipcRenderer.invoke('tasks-install-gh'),
   tasksRepos: (opts) => ipcRenderer.invoke('tasks-repos', opts),
   tasksSearchIssues: (opts) => ipcRenderer.invoke('tasks-search-issues', opts),
 

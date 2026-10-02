@@ -6,12 +6,12 @@ import {
   ChevronRight,
   CheckCircle,
   CircleDot,
-  Github,
   RefreshCw,
   Search,
   X,
 } from 'lucide-react';
 import { SegmentedTabs, Tooltip } from './ui';
+import { SetupBanner } from './TasksSetup';
 import {
   ALL,
   DEFAULT_ISSUE_QUERY,
@@ -195,7 +195,11 @@ export default function Tasks() {
       </div>
 
       {preflight && !ready ? (
-        <SetupBanner preflight={preflight} onRetry={() => loadSetup({ force: true })} />
+        <SetupBanner
+          preflight={preflight}
+          onRetry={() => loadSetup({ force: true })}
+          onReady={() => loadSetup({ force: true })}
+        />
       ) : sites && tree.length <= 1 ? (
         <EmptyState
           title="No Sites with a GitHub repo"
@@ -427,39 +431,6 @@ function IssueRow({ issue, now }) {
 
 // `gh` missing or signed out. The one-click install and sign-in flows land in
 // their own ticket; for now this says what to do.
-function SetupBanner({ preflight, onRetry }) {
-  const missing = !preflight.installed;
-  return (
-    <div className="bg-card border border-border rounded-xl shadow-sm px-6 py-8 text-center">
-      <Github size={28} className="mx-auto text-muted-foreground" />
-      <p className="mt-3 text-[14px] font-medium text-foreground">
-        {missing ? 'The GitHub CLI isn’t installed' : 'The GitHub CLI isn’t signed in'}
-      </p>
-      <p className="mt-1 text-[12.5px] text-muted-foreground">
-        {missing ? (
-          <>
-            Tasks talks to GitHub through <code className="font-mono">gh</code>. Install
-            it with <code className="font-mono">brew install gh</code>, then check again.
-          </>
-        ) : (
-          <>
-            Run <code className="font-mono">gh auth login</code> in a terminal, then check
-            again.
-          </>
-        )}
-      </p>
-      {preflight.error?.message && !missing && (
-        <p className="mt-1 text-[11.5px] text-muted-foreground/80">
-          {preflight.error.message}
-        </p>
-      )}
-      <button className="btn btn-secondary mt-4" onClick={onRetry}>
-        Check again
-      </button>
-    </div>
-  );
-}
-
 function EmptyState({ title, body }) {
   return (
     <div className="bg-card border border-border rounded-xl shadow-sm px-6 py-10 text-center">

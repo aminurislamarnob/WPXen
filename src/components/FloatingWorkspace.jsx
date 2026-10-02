@@ -21,6 +21,7 @@ import { Favicon } from './browser/BrowserToolbar';
 import AgentStatusGlyph from './AgentStatusGlyph';
 import { Tooltip } from './ui';
 import { useSettings } from '../lib/useSettings';
+import { registerFloatingRunner } from '../lib/floatingBus';
 import * as sessionCache from '../lib/terminal/sessionCache';
 import * as webviewCache from '../lib/browser/webviewCache';
 import {
@@ -349,22 +350,37 @@ export default function FloatingWorkspace() {
     });
   };
 
-  const newTerminal = async () => {
+  // `command`, when given, is typed into the new shell (see floatingBus).
+  // Resolves the Session id, or null when the launch failed.
+  const newTerminal = async ({ command, cwd: wanted } = {}) => {
     setError(null);
-    const sites = (await window.electronAPI.getSites()) || [];
-    const { cwd } = resolveContext({
-      pathname: pathnameRef.current,
-      sites,
-      terminalDirectory: settings['floatingWorkspace.terminalDirectory'],
-    });
-    const res = await window.electronAPI.launchFloatingTerminal(cwd);
-    if (res?.error) return setError(res.error);
+    let cwd = wanted;
+    if (!cwd) {
+      const sites = (await window.electronAPI.getSites()) || [];
+      cwd = resolveContext({
+        pathname: pathnameRef.current,
+        sites,
+        terminalDirectory: settings['floatingWorkspace.terminalDirectory'],
+      }).cwd;
+    }
+    const res = await window.electronAPI.launchFloatingTerminal(cwd, command);
+    if (res?.error) {
+      setError(res.error);
+      return null;
+    }
     dispatch({
       type: 'add',
       tab: { kind: 'terminal', id: newTabId('terminal'), sessionId: res.sessionId, cwd },
     });
     setOpen(true);
+    return res.sessionId;
   };
+  const newTerminalRef = useRef(newTerminal);
+  newTerminalRef.current = newTerminal;
+  useEffect(() => {
+    if (!settingsLoaded || !enabled) return undefined;
+    return registerFloatingRunner((opts) => newTerminalRef.current(opts));
+  }, [settingsLoaded, enabled]);
 
   // A new browser tab: the given URL, else the current Site's, else blank
   // with the address bar ready for typing.
@@ -694,7 +710,7 @@ export default function FloatingWorkspace() {
             <div className="flex items-center flex-shrink-0">
               <Tooltip label="New terminal" keys={['⌘', 'T']}>
                 <button
-                  onClick={newTerminal}
+                  onClick={() => newTerminal()}
                   aria-label="New terminal"
                   className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent"
                 >

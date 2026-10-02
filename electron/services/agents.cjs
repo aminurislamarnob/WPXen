@@ -826,7 +826,13 @@ function launch({ site, agentId, target = null, globalArgs = '' }) {
 // but stays out of everything that means "a Site's Sessions" — the Projects
 // list, keep-awake, the tray count, notifications and the quit warning. A
 // leading `~` is expanded here, since the renderer doesn't know the home dir.
-function launchFloating({ cwd } = {}) {
+//
+// `command`, when given, is typed into the shell once it settles — the way an
+// agent command is — so a flow like `gh auth login` runs in a real terminal
+// the user can interact with. One line only; it's typed, not exec'd.
+function launchFloating({ cwd, command = '' } = {}) {
+  const line = String(command || '').trim();
+  if (/[\r\n]/.test(line)) return { error: 'A floating command must be a single line' };
   const raw = String(cwd || '~').trim() || '~';
   const home = deps.homedir();
   const resolved =
@@ -834,7 +840,7 @@ function launchFloating({ cwd } = {}) {
   if (!path.isAbsolute(resolved)) return { error: `Directory not found: ${raw}` };
   return startSession({
     cwd: path.normalize(resolved),
-    command: '',
+    command: line,
     meta: {
       scope: 'floating',
       siteId: null,

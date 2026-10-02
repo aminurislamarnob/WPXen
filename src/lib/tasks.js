@@ -116,3 +116,38 @@ export function timeAgo(iso, now = Date.now()) {
 export function labelColor(hex) {
   return /^[0-9a-f]{6}$/i.test(hex || '') ? `#${hex}` : null;
 }
+
+// ── gh setup ─────────────────────────────────────────────────────────────────
+// What the page needs from `gh` before it can list anything, as one step.
+
+export function setupStep(preflight) {
+  if (!preflight) return 'checking';
+  if (!preflight.installed) return 'install';
+  if (!preflight.authenticated) return 'sign-in';
+  return 'ready';
+}
+
+// Whether the signed-in token carries `scope`. `scopes` is null when gh
+// can't tell (a fine-grained or app token reports none), and then the call
+// is simply tried — GitHub's own error is the authority.
+export function hasScope(preflight, scope) {
+  if (!scope) return true;
+  const scopes = preflight?.scopes;
+  if (!Array.isArray(scopes)) return true;
+  // `project` implies `read:project`, as `repo` does its read-only parts.
+  const base = scope.replace(/^read:/, '');
+  return scopes.includes(scope) || scopes.includes(base);
+}
+
+const SCOPE_NAME = /^[a-z][a-z:_-]{0,40}$/;
+
+// What to type in a terminal to sign in, or to add a scope to the existing
+// login. `gh auth login` is interactive (browser + one-time code), so it runs
+// in a real terminal rather than headless.
+export function ghSetupCommand({ scope } = {}) {
+  if (scope != null) {
+    if (!SCOPE_NAME.test(String(scope))) return null;
+    return `gh auth refresh --hostname github.com --scopes ${scope}`;
+  }
+  return 'gh auth login --hostname github.com --git-protocol https --web';
+}
