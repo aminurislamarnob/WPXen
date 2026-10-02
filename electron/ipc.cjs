@@ -9,6 +9,7 @@ const {
   nativeTheme,
   session,
   Notification,
+  powerMonitor,
 } = require('electron');
 const crypto = require('crypto');
 const path = require('path');
@@ -43,6 +44,7 @@ const browser = require('./services/browser.cjs');
 const browserHistory = require('./services/browserHistory.cjs');
 const settingsService = require('./services/settings.cjs');
 const externalTools = require('./services/externalTools.cjs');
+const keepAwake = require('./services/keepAwake.cjs');
 const { humanize } = require('./services/errors.cjs');
 
 let store;
@@ -245,6 +247,7 @@ function registerHandlers(win, storeInstance) {
       'agents.notifications.onBell': (_v, all) => applyNotificationConfig(all),
       'agents.notifications.suppressWhenFocused': (_v, all) =>
         applyNotificationConfig(all),
+      'agents.keepAwake': (value) => keepAwake.setMode(value),
     },
   });
   settings.migrateLegacy();
@@ -254,6 +257,18 @@ function registerHandlers(win, storeInstance) {
   nativeTheme.themeSource = settings.get('appearance.themeMode');
   applyAgentConfig(settings.read());
   applyNotificationConfig(settings.read());
+
+  // Keep computer awake. Subscribe before applying the stored mode so the
+  // first status reaches the renderer; re-check after a wake from sleep.
+  keepAwake.onStatusChange((status) => {
+    for (const w of BrowserWindow.getAllWindows()) {
+      if (!w.isDestroyed() && w.webContents) {
+        w.webContents.send('keep-awake-status-update', status);
+      }
+    }
+  });
+  keepAwake.setMode(settings.get('agents.keepAwake'));
+  powerMonitor.on('resume', () => keepAwake.handleResume());
 
   // Apply persisted DB credentials so MySQL operations authenticate correctly.
   mysql.setCredentials({
@@ -2220,6 +2235,10 @@ function registerHandlers(win, storeInstance) {
   // Flat dotted map of every known setting. The renderer's useSettings() hook
   // holds this and re-reads it on 'settings-updated'.
   ipcMain.handle('settings-get-all', () => settings.read());
+
+  // { mode, active, workingCount } — the mode lives in settings; this adds
+  // whether a sleep assertion is actually held right now.
+  ipcMain.handle('keep-awake-status', () => keepAwake.getStatus());
 
   // Validated shallow patch. Always resolves — rejections come back on the
   // result so the UI can roll the control back and say why.

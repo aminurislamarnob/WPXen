@@ -1,12 +1,25 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ChevronDown, Download, Loader, Plus, RotateCcw, Trash2 } from 'lucide-react';
-import { Button, Card, SectionLabel, SettingsRow, Toggle, Tooltip } from '../../ui';
+import {
+  Button,
+  Card,
+  SectionLabel,
+  SegmentedTabs,
+  SettingsRow,
+  Toggle,
+  Tooltip,
+} from '../../ui';
 import { SelectSetting, TextSetting } from '../controls';
 import { ProviderIcon } from '../../providerIcons';
 import { useSettings } from '../../../lib/useSettings';
 import { useSettingsContext } from '../SettingsLayout';
 import { useAgentInstall } from '../../../lib/useAgentInstall';
 import { installerSubtitle, installerTooltip } from '../../../lib/installerLabel';
+import {
+  KEEP_AWAKE_MODES,
+  keepAwakeMode,
+  useKeepAwakeStatus,
+} from '../../../lib/useKeepAwake';
 
 export default function AgentsSection() {
   const { settings, setSetting } = useSettings();
@@ -18,6 +31,7 @@ export default function AgentsSection() {
   // second list, and several open at once just rebuilds the stacked form this
   // replaced.
   const [open, setOpen] = useState(null);
+  const keepAwake = useKeepAwakeStatus();
 
   const refresh = useCallback(() => {
     window.electronAPI
@@ -187,9 +201,36 @@ export default function AgentsSection() {
       </Card>
     </div>
   );
+  const awakeMode = keepAwakeMode(settings['agents.keepAwake']);
 
   return (
     <div className="space-y-6">
+      {(!visible || visible.includes('agents.keepAwake')) && (
+        <div>
+          <SectionLabel>Keep Computer Awake</SectionLabel>
+          <Card>
+            <SettingsRow
+              id="agents.keepAwake"
+              visible={visible}
+              title="Keep computer awake"
+              subtitle={`${awakeMode.description} · ${
+                keepAwake.active ? 'Active' : 'Inactive'
+              }`}
+            >
+              <SegmentedTabs
+                tabs={KEEP_AWAKE_MODES}
+                value={awakeMode.value}
+                onChange={(v) => setSetting('agents.keepAwake', v)}
+              />
+            </SettingsRow>
+          </Card>
+          <p className="text-[11px] text-muted-foreground mt-1.5 px-1">
+            Your display can still sleep and lock. With the lid closed on battery, macOS
+            sleeps regardless.
+          </p>
+        </div>
+      )}
+
       <div>
         <SectionLabel>Available Agents</SectionLabel>
         <Card>

@@ -29,6 +29,7 @@ const VALID_EVENT_CHANNELS = [
   'browser-new-window',
   'browser-shortcut',
   'settings-updated',
+  'keep-awake-status-update',
 ];
 
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -160,6 +161,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // resolves with { ok, applied, rejected } — it never throws on a bad value.
   getAllSettings: () => ipcRenderer.invoke('settings-get-all'),
   setSettings: (patch) => ipcRenderer.invoke('settings-set', patch),
+  // Keep computer awake: { mode, active, workingCount }. Changes are pushed on
+  // 'keep-awake-status-update'; the mode itself is the agents.keepAwake setting.
+  getKeepAwakeStatus: () => ipcRenderer.invoke('keep-awake-status'),
   // Editors/terminals detected on this machine, for the settings pickers.
   listExternalTools: () => ipcRenderer.invoke('list-external-tools'),
   // Every agent including ones hidden from the launcher (settings only).
