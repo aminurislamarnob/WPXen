@@ -29,6 +29,11 @@ import { useAgentSessions, setSelectedSession } from '../lib/useAgentSessions';
 
 const CLOSE_CONFIRM_KEY = 'wpxen.terminalCloseConfirmSuppressed';
 
+// This pane's browser tab keys. The webview cache and the browser IPC events
+// are shared with the Floating Workspace (`floating-browser:` keys), so the
+// prefix is how each side knows which pages are its own.
+const BROWSER_KEY_PREFIX = 'browser:';
+
 // The places you actually want to look at while an agent works on a site.
 // Order is by how often they're reached for, not alphabetical.
 const BROWSER_TARGETS = [
@@ -90,7 +95,7 @@ export default function AgentsPane() {
   // arrays, which are evaluated during render — a `const` declared further down
   // would still be in its temporal dead zone at that point.
   const openBrowser = useCallback((url = 'about:blank') => {
-    const key = `browser:${++browserSeq.current}`;
+    const key = `${BROWSER_KEY_PREFIX}${++browserSeq.current}`;
     setBrowserState((prev) => ({
       ...prev,
       [key]: { url, title: '', loading: true, error: null },
@@ -169,23 +174,29 @@ export default function AgentsPane() {
   // Drop editor tabs when the Site changes. Browser tabs are site-scoped too,
   // and their webviews would otherwise stay parked off-screen forever.
   useEffect(() => {
-    webviewCache.disposeAll();
+    webviewCache.disposeAll(BROWSER_KEY_PREFIX);
     setBrowserState({});
     setOpenFiles([]);
     setActiveKey(null);
   }, [siteId]);
 
   // Same on unmount — leaving the Agents screen must not leak live pages.
-  useEffect(() => () => webviewCache.disposeAll(), []);
+  useEffect(() => () => webviewCache.disposeAll(BROWSER_KEY_PREFIX), []);
 
   // Popups (target="_blank", window.open) are denied in the main process and
   // re-emitted here, so they land as another tab rather than a chrome-less
   // window. Link context-menu "Open in New Tab" arrives on the same channel.
   useEffect(() => {
     const api = window.electronAPI;
-    const offNewWindow = api.on('browser-new-window', ({ url }) => openBrowser(url));
+    // Both channels carry every browser tab's events; the Floating
+    // Workspace's pages are its own business.
+    const ours = (tabKey) => String(tabKey || '').startsWith(BROWSER_KEY_PREFIX);
+    const offNewWindow = api.on('browser-new-window', ({ tabKey, url }) => {
+      if (ours(tabKey)) openBrowser(url);
+    });
     // Chords the focused page would otherwise swallow (see browser.cjs).
     const offShortcut = api.on('browser-shortcut', ({ tabKey, key }) => {
+      if (!ours(tabKey)) return;
       if (key === 'w') closeFileRef.current(tabKey);
       else if (key === 'r') webviewCache.reload(tabKey);
     });
@@ -382,7 +393,7 @@ export default function AgentsPane() {
   const closeFile = (key) => {
     // A browser tab's page outlives its React component by design, so closing
     // the tab is the one moment it has to be torn down for real.
-    if (key.startsWith('browser:')) {
+    if (key.startsWith(BROWSER_KEY_PREFIX)) {
       webviewCache.dispose(key);
       setBrowserState((prev) => {
         const next = { ...prev };

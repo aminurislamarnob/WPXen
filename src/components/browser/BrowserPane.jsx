@@ -16,6 +16,7 @@ export default function BrowserPane({
   state,
   onStateChange,
   onClose,
+  autoEditAddress = false,
 }) {
   const containerRef = useRef(null);
   const [nav, setNav] = useState({ canGoBack: false, canGoForward: false });
@@ -64,6 +65,7 @@ export default function BrowserPane({
           onGoForward={goForward}
           onReload={reload}
           onNavigate={navigate}
+          autoEdit={autoEditAddress}
         />
         <div className="flex items-center gap-0.5 flex-shrink-0">
           <Tooltip label="Open DevTools">

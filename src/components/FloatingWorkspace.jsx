@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import {
+  ChevronDown,
   EyeOff,
+  Globe,
   Maximize2,
   Minimize2,
   Minus,
@@ -11,10 +13,13 @@ import {
   X,
 } from 'lucide-react';
 import Terminal from './Terminal';
+import BrowserPane from './browser/BrowserPane';
+import { Favicon } from './browser/BrowserToolbar';
 import AgentStatusGlyph from './AgentStatusGlyph';
 import { Tooltip } from './ui';
 import { useSettings } from '../lib/useSettings';
 import * as sessionCache from '../lib/terminal/sessionCache';
+import * as webviewCache from '../lib/browser/webviewCache';
 import {
   EMPTY_WORKSPACE,
   activeTab as getActiveTab,
@@ -22,6 +27,7 @@ import {
   needsAttention,
   resolveContext,
   terminalTabTitle,
+  browserTabTitle,
   workspaceReducer,
   LAYOUT_STORAGE_KEY,
   parseLayout,
@@ -39,9 +45,11 @@ import {
 import { trackPointer, useFloatingGeometry } from '../lib/useFloatingGeometry';
 
 // Floating Workspace — a launcher button in the bottom-right of every page and
-// the floating panel it opens, modelled on Orca's floating terminal. Tabs are
-// plain shells owned by no Site (`scope: 'floating'` in agents.cjs), so they
-// stay out of the Projects list, keep-awake and the tray.
+// the floating panel it opens, modelled on Orca's floating terminal. Terminal
+// tabs are plain shells owned by no Site (`scope: 'floating'` in agents.cjs),
+// so they stay out of the Projects list, keep-awake and the tray. Browser
+// tabs are the in-app browser (BrowserPane + webviewCache, shared partition
+// and history) under `floating-browser:` keys, which the Agents pane ignores.
 //
 // The panel stays mounted while it has tabs and is only hidden with CSS when
 // minimised: the active terminal stays attached and every Session keeps
@@ -76,6 +84,12 @@ const chordOf = (e) => {
   if (e.code !== 'KeyA' || !e.metaKey || !e.altKey || e.ctrlKey) return null;
   return e.shiftKey ? 'floating-max' : 'floating';
 };
+
+// The "+" menu and the empty state offer the same choices.
+const NEW_TAB_ACTIONS = [
+  { key: 'terminal', label: 'New Terminal', icon: TerminalSquare },
+  { key: 'browser', label: 'New Browser Tab', icon: Globe },
+];
 
 // The 8 resize handles: edge or corner, and where it sits on the panel.
 const RESIZE_HANDLES = [
@@ -113,6 +127,8 @@ export default function FloatingWorkspace() {
   const [dragTrigger, setDragTrigger] = useState(null);
   const [workspace, dispatch] = useReducer(workspaceReducer, EMPTY_WORKSPACE);
   const [error, setError] = useState(null);
+  const [browserState, setBrowserState] = useState({}); // tab id -> chrome state
+  const [addMenu, setAddMenu] = useState(null); // { x, y } while the "+" menu is open
   const sessions = useFloatingSessions();
   const panelRef = useRef(null);
   const pathnameRef = useRef(location.pathname);
@@ -140,19 +156,25 @@ export default function FloatingWorkspace() {
     (async () => {
       const live = (await api.listFloatingSessions()) || [];
       if (cancelled) return;
+      const layout = parseLayout(readStored(LAYOUT_STORAGE_KEY));
       if (live.length > 0) {
-        const tabs = live.map((s) => ({
-          kind: 'terminal',
-          id: newTabId('terminal'),
-          sessionId: s.sessionId,
-          cwd: s.cwd,
-        }));
+        // Pages and notes died with the renderer, so they come back from the
+        // saved layout, after the adopted shells.
+        const tabs = [
+          ...live.map((s) => ({
+            kind: 'terminal',
+            id: newTabId('terminal'),
+            sessionId: s.sessionId,
+            cwd: s.cwd,
+          })),
+          ...(layout?.tabs || []).filter((t) => t.kind !== 'terminal'),
+        ];
         dispatch({ type: 'hydrate', state: { tabs, activeId: tabs[0].id } });
       } else {
-        const layout = parseLayout(readStored(LAYOUT_STORAGE_KEY));
         if (layout) {
           dispatch({ type: 'hydrate', state: layout });
           for (const tab of layout.tabs) {
+            if (tab.kind !== 'terminal') continue;
             const res = await api.launchFloatingTerminal(tab.cwd);
             // Cancelled, or the tab was closed while its shell was starting:
             // don't leave a shell running with no tab.
@@ -337,13 +359,86 @@ export default function FloatingWorkspace() {
     setOpen(true);
   };
 
+  // A new browser tab: the given URL, else the current Site's, else blank
+  // with the address bar ready for typing.
+  const newBrowser = async (url) => {
+    setError(null);
+    let target = url;
+    if (!target) {
+      const sites = (await window.electronAPI.getSites()) || [];
+      target = resolveContext({ pathname: pathnameRef.current, sites }).url;
+    }
+    const tab = {
+      kind: 'browser',
+      id: newTabId('browser'),
+      url: target || 'about:blank',
+    };
+    setBrowserState((prev) => ({
+      ...prev,
+      [tab.id]: {
+        url: tab.url,
+        title: '',
+        loading: tab.url !== 'about:blank',
+        error: null,
+      },
+    }));
+    dispatch({ type: 'add', tab });
+    setOpen(true);
+  };
+
   const closeTab = (tab) => {
     dispatch({ type: 'close', id: tab.id });
-    if (tab.sessionId) {
+    if (tab.kind === 'browser') {
+      // The page outlives its React component by design; closing the tab is
+      // the one moment it's torn down for real.
+      webviewCache.dispose(tab.id);
+      setBrowserState((prev) => {
+        const next = { ...prev };
+        delete next[tab.id];
+        return next;
+      });
+    } else if (tab.sessionId) {
       window.electronAPI.terminalStop(tab.sessionId);
       sessionCache.dispose(tab.sessionId);
     }
   };
+
+  // Chrome state for each browser tab, fed by its webview. The URL is also
+  // written onto the tab, so the saved layout reopens the page it was on.
+  const onBrowserStateChange = useCallback((key, patch) => {
+    setBrowserState((prev) => ({ ...prev, [key]: { ...(prev[key] || {}), ...patch } }));
+    if (patch.url && patch.url !== 'about:blank') {
+      dispatch({ type: 'update', id: key, patch: { url: patch.url } });
+    }
+  }, []);
+
+  // Popups and ⌘W/⌘R from our own pages; the Agents pane handles its own.
+  const newBrowserRef = useRef(null);
+  newBrowserRef.current = newBrowser;
+  const closeTabByIdRef = useRef(null);
+  closeTabByIdRef.current = (id) => {
+    const tab = workspaceRef.current.tabs.find((t) => t.id === id);
+    if (tab) closeTab(tab);
+  };
+  useEffect(() => {
+    const api = window.electronAPI;
+    const ours = (tabKey) => String(tabKey || '').startsWith('floating-browser:');
+    const offNewWindow = api.on('browser-new-window', ({ tabKey, url }) => {
+      if (ours(tabKey)) newBrowserRef.current(url);
+    });
+    const offShortcut = api.on('browser-shortcut', ({ tabKey, key }) => {
+      if (!ours(tabKey)) return;
+      if (key === 'w') closeTabByIdRef.current(tabKey);
+      else if (key === 'r') webviewCache.reload(tabKey);
+    });
+    return () => {
+      offNewWindow();
+      offShortcut();
+    };
+  }, []);
+
+  // Leaving for good (the app's window closing) takes our pages with it.
+  useEffect(() => () => webviewCache.disposeAll('floating-browser:'), []);
 
   // A fresh shell in the same folder, in the same tab position — after the
   // shell exited, or when a restored tab's launch was refused.
@@ -434,7 +529,23 @@ export default function FloatingWorkspace() {
     dispatch({ type: 'move', id, index });
   };
 
-  const openLink = useCallback((url) => window.electronAPI.openSiteInBrowser(url), []);
+  const newTabOf = (kind) => {
+    if (kind === 'browser') newBrowser();
+    else newTerminal();
+  };
+
+  // Escape closes the "+" menu (the panel itself never binds Esc).
+  useEffect(() => {
+    if (!addMenu) return undefined;
+    const onKey = (e) => e.key === 'Escape' && setAddMenu(null);
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [addMenu]);
+
+  const openLink = (url) => {
+    if (settings['app.openLinksIn'] === 'app') newBrowser(url);
+    else window.electronAPI.openSiteInBrowser(url);
+  };
 
   const hasTabs = workspace.tabs.length > 0;
   const attention = !open && needsAttention(sessions);
@@ -501,14 +612,18 @@ export default function FloatingWorkspace() {
                         : 'text-muted-foreground hover:bg-accent'
                     }`}
                   >
-                    {session &&
-                    ['working', 'needs-input', 'done'].includes(session.state) ? (
+                    {tab.kind === 'browser' ? (
+                      <Favicon src={browserState[tab.id]?.favicon} />
+                    ) : session &&
+                      ['working', 'needs-input', 'done'].includes(session.state) ? (
                       <AgentStatusGlyph state={session.state} />
                     ) : (
                       <TerminalSquare size={13} className="flex-shrink-0" />
                     )}
                     <span className="truncate max-w-[160px]">
-                      {terminalTabTitle(tab, session)}
+                      {tab.kind === 'browser'
+                        ? browserTabTitle(tab, browserState[tab.id])
+                        : terminalTabTitle(tab, session)}
                     </span>
                     {session?.unread && !isActive && (
                       <span className="size-1.5 rounded-full bg-status-warning" />
@@ -527,15 +642,31 @@ export default function FloatingWorkspace() {
                 );
               })}
             </div>
-            <Tooltip label="New terminal">
-              <button
-                onClick={newTerminal}
-                aria-label="New terminal"
-                className="flex-shrink-0 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent"
-              >
-                <Plus size={15} />
-              </button>
-            </Tooltip>
+            <div className="flex items-center flex-shrink-0">
+              <Tooltip label="New terminal" keys={['⌘', 'T']}>
+                <button
+                  onClick={newTerminal}
+                  aria-label="New terminal"
+                  className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent"
+                >
+                  <Plus size={15} />
+                </button>
+              </Tooltip>
+              <Tooltip label="New tab…" disabled={!!addMenu}>
+                <button
+                  onClick={(e) => {
+                    const r = e.currentTarget.getBoundingClientRect();
+                    setAddMenu((m) => (m ? null : { x: r.left, y: r.bottom + 4 }));
+                  }}
+                  aria-label="New tab menu"
+                  aria-haspopup="menu"
+                  aria-expanded={!!addMenu}
+                  className="py-1 px-0.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent"
+                >
+                  <ChevronDown size={12} />
+                </button>
+              </Tooltip>
+            </div>
             <div className="flex-1" />
             <Tooltip
               label={maximized ? 'Restore' : 'Maximize'}
@@ -566,8 +697,31 @@ export default function FloatingWorkspace() {
             </div>
           )}
 
-          <div className="flex-1 min-h-0 bg-background">
-            {active && !active.sessionId ? (
+          {/* BrowserPane renders its toolbar and viewport as siblings, so it
+              needs a column; terminals and the empty states fill with h-full. */}
+          <div
+            className={`flex-1 min-h-0 bg-background ${
+              active?.kind === 'browser' ? 'flex flex-col' : ''
+            }`}
+          >
+            {active?.kind === 'browser' ? (
+              <BrowserPane
+                key={active.id}
+                tabKey={active.id}
+                initialUrl={active.url}
+                state={
+                  browserState[active.id] || {
+                    url: active.url,
+                    title: '',
+                    loading: true,
+                    error: null,
+                  }
+                }
+                onStateChange={onBrowserStateChange}
+                onClose={() => closeTab(active)}
+                autoEditAddress={active.url === 'about:blank'}
+              />
+            ) : active && !active.sessionId ? (
               <div className="h-full flex flex-col items-center justify-center gap-3 px-6 text-center">
                 {active.error ? (
                   <>
@@ -603,14 +757,52 @@ export default function FloatingWorkspace() {
             ) : (
               <div className="h-full flex flex-col items-center justify-center gap-3 text-center">
                 <p className="text-[13px] text-muted-foreground">Nothing open yet.</p>
-                <button className="btn btn-secondary" onClick={newTerminal}>
-                  <TerminalSquare size={14} />
-                  New Terminal
-                </button>
+                <div className="flex flex-wrap justify-center gap-2">
+                  {NEW_TAB_ACTIONS.map(({ key, label, icon: Icon }) => (
+                    <button
+                      key={key}
+                      className="btn btn-secondary"
+                      onClick={() => newTabOf(key)}
+                    >
+                      <Icon size={14} />
+                      {label}
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
           </div>
         </section>
+      )}
+
+      {addMenu && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setAddMenu(null)} />
+          <div
+            role="menu"
+            aria-label="New tab"
+            className="panel-menu fixed z-50 w-48 p-1"
+            style={{
+              left: Math.min(addMenu.x, viewport.width - 200),
+              top: addMenu.y,
+            }}
+          >
+            {NEW_TAB_ACTIONS.map(({ key, label, icon: Icon }) => (
+              <button
+                key={key}
+                role="menuitem"
+                className="panel-item"
+                onClick={() => {
+                  setAddMenu(null);
+                  newTabOf(key);
+                }}
+              >
+                <Icon size={14} className="text-muted-foreground" />
+                {label}
+              </button>
+            ))}
+          </div>
+        </>
       )}
 
       {settingsLoaded && enabled && (

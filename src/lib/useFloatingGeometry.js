@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { setDragPassthrough } from './browser/webviewCache';
 import {
   DEFAULT_TRIGGER,
   STORAGE_KEYS,
@@ -102,6 +103,9 @@ export function trackPointer(e, { onMove, onEnd }) {
   }
   const prevSelect = document.body.style.userSelect;
   document.body.style.userSelect = 'none';
+  // A webview swallows pointer events before capture sees them; let them
+  // through for the length of the drag.
+  setDragPassthrough(true);
 
   const move = (ev) => onMove?.(ev.clientX - sx, ev.clientY - sy);
   const end = (ev) => {
@@ -111,6 +115,7 @@ export function trackPointer(e, { onMove, onEnd }) {
       // already released
     }
     document.body.style.userSelect = prevSelect;
+    setDragPassthrough(false);
     el.removeEventListener('pointermove', move);
     el.removeEventListener('pointerup', end);
     el.removeEventListener('pointercancel', end);
