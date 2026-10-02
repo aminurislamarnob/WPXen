@@ -130,7 +130,7 @@
         ]
       }
     ],
-    "afterPack": "scripts/fix-pty-permissions.cjs"
+    "afterPack": "scripts/after-pack.cjs"
   },
   "allowScripts": {
     "electron@28.3.3": true,
