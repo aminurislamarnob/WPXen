@@ -4,6 +4,7 @@ import { Search, ArrowLeft, ArrowRight, PanelLeft } from 'lucide-react';
 import logo from '../assets/logo.png';
 import ActivityBar from './ActivityBar';
 import AgentsSidebar from './AgentsSidebar';
+import KeepAwakeButton from './KeepAwakeButton';
 import { Tooltip } from './ui';
 import { NAV_GROUPS } from '../lib/navItems';
 import { ACTIVITY_BAR_WIDTH, WINDOW_CONTROLS_END, agentsLabel } from '../lib/activityBar';
@@ -177,14 +178,15 @@ export default function Layout({ serviceStatus }) {
           </>
         )}
 
-        {/* Footer — app logo */}
-        <div className="flex items-center px-4 py-3">
+        {/* Footer — app logo, then the keep-awake control */}
+        <div className="flex items-center justify-between gap-2 pl-4 pr-2.5 py-3">
           <img
             src={logo}
             alt="WPXen"
             className="h-5 w-auto object-contain"
             draggable={false}
           />
+          <KeepAwakeButton />
         </div>
       </aside>
 
