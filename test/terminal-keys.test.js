@@ -86,6 +86,16 @@ describe('shouldBubbleChord', () => {
   it('does not bubble a plain letter', () => {
     expect(shouldBubbleChord(key({ code: 'KeyX' }))).toBe(false);
   });
+  it('bubbles Ctrl+Tab and Ctrl+Shift+Tab, for tab switching', () => {
+    expect(shouldBubbleChord(key({ code: 'Tab', ctrlKey: true }))).toBe(true);
+    expect(shouldBubbleChord(key({ code: 'Tab', ctrlKey: true, shiftKey: true }))).toBe(
+      true
+    );
+  });
+  it('does not bubble a plain Tab (completion)', () => {
+    expect(shouldBubbleChord(key({ code: 'Tab' }))).toBe(false);
+    expect(shouldBubbleChord(key({ code: 'Tab', shiftKey: true }))).toBe(false);
+  });
 });
 
 describe('trimSelection', () => {

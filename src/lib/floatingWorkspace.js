@@ -44,12 +44,39 @@ export function workspaceReducer(state, action) {
         tabs: state.tabs.map((t) => (t.id === action.id ? { ...t, ...action.patch } : t)),
       };
     }
+    // Drag-to-reorder: move a tab to `index` in the strip. Focus stays put.
+    case 'move': {
+      const from = state.tabs.findIndex((t) => t.id === action.id);
+      if (from === -1) return state;
+      const to = Math.max(0, Math.min(action.index, state.tabs.length - 1));
+      if (from === to) return state;
+      const tabs = [...state.tabs];
+      const [tab] = tabs.splice(from, 1);
+      tabs.splice(to, 0, tab);
+      return { ...state, tabs };
+    }
+    // ⌃Tab / ⌃⇧Tab: step through the strip, wrapping at either end.
+    case 'cycle': {
+      const n = state.tabs.length;
+      if (n < 2) return state;
+      const i = Math.max(
+        0,
+        state.tabs.findIndex((t) => t.id === state.activeId)
+      );
+      const next = state.tabs[(((i + action.delta) % n) + n) % n];
+      return { ...state, activeId: next.id };
+    }
+    // Replace the whole workspace — restoring a saved layout at launch.
+    case 'hydrate': {
+      return action.state;
+    }
     // A Session the main process no longer lists (dismissed elsewhere, or
     // reaped) takes its tab with it.
     case 'prune': {
       const live = new Set(action.sessionIds);
+      // A tab still waiting on (or refused) its shell has no Session yet.
       const gone = state.tabs.filter(
-        (t) => t.kind === 'terminal' && !live.has(t.sessionId)
+        (t) => t.kind === 'terminal' && t.sessionId && !live.has(t.sessionId)
       );
       return gone.reduce(
         (s, t) => workspaceReducer(s, { type: 'close', id: t.id }),
@@ -114,4 +141,44 @@ export function terminalTabTitle(tab, session) {
 // Whether the minimised launcher should show its attention dot.
 export function needsAttention(sessions) {
   return sessions.some((s) => !s.exited && (s.unread || s.state === 'needs-input'));
+}
+
+// ── Layout persistence ───────────────────────────────────────────────────────
+// What survives a restart: tab order, the focused tab and where each terminal
+// was opened. Never a sessionId — after a restart every shell is a fresh one
+// (ADR 0001: no daemon, nothing outlives the app).
+
+export const LAYOUT_STORAGE_KEY = 'wpxen.floatingWorkspace.tabs';
+
+export function serializeLayout(state) {
+  const tabs = state.tabs
+    .filter((t) => t.kind === 'terminal')
+    .map((t) => ({ kind: 'terminal', id: t.id, cwd: t.cwd }));
+  const activeId = tabs.some((t) => t.id === state.activeId) ? state.activeId : null;
+  return JSON.stringify({ tabs, activeId });
+}
+
+// The saved layout as tabs still to be launched: each terminal comes back
+// with no Session, for the panel to start a fresh shell in its cwd. Anything
+// malformed is dropped rather than trusted.
+export function parseLayout(raw) {
+  let data;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!data || !Array.isArray(data.tabs)) return null;
+  const seen = new Set();
+  const tabs = [];
+  for (const t of data.tabs) {
+    if (!t || t.kind !== 'terminal') continue;
+    if (typeof t.id !== 'string' || !t.id || seen.has(t.id)) continue;
+    if (typeof t.cwd !== 'string' || !t.cwd.trim()) continue;
+    seen.add(t.id);
+    tabs.push({ kind: 'terminal', id: t.id, sessionId: null, cwd: t.cwd });
+  }
+  if (tabs.length === 0) return null;
+  const activeId = tabs.some((t) => t.id === data.activeId) ? data.activeId : tabs[0].id;
+  return { tabs, activeId };
 }

@@ -23,13 +23,18 @@ import {
   resolveContext,
   terminalTabTitle,
   workspaceReducer,
+  LAYOUT_STORAGE_KEY,
+  parseLayout,
+  serializeLayout,
 } from '../lib/floatingWorkspace';
 import {
   isDrag,
   moveBounds,
   pointToTrigger,
+  readStored,
   resizeBounds,
   triggerToPoint,
+  writeStored,
 } from '../lib/floatingGeometry';
 import { trackPointer, useFloatingGeometry } from '../lib/useFloatingGeometry';
 
@@ -113,32 +118,72 @@ export default function FloatingWorkspace() {
   const pathnameRef = useRef(location.pathname);
   pathnameRef.current = location.pathname;
 
+  const workspaceRef = useRef(workspace);
+  workspaceRef.current = workspace;
   const active = getActiveTab(workspace);
   const sessionById = new Map(sessions.map((s) => [s.sessionId, s]));
 
-  // A renderer reload (dev HMR, a crashed window) loses this component's state
-  // while the main process keeps the shells — adopt any that are still there
-  // rather than leaving them running with no tab.
+  // Bring the workspace back at launch.
+  //
+  // After an app restart nothing is running (no daemon — ADR 0001), so the
+  // saved layout is relaunched: every terminal tab gets a fresh shell in its
+  // saved cwd, in order. After a renderer-only reload (dev HMR, a crashed
+  // window) the main process still has the shells, so those are adopted
+  // instead — relaunching would leave them running with no tab.
+  //
+  // StrictMode double-invokes this; the first run is cancelled before its
+  // first await resolves, so only the surviving run launches anything.
+  const [hydrated, setHydrated] = useState(false);
   useEffect(() => {
     let cancelled = false;
-    window.electronAPI.listFloatingSessions().then((list) => {
+    const api = window.electronAPI;
+    (async () => {
+      const live = (await api.listFloatingSessions()) || [];
       if (cancelled) return;
-      for (const s of list || []) {
-        dispatch({
-          type: 'add',
-          tab: {
-            kind: 'terminal',
-            id: newTabId('terminal'),
-            sessionId: s.sessionId,
-            cwd: s.cwd,
-          },
-        });
+      if (live.length > 0) {
+        const tabs = live.map((s) => ({
+          kind: 'terminal',
+          id: newTabId('terminal'),
+          sessionId: s.sessionId,
+          cwd: s.cwd,
+        }));
+        dispatch({ type: 'hydrate', state: { tabs, activeId: tabs[0].id } });
+      } else {
+        const layout = parseLayout(readStored(LAYOUT_STORAGE_KEY));
+        if (layout) {
+          dispatch({ type: 'hydrate', state: layout });
+          for (const tab of layout.tabs) {
+            const res = await api.launchFloatingTerminal(tab.cwd);
+            // Cancelled, or the tab was closed while its shell was starting:
+            // don't leave a shell running with no tab.
+            const closed = !workspaceRef.current.tabs.some((t) => t.id === tab.id);
+            if (cancelled || closed) {
+              if (res?.sessionId) api.terminalStop(res.sessionId);
+              if (cancelled) return;
+              continue;
+            }
+            dispatch({
+              type: 'update',
+              id: tab.id,
+              patch: res?.sessionId
+                ? { sessionId: res.sessionId }
+                : { error: res?.error },
+            });
+          }
+        }
       }
-    });
+      if (!cancelled) setHydrated(true);
+    })();
     return () => {
       cancelled = true;
     };
   }, []);
+
+  // Save the layout on every change — once restoring is done, so the empty
+  // starting state can't overwrite what's being restored.
+  useEffect(() => {
+    if (hydrated) writeStored(LAYOUT_STORAGE_KEY, serializeLayout(workspace));
+  }, [hydrated, workspace]);
 
   // A Session that vanished from the main process takes its tab with it.
   useEffect(() => {
@@ -294,18 +339,99 @@ export default function FloatingWorkspace() {
 
   const closeTab = (tab) => {
     dispatch({ type: 'close', id: tab.id });
-    window.electronAPI.terminalStop(tab.sessionId);
-    sessionCache.dispose(tab.sessionId);
+    if (tab.sessionId) {
+      window.electronAPI.terminalStop(tab.sessionId);
+      sessionCache.dispose(tab.sessionId);
+    }
   };
 
-  // A fresh shell in the same folder, in the same tab position.
+  // A fresh shell in the same folder, in the same tab position — after the
+  // shell exited, or when a restored tab's launch was refused.
   const restart = async (tab) => {
     setError(null);
     const res = await window.electronAPI.launchFloatingTerminal(tab.cwd);
-    if (res?.error) return setError(res.error);
-    dispatch({ type: 'update', id: tab.id, patch: { sessionId: res.sessionId } });
-    window.electronAPI.terminalStop(tab.sessionId);
-    sessionCache.dispose(tab.sessionId);
+    if (res?.error) {
+      if (!tab.sessionId)
+        dispatch({ type: 'update', id: tab.id, patch: { error: res.error } });
+      else setError(res.error);
+      return;
+    }
+    dispatch({
+      type: 'update',
+      id: tab.id,
+      patch: { sessionId: res.sessionId, error: null },
+    });
+    if (tab.sessionId) {
+      window.electronAPI.terminalStop(tab.sessionId);
+      sessionCache.dispose(tab.sessionId);
+    }
+  };
+
+  // Tell the main process whether focus is inside the panel, so it can take
+  // ⌘W for the panel's tab instead of letting the menu close the window.
+  useEffect(() => {
+    const report = () => {
+      const panel = panelRef.current;
+      const inside = !!(open && panel && panel.contains(document.activeElement));
+      window.electronAPI.setFloatingFocus(inside);
+    };
+    // focusout fires before focus lands on the next element; check after.
+    const onFocusOut = () => setTimeout(report, 0);
+    document.addEventListener('focusin', report);
+    document.addEventListener('focusout', onFocusOut);
+    report();
+    return () => {
+      document.removeEventListener('focusin', report);
+      document.removeEventListener('focusout', onFocusOut);
+      window.electronAPI.setFloatingFocus(false);
+    };
+  }, [open]);
+
+  // ⌘W, taken by the main process while the panel has focus.
+  const closeActiveRef = useRef(null);
+  closeActiveRef.current = () => {
+    if (active) closeTab(active);
+    else setOpen(false);
+  };
+  useEffect(
+    () =>
+      window.electronAPI.on('floating-shortcut', ({ key }) => {
+        if (key === 'w') closeActiveRef.current();
+      }),
+    []
+  );
+
+  // Panel-scoped chords. xterm bubbles ⌘ chords and ⌃Tab, so these arrive
+  // here from a focused terminal too. Esc is deliberately left alone — the
+  // terminal (vim, TUIs, agent prompts) needs it.
+  const onPanelKeyDown = (e) => {
+    if (e.code === 'KeyT' && e.metaKey && !e.altKey && !e.ctrlKey && !e.shiftKey) {
+      e.preventDefault();
+      newTerminal();
+    } else if (e.code === 'Tab' && e.ctrlKey && !e.metaKey && !e.altKey) {
+      e.preventDefault();
+      dispatch({ type: 'cycle', delta: e.shiftKey ? -1 : 1 });
+    }
+  };
+
+  // Drag a tab onto another to take its place. Our own MIME type, so a file or
+  // path dropped on the terminal isn't mistaken for a tab move.
+  const TAB_MIME = 'application/x-wpxen-floating-tab';
+  const onTabDragStart = (tab) => (e) => {
+    e.dataTransfer.setData(TAB_MIME, tab.id);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+  const onTabDragOver = (e) => {
+    if (!e.dataTransfer.types.includes(TAB_MIME)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  };
+  const onTabDrop = (target) => (e) => {
+    const id = e.dataTransfer.getData(TAB_MIME);
+    if (!id) return;
+    e.preventDefault();
+    const index = workspace.tabs.findIndex((t) => t.id === target.id);
+    dispatch({ type: 'move', id, index });
   };
 
   const openLink = useCallback((url) => window.electronAPI.openSiteInBrowser(url), []);
@@ -324,6 +450,7 @@ export default function FloatingWorkspace() {
           ref={panelRef}
           aria-label="Floating workspace"
           aria-hidden={!open}
+          onKeyDown={onPanelKeyDown}
           style={{
             left: panelBounds.x,
             top: panelBounds.y,
@@ -363,6 +490,10 @@ export default function FloatingWorkspace() {
                   <div
                     key={tab.id}
                     data-tab
+                    draggable
+                    onDragStart={onTabDragStart(tab)}
+                    onDragOver={onTabDragOver}
+                    onDrop={onTabDrop(tab)}
                     onClick={() => dispatch({ type: 'activate', id: tab.id })}
                     className={`group flex items-center gap-1.5 pl-2 pr-1 h-7 rounded-md text-[12.5px] cursor-pointer whitespace-nowrap ${
                       isActive
@@ -436,7 +567,31 @@ export default function FloatingWorkspace() {
           )}
 
           <div className="flex-1 min-h-0 bg-background">
-            {active ? (
+            {active && !active.sessionId ? (
+              <div className="h-full flex flex-col items-center justify-center gap-3 px-6 text-center">
+                {active.error ? (
+                  <>
+                    <p className="text-[13px] text-foreground">
+                      Couldn’t start this terminal.
+                    </p>
+                    <p className="text-[12px] text-muted-foreground">{active.error}</p>
+                    <div className="flex gap-2">
+                      <button className="btn btn-primary" onClick={() => restart(active)}>
+                        Retry
+                      </button>
+                      <button
+                        className="btn btn-secondary"
+                        onClick={() => closeTab(active)}
+                      >
+                        Close
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <p className="text-[13px] text-muted-foreground">Starting…</p>
+                )}
+              </div>
+            ) : active ? (
               <Terminal
                 key={active.sessionId}
                 sessionId={active.sessionId}

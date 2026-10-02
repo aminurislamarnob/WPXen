@@ -8,6 +8,8 @@ import {
   folderName,
   terminalTabTitle,
   needsAttention,
+  serializeLayout,
+  parseLayout,
 } from '../src/lib/floatingWorkspace';
 
 const term = (id, extra = {}) => ({
@@ -171,5 +173,104 @@ describe('needsAttention', () => {
     expect(needsAttention([{ state: 'working' }, { state: 'idle' }])).toBe(false);
     expect(needsAttention([{ unread: true, exited: true }])).toBe(false);
     expect(needsAttention([])).toBe(false);
+  });
+});
+
+describe('tab order and cycling', () => {
+  it('moves a tab to a new index, keeping focus', () => {
+    const s = workspaceReducer(withTabs(['a', 'b', 'c'], 'b'), {
+      type: 'move',
+      id: 'a',
+      index: 2,
+    });
+    expect(s.tabs.map((t) => t.id)).toEqual(['b', 'c', 'a']);
+    expect(s.activeId).toBe('b');
+  });
+
+  it('clamps the target index and ignores unknown or no-op moves', () => {
+    const s = withTabs(['a', 'b', 'c']);
+    expect(
+      workspaceReducer(s, { type: 'move', id: 'c', index: -5 }).tabs.map((t) => t.id)
+    ).toEqual(['c', 'a', 'b']);
+    expect(workspaceReducer(s, { type: 'move', id: 'zz', index: 0 })).toBe(s);
+    expect(workspaceReducer(s, { type: 'move', id: 'b', index: 1 })).toBe(s);
+  });
+
+  it('cycles forward and back, wrapping at both ends', () => {
+    const s = withTabs(['a', 'b', 'c'], 'c');
+    expect(workspaceReducer(s, { type: 'cycle', delta: 1 }).activeId).toBe('a');
+    expect(workspaceReducer(s, { type: 'cycle', delta: -1 }).activeId).toBe('b');
+    const first = withTabs(['a', 'b', 'c'], 'a');
+    expect(workspaceReducer(first, { type: 'cycle', delta: -1 }).activeId).toBe('c');
+  });
+
+  it('does nothing to cycle with fewer than two tabs', () => {
+    const one = withTabs(['a']);
+    expect(workspaceReducer(one, { type: 'cycle', delta: 1 })).toBe(one);
+  });
+
+  it('never prunes a tab still waiting on its shell', () => {
+    const s = workspaceReducer(EMPTY_WORKSPACE, {
+      type: 'add',
+      tab: { kind: 'terminal', id: 'r', sessionId: null, cwd: '~' },
+    });
+    expect(workspaceReducer(s, { type: 'prune', sessionIds: [] }).tabs).toHaveLength(1);
+  });
+});
+
+describe('layout persistence', () => {
+  it('saves order, focus and cwd — never a sessionId', () => {
+    const s = withTabs(['a', 'b'], 'a');
+    const raw = serializeLayout(s);
+    expect(raw).not.toMatch(/sessionId|s-a|s-b/);
+    expect(JSON.parse(raw)).toEqual({
+      tabs: [
+        { kind: 'terminal', id: 'a', cwd: '~' },
+        { kind: 'terminal', id: 'b', cwd: '~' },
+      ],
+      activeId: 'a',
+    });
+  });
+
+  it('restores terminals as fresh-shell requests in their saved cwd', () => {
+    const s = workspaceReducer(withTabs(['a', 'b'], 'b'), {
+      type: 'update',
+      id: 'a',
+      patch: { cwd: '/Users/me/Sites/shop' },
+    });
+    expect(parseLayout(serializeLayout(s))).toEqual({
+      tabs: [
+        { kind: 'terminal', id: 'a', sessionId: null, cwd: '/Users/me/Sites/shop' },
+        { kind: 'terminal', id: 'b', sessionId: null, cwd: '~' },
+      ],
+      activeId: 'b',
+    });
+  });
+
+  it('focuses the first tab when the saved focus is missing', () => {
+    const raw = JSON.stringify({
+      tabs: [{ kind: 'terminal', id: 'a', cwd: '~' }],
+      activeId: 'x',
+    });
+    expect(parseLayout(raw).activeId).toBe('a');
+  });
+
+  it('drops malformed and duplicate tabs', () => {
+    const raw = JSON.stringify({
+      tabs: [
+        { kind: 'terminal', id: 'a', cwd: '~' },
+        { kind: 'terminal', id: 'a', cwd: '/tmp' },
+        { kind: 'terminal', id: 'b' },
+        { kind: 'mystery', id: 'c', cwd: '~' },
+        null,
+      ],
+    });
+    expect(parseLayout(raw).tabs.map((t) => t.id)).toEqual(['a']);
+  });
+
+  it('returns null for nothing worth restoring', () => {
+    for (const raw of [null, '', 'nope', '{}', '{"tabs":[]}', '{"tabs":"x"}']) {
+      expect(parseLayout(raw)).toBeNull();
+    }
   });
 });
