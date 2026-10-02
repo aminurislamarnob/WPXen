@@ -2342,4 +2342,20 @@ function getSetting(key) {
   return settings ? settings.get(key) : undefined;
 }
 
-module.exports = { registerHandlers, startStatusPoller, getServiceStatus, getSetting };
+// Write a setting from the main process (the tray) through the same validated
+// path as the renderer's settings-set, so effects run and every open window
+// hears about it.
+function setSetting(key, value) {
+  if (!settings) return { ok: false };
+  const result = settings.write({ [key]: value });
+  broadcastSettings(result.settings);
+  return result;
+}
+
+module.exports = {
+  registerHandlers,
+  startStatusPoller,
+  getServiceStatus,
+  getSetting,
+  setSetting,
+};
