@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AlertTriangle,
   ArrowLeft,
+  Check,
   CheckCircle,
   CircleDot,
   Copy,
@@ -9,15 +10,17 @@ import {
   Loader2,
   Pencil,
   RefreshCw,
+  Send,
   X,
 } from 'lucide-react';
 import { Tooltip } from '../ui';
 import { useOpenLink } from '../../lib/useOpenLink';
 import { sessionsFor, timeAgo } from '../../lib/tasks';
 import { Avatar, LabelChip, StartButton, StateBadge } from './parts';
-import { CommentCard, None, SidebarSection, TimelineEvent } from './timeline';
+import { None, SidebarSection, TimelineEvent } from './timeline';
 import { ProviderIcon } from '../providerIcons';
-import { MarkdownEditor } from './markdown';
+import { Markdown } from './markdown';
+import MarkdownComposer from './MarkdownComposer';
 import { DetailsSkeleton } from './skeletons';
 import { MultiPicker, StatusMenu } from './pickers';
 import { useIssueMutation } from './useIssueMutation';
@@ -95,12 +98,22 @@ export default function IssueDetails({
     onChanged?.();
   };
 
+  // Enter saves and the field then blurs, which saves too — one save only.
+  const savingTitle = useRef(false);
   const saveTitle = async () => {
-    if (titleDraft.trim() === issue.title) return setTitleDraft(null);
-    const res = await mutation.run('tasksIssueEdit', { ...ref, title: titleDraft });
-    if (res) {
-      setTitleDraft(null);
-      landed(res);
+    if (titleDraft === null || savingTitle.current) return;
+    const next = titleDraft.trim();
+    // An empty or unchanged title just ends the edit, as in Orca.
+    if (!next || next === issue.title) return setTitleDraft(null);
+    savingTitle.current = true;
+    try {
+      const res = await mutation.run('tasksIssueEdit', { ...ref, title: next });
+      if (res) {
+        setTitleDraft(null);
+        landed(res);
+      }
+    } finally {
+      savingTitle.current = false;
     }
   };
 
@@ -212,49 +225,39 @@ export default function IssueDetails({
         <DetailsSkeleton />
       ) : (
         <>
+          {/* The title edits in place, as in Orca: click it, Enter or leaving
+              the field saves, Escape cancels. */}
           {titleDraft !== null ? (
-            <form
-              className="flex items-center gap-2"
-              onSubmit={(e) => {
-                e.preventDefault();
-                saveTitle();
+            <input
+              autoFocus
+              value={titleDraft}
+              disabled={busy === 'tasksIssueEdit'}
+              onChange={(e) => setTitleDraft(e.target.value)}
+              onBlur={() => saveTitle()}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  saveTitle();
+                } else if (e.key === 'Escape') {
+                  e.preventDefault();
+                  setTitleDraft(null);
+                }
               }}
-            >
-              <input
-                autoFocus
-                value={titleDraft}
-                onChange={(e) => setTitleDraft(e.target.value)}
-                onKeyDown={(e) => e.key === 'Escape' && setTitleDraft(null)}
-                aria-label="Title"
-                className="form-input flex-1 !text-[15px]"
-              />
-              <button className="btn btn-primary" disabled={!!busy}>
-                Save
-              </button>
+              aria-label="Title"
+              className="form-input w-full !h-9 !text-[18px] font-semibold"
+            />
+          ) : (
+            <h1 className="text-[20px] font-semibold text-foreground leading-snug">
               <button
                 type="button"
-                className="btn btn-secondary"
-                onClick={() => setTitleDraft(null)}
+                title="Edit title"
+                className="text-left hover:underline decoration-muted-foreground/50 underline-offset-4"
+                onClick={() => setTitleDraft(issue.title)}
               >
-                Cancel
-              </button>
-            </form>
-          ) : (
-            <div className="group flex items-start gap-2">
-              <h1 className="flex-1 text-[20px] font-semibold text-foreground leading-snug">
-                {issue.title}{' '}
-                <span className="font-normal text-muted-foreground">#{issue.number}</span>
-              </h1>
-              <Tooltip label="Edit title">
-                <button
-                  className="btn btn-ghost !px-2 opacity-0 group-hover:opacity-100 focus:opacity-100"
-                  aria-label="Edit title"
-                  onClick={() => setTitleDraft(issue.title)}
-                >
-                  <Pencil size={13} />
-                </button>
-              </Tooltip>
-            </div>
+                {issue.title}
+              </button>{' '}
+              <span className="font-normal text-muted-foreground">#{issue.number}</span>
+            </h1>
           )}
           <div className="mt-2 mb-5 flex items-center gap-2 text-[12.5px] text-muted-foreground">
             <StateBadge item={issue} size="md" />
@@ -283,53 +286,79 @@ export default function IssueDetails({
 
           <div className="grid grid-cols-[1fr_220px] gap-6 items-start">
             <div className="min-w-0 space-y-4">
-              <CommentCard
-                author={{ login: issue.author, avatarUrl: issue.authorAvatar }}
-                at={issue.createdAt}
-                body={issue.body}
-                url={issue.url}
-                onLink={onLink}
-                now={now}
-                empty="No description provided."
-                action={
-                  bodyDraft === null && (
-                    <button
-                      className="hover:text-foreground"
-                      onClick={() => setBodyDraft(issue.body)}
-                    >
-                      Edit
-                    </button>
-                  )
-                }
-              >
-                {bodyDraft !== null && (
-                  <div className="space-y-2">
-                    <MarkdownEditor
-                      value={bodyDraft}
-                      onChange={setBodyDraft}
-                      onLink={onLink}
-                      onSubmit={saveBody}
-                      rows={10}
-                      autoFocus
-                    />
-                    <div className="flex justify-end gap-2">
-                      <button
-                        className="btn btn-secondary"
-                        onClick={() => setBodyDraft(null)}
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        className="btn btn-primary"
-                        onClick={saveBody}
-                        disabled={!!busy}
-                      >
-                        Save
-                      </button>
-                    </div>
+              {/* The description card, Orca's: a pencil in its header swaps
+                  the body for the editor, with Cancel / Save beside it. */}
+              <div className="flex gap-3">
+                <Avatar
+                  person={{ login: issue.author, avatarUrl: issue.authorAvatar }}
+                  size={28}
+                  ring={false}
+                />
+                <div className="flex-1 min-w-0 rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+                  <div className="flex items-center gap-2 px-4 h-10 border-b border-border bg-tertiary text-[12px] text-muted-foreground">
+                    <span className="font-medium text-foreground">
+                      {issue.author || 'ghost'}
+                    </span>
+                    <span>updated {timeAgo(issue.updatedAt, now)}</span>
+                    {bodyDraft !== null ? (
+                      <div className="ml-auto flex items-center gap-1">
+                        <button
+                          type="button"
+                          className="btn btn-ghost !h-7 !px-2 !text-[12px]"
+                          disabled={busy === 'tasksIssueEdit'}
+                          onClick={() => setBodyDraft(null)}
+                        >
+                          <X size={13} />
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-primary !h-7 !px-2 !text-[12px]"
+                          disabled={busy === 'tasksIssueEdit' || bodyDraft === issue.body}
+                          onClick={saveBody}
+                        >
+                          {busy === 'tasksIssueEdit' ? (
+                            <Loader2 size={13} className="animate-spin" />
+                          ) : (
+                            <Check size={13} />
+                          )}
+                          Save
+                        </button>
+                      </div>
+                    ) : (
+                      <Tooltip label="Edit description">
+                        <button
+                          type="button"
+                          aria-label="Edit description"
+                          className="ml-auto inline-flex size-7 items-center justify-center rounded-md hover:bg-accent hover:text-foreground"
+                          onClick={() => setBodyDraft(issue.body)}
+                        >
+                          <Pencil size={13} />
+                        </button>
+                      </Tooltip>
+                    )}
                   </div>
-                )}
-              </CommentCard>
+                  <div className="px-4 py-4">
+                    {bodyDraft !== null ? (
+                      <MarkdownComposer
+                        value={bodyDraft}
+                        onChange={setBodyDraft}
+                        placeholder="Description"
+                        disabled={busy === 'tasksIssueEdit'}
+                        autoFocus
+                        minHeightClassName="min-h-64"
+                        onSubmit={saveBody}
+                      />
+                    ) : (
+                      <Markdown
+                        text={issue.body}
+                        onLink={onLink}
+                        empty="No description provided."
+                      />
+                    )}
+                  </div>
+                </div>
+              </div>
               {data.timeline.map((event) => (
                 <TimelineEvent key={event.id} event={event} now={now} onLink={onLink} />
               ))}
@@ -346,17 +375,37 @@ export default function IssueDetails({
                 </p>
               )}
 
-              <div className="pt-2 border-t border-border space-y-2">
-                <MarkdownEditor
-                  value={comment}
-                  onChange={setComment}
-                  onLink={onLink}
-                  onSubmit={() => comment.trim() && submitComment()}
-                  placeholder="Leave a comment — markdown, ⌘↩ to send"
-                />
-                <div className="flex justify-end gap-2">
+              {/* Orca's comment box: the editor with a send button in its
+                  corner; ⌘↩ sends too. Closing or reopening rides along. */}
+              <div className="pt-2 border-t border-border">
+                <div className="relative">
+                  <MarkdownComposer
+                    value={comment}
+                    onChange={setComment}
+                    placeholder="Add a comment…"
+                    disabled={busy === 'tasksIssueComment'}
+                    minHeightClassName="min-h-28 pb-14 pr-14"
+                    onSubmit={() => comment.trim() && submitComment()}
+                  />
+                  <Tooltip label="Send comment">
+                    <button
+                      type="button"
+                      aria-label="Send comment"
+                      className="btn btn-primary !h-8 !w-8 !p-0 absolute bottom-3 right-3 shadow-sm"
+                      disabled={!!busy || !comment.trim()}
+                      onClick={() => submitComment()}
+                    >
+                      {busy === 'tasksIssueComment' ? (
+                        <Loader2 size={15} className="animate-spin" />
+                      ) : (
+                        <Send size={15} />
+                      )}
+                    </button>
+                  </Tooltip>
+                </div>
+                <div className="mt-2 flex justify-end">
                   <button
-                    className="btn btn-secondary"
+                    className="btn btn-ghost !h-7 !px-2 !text-[12px]"
                     disabled={!!busy}
                     onClick={() =>
                       submitComment(
@@ -374,16 +423,6 @@ export default function IssueDetails({
                       : comment.trim()
                         ? 'Reopen with comment'
                         : 'Reopen issue'}
-                  </button>
-                  <button
-                    className="btn btn-primary"
-                    disabled={!!busy || !comment.trim()}
-                    onClick={() => submitComment()}
-                  >
-                    {busy === 'tasksIssueComment' && (
-                      <Loader2 size={13} className="animate-spin" />
-                    )}
-                    Comment
                   </button>
                 </div>
               </div>

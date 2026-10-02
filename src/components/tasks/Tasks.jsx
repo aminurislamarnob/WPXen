@@ -630,7 +630,6 @@ export default function Tasks() {
         <NewIssueDialog
           repos={repoOptions}
           defaultRepo={repos.length === 1 ? repos[0] : null}
-          onLink={(url) => openLink(url)}
           onClose={() => setCreating(false)}
           onCreated={(issue) => {
             setCreating(false);
