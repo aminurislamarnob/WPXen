@@ -175,3 +175,33 @@ describe('inspect and apply, with git faked', () => {
     ).toBe('fatal: worktree failed');
   });
 });
+
+describe('Start → on a PR', () => {
+  it('checks the PR out with gh in the repo’s checkout', async () => {
+    const calls = [];
+    taskStart.__setDeps({
+      checkoutPull: async (opts) => {
+        calls.push(opts);
+        return { ok: true };
+      },
+    });
+    expect(
+      await taskStart.applyPullCheckout({ repoRoot: '/r', repo: 'acme/shop', number: 9 })
+    ).toEqual({ ok: true, cwd: '/r', worktree: null });
+    expect(calls).toEqual([{ repo: 'acme/shop', number: 9, cwd: '/r' }]);
+  });
+
+  it("passes gh's reason through when the checkout fails", async () => {
+    taskStart.__setDeps({
+      checkoutPull: async () => ({
+        error: {
+          code: 'unknown',
+          message: 'error: Your local changes would be overwritten',
+        },
+      }),
+    });
+    expect(
+      await taskStart.applyPullCheckout({ repoRoot: '/r', repo: 'acme/shop', number: 9 })
+    ).toEqual({ error: 'error: Your local changes would be overwritten' });
+  });
+});

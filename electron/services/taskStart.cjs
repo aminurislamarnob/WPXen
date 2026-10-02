@@ -8,7 +8,8 @@
 //      The dialog warns about the first and offers a switch for the second.
 //   3. Git plan — by mode: `branch` switches (or creates) the branch in the
 //      repo's own checkout, so the .test site serves the work live;
-//      `worktree` adds a sibling worktree; `current` leaves git alone.
+//      `worktree` adds a sibling worktree; `current` leaves git alone. A PR
+//      has one plan of its own: `gh pr checkout <n>` in the checkout.
 //   4. Launch — through agents.launch, at the repo root or the worktree,
 //      with the prompt and the issue link on the Session.
 //
@@ -53,6 +54,7 @@ function defaultRunGit(root, args) {
 
 const deps = {
   runGit: defaultRunGit,
+  checkoutPull: (opts) => require('./github.cjs').checkoutPull(opts),
 };
 
 function __setDeps(next) {
@@ -189,8 +191,17 @@ async function applyPlan({ mode, repoRoot, branch }) {
   return { ok: true, cwd: plan.cwd, worktree: plan.worktree || null, branchExists };
 }
 
+// Start → on a PR: check out its branch in the repo's checkout.
+// → { ok, cwd } or { error }.
+async function applyPullCheckout({ repoRoot, repo, number }) {
+  const res = await deps.checkoutPull({ repo, number, cwd: repoRoot });
+  if (res?.error) return { error: res.error.message || 'gh pr checkout failed' };
+  return { ok: true, cwd: repoRoot, worktree: null };
+}
+
 module.exports = {
   MODES,
+  applyPullCheckout,
   slugify,
   renderTemplate,
   branchName,

@@ -15,6 +15,8 @@
 const { execFile } = require('child_process');
 
 const GH_TIMEOUT_MS = 20000;
+// A checkout fetches the PR's commits, which can take a while on a big repo.
+const GH_CHECKOUT_TIMEOUT_MS = 120000;
 const MAX_CONCURRENT = 4;
 const SEARCH_PER_PAGE = 100; // one request per repo; the list pages locally
 const SEARCH_CACHE_MS = 20000;
@@ -24,7 +26,9 @@ const TIMELINE_PER_PAGE = 100;
 
 // `input`, when given, is written to gh's stdin — writes send their JSON body
 // that way (`--input -`), so empty arrays and multi-line text survive intact.
-function defaultRunGh(args, { input } = {}) {
+// `cwd`, when given, runs gh inside a checkout — `gh pr checkout` acts on
+// the repo it's run in.
+function defaultRunGh(args, { input, cwd } = {}) {
   return new Promise((resolve, reject) => {
     const agents = require('./agents.cjs');
     const env = agents.resolveShellEnv();
@@ -40,7 +44,8 @@ function defaultRunGh(args, { input } = {}) {
       args,
       {
         env: { ...env, GH_PROMPT_DISABLED: '1', NO_COLOR: '1' },
-        timeout: GH_TIMEOUT_MS,
+        cwd: cwd || undefined,
+        timeout: cwd ? GH_CHECKOUT_TIMEOUT_MS : GH_TIMEOUT_MS,
         maxBuffer: 32 * 1024 * 1024,
       },
       (err, stdout, stderr) => {
@@ -1038,6 +1043,27 @@ function repoLabels({ repo, force = false } = {}) {
   );
 }
 
+// `gh pr checkout <n>` in a checkout, for Start → on a PR. `--repo` pins the
+// PR's repo, so a fork with both `origin` and `upstream` never makes gh ask
+// which one is meant (prompts are disabled, so asking would fail).
+async function checkoutPull({ repo, number, cwd }) {
+  const n = validRef(repo, number);
+  if (!n) return { error: { code: 'validation', message: 'Not a pull request.' } };
+  try {
+    await gh(['pr', 'checkout', String(n), '--repo', repo], { cwd });
+    return { ok: true };
+  } catch (err) {
+    const classified = classifyError(err);
+    // gh's own last line ("fatal: …", "could not …") says more than a code.
+    const detail = String(err?.stderr || '')
+      .split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean)
+      .pop();
+    return { error: { ...classified, message: detail || classified.message } };
+  }
+}
+
 module.exports = {
   MAX_CONCURRENT,
   PULLS_PER_REPO,
@@ -1065,6 +1091,7 @@ module.exports = {
   getPull,
   getPullFiles,
   getPullChecks,
+  checkoutPull,
   addComment,
   setIssueState,
   editIssue,

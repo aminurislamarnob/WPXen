@@ -968,3 +968,38 @@ describe('PR details', () => {
     ).toBe('validation');
   });
 });
+
+describe('checkoutPull', () => {
+  it('runs gh pr checkout pinned to the repo, inside the checkout', async () => {
+    const seen = [];
+    github.__setDeps({
+      runGh: async (args, opts) => {
+        seen.push({ args, cwd: opts?.cwd });
+        return '';
+      },
+    });
+    expect(
+      await github.checkoutPull({ repo: 'acme/shop', number: 9, cwd: '/r' })
+    ).toEqual({
+      ok: true,
+    });
+    expect(seen).toEqual([
+      { args: ['pr', 'checkout', '9', '--repo', 'acme/shop'], cwd: '/r' },
+    ]);
+  });
+
+  it("reports gh's last line on failure, and refuses a bad reference", async () => {
+    github.__setDeps({
+      runGh: async () => {
+        throw ghError('From github.com:acme/shop\nfatal: could not lock ref');
+      },
+    });
+    expect(
+      (await github.checkoutPull({ repo: 'acme/shop', number: 9, cwd: '/r' })).error
+        .message
+    ).toBe('fatal: could not lock ref');
+    expect((await github.checkoutPull({ repo: 'x', number: 9 })).error.code).toBe(
+      'validation'
+    );
+  });
+});

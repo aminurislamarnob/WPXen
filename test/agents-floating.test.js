@@ -227,6 +227,17 @@ describe('agents.launch for Start →', () => {
     });
   });
 
+  it('links a PR the same way', () => {
+    const { sessionId } = agents.launch({
+      site: site(),
+      agentId: 'fake',
+      issue: { repo: 'acme/shop', number: 9, url: 'u', title: 'Fix', kind: 'pr' },
+    });
+    expect(
+      agents.listAllSessions().find((s) => s.sessionId === sessionId).issue
+    ).toMatchObject({ number: 9, kind: 'pr' });
+  });
+
   it('leaves an ordinary launch unlinked', () => {
     const { sessionId } = agents.launch({ site: site(), agentId: 'fake' });
     expect(

@@ -484,14 +484,19 @@ function registerHandlers(win, storeInstance) {
     if (checkouts.length === 0)
       return { error: `No Site has a checkout of ${issue.repo}` };
     const checkout = checkouts.find((c) => c.repoRoot === opts?.repoRoot) || checkouts[0];
-    const branch = taskStart.branchName(settings.get('tasks.branchTemplate'), issue);
+    // A PR's branch is its head ref, checked out by gh; an issue's is the
+    // rendered template.
+    const isPr = issue.kind === 'pr';
+    const branch = isPr
+      ? String(issue.headRef || '')
+      : taskStart.branchName(settings.get('tasks.branchTemplate'), issue);
     const git = await taskStart.inspect({ repoRoot: checkout.repoRoot, branch });
     return {
       checkouts,
       checkout,
       branch,
       prompt: taskStart.renderTemplate(settings.get('tasks.startPrompt'), issue),
-      mode: settings.get('tasks.startMode'),
+      mode: isPr ? 'pr' : settings.get('tasks.startMode'),
       git,
     };
   });
@@ -509,7 +514,14 @@ function registerHandlers(win, storeInstance) {
     const site = findSite(checkout.siteId);
     if (!site) return { error: 'Site not found' };
 
-    const plan = await taskStart.applyPlan({ mode, repoRoot: checkout.repoRoot, branch });
+    const plan =
+      issue.kind === 'pr'
+        ? await taskStart.applyPullCheckout({
+            repoRoot: checkout.repoRoot,
+            repo: issue.repo,
+            number: issue.number,
+          })
+        : await taskStart.applyPlan({ mode, repoRoot: checkout.repoRoot, branch });
     if (plan.error) return { error: plan.error };
 
     let target = null;

@@ -309,6 +309,9 @@ export default function Tasks() {
           number={detail.number}
           siteId={siteIdFor(detail.repo)}
           onBack={() => navigate('/tasks')}
+          linked={linked}
+          onStart={(pr) => setStarting({ issue: pr })}
+          onOpenSession={openSession}
         />
       )}
       {detail?.kind === 'issue' && (
@@ -460,6 +463,9 @@ export default function Tasks() {
                   loading={loading && !results}
                   onOpen={openDetails}
                   onMenu={(pr, anchor) => setRowMenu({ issue: pr, anchor })}
+                  linked={linked}
+                  onStart={(pr) => setStarting({ issue: pr })}
+                  onOpenSession={openSession}
                 />
               ) : (
                 <IssueTable
