@@ -3,6 +3,10 @@
 // The icon a project (a Site) shows in the Agents sidebar, after Orca's
 // repo-icon detection (src/main/repo-icon-*.ts in stablyai/orca):
 //
+//   0. A custom icon the user chose (Change Project Icon): an emoji, or an
+//      uploaded PNG/WebP kept at userData/project-icons/<siteId>.<ext>. The
+//      Site record holds only `icon: { type: 'emoji', emoji }` or
+//      `{ type: 'image', file }`.
 //   1. The Site's own WordPress Site Icon, when one is set.
 //   2. When the Site's folder is itself a GitHub repo, Orca's order:
 //        a conventional icon file in the repo (favicon.png, public/logo.png…),
@@ -298,8 +302,82 @@ async function detectRepoIcon(repoRoot) {
 const WORDPRESS = { type: 'wordpress' };
 const cache = new Map(); // site.id → { at, ttl, key, icon }
 
-async function projectIcon(site, { force = false } = {}) {
+// ── 0. A custom icon ─────────────────────────────────────────────────────────
+
+const MAX_EMOJI_LENGTH = 16;
+
+// What a Site record may carry as its custom icon; anything else is ignored.
+function sanitizeCustomIcon(value) {
+  if (!value || typeof value !== 'object') return null;
+  if (value.type === 'emoji') {
+    const emoji = String(value.emoji || '').trim();
+    // An emoji, not text: no letters or digits from the ASCII range.
+    if (!emoji || emoji.length > MAX_EMOJI_LENGTH || /[A-Za-z0-9<>]/.test(emoji))
+      return null;
+    return { type: 'emoji', emoji };
+  }
+  if (value.type === 'image') {
+    const file = String(value.file || '');
+    return /^[\w.-]+\.(png|webp)$/.test(file) ? { type: 'image', file } : null;
+  }
+  return null;
+}
+
+// An uploaded image → the file it's kept as. `base64` is the file's bytes;
+// only a real PNG or WebP (by signature) under the size cap is accepted.
+// → { file } or { error }.
+function writeIconImage(dir, siteId, base64) {
+  if (!/^[\w-]+$/.test(String(siteId || ''))) return { error: 'Invalid site' };
+  let buf;
+  try {
+    buf = Buffer.from(String(base64 || ''), 'base64');
+  } catch {
+    return { error: 'That file couldn’t be read.' };
+  }
+  if (!buf.length) return { error: 'That file is empty.' };
+  if (buf.length > MAX_ICON_BYTES) return { error: 'Images must be 256 KB or smaller.' };
+  const mime = imageMime(buf);
+  const ext = mime === 'image/png' ? 'png' : mime === 'image/webp' ? 'webp' : null;
+  if (!ext) return { error: 'Use a PNG or WebP image.' };
+  fs.mkdirSync(dir, { recursive: true });
+  removeIconImages(dir, siteId);
+  const file = `${siteId}.${ext}`;
+  fs.writeFileSync(path.join(dir, file), buf);
+  return { file };
+}
+
+// Every image kept for a Site (either extension) — on reset, on a new
+// upload, and when the Site is deleted.
+function removeIconImages(dir, siteId) {
+  if (!/^[\w-]+$/.test(String(siteId || ''))) return;
+  for (const ext of ['png', 'webp']) {
+    try {
+      fs.rmSync(path.join(dir, `${siteId}.${ext}`), { force: true });
+    } catch {
+      // nothing to remove
+    }
+  }
+}
+
+function customIcon(site, iconDir) {
+  const icon = sanitizeCustomIcon(site.icon);
+  if (!icon) return null;
+  if (icon.type === 'emoji') return { ...icon, source: 'custom' };
+  if (!iconDir) return null;
+  const src = imageDataUri(path.join(iconDir, icon.file), ['image/png', 'image/webp']);
+  return src ? { type: 'image', src, source: 'custom' } : null;
+}
+
+// Drop a Site's cached icon, so the next ask detects (or reads) it afresh.
+function invalidate(siteId) {
+  cache.delete(siteId);
+}
+
+async function projectIcon(site, { force = false, iconDir = null } = {}) {
   if (!site?.id || !site?.path) return WORDPRESS;
+  // A custom icon is the user's choice and costs no lookup: never cached.
+  const custom = customIcon(site, iconDir);
+  if (custom) return custom;
   const key = site.path;
   const hit = cache.get(site.id);
   if (!force && hit && hit.key === key && deps.now() - hit.at < hit.ttl) return hit.icon;
@@ -322,6 +400,10 @@ module.exports = {
   faviconUrlFromWebsite,
   githubAvatarSlug,
   detectRepoIcon,
+  sanitizeCustomIcon,
+  writeIconImage,
+  removeIconImages,
+  invalidate,
   projectIcon,
   __setDeps,
 };

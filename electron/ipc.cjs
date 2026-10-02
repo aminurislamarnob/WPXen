@@ -364,9 +364,44 @@ function registerHandlers(win, storeInstance) {
   // A project's sidebar icon (services/projectIcon.cjs): its WordPress Site
   // Icon, Orca's repo icon when the Site's folder is a GitHub repo, else the
   // WordPress logo.
+  const projectIconDir = () => path.join(app.getPath('userData'), 'project-icons');
   ipcMain.handle('project-icon', (_e, siteId, opts) => {
     const site = findSite(siteId);
-    return projectIcon.projectIcon(site, { force: !!opts?.force });
+    return projectIcon.projectIcon(site, {
+      force: !!opts?.force,
+      iconDir: projectIconDir(),
+    });
+  });
+
+  // Change Project Icon: `choice` is { type: 'auto' } (back to detection),
+  // { type: 'emoji', emoji } or { type: 'image', data } (the file's bytes,
+  // base64). The Site record keeps only the choice; an image lives in
+  // userData/project-icons. Every window hears about it to redraw.
+  ipcMain.handle('project-icon-set', (_e, siteId, choice) => {
+    const sites = store.get('sites', []);
+    const site = sites.find((x) => x.id === siteId);
+    if (!site) return { error: 'Site not found' };
+    const dir = projectIconDir();
+    let icon = null;
+    if (choice?.type === 'emoji') {
+      icon = projectIcon.sanitizeCustomIcon({ type: 'emoji', emoji: choice.emoji });
+      if (!icon) return { error: 'Pick a single emoji.' };
+      projectIcon.removeIconImages(dir, siteId);
+    } else if (choice?.type === 'image') {
+      const res = projectIcon.writeIconImage(dir, siteId, choice.data);
+      if (res.error) return res;
+      icon = { type: 'image', file: res.file };
+    } else {
+      projectIcon.removeIconImages(dir, siteId);
+    }
+    if (icon) site.icon = icon;
+    else delete site.icon;
+    store.set('sites', sites);
+    projectIcon.invalidate(siteId);
+    for (const w of BrowserWindow.getAllWindows()) {
+      if (!w.isDestroyed()) w.webContents.send('project-icon-changed', { siteId });
+    }
+    return { ok: true };
   });
   ipcMain.handle('agent-project-add', (_e, siteId) => {
     if (!findSite(siteId)) return { error: 'Site not found' };
@@ -1131,6 +1166,11 @@ function registerHandlers(win, storeInstance) {
 
       // Tear down any live share tunnel before removing the vhost/files.
       cloudflared.stopTunnel(id);
+      // A custom project icon lives outside the Site record; it goes too.
+      projectIcon.removeIconImages(
+        path.join(app.getPath('userData'), 'project-icons'),
+        id
+      );
 
       wordpress.removeWordPressSite(site, opts);
 

@@ -158,3 +158,77 @@ describe('projectIcon', () => {
     ).toBeNull();
   });
 });
+
+describe('custom project icons', () => {
+  const iconDir = () => path.join(dir, 'project-icons');
+
+  it('puts a custom emoji ahead of every detected icon', async () => {
+    const file = path.join(dir, 'site-icon.png');
+    fs.writeFileSync(file, PNG);
+    wpAnswer = async () => file;
+    const icon = await projectIcon.projectIcon(
+      { ...site(), icon: { type: 'emoji', emoji: '🔥' } },
+      { iconDir: iconDir() }
+    );
+    expect(icon).toEqual({ type: 'emoji', emoji: '🔥', source: 'custom' });
+  });
+
+  it('stores an uploaded PNG or WebP as a file, and reads it back', async () => {
+    const res = projectIcon.writeIconImage(iconDir(), 's1', PNG.toString('base64'));
+    expect(res).toEqual({ file: 's1.png' });
+    expect(fs.existsSync(path.join(iconDir(), 's1.png'))).toBe(true);
+    const icon = await projectIcon.projectIcon(
+      { ...site(), icon: { type: 'image', file: 's1.png' } },
+      { iconDir: iconDir() }
+    );
+    expect(icon.source).toBe('custom');
+    expect(icon.src.startsWith('data:image/png;base64,')).toBe(true);
+  });
+
+  it('replaces the other format on a new upload, and removes both on reset', () => {
+    const webp = Buffer.from('RIFF0000WEBPVP8 ', 'ascii').toString('base64');
+    projectIcon.writeIconImage(iconDir(), 's1', PNG.toString('base64'));
+    expect(projectIcon.writeIconImage(iconDir(), 's1', webp)).toEqual({
+      file: 's1.webp',
+    });
+    expect(fs.readdirSync(iconDir())).toEqual(['s1.webp']);
+    projectIcon.removeIconImages(iconDir(), 's1');
+    expect(fs.readdirSync(iconDir())).toEqual([]);
+  });
+
+  it('refuses anything but a small PNG or WebP, by its bytes', () => {
+    const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0]).toString('base64');
+    expect(projectIcon.writeIconImage(iconDir(), 's1', jpeg).error).toMatch(
+      /PNG or WebP/
+    );
+    expect(projectIcon.writeIconImage(iconDir(), 's1', '').error).toMatch(/empty/);
+    const huge = Buffer.concat([PNG, Buffer.alloc(300 * 1024)]).toString('base64');
+    expect(projectIcon.writeIconImage(iconDir(), 's1', huge).error).toMatch(/256 KB/);
+    expect(
+      projectIcon.writeIconImage(iconDir(), '../x', PNG.toString('base64')).error
+    ).toBe('Invalid site');
+  });
+
+  it('falls back to detection when the custom image is missing or the record is odd', async () => {
+    const auto = await projectIcon.projectIcon(
+      { ...site(), icon: { type: 'image', file: 'gone.png' } },
+      { iconDir: iconDir() }
+    );
+    expect(auto).toEqual({ type: 'wordpress' });
+    expect(
+      projectIcon.sanitizeCustomIcon({ type: 'image', file: '../../etc/passwd' })
+    ).toBeNull();
+    expect(projectIcon.sanitizeCustomIcon({ type: 'lucide', name: 'X' })).toBeNull();
+  });
+
+  it('accepts a single emoji, not text', () => {
+    expect(projectIcon.sanitizeCustomIcon({ type: 'emoji', emoji: ' 🛒 ' })).toEqual({
+      type: 'emoji',
+      emoji: '🛒',
+    });
+    expect(projectIcon.sanitizeCustomIcon({ type: 'emoji', emoji: '👩‍💻' })).not.toBeNull();
+    expect(projectIcon.sanitizeCustomIcon({ type: 'emoji', emoji: 'abc' })).toBeNull();
+    expect(projectIcon.sanitizeCustomIcon({ type: 'emoji', emoji: '' })).toBeNull();
+    expect(projectIcon.sanitizeCustomIcon({ type: 'emoji', emoji: '<img>' })).toBeNull();
+  });
+});

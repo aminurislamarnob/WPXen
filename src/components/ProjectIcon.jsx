@@ -7,6 +7,21 @@ import { useEffect, useState } from 'react';
 // shows the same Site.
 
 const cache = new Map(); // siteId → Promise<icon>
+const listeners = new Set(); // (siteId) → void, one per mounted icon
+
+// Change Project Icon (any window) → every icon showing that Site re-asks.
+let subscribed = false;
+function subscribe(fn) {
+  if (!subscribed && window.electronAPI?.on) {
+    subscribed = true;
+    window.electronAPI.on('project-icon-changed', ({ siteId }) => {
+      cache.delete(siteId);
+      for (const l of listeners) l(siteId);
+    });
+  }
+  listeners.add(fn);
+  return () => listeners.delete(fn);
+}
 
 function loadIcon(siteId) {
   if (!cache.has(siteId)) {
@@ -38,6 +53,12 @@ export function WordPressLogo({ size = 14, className = '' }) {
 export default function ProjectIcon({ siteId, size = 14, className = '' }) {
   const [icon, setIcon] = useState(null);
   const [failed, setFailed] = useState(false);
+  const [version, setVersion] = useState(0);
+
+  useEffect(
+    () => subscribe((changed) => changed === siteId && setVersion((v) => v + 1)),
+    [siteId]
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -47,7 +68,19 @@ export default function ProjectIcon({ siteId, size = 14, className = '' }) {
     return () => {
       cancelled = true;
     };
-  }, [siteId]);
+  }, [siteId, version]);
+
+  if (icon?.type === 'emoji') {
+    return (
+      <span
+        aria-hidden="true"
+        className={`flex-shrink-0 inline-flex items-center justify-center leading-none ${className}`}
+        style={{ width: size, height: size, fontSize: Math.round(size * 0.85) }}
+      >
+        {icon.emoji}
+      </span>
+    );
+  }
 
   if (icon?.type === 'image' && icon.src && !failed) {
     return (
