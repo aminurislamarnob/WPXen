@@ -34,12 +34,15 @@ export default function StartDialog({ issue, initialMode, onClose }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
 
+  const isPr = issue.kind === 'pr';
   const ref = {
     repo: issue.repo,
     number: issue.number,
     url: issue.url,
     title: issue.title,
-    kind: issue.kind || 'issue',
+    kind: isPr ? 'pr' : 'issue',
+    // A PR's head branch, so the dialog can say what it checks out.
+    headRef: issue.headRef || null,
   };
 
   useEffect(() => {
@@ -99,7 +102,7 @@ export default function StartDialog({ issue, initialMode, onClose }) {
     }
   };
 
-  const label = mode !== 'current' && exists ? `Switch to ${branch}` : 'Start →';
+  const label = !isPr && mode !== 'current' && exists ? `Switch to ${branch}` : 'Start →';
   const ready = info && !info.error && agentId && prompt.trim() && mode;
 
   return (
@@ -111,7 +114,7 @@ export default function StartDialog({ issue, initialMode, onClose }) {
       <div className="panel w-[540px] max-w-[92vw] p-4 space-y-4">
         <div>
           <p className="text-[13.5px] font-semibold text-foreground">
-            Start on #{issue.number}
+            Start on {isPr ? 'PR ' : ''}#{issue.number}
           </p>
           <p className="mt-0.5 truncate text-[12px] text-muted-foreground">
             {issue.title}
@@ -177,32 +180,48 @@ export default function StartDialog({ issue, initialMode, onClose }) {
               />
             </Field>
 
-            <Field label="Where">
-              <div className="space-y-1.5">
-                {MODES.map((m) => (
-                  <label
-                    key={m.value}
-                    className="flex items-start gap-2 cursor-pointer text-[12.5px]"
-                  >
-                    <input
-                      type="radio"
-                      name="start-mode"
-                      className="mt-0.5"
-                      checked={mode === m.value}
-                      onChange={() => setMode(m.value)}
-                    />
-                    <span>
-                      <span className="text-foreground">{m.label}</span>
-                      <span className="block text-[11.5px] text-muted-foreground">
-                        {m.hint}
+            {isPr ? (
+              <Field label="Where">
+                <p className="text-[12.5px] text-foreground">
+                  Checks out the PR’s branch
+                  {issue.headRef && (
+                    <>
+                      {' '}
+                      <code className="font-mono">{issue.headRef}</code>
+                    </>
+                  )}{' '}
+                  in the Site’s checkout, with{' '}
+                  <code className="font-mono">gh pr checkout {issue.number}</code>.
+                </p>
+              </Field>
+            ) : (
+              <Field label="Where">
+                <div className="space-y-1.5">
+                  {MODES.map((m) => (
+                    <label
+                      key={m.value}
+                      className="flex items-start gap-2 cursor-pointer text-[12.5px]"
+                    >
+                      <input
+                        type="radio"
+                        name="start-mode"
+                        className="mt-0.5"
+                        checked={mode === m.value}
+                        onChange={() => setMode(m.value)}
+                      />
+                      <span>
+                        <span className="text-foreground">{m.label}</span>
+                        <span className="block text-[11.5px] text-muted-foreground">
+                          {m.hint}
+                        </span>
                       </span>
-                    </span>
-                  </label>
-                ))}
-              </div>
-            </Field>
+                    </label>
+                  ))}
+                </div>
+              </Field>
+            )}
 
-            {mode !== 'current' && (
+            {!isPr && mode !== 'current' && (
               <Field label="Branch">
                 <input
                   value={branch}
@@ -218,7 +237,7 @@ export default function StartDialog({ issue, initialMode, onClose }) {
               </Field>
             )}
 
-            {mode === 'branch' && git?.dirty && (
+            {(mode === 'branch' || isPr) && git?.dirty && (
               <div className="flex items-start gap-2 rounded-md bg-status-warning/10 px-3 py-2 text-[12px] text-foreground">
                 <AlertTriangle
                   size={13}
@@ -226,8 +245,10 @@ export default function StartDialog({ issue, initialMode, onClose }) {
                 />
                 <span>
                   The checkout has uncommitted changes on{' '}
-                  <code className="font-mono">{git.currentBranch}</code>. They’ll carry
-                  over to the new branch.
+                  <code className="font-mono">{git.currentBranch}</code>.{' '}
+                  {isPr
+                    ? 'gh pr checkout may refuse if they conflict with the PR’s branch.'
+                    : 'They’ll carry over to the new branch.'}
                 </span>
               </div>
             )}

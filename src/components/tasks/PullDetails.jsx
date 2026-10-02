@@ -14,9 +14,10 @@ import {
 import { SegmentedTabs, Tooltip } from '../ui';
 import DiffView from '../DiffView';
 import { useOpenLink } from '../../lib/useOpenLink';
-import { timeAgo } from '../../lib/tasks';
+import { sessionsFor, timeAgo } from '../../lib/tasks';
 import { patchToSides } from '../../lib/patch';
-import { Avatar, LabelChip } from './parts';
+import { Avatar, LabelChip, StartButton } from './parts';
+import { ProviderIcon } from '../providerIcons';
 import { CommentCard, None, SidebarSection, TimelineEvent } from './timeline';
 import { MergeBadge, pullIcon } from './PullTable';
 
@@ -208,7 +209,15 @@ function ChecksTab({ data, onRetry, onLink }) {
   );
 }
 
-export default function PullDetails({ repo, number, siteId, onBack }) {
+export default function PullDetails({
+  repo,
+  number,
+  siteId,
+  onBack,
+  linked,
+  onStart,
+  onOpenSession,
+}) {
   const openLink = useOpenLink();
   const onLink = (url) => openLink(url, siteId);
   const [tab, setTab] = useState('conversation');
@@ -286,6 +295,14 @@ export default function PullDetails({ repo, number, siteId, onBack }) {
         </Tooltip>
         {pull && (
           <>
+            {pull.state === 'open' && (
+              <StartButton
+                size="md"
+                sessions={sessionsFor(linked, pull)}
+                onStart={() => onStart(pull)}
+                onOpenSession={onOpenSession}
+              />
+            )}
             <button className="btn btn-secondary" onClick={copyLink}>
               <Copy size={13} />
               {copied ? 'Copied' : 'Copy link'}
@@ -409,6 +426,24 @@ export default function PullDetails({ repo, number, siteId, onBack }) {
                         <Avatar person={r} size={18} ring={false} />
                         {r.login}
                       </div>
+                    ))}
+                  </div>
+                )}
+              </SidebarSection>
+              <SidebarSection title="Linked work">
+                {sessionsFor(linked, pull).length === 0 ? (
+                  <None />
+                ) : (
+                  <div className="space-y-1">
+                    {sessionsFor(linked, pull).map((s) => (
+                      <button
+                        key={s.sessionId}
+                        onClick={() => onOpenSession(s)}
+                        className="flex w-full items-center gap-1.5 rounded-sm px-1 py-0.5 text-left text-foreground hover:bg-accent"
+                      >
+                        <ProviderIcon agentId={s.agentId} brand size={13} />
+                        <span className="truncate">{s.title || s.agentName}</span>
+                      </button>
                     ))}
                   </div>
                 )}

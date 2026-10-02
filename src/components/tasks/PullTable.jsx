@@ -11,14 +11,14 @@ import {
   XCircle,
 } from 'lucide-react';
 import { Tooltip } from '../ui';
-import { timeAgo } from '../../lib/tasks';
-import { LabelChip } from './parts';
+import { sessionsFor, timeAgo } from '../../lib/tasks';
+import { LabelChip, StartButton } from './parts';
 
 // The PRs tab's table: ID, title with its context, then GitHub's three
 // verdicts — Review, Checks, Merge — and Updated. The values are already
 // normalised by services/github.cjs (normalizeReview / Checks / Merge).
 
-const GRID = 'grid-cols-[64px_1fr_116px_92px_92px_84px_28px]';
+const GRID = 'grid-cols-[60px_1fr_108px_84px_92px_76px_72px_28px]';
 
 function Pill({ tone = 'muted', icon: Icon, children, title }) {
   const tones = {
@@ -107,7 +107,15 @@ export function pullIcon(pr) {
   return { Icon: GitPullRequest, tone: 'text-status-running' };
 }
 
-export default function PullTable({ items, loading, onOpen, onMenu }) {
+export default function PullTable({
+  items,
+  loading,
+  onOpen,
+  onMenu,
+  linked,
+  onStart,
+  onOpenSession,
+}) {
   const now = Date.now();
   return (
     <div className="bg-card border border-border rounded-xl shadow-sm overflow-hidden">
@@ -120,6 +128,7 @@ export default function PullTable({ items, loading, onOpen, onMenu }) {
         <span>Checks</span>
         <span>Merge</span>
         <span>Updated</span>
+        <span />
         <span />
       </div>
       {loading ? (
@@ -185,6 +194,13 @@ export default function PullTable({ items, loading, onOpen, onMenu }) {
               </span>
               <span className="text-[12px] text-muted-foreground">
                 {timeAgo(pr.updatedAt, now)}
+              </span>
+              <span>
+                <StartButton
+                  sessions={sessionsFor(linked, pr)}
+                  onStart={() => onStart(pr)}
+                  onOpenSession={onOpenSession}
+                />
               </span>
               <Tooltip label="More">
                 <button
