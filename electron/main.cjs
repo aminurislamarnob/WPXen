@@ -12,6 +12,7 @@ const {
   startStatusPoller,
   getServiceStatus,
   getSetting,
+  setSetting,
 } = require('./ipc.cjs');
 
 const isDev = process.env.NODE_ENV === 'development';
@@ -152,12 +153,23 @@ app.whenReady().then(() => {
       sessionId: s.sessionId,
     });
   };
+  const keepAwake = require('./services/keepAwake.cjs');
   const trayCtl = createTray(
     win,
     () => getServiceStatus(),
     () => store.get('sites', []),
-    { getAttention: () => attention, onOpenSession: openSession }
+    {
+      getAttention: () => attention,
+      onOpenSession: openSession,
+      keepAwake: {
+        getStatus: () => keepAwake.getStatus(),
+        setMode: (mode) => setSetting('agents.keepAwake', mode),
+      },
+    }
   );
+  // Mode changes from anywhere, and the hold coming and going, show in the
+  // tray at once rather than on the next 5 s refresh.
+  keepAwake.onStatusChange(() => trayCtl.updateMenu());
   let attentionKey = '';
   agents.onSessionsChanged((list) => {
     attention = list.filter((s) => s.unread);
