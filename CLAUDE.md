@@ -147,7 +147,13 @@ refetch.
 ### Agents
 
 `services/agents.cjs` runs an AI-provider CLI in a pseudo-terminal rooted at a
-site's webroot — one Session per Site. The pty lives in the **main process, with
+site's webroot — a Site may host many Sessions, keyed by `sessionId`. The
+Agents sidebar is a **Projects** list: the opt-in working set of Sites
+(`agentProjects` in the store, see `services/agentProjects.cjs`) with every
+Session under it, live or exited, pushed on `agent-sessions-update`. Each
+Session's terminal title — and, as it grows, its status — is parsed from pty
+output by `services/agentStatus.cjs`, so background Sessions whose xterm isn't
+mounted are still tracked. The pty lives in the **main process, with
 no daemon** (see `docs/adr/0001-main-process-pty-no-daemon.md`), so it survives
 the window hiding to the tray and is reaped on quit; reattach after a window
 reopen is served from an in-memory ring buffer. The provider registry is

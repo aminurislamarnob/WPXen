@@ -336,8 +336,16 @@ async function discardTracked(rootPath, rel) {
   return runMutate(path.resolve(rootPath), ['restore', '--', rel]);
 }
 
+// The checked-out branch of the repo containing `root`, or null when `root`
+// isn't inside a git repo (or git is missing). A detached HEAD reads "HEAD".
+async function currentBranch(root) {
+  const out = await run(path.resolve(root), ['rev-parse', '--abbrev-ref', 'HEAD']);
+  return out ? out.trim() || null : null;
+}
+
 module.exports = {
   gitStatus,
+  currentBranch,
   discoverRepos,
   parseStatus,
   parseNumstat,

@@ -88,15 +88,15 @@ export default function Layout({ serviceStatus }) {
           top bar. */}
       <aside
         className={`flex flex-col flex-shrink-0 overflow-hidden bg-sidebar text-sidebar-foreground border-r border-sidebar-border transition-[width] duration-200 ease-out ${
-          sidebarCollapsed ? 'w-0 border-r-0' : 'w-56'
+          sidebarCollapsed ? 'w-0 border-r-0' : agentsMode ? 'w-64' : 'w-56'
         }`}
       >
         {/* Title bar drag region (hosts the traffic lights) */}
         <div className="drag-region h-12 flex-shrink-0" />
 
         {agentsMode ? (
-          // Agents mode: the sidebar becomes a Sites → providers tree, in place
-          // of the main menu.
+          // Agents mode: the sidebar becomes the Projects list (Sites → agent
+          // Sessions), in place of the main menu.
           <AgentsSidebar />
         ) : (
           <>

@@ -1,18 +1,22 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { ChevronRight, ChevronDown, Globe } from 'lucide-react';
+import { ChevronRight, ChevronDown, Globe, GitBranch, Plus, X } from 'lucide-react';
 import { ProviderIcon } from './providerIcons';
+import { Tooltip } from './ui';
+import LaunchMenu from './LaunchMenu';
+import { buildProjects } from '../lib/agentsList';
+import {
+  useAgentSessions,
+  useAgentProjects,
+  useSelectedSession,
+} from '../lib/useAgentSessions';
 
-// The Agents-mode sidebar: a Sites tree. Each Site collapses to its available
-// providers (Agents); clicking one opens that Agent's terminal in the selected
-// Site's directory (route /agents/<siteId>/<agentId>). Leaving Agents mode goes
-// through the activity bar to its left (ActivityBar.jsx) or the back arrow (⌘[).
-//
-// Only agents that are both enabled and actually installed appear here. The
-// list repeats under every Site, so an uninstallable row costs one dead line
-// per site rather than one overall — and every row here is a launcher, so a
-// row that can't launch is noise. Settings → Agents is where the full set
-// lives, with the install buttons; this tree is for getting to work.
+// The Agents-mode sidebar: the "Projects" list. A Project is a Site in the
+// Agents working set; under it, one row per agent Session (a "workspace") —
+// live or exited. A Site joins the working set when a Session is launched in
+// it. Clicking a Session row opens it in the Agents pane; the hover "+" on a
+// Project starts a new one there. Leaving Agents mode goes through the
+// activity bar to its left (ActivityBar.jsx) or the back arrow (⌘[).
 export default function AgentsSidebar() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -22,49 +26,89 @@ export default function AgentsSidebar() {
   const m = location.pathname.match(/^\/agents\/([^/]+)/);
   const activeSite = m?.[1] ? decodeURIComponent(m[1]) : null;
 
+  const sessions = useAgentSessions();
+  const projectIds = useAgentProjects();
+  const selected = useSelectedSession();
   const [sites, setSites] = useState([]);
-  const [agents, setAgents] = useState([]);
-  const [expanded, setExpanded] = useState(() => new Set());
+  const [branches, setBranches] = useState({}); // siteId -> branch | null
+  const [collapsed, setCollapsed] = useState(() => new Set());
+  const [launchMenu, setLaunchMenu] = useState(null); // { siteId, x, y }
 
+  // Re-read sites when the working set changes — a newly added project may be
+  // a site created since this mounted.
+  const projectKey = projectIds.join('|');
   useEffect(() => {
-    (async () => {
-      const [s, a] = await Promise.all([
-        window.electronAPI.getSites(),
-        window.electronAPI.listAgents(),
-      ]);
-      setSites(s || []);
-      // listAgents() already applies the enabled filter; `detected` is the
-      // other half. The plain Terminal reports detected, so it survives this.
-      setAgents((a || []).filter((agent) => agent.detected));
-    })();
-  }, []);
+    let cancelled = false;
+    window.electronAPI.getSites().then((s) => {
+      if (!cancelled) setSites(s || []);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectKey]);
 
-  // Keep the selected Site expanded.
+  const projects = useMemo(
+    () => buildProjects({ projectIds, sites, sessions }),
+    [projectIds, sites, sessions]
+  );
+
+  // Each project's checked-out branch. Refreshed as sessions come and go —
+  // that's when an agent is most likely to have switched it.
+  const sessionCount = sessions.length;
   useEffect(() => {
-    if (activeSite) setExpanded((prev) => new Set(prev).add(activeSite));
-  }, [activeSite]);
+    let cancelled = false;
+    Promise.all(
+      projects.map(async ({ site }) => [
+        site.id,
+        site.path ? await window.electronAPI.getGitBranch(site.path) : null,
+      ])
+    ).then((pairs) => {
+      if (!cancelled) setBranches(Object.fromEntries(pairs));
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectKey, sites, sessionCount]);
 
   const toggle = (id) =>
-    setExpanded((prev) => {
+    setCollapsed((prev) => {
       const next = new Set(prev);
       next.has(id) ? next.delete(id) : next.add(id);
       return next;
     });
 
+  const openSession = (siteId, sessionId) =>
+    navigate(`/agents/${encodeURIComponent(siteId)}`, {
+      state: { focus: sessionId, nonce: Date.now() },
+    });
+
+  const launch = (siteId, agentId, targetId) => {
+    setLaunchMenu(null);
+    navigate(`/agents/${encodeURIComponent(siteId)}`, {
+      state: { spawn: agentId, target: targetId, nonce: Date.now() },
+    });
+  };
+
   return (
     <div className="flex-1 flex flex-col min-h-0 no-drag">
       <div className="px-4 pb-1 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
-        Sites
+        Projects
       </div>
 
       <nav className="flex-1 px-3 overflow-y-auto space-y-0.5">
-        {sites.map((site) => {
-          const isOpen = expanded.has(site.id);
+        {projects.map(({ site, sessions: rows }) => {
+          const isOpen = !collapsed.has(site.id);
+          const branch = branches[site.id];
           return (
             <div key={site.id}>
-              <button
+              <div
+                className={`group flex items-center gap-1.5 pl-2 pr-1 py-[5px] rounded-md text-[13px] hover:bg-sidebar-accent cursor-pointer ${
+                  site.id === activeSite
+                    ? 'text-sidebar-foreground'
+                    : 'text-sidebar-foreground/90'
+                }`}
                 onClick={() => toggle(site.id)}
-                className="w-full flex items-center gap-1.5 px-2 py-[5px] rounded-md text-[13px] text-sidebar-foreground/90 hover:bg-sidebar-accent"
               >
                 {isOpen ? (
                   <ChevronDown
@@ -78,40 +122,71 @@ export default function AgentsSidebar() {
                   />
                 )}
                 <Globe size={13} className="text-muted-foreground flex-shrink-0" />
-                <span className="truncate flex-1 text-left">{site.name}</span>
-              </button>
+                <span className="truncate font-medium">{site.name}</span>
+                <span className="flex-1" />
+                {branch && (
+                  <span
+                    className="flex items-center gap-0.5 min-w-0 max-w-[45%] text-[11px] text-muted-foreground group-hover:hidden"
+                    title={branch}
+                  >
+                    <GitBranch size={11} className="flex-shrink-0" />
+                    <span className="truncate">{branch}</span>
+                  </span>
+                )}
+                <Tooltip label="New session">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const r = e.currentTarget.getBoundingClientRect();
+                      setLaunchMenu({ siteId: site.id, x: r.left, y: r.bottom + 4 });
+                    }}
+                    aria-label={`New session in ${site.name}`}
+                    className="hidden group-hover:flex p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent"
+                  >
+                    <Plus size={14} />
+                  </button>
+                </Tooltip>
+              </div>
 
               {isOpen && (
                 <div className="ml-[18px] mt-0.5 space-y-0.5 border-l border-sidebar-border pl-2">
-                  {/* Each click spawns a NEW Session (many per Site allowed);
-                      the pane reads spawn+nonce from navigation state. */}
-                  {agents.map((agent) => (
-                    <button
-                      key={agent.id}
-                      title={
-                        agent.isShell
-                          ? 'Open a shell in this site’s folder'
-                          : 'Open a new session'
-                      }
-                      onClick={() =>
-                        navigate(`/agents/${encodeURIComponent(site.id)}`, {
-                          state: { spawn: agent.id, nonce: Date.now() },
-                        })
-                      }
-                      className="w-full min-w-0 flex items-center gap-1.5 px-2 py-[5px] rounded-md text-[13px] text-sidebar-foreground/80 hover:bg-sidebar-accent"
+                  {rows.map((s) => (
+                    <div
+                      key={s.sessionId}
+                      onClick={() => openSession(site.id, s.sessionId)}
+                      title={s.displayTitle}
+                      className={`group/row w-full min-w-0 flex items-center gap-1.5 pl-2 pr-1 py-[5px] rounded-md text-[13px] cursor-pointer ${
+                        s.sessionId === selected
+                          ? 'bg-sidebar-accent text-sidebar-foreground'
+                          : 'text-sidebar-foreground/80 hover:bg-sidebar-accent'
+                      } ${s.exited ? 'opacity-60' : ''}`}
                     >
                       <ProviderIcon
-                        agentId={agent.id}
+                        agentId={s.agentId}
                         brand
                         size={13}
                         className="flex-shrink-0"
                       />
-                      <span className="truncate">{agent.name}</span>
-                    </button>
+                      <span className="truncate flex-1">{s.displayTitle}</span>
+                      {s.exited && (
+                        <Tooltip label="Dismiss">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              window.electronAPI.dismissSession(s.sessionId);
+                            }}
+                            aria-label="Dismiss session"
+                            className="hidden group-hover/row:flex p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent"
+                          >
+                            <X size={12} />
+                          </button>
+                        </Tooltip>
+                      )}
+                    </div>
                   ))}
-                  {agents.length === 0 && (
+                  {rows.length === 0 && (
                     <p className="px-2 py-1 text-xs text-muted-foreground">
-                      No agents installed.
+                      No sessions.
                     </p>
                   )}
                 </div>
@@ -119,10 +194,21 @@ export default function AgentsSidebar() {
             </div>
           );
         })}
-        {sites.length === 0 && (
-          <p className="px-2 py-1 text-xs text-muted-foreground">No sites yet.</p>
+        {projects.length === 0 && (
+          <p className="px-2 py-1 text-xs text-muted-foreground leading-relaxed">
+            No projects yet. Launch an agent from a site to add it here.
+          </p>
         )}
       </nav>
+
+      {launchMenu && (
+        <LaunchMenu
+          siteId={launchMenu.siteId}
+          anchor={launchMenu}
+          onClose={() => setLaunchMenu(null)}
+          onLaunch={(agentId, targetId) => launch(launchMenu.siteId, agentId, targetId)}
+        />
+      )}
     </div>
   );
 }

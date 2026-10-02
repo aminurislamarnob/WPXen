@@ -35,6 +35,7 @@ const setup = require('./services/setup.cjs');
 const logs = require('./services/logs.cjs');
 const validation = require('./services/validation.cjs');
 const agents = require('./services/agents.cjs');
+const agentProjects = require('./services/agentProjects.cjs');
 const files = require('./services/files.cjs');
 const git = require('./services/git.cjs');
 const browser = require('./services/browser.cjs');
@@ -288,6 +289,49 @@ function registerHandlers(win, storeInstance) {
   // The live Sessions for a Site — the renderer restores its terminal tabs.
   ipcMain.handle('agent-sessions', (_e, siteId) => agents.listSessions(siteId));
 
+  // ── Agents working set ("Projects") & session rows ─────────────────────────
+  // The sidebar lists working-set Sites with every Session under them, live or
+  // exited. Both lists are pushed on change so it never polls.
+  const getProjectIds = () => {
+    const sites = store.get('sites', []);
+    const list = store.get(agentProjects.STORE_KEY, []);
+    const pruned = agentProjects.pruneProjects(list, sites);
+    if (pruned !== list) store.set(agentProjects.STORE_KEY, pruned);
+    return pruned;
+  };
+  const sendProjects = () => {
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('agent-projects-update', getProjectIds());
+    }
+  };
+  const addToProjects = (siteId) => {
+    const list = getProjectIds();
+    const next = agentProjects.addProject(list, siteId);
+    if (next !== list) {
+      store.set(agentProjects.STORE_KEY, next);
+      sendProjects();
+    }
+  };
+
+  agents.onSessionsChanged((list) => {
+    if (win && !win.isDestroyed()) win.webContents.send('agent-sessions-update', list);
+  });
+
+  ipcMain.handle('agent-projects-get', () => getProjectIds());
+  ipcMain.handle('agent-projects-reorder', (_e, order) => {
+    const next = agentProjects.reorderProjects(getProjectIds(), order);
+    store.set(agentProjects.STORE_KEY, next);
+    sendProjects();
+    return next;
+  });
+  ipcMain.handle('agent-sessions-all', () => agents.listAllSessions());
+  // Dismissing a row is the same teardown as closing its tab.
+  ipcMain.handle('agent-session-dismiss', (_e, sessionId) => {
+    agents.stop(sessionId);
+    return { ok: true };
+  });
+  ipcMain.handle('git-branch', (_e, rootPath) => git.currentBranch(rootPath));
+
   // Launch an Agent for a Site. Always spawns a NEW Session (many per Site are
   // allowed), returning its sessionId for the renderer to attach a terminal to.
   // `targetId` (optional) selects a saved Launch Target on the Site; without it
@@ -301,7 +345,10 @@ function registerHandlers(win, storeInstance) {
       target = (site.launchTargets || []).find((t) => t.id === targetId) || null;
       if (!target) return { error: 'Launch target not found' };
     }
-    return agents.launch({ site, agentId, target, globalArgs });
+    const res = agents.launch({ site, agentId, target, globalArgs });
+    // Launching is the common way a Site joins the working set.
+    if (res?.ok) addToProjects(siteId);
+    return res;
   });
 
   // ── Launch Presets (global, per-Agent) & Launch Targets (per-Site) ─────────
@@ -757,6 +804,16 @@ function registerHandlers(win, storeInstance) {
         'sites',
         sites.filter((s) => s.id !== id)
       );
+      store.set(
+        agentProjects.STORE_KEY,
+        agentProjects.removeProject(store.get(agentProjects.STORE_KEY, []), id)
+      );
+      if (win && !win.isDestroyed()) {
+        win.webContents.send(
+          'agent-projects-update',
+          store.get(agentProjects.STORE_KEY, [])
+        );
+      }
       return { success: true };
     } catch (err) {
       return { success: false, error: humanize(err) };

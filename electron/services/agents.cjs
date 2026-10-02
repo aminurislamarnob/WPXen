@@ -3,7 +3,7 @@
 // Agent Launcher — see CONTEXT.md and docs/adr/0001-main-process-pty-no-daemon.md.
 //
 // Runs an AI-provider CLI ("Agent") in a pseudo-terminal ("Session") rooted at a
-// Site's webroot. One Session per Site. The pty lives in THIS (main) process —
+// Site's webroot. A Site may host many Sessions. The pty lives in THIS (main) process —
 // no daemon — so it survives the window hiding to the tray and is reaped on quit.
 // Reattach after a window reopen is served from an in-memory ring buffer.
 
@@ -12,6 +12,7 @@ const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
 const pty = require('node-pty');
+const { createTracker } = require('./agentStatus.cjs');
 
 // ── Registry ────────────────────────────────────────────────────────────────
 // Curated, data-shaped so user-defined Agents can drop in later (Q5). `cmd` is
@@ -616,6 +617,34 @@ const { randomUUID } = require('crypto');
 const MAX_BUFFER = 1024 * 1024; // ~1 MB ring buffer (Q9)
 const sessions = new Map(); // sessionId -> session
 
+// Change feed for the Agents sidebar. Title updates arrive at spinner rate, so
+// notifications are coalesced into one per CHANGE_DEBOUNCE_MS; launches, exits
+// and stops are flushed immediately.
+const CHANGE_DEBOUNCE_MS = 200;
+const changeListeners = new Set();
+let changeTimer = null;
+
+function onSessionsChanged(cb) {
+  changeListeners.add(cb);
+  return () => changeListeners.delete(cb);
+}
+
+function emitChange({ immediate = false } = {}) {
+  if (changeTimer && !immediate) return;
+  if (changeTimer) clearTimeout(changeTimer);
+  const fire = () => {
+    changeTimer = null;
+    const list = listAllSessions();
+    for (const cb of changeListeners) {
+      try {
+        cb(list);
+      } catch {}
+    }
+  };
+  if (immediate) fire();
+  else changeTimer = setTimeout(fire, CHANGE_DEBOUNCE_MS);
+}
+
 function getSession(sessionId) {
   return sessions.get(sessionId) || null;
 }
@@ -633,6 +662,29 @@ function listSessions(siteId) {
         label: s.label,
       });
     }
+  }
+  return out;
+}
+
+// Every Session across all Sites, live and exited, oldest first — the Agents
+// sidebar's rows. An exited Session stays listed until it is dismissed (stop)
+// or the app quits, so finishing or crashing while unwatched stays visible.
+function listAllSessions() {
+  const out = [];
+  for (const s of sessions.values()) {
+    const snap = s.tracker.snapshot();
+    out.push({
+      sessionId: s.sessionId,
+      siteId: s.siteId,
+      agentId: s.agentId,
+      agentName: s.agentName,
+      targetId: s.targetId,
+      label: s.label,
+      startedAt: s.startedAt,
+      exited: s.exited,
+      exitCode: s.exitCode,
+      title: snap.title,
+    });
   }
   return out;
 }
@@ -712,6 +764,9 @@ function launch({ site, agentId, target = null, globalArgs = '' }) {
     buffer: '',
     window: null,
     exited: false,
+    exitCode: null,
+    startedAt: Date.now(),
+    tracker: createTracker(),
     // `started` gates the type-the-command step; a shell session has already
     // arrived at what the user wanted, so it starts out done.
     started: startsImmediately,
@@ -737,6 +792,7 @@ function launch({ site, agentId, target = null, globalArgs = '' }) {
 
   term.onData((data) => {
     scheduleRun();
+    if (session.tracker.output(data)) emitChange();
     session.buffer += data;
     if (session.buffer.length > MAX_BUFFER) {
       session.buffer = session.buffer.slice(session.buffer.length - MAX_BUFFER);
@@ -749,12 +805,16 @@ function launch({ site, agentId, target = null, globalArgs = '' }) {
 
   term.onExit(({ exitCode }) => {
     session.exited = true;
+    session.exitCode = exitCode;
     const win = session.window;
     if (win && !win.isDestroyed()) {
       win.webContents.send('terminal-exit', { sessionId, code: exitCode });
     }
+    // stop() already deleted a dismissed session; don't resurrect its row.
+    if (sessions.has(sessionId)) emitChange({ immediate: true });
   });
 
+  emitChange({ immediate: true });
   return { ok: true, sessionId };
 }
 
@@ -812,6 +872,7 @@ function stop(sessionId) {
     }, 3000);
   }
   sessions.delete(sessionId);
+  emitChange({ immediate: true });
 }
 
 function hasActiveSessions() {
@@ -843,6 +904,8 @@ module.exports = {
   installScriptUrl,
   assertShellScript,
   listSessions,
+  listAllSessions,
+  onSessionsChanged,
   resolveLaunch,
   launch,
   attach,
