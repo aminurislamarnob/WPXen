@@ -381,6 +381,16 @@ function registerHandlers(win, storeInstance) {
     return next;
   });
   ipcMain.handle('agent-sessions-all', () => agents.listAllSessions());
+
+  // Floating Workspace terminals: plain shells owned by no Site, on their own
+  // feed so the Projects list, keep-awake and the tray never see them.
+  agents.onFloatingSessionsChanged((list) => {
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('agent-floating-sessions-update', list);
+    }
+  });
+  ipcMain.handle('agent-floating-sessions', () => agents.listFloatingSessions());
+  ipcMain.handle('agent-launch-floating', (_e, cwd) => agents.launchFloating({ cwd }));
   // Dismissing a row is the same teardown as closing its tab.
   ipcMain.handle('agent-session-dismiss', (_e, sessionId) => {
     agents.stop(sessionId);
@@ -428,6 +438,10 @@ function registerHandlers(win, storeInstance) {
   // focused (observed here).
   ipcMain.on('agent-view', (_e, sessionId) =>
     agents.setView({ selected: sessionId || null })
+  );
+  // The Floating Workspace's active terminal while the panel is open.
+  ipcMain.on('agent-floating-view', (_e, sessionId) =>
+    agents.setView({ floating: sessionId || null })
   );
   ipcMain.handle('agent-session-mark', (_e, sessionId, read) => {
     agents.markRead(sessionId, !!read);

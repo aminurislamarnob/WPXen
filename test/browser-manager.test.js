@@ -414,6 +414,33 @@ describe('key interception', () => {
     });
   });
 
+  it('forwards ⌘⌥A (and ⌘⌥⇧A) for the Floating Workspace, matched by code', () => {
+    const cases = [
+      [chord('å', { alt: true, code: 'KeyA' }), 'floating'],
+      [chord('Å', { alt: true, shift: true, code: 'KeyA' }), 'floating-max'],
+    ];
+    for (const [input, key] of cases) {
+      const { guest, send } = registered();
+      const event = { preventDefault: vi.fn() };
+      guest.emit('before-input-event', event, input);
+      expect(event.preventDefault).toHaveBeenCalled();
+      expect(send).toHaveBeenCalledWith('browser-shortcut', { tabKey: 'browser:1', key });
+      browser.unregisterAll();
+    }
+  });
+
+  it('leaves ⌥A without ⌘ to the page', () => {
+    const { guest, send } = registered();
+    const event = { preventDefault: vi.fn() };
+    guest.emit(
+      'before-input-event',
+      event,
+      chord('å', { meta: false, alt: true, code: 'KeyA' })
+    );
+    expect(event.preventDefault).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+  });
+
   it('leaves everything else to the page', () => {
     const { guest, send } = registered();
     const cases = [
