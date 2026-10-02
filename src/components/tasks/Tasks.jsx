@@ -18,6 +18,7 @@ import {
   SlidersHorizontal,
   Plus,
   CircleDot,
+  GitPullRequest,
   RefreshCw,
   Search,
   X,
@@ -32,10 +33,12 @@ import { useIssueMutation } from './useIssueMutation';
 import { useOpenLink } from '../../lib/useOpenLink';
 import { AvatarStack, LabelChip, StartButton, StateBadge, stateIcon } from './parts';
 import StartDialog from './StartDialog';
+import PullTable from './PullTable';
 import { useAgentSessions } from '../../lib/useAgentSessions';
 import {
   ALL,
   ISSUE_CHIPS,
+  PR_CHIPS,
   activeFilterCount,
   chipMatches,
   linkedSessions,
@@ -51,16 +54,37 @@ import {
   timeAgo,
 } from '../../lib/tasks';
 
-// Tasks — GitHub Issues for every Site with a GitHub repo, through the `gh`
-// CLI (services/github.cjs). Modelled on Orca's Tasks page: a project picker,
-// preset chips, a GitHub search box scoped to the selected repos, and one list
-// merged across repos, newest activity first, 24 to a page.
+// Tasks — GitHub Issues and PRs for every Site with a GitHub repo, through
+// the `gh` CLI (services/github.cjs). Modelled on Orca's Tasks page: a project
+// picker, preset chips, a GitHub search box scoped to the selected repos, and
+// one list merged across repos, newest activity first, 24 to a page. Each tab
+// keeps its own query and page.
 //
 // Every repo is searched separately, so a failing one reports its own error
 // above the list while the rest still show. A quiet refresh runs every 60 s
 // while the page is visible; ↻ forces one past the main process's cache.
 
 const SELECTION_KEY = 'wpxen.tasks.selection';
+const TAB_KEY = 'wpxen.tasks.tab';
+
+const TABS = [
+  { value: 'issues', label: 'Issues', icon: CircleDot },
+  { value: 'pulls', label: 'PRs', icon: GitPullRequest },
+];
+const TAB_VIEW = {
+  issues: {
+    chips: ISSUE_CHIPS,
+    noun: ['issue', 'issues'],
+    perRepo: 100,
+    search: (opts) => window.electronAPI.tasksSearchIssues(opts),
+  },
+  pulls: {
+    chips: PR_CHIPS,
+    noun: ['pull request', 'pull requests'],
+    perRepo: 50,
+    search: (opts) => window.electronAPI.tasksSearchPulls(opts),
+  },
+};
 const REFRESH_MS = 60_000;
 
 function readStored(key) {
@@ -86,6 +110,10 @@ export default function Tasks() {
   const [preflight, setPreflight] = useState(null); // { installed, authenticated, error? }
   const [sites, setSites] = useState(null); // [{ siteId, siteName, repos }]
   const [selection, setSelection] = useState(() => readStored(SELECTION_KEY) || ALL);
+  const [tab, setTab] = useState(() =>
+    readStored(TAB_KEY) === 'pulls' ? 'pulls' : 'issues'
+  );
+  const view = TAB_VIEW[tab];
   const [query, setQuery] = useState(DEFAULT_ISSUE_QUERY);
   const [draft, setDraft] = useState(DEFAULT_ISSUE_QUERY);
   const draftRef = useRef(draft);
@@ -111,6 +139,25 @@ export default function Tasks() {
   }, [params, setParams]);
 
   useEffect(() => writeStored(SELECTION_KEY, selection), [selection]);
+  useEffect(() => writeStored(TAB_KEY, tab), [tab]);
+
+  // Each tab keeps its own query and page; switching stashes the one being
+  // left and restores the other's.
+  const tabViews = useRef({});
+  const switchTab = (next) => {
+    if (next === tab) return;
+    tabViews.current[tab] = { query, draft, page };
+    const saved = tabViews.current[next] || {
+      query: DEFAULT_ISSUE_QUERY,
+      draft: DEFAULT_ISSUE_QUERY,
+      page: 1,
+    };
+    setResults(null);
+    setQuery(saved.query);
+    setDraft(saved.draft);
+    setPage(saved.page);
+    setTab(next);
+  };
 
   const loadSetup = useCallback(async ({ force = false } = {}) => {
     const api = window.electronAPI;
@@ -126,8 +173,12 @@ export default function Tasks() {
 
   const ready = preflight?.installed && preflight?.authenticated;
 
+  // Only the newest search may land: a slow one from before a tab or query
+  // change must not overwrite what's on screen now.
+  const searchSeq = useRef(0);
   const search = useCallback(
     async ({ force = false, quiet = false } = {}) => {
+      const seq = ++searchSeq.current;
       if (!ready || repos.length === 0) {
         setResults(null);
         return;
@@ -135,16 +186,18 @@ export default function Tasks() {
       if (quiet) setRefreshing(true);
       else setLoading(true);
       try {
-        const res = await window.electronAPI.tasksSearchIssues({ repos, query, force });
-        setResults(mergeResults(res?.results));
+        const res = await TAB_VIEW[tab].search({ repos, query, force });
+        if (seq === searchSeq.current) setResults(mergeResults(res?.results));
       } finally {
-        setLoading(false);
-        setRefreshing(false);
+        if (seq === searchSeq.current) {
+          setLoading(false);
+          setRefreshing(false);
+        }
       }
     },
     // reposKey stands in for `repos`, which is a fresh array each render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [ready, reposKey, query]
+    [ready, reposKey, query, tab]
   );
 
   useEffect(() => {
@@ -263,11 +316,7 @@ export default function Tasks() {
       )}
       <div className={detail ? 'hidden' : undefined}>
         <div className="flex items-center gap-2 mb-3">
-          <SegmentedTabs
-            tabs={[{ value: 'issues', label: 'Issues', icon: CircleDot }]}
-            value="issues"
-            onChange={() => {}}
-          />
+          <SegmentedTabs tabs={TABS} value={tab} onChange={switchTab} />
           {ready && tree.length > 1 && (
             <select
               value={option?.value || ALL}
@@ -283,7 +332,7 @@ export default function Tasks() {
             </select>
           )}
           <div className="flex-1" />
-          {ready && repoOptions.length > 0 && (
+          {ready && tab === 'issues' && repoOptions.length > 0 && (
             <button className="btn btn-secondary" onClick={() => setCreating(true)}>
               <Plus size={14} />
               New issue
@@ -315,13 +364,13 @@ export default function Tasks() {
         ) : sites && tree.length <= 1 ? (
           <EmptyState
             title="No Sites with a GitHub repo"
-            body="Tasks lists issues for Sites whose webroot, theme or plugin is a git repo with a github.com remote."
+            body="Tasks lists issues and PRs for Sites whose webroot, theme or plugin is a git repo with a github.com remote."
           />
         ) : (
           ready && (
             <>
               <div className="flex items-center gap-2 mb-3">
-                {ISSUE_CHIPS.map((c) => (
+                {view.chips.map((c) => (
                   <button
                     key={c.label}
                     onClick={() => applyQuery(c.query)}
@@ -360,8 +409,8 @@ export default function Tasks() {
                   <input
                     value={draft}
                     onChange={(e) => setDraft(e.target.value)}
-                    placeholder="Search issues — GitHub search syntax"
-                    aria-label="Search issues"
+                    placeholder={`Search ${view.noun[1]} — GitHub search syntax`}
+                    aria-label={`Search ${view.noun[1]}`}
                     className="form-input !h-8 !pl-8 !pr-8 font-mono !text-[12px]"
                   />
                   {draft && (
@@ -395,28 +444,37 @@ export default function Tasks() {
                 </div>
               )}
 
-              <IssueTable
-                items={paged?.items || []}
-                loading={loading && !results}
-                onOpen={openDetails}
-                linked={linked}
-                onStart={(issue) => setStarting({ issue })}
-                onOpenSession={openSession}
-                onEdit={(kind, issue, anchor) =>
-                  kind === 'menu'
-                    ? setRowMenu({ issue, anchor })
-                    : setRowPopover({ kind, issue, anchor })
-                }
-              />
+              {tab === 'pulls' ? (
+                <PullTable
+                  items={paged?.items || []}
+                  loading={loading && !results}
+                  onOpen={(pr) => openLink(pr.url, siteIdFor(pr.repo))}
+                  onMenu={(pr, anchor) => setRowMenu({ issue: pr, anchor })}
+                />
+              ) : (
+                <IssueTable
+                  items={paged?.items || []}
+                  loading={loading && !results}
+                  onOpen={openDetails}
+                  linked={linked}
+                  onStart={(issue) => setStarting({ issue })}
+                  onOpenSession={openSession}
+                  onEdit={(kind, issue, anchor) =>
+                    kind === 'menu'
+                      ? setRowMenu({ issue, anchor })
+                      : setRowPopover({ kind, issue, anchor })
+                  }
+                />
+              )}
 
               {results && (
                 <div className="flex items-center justify-between mt-3 text-[12px] text-muted-foreground">
                   <span>
                     {results.items.length === 0
-                      ? 'No matching issues.'
-                      : `${results.items.length} ${results.items.length === 1 ? 'issue' : 'issues'}`}
+                      ? `No matching ${view.noun[1]}.`
+                      : `${results.items.length} ${view.noun[results.items.length === 1 ? 0 : 1]}`}
                     {results.truncated.length > 0 &&
-                      ' · showing the 100 most recently updated per repo — narrow the search to see more'}
+                      ` · showing the ${view.perRepo} most recently updated per repo — narrow the search to see more`}
                   </span>
                   {paged.pageCount > 1 && (
                     <div className="flex items-center gap-1">
@@ -483,6 +541,7 @@ export default function Tasks() {
       )}
       {filtersAnchor && (
         <FiltersMenu
+          kind={tab === 'pulls' ? 'pr' : 'issue'}
           anchor={filtersAnchor}
           draft={draft}
           onDraft={setDraft}
@@ -497,7 +556,11 @@ export default function Tasks() {
           issue={rowMenu.issue}
           anchor={rowMenu.anchor}
           onLink={(url) => openLink(url, siteIdFor(rowMenu.issue.repo))}
-          onStartWorktree={() => setStarting({ issue: rowMenu.issue, mode: 'worktree' })}
+          onStartWorktree={
+            rowMenu.issue.kind === 'pr'
+              ? null
+              : () => setStarting({ issue: rowMenu.issue, mode: 'worktree' })
+          }
           onClose={() => setRowMenu(null)}
         />
       )}
@@ -580,7 +643,7 @@ function RowMenu({ issue, anchor, onLink, onStartWorktree, onClose }) {
   return (
     <Popover anchor={anchor} onClose={onClose} width={190}>
       {item(ExternalLink, 'Open on GitHub', () => onLink(issue.url))}
-      {item(FolderGit2, 'Start in a new worktree', onStartWorktree)}
+      {onStartWorktree && item(FolderGit2, 'Start in a new worktree', onStartWorktree)}
       {item(Copy, 'Copy link', () =>
         navigator.clipboard?.writeText(issue.url).catch(() => {
           // clipboard unavailable — Open on GitHub still works

@@ -542,6 +542,13 @@ function registerHandlers(win, storeInstance) {
     return { ok: true, siteId: site.id, sessionId: res.sessionId };
   });
 
+  ipcMain.handle('tasks-search-pulls', (_e, opts) =>
+    github.searchPulls({
+      repos: opts?.repos,
+      query: opts?.query,
+      force: !!opts?.force,
+    })
+  );
   ipcMain.handle('tasks-search-issues', (_e, opts) =>
     github.searchIssues({
       repos: opts?.repos,

@@ -653,3 +653,153 @@ describe('picker lookups', () => {
     ]);
   });
 });
+
+describe('pull requests', () => {
+  const tally = (pairs) => pairs.map(([state, count]) => ({ state, count }));
+  const rollup = (state, runs = [], statuses = []) => ({
+    state,
+    contexts: {
+      checkRunCountsByState: tally(runs),
+      statusContextCountsByState: tally(statuses),
+    },
+  });
+
+  it('maps the review decision', () => {
+    expect(github.normalizeReview('APPROVED')).toBe('approved');
+    expect(github.normalizeReview('CHANGES_REQUESTED')).toBe('changes-requested');
+    expect(github.normalizeReview('REVIEW_REQUIRED')).toBe('review-required');
+    expect(github.normalizeReview(null)).toBeNull();
+  });
+
+  it('folds check runs and statuses into passing, failing and pending', () => {
+    // GitHub's real tally shape: every state listed, most at zero.
+    expect(
+      github.normalizeChecks(
+        rollup(
+          'SUCCESS',
+          [
+            ['SUCCESS', 12],
+            ['SKIPPED', 13],
+            ['FAILURE', 0],
+          ],
+          [['SUCCESS', 1]]
+        )
+      )
+    ).toEqual({ state: 'passing', passing: 26, failing: 0, pending: 0, total: 26 });
+    expect(
+      github.normalizeChecks(
+        rollup('FAILURE', [
+          ['SUCCESS', 3],
+          ['TIMED_OUT', 1],
+          ['IN_PROGRESS', 2],
+        ])
+      )
+    ).toEqual({ state: 'failing', passing: 3, failing: 1, pending: 2, total: 6 });
+    expect(
+      github.normalizeChecks(rollup('PENDING', [['QUEUED', 1]], [['EXPECTED', 1]]))
+    ).toMatchObject({ state: 'pending', pending: 2 });
+    expect(github.normalizeChecks(null)).toBeNull();
+  });
+
+  it('derives the merge state in GitHub’s order', () => {
+    const m = (pr) => github.normalizeMerge({ state: 'OPEN', ...pr });
+    expect(m({ merged: true, state: 'MERGED' })).toBe('merged');
+    expect(m({ state: 'CLOSED' })).toBe('closed');
+    expect(m({ isDraft: true, mergeable: 'CONFLICTING' })).toBe('draft');
+    expect(m({ mergeable: 'CONFLICTING', mergeStateStatus: 'DIRTY' })).toBe('conflicts');
+    expect(m({ mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN' })).toBe('ready');
+    expect(m({ mergeStateStatus: 'UNSTABLE' })).toBe('ready');
+    expect(m({ mergeStateStatus: 'BLOCKED' })).toBe('blocked');
+    expect(m({ mergeStateStatus: 'BEHIND' })).toBe('behind');
+    expect(m({})).toBe('unknown');
+  });
+
+  const prNode = (n, extra = {}) => ({
+    number: n,
+    title: `PR ${n}`,
+    url: `https://github.com/acme/shop/pull/${n}`,
+    state: 'OPEN',
+    isDraft: false,
+    merged: false,
+    createdAt: '2026-09-01T00:00:00Z',
+    updatedAt: '2026-09-02T00:00:00Z',
+    author: { login: 'ana', avatarUrl: null },
+    headRefName: 'fix-cart',
+    baseRefName: 'main',
+    reviewDecision: 'APPROVED',
+    labels: { nodes: [{ name: 'bug', color: 'd73a4a' }] },
+    assignees: { nodes: [] },
+    comments: { totalCount: 1 },
+    commits: {
+      nodes: [{ commit: { statusCheckRollup: rollup('SUCCESS', [['SUCCESS', 2]]) } }],
+    },
+    ...extra,
+  });
+
+  it('runs the row and merge searches per repo and joins them', async () => {
+    fakeGh((args) => {
+      const query = args.find((a) => a.startsWith('query=')) || '';
+      if (query.includes('mergeStateStatus')) {
+        return JSON.stringify({
+          data: {
+            search: {
+              nodes: [{ number: 4, mergeable: 'CONFLICTING', mergeStateStatus: 'DIRTY' }],
+            },
+          },
+        });
+      }
+      return JSON.stringify({ data: { search: { issueCount: 1, nodes: [prNode(4)] } } });
+    });
+    const { results } = await github.searchPulls({
+      repos: ['acme/shop'],
+      query: 'is:open',
+    });
+    expect(calls).toHaveLength(2);
+    for (const args of calls) {
+      expect(args.slice(0, 4)).toEqual([
+        'api',
+        'graphql',
+        '-f',
+        'q=is:pr is:open repo:acme/shop',
+      ]);
+    }
+    expect(results[0].items[0]).toMatchObject({
+      kind: 'pr',
+      number: 4,
+      headRef: 'fix-cart',
+      baseRef: 'main',
+      review: 'approved',
+      checks: { state: 'passing', passing: 2, total: 2 },
+      merge: 'conflicts',
+    });
+  });
+
+  it('still lists rows when the merge search fails', async () => {
+    fakeGh((args) => {
+      const query = args.find((a) => a.startsWith('query=')) || '';
+      if (query.includes('mergeStateStatus')) throw ghError('gh: HTTP 502');
+      return JSON.stringify({
+        data: {
+          search: { issueCount: 2, nodes: [prNode(4), prNode(5, { isDraft: true })] },
+        },
+      });
+    });
+    const { results } = await github.searchPulls({ repos: ['acme/shop'] });
+    expect(results[0].items.map((i) => i.merge)).toEqual(['unknown', 'draft']);
+  });
+
+  it("reports GraphQL's own errors per repo", async () => {
+    fakeGh(() => JSON.stringify({ errors: [{ message: 'API rate limit exceeded' }] }));
+    const { results } = await github.searchPulls({ repos: ['acme/shop'] });
+    expect(results[0].error.code).toBe('rate-limited');
+  });
+
+  it('classifies a GitHub 5xx or timeout as a network problem', () => {
+    expect(github.classifyError(ghError('gh: HTTP 502')).code).toBe('network');
+    expect(
+      github.classifyError(
+        ghError("gh: We couldn't respond to your request in time. Sorry about that.")
+      ).code
+    ).toBe('network');
+  });
+});

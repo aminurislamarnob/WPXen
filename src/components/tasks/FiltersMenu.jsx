@@ -8,11 +8,19 @@ import { Popover } from './pickers';
 // it, so the box always shows what's applied; the search runs when the
 // dropdown closes, the same moment a typed query runs on Enter.
 
-const STATUSES = [
-  { value: 'open', label: 'Open' },
-  { value: 'closed', label: 'Closed' },
-  { value: 'all', label: 'All' },
-];
+const STATUSES = {
+  issue: [
+    { value: 'open', label: 'Open' },
+    { value: 'closed', label: 'Closed' },
+    { value: 'all', label: 'All' },
+  ],
+  pr: [
+    { value: 'open', label: 'Open' },
+    { value: 'closed', label: 'Closed' },
+    { value: 'merged', label: 'Merged' },
+    { value: 'all', label: 'All' },
+  ],
+};
 
 function Field({ label, children }) {
   return (
@@ -25,7 +33,10 @@ function Field({ label, children }) {
   );
 }
 
-export default function FiltersMenu({ anchor, draft, onDraft, onClose }) {
+// `kind` 'issue' filters by Assignee; 'pr' by Reviewer (review-requested:)
+// and can pick Merged.
+export default function FiltersMenu({ kind = 'issue', anchor, draft, onDraft, onClose }) {
+  const person = kind === 'pr' ? 'reviewer' : 'assignee';
   const filters = parseFilters(draft);
   const [labelInput, setLabelInput] = useState('');
   const set = (patch) => onDraft(applyFilters(draft, { ...filters, ...patch }));
@@ -41,7 +52,7 @@ export default function FiltersMenu({ anchor, draft, onDraft, onClose }) {
       <div className="space-y-3 p-2">
         <Field label="Status">
           <div className="flex gap-1">
-            {STATUSES.map((s) => (
+            {STATUSES[kind].map((s) => (
               <button
                 key={s.value}
                 type="button"
@@ -66,11 +77,11 @@ export default function FiltersMenu({ anchor, draft, onDraft, onClose }) {
             className="form-input !h-7 !text-[12px]"
           />
         </Field>
-        <Field label="Assignee">
+        <Field label={kind === 'pr' ? 'Reviewer' : 'Assignee'}>
           <div className="flex gap-1">
             <input
-              value={filters.assignee}
-              onChange={(e) => set({ assignee: e.target.value.replace(/\s/g, '') })}
+              value={filters[person]}
+              onChange={(e) => set({ [person]: e.target.value.replace(/\s/g, '') })}
               onKeyDown={(e) => e.key === 'Enter' && onClose()}
               placeholder="login"
               className="form-input !h-7 !text-[12px] flex-1"
@@ -78,7 +89,7 @@ export default function FiltersMenu({ anchor, draft, onDraft, onClose }) {
             <button
               type="button"
               className="btn btn-secondary !h-7 !px-2 !text-[12px]"
-              onClick={() => set({ assignee: filters.assignee === '@me' ? '' : '@me' })}
+              onClick={() => set({ [person]: filters[person] === '@me' ? '' : '@me' })}
             >
               Me
             </button>
