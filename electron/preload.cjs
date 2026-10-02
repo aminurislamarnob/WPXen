@@ -28,6 +28,7 @@ const VALID_EVENT_CHANNELS = [
   'agent-floating-sessions-update',
   'floating-shortcut',
   'agent-projects-update',
+  'project-icon-changed',
   'agent-open-session',
   'browser-new-window',
   'browser-shortcut',
@@ -215,6 +216,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Tasks (GitHub via the gh CLI)
   tasksPreflight: () => ipcRenderer.invoke('tasks-preflight'),
+  projectIcon: (siteId, opts) => ipcRenderer.invoke('project-icon', siteId, opts),
+  setProjectIcon: (siteId, choice) =>
+    ipcRenderer.invoke('project-icon-set', siteId, choice),
   tasksInstallGh: () => ipcRenderer.invoke('tasks-install-gh'),
   tasksRepos: (opts) => ipcRenderer.invoke('tasks-repos', opts),
   tasksSearchIssues: (opts) => ipcRenderer.invoke('tasks-search-issues', opts),

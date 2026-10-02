@@ -34,6 +34,7 @@ import SiteLogs from './SiteLogs';
 import BrowserPane from './browser/BrowserPane';
 import * as webviewCache from '../lib/browser/webviewCache';
 import { WordPressIcon } from './icons';
+import ProjectIcon from './ProjectIcon';
 import { useOpenLink } from '../lib/useOpenLink';
 
 const NAV = [
@@ -491,6 +492,7 @@ export default function SiteDetail({ sites, refreshSites }) {
                 <ChevronLeft size={17} />
               </button>
             </Tooltip>
+            <ProjectIcon siteId={site.id} size={18} className="ml-1 mr-1.5" />
             <span className="text-[15px] font-bold text-foreground truncate">
               {site.name}
             </span>

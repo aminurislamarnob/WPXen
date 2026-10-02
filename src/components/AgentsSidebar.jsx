@@ -4,12 +4,11 @@ import {
   ChevronRight,
   ChevronDown,
   ChevronLeft,
-  Globe,
   GitBranch,
+  MoreHorizontal,
   Plus,
   X,
   FolderPlus,
-  FolderMinus,
   SlidersHorizontal,
   Check,
   Bell,
@@ -18,6 +17,10 @@ import {
 import { ProviderIcon } from './providerIcons';
 import { Tooltip, ConfirmDialog } from './ui';
 import LaunchMenu from './LaunchMenu';
+import ProjectIcon from './ProjectIcon';
+import ProjectIconPicker from './ProjectIconPicker';
+import ProjectMenu from './ProjectMenu';
+import { useOpenLink } from '../lib/useOpenLink';
 import AgentStatusGlyph from './AgentStatusGlyph';
 import {
   buildProjects,
@@ -248,6 +251,18 @@ export default function AgentsSidebar() {
     writeListOptions(next);
   };
   const [launchMenu, setLaunchMenu] = useState(null); // { siteId, x, y }
+  // A changed icon is written to the Site record; reload so the picker shows
+  // what's current.
+  useEffect(
+    () =>
+      window.electronAPI.on('project-icon-changed', () =>
+        window.electronAPI.getSites().then((list) => setSites(list || []))
+      ),
+    []
+  );
+  const [projectMenu, setProjectMenu] = useState(null); // { site, rows, anchor }
+  const [iconPicker, setIconPicker] = useState(null); // { site, anchor }
+  const openLink = useOpenLink();
   const [addMenu, setAddMenu] = useState(null); // { x, y } — Add project picker
   // New workspace menu; `siteId: null` shows the project list first.
   const [newMenu, setNewMenu] = useState(null); // { x, y, siteId }
@@ -476,7 +491,7 @@ export default function AgentsSidebar() {
                 draggable={canDrag}
                 onDragStart={() => setDragging(site.id)}
                 onDragEnd={() => setDragging(null)}
-                className={`group flex items-center gap-1.5 pl-2 pr-1 py-[5px] rounded-md text-[13px] hover:bg-sidebar-accent cursor-pointer ${
+                className={`group relative flex items-center gap-2 pl-2 pr-1 py-[5px] rounded-md text-[13px] hover:bg-sidebar-accent cursor-pointer ${
                   dragging === site.id ? 'opacity-50' : ''
                 } ${
                   site.id === activeSite
@@ -485,21 +500,10 @@ export default function AgentsSidebar() {
                 }`}
                 onClick={() => toggle(site.id)}
               >
-                {isOpen ? (
-                  <ChevronDown
-                    size={14}
-                    className="text-muted-foreground flex-shrink-0"
-                  />
-                ) : (
-                  <ChevronRight
-                    size={14}
-                    className="text-muted-foreground flex-shrink-0"
-                  />
-                )}
                 {urgent && urgent !== 'idle' ? (
                   <AgentStatusGlyph state={urgent} />
                 ) : (
-                  <Globe size={13} className="text-muted-foreground flex-shrink-0" />
+                  <ProjectIcon siteId={site.id} size={16} />
                 )}
                 <span className={`truncate ${anyUnread ? 'font-bold' : 'font-medium'}`}>
                   {site.name}
@@ -507,37 +511,68 @@ export default function AgentsSidebar() {
                 <span className="flex-1" />
                 {branch && !compact && (
                   <span
-                    className="flex items-center gap-0.5 min-w-0 max-w-[45%] text-[11px] text-muted-foreground group-hover:hidden"
+                    className={`flex items-center gap-0.5 min-w-0 max-w-[45%] text-[11px] text-muted-foreground group-hover:invisible ${
+                      projectMenu?.site.id === site.id ? 'invisible' : ''
+                    }`}
                     title={branch}
                   >
                     <GitBranch size={11} className="flex-shrink-0" />
                     <span className="truncate">{branch}</span>
                   </span>
                 )}
-                <Tooltip label="Remove from projects">
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      requestRemove(site, rows);
-                    }}
-                    aria-label={`Remove ${site.name} from projects`}
-                    className="hidden group-hover:flex p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent"
-                  >
-                    <FolderMinus size={13} />
-                  </button>
-                </Tooltip>
-                <Tooltip label="New session">
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setLaunchMenu({ siteId: site.id, ...menuBelow(e) });
-                    }}
-                    aria-label={`New session in ${site.name}`}
-                    className="hidden group-hover:flex p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent"
-                  >
-                    <Plus size={14} />
-                  </button>
-                </Tooltip>
+                {/* Orca's hover actions: they float over the end of the row
+                    instead of reserving width, so long names keep their room;
+                    an open menu keeps them shown. */}
+                <div
+                  className={`absolute right-1 top-1/2 z-10 -translate-y-1/2 flex items-center gap-0.5 rounded-md bg-sidebar-accent pl-1 transition-opacity ${
+                    projectMenu?.site.id === site.id
+                      ? 'opacity-100'
+                      : 'pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100'
+                  }`}
+                >
+                  <Tooltip label={isOpen ? 'Collapse' : 'Expand'}>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggle(site.id);
+                      }}
+                      aria-label={`${isOpen ? 'Collapse' : 'Expand'} ${site.name}`}
+                      className="flex size-5 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent"
+                    >
+                      <ChevronDown
+                        size={14}
+                        className={`transition-transform ${isOpen ? '' : '-rotate-90'}`}
+                      />
+                    </button>
+                  </Tooltip>
+                  <Tooltip label="Project actions">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const anchor = e.currentTarget;
+                        setProjectMenu((m) =>
+                          m?.site.id === site.id ? null : { site, rows, anchor }
+                        );
+                      }}
+                      aria-label={`${site.name} actions`}
+                      className="flex size-5 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent"
+                    >
+                      <MoreHorizontal size={14} />
+                    </button>
+                  </Tooltip>
+                  <Tooltip label="New session">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setLaunchMenu({ siteId: site.id, ...menuBelow(e) });
+                      }}
+                      aria-label={`New session in ${site.name}`}
+                      className="flex size-5 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent"
+                    >
+                      <Plus size={14} />
+                    </button>
+                  </Tooltip>
+                </div>
               </div>
 
               {isOpen && (
@@ -574,6 +609,26 @@ export default function AgentsSidebar() {
         )}
       </nav>
 
+      {projectMenu && (
+        <ProjectMenu
+          site={projectMenu.site}
+          anchor={projectMenu.anchor}
+          onClose={() => setProjectMenu(null)}
+          onSettings={() => navigate(`/sites/${encodeURIComponent(projectMenu.site.id)}`)}
+          onChangeIcon={() =>
+            setIconPicker({ site: projectMenu.site, anchor: projectMenu.anchor })
+          }
+          onOpenSite={() => openLink(projectMenu.site.url, projectMenu.site.id)}
+          onRemove={() => requestRemove(projectMenu.site, projectMenu.rows)}
+        />
+      )}
+      {iconPicker && (
+        <ProjectIconPicker
+          site={sites.find((x) => x.id === iconPicker.site.id) || iconPicker.site}
+          anchor={iconPicker.anchor}
+          onClose={() => setIconPicker(null)}
+        />
+      )}
       {launchMenu && (
         <LaunchMenu
           siteId={launchMenu.siteId}
@@ -605,7 +660,7 @@ export default function AgentsSidebar() {
                 onClick={() => addProject(site.id)}
                 className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[13px] text-foreground hover:bg-accent"
               >
-                <Globe size={14} className="flex-shrink-0 text-muted-foreground" />
+                <ProjectIcon siteId={site.id} size={14} />
                 <span className="truncate">{site.name}</span>
               </button>
             ))}
@@ -683,7 +738,7 @@ export default function AgentsSidebar() {
                 onClick={() => setNewMenu((m) => ({ ...m, siteId: site.id }))}
                 className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[13px] text-foreground hover:bg-accent"
               >
-                <Globe size={14} className="flex-shrink-0 text-muted-foreground" />
+                <ProjectIcon siteId={site.id} size={14} />
                 <span className="truncate flex-1">{site.name}</span>
                 <ChevronRight size={13} className="text-muted-foreground" />
               </button>

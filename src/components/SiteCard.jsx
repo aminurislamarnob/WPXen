@@ -23,6 +23,7 @@ import {
   Layers,
 } from 'lucide-react';
 import { WordPressIcon } from './icons';
+import ProjectIcon from './ProjectIcon';
 import { Tooltip } from './ui';
 import { useOpenLink } from '../lib/useOpenLink';
 
@@ -239,11 +240,11 @@ export default function SiteCard({
           <button
             onClick={openDetail}
             aria-label="Manage site"
-            className="icon-tile w-9 h-9 bg-[#30b0c7] hover:brightness-95 transition-all flex-shrink-0"
+            className="icon-tile w-9 h-9 bg-muted hover:bg-accent transition-colors flex-shrink-0"
           >
-            <span className="text-white text-sm font-bold">
-              {site.name.charAt(0).toUpperCase()}
-            </span>
+            {/* The project icon — custom, Site Icon, repo icon or the
+                WordPress mark — as in the Agents sidebar. */}
+            <ProjectIcon siteId={site.id} size={22} />
           </button>
         </Tooltip>
 
