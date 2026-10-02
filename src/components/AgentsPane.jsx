@@ -443,7 +443,7 @@ export default function AgentsPane() {
         </div>
         <p className="text-[15px] font-semibold text-foreground">Agents</p>
         <p className="mt-1 max-w-sm text-[13px] text-muted-foreground">
-          Pick a site in the sidebar, expand it, and choose an AI agent to open it in that
+          Add a project in the sidebar, then start an AI agent session in that
           site&rsquo;s directory.
         </p>
       </div>

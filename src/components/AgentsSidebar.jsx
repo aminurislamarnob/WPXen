@@ -1,8 +1,18 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { ChevronRight, ChevronDown, Globe, GitBranch, Plus, X } from 'lucide-react';
+import {
+  ChevronRight,
+  ChevronDown,
+  ChevronLeft,
+  Globe,
+  GitBranch,
+  Plus,
+  X,
+  FolderPlus,
+  FolderMinus,
+} from 'lucide-react';
 import { ProviderIcon } from './providerIcons';
-import { Tooltip } from './ui';
+import { Tooltip, ConfirmDialog } from './ui';
 import LaunchMenu from './LaunchMenu';
 import { buildProjects } from '../lib/agentsList';
 import {
@@ -15,8 +25,10 @@ import {
 // Agents working set; under it, one row per agent Session (a "workspace") —
 // live or exited. A Site joins the working set when a Session is launched in
 // it. Clicking a Session row opens it in the Agents pane; the hover "+" on a
-// Project starts a new one there. Leaving Agents mode goes through the
-// activity bar to its left (ActivityBar.jsx) or the back arrow (⌘[).
+// Project starts a new one there. The toolbar adds a Site to the working set
+// (Add project) or starts a Session in the current one (New workspace).
+// Leaving Agents mode goes through the activity bar to its left
+// (ActivityBar.jsx) or the back arrow (⌘[).
 export default function AgentsSidebar() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -33,6 +45,10 @@ export default function AgentsSidebar() {
   const [branches, setBranches] = useState({}); // siteId -> branch | null
   const [collapsed, setCollapsed] = useState(() => new Set());
   const [launchMenu, setLaunchMenu] = useState(null); // { siteId, x, y }
+  const [addMenu, setAddMenu] = useState(null); // { x, y } — Add project picker
+  // New workspace menu; `siteId: null` shows the project list first.
+  const [newMenu, setNewMenu] = useState(null); // { x, y, siteId }
+  const [removing, setRemoving] = useState(null); // { site, live } pending confirm
 
   // Re-read sites when the working set changes — a newly added project may be
   // a site created since this mounted.
@@ -85,15 +101,64 @@ export default function AgentsSidebar() {
 
   const launch = (siteId, agentId, targetId) => {
     setLaunchMenu(null);
+    setNewMenu(null);
     navigate(`/agents/${encodeURIComponent(siteId)}`, {
       state: { spawn: agentId, target: targetId, nonce: Date.now() },
     });
   };
 
+  const menuBelow = (e) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    return { x: r.left, y: r.bottom + 4 };
+  };
+
+  const addProject = async (siteId) => {
+    setAddMenu(null);
+    await window.electronAPI.addAgentProject(siteId);
+    navigate(`/agents/${encodeURIComponent(siteId)}`);
+  };
+
+  // Ask before ending running Sessions; a Project with none just goes.
+  const requestRemove = (site, rows) => {
+    const live = rows.filter((s) => !s.exited).length;
+    if (live === 0) window.electronAPI.removeAgentProject(site.id);
+    else setRemoving({ site, live });
+  };
+
+  const outside = sites.filter((s) => !projectIds.includes(s.id));
+  // The "current" project for New workspace: the open Site, if it's one.
+  const current = activeSite && projectIds.includes(activeSite) ? activeSite : null;
+
   return (
     <div className="flex-1 flex flex-col min-h-0 no-drag">
-      <div className="px-4 pb-1 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
-        Projects
+      <div className="flex items-center gap-0.5 pl-4 pr-3 pb-1">
+        <span className="flex-1 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
+          Projects
+        </span>
+        <Tooltip label="Add project">
+          <button
+            onClick={(e) => {
+              // Refresh first: the picker must offer sites created since mount.
+              window.electronAPI.getSites().then((s) => setSites(s || []));
+              setAddMenu((m) => (m ? null : menuBelow(e)));
+            }}
+            aria-label="Add project"
+            className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-sidebar-accent"
+          >
+            <FolderPlus size={14} />
+          </button>
+        </Tooltip>
+        <Tooltip label="New workspace">
+          <button
+            onClick={(e) =>
+              setNewMenu((m) => (m ? null : { ...menuBelow(e), siteId: current }))
+            }
+            aria-label="New workspace"
+            className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-sidebar-accent"
+          >
+            <Plus size={15} />
+          </button>
+        </Tooltip>
       </div>
 
       <nav className="flex-1 px-3 overflow-y-auto space-y-0.5">
@@ -133,12 +198,23 @@ export default function AgentsSidebar() {
                     <span className="truncate">{branch}</span>
                   </span>
                 )}
+                <Tooltip label="Remove from projects">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      requestRemove(site, rows);
+                    }}
+                    aria-label={`Remove ${site.name} from projects`}
+                    className="hidden group-hover:flex p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent"
+                  >
+                    <FolderMinus size={13} />
+                  </button>
+                </Tooltip>
                 <Tooltip label="New session">
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      const r = e.currentTarget.getBoundingClientRect();
-                      setLaunchMenu({ siteId: site.id, x: r.left, y: r.bottom + 4 });
+                      setLaunchMenu({ siteId: site.id, ...menuBelow(e) });
                     }}
                     aria-label={`New session in ${site.name}`}
                     className="hidden group-hover:flex p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent"
@@ -196,7 +272,7 @@ export default function AgentsSidebar() {
         })}
         {projects.length === 0 && (
           <p className="px-2 py-1 text-xs text-muted-foreground leading-relaxed">
-            No projects yet. Launch an agent from a site to add it here.
+            No projects yet. Use Add project to pick a site to work on with agents.
           </p>
         )}
       </nav>
@@ -209,6 +285,130 @@ export default function AgentsSidebar() {
           onLaunch={(agentId, targetId) => launch(launchMenu.siteId, agentId, targetId)}
         />
       )}
+
+      {addMenu && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setAddMenu(null)} />
+          <div
+            className="panel fixed z-50 min-w-[200px] max-w-[280px] max-h-[60vh] overflow-y-auto py-1"
+            style={{ left: addMenu.x, top: addMenu.y }}
+          >
+            {outside.map((site) => (
+              <button
+                key={site.id}
+                onClick={() => addProject(site.id)}
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[13px] text-foreground hover:bg-accent"
+              >
+                <Globe size={14} className="flex-shrink-0 text-muted-foreground" />
+                <span className="truncate">{site.name}</span>
+              </button>
+            ))}
+            {outside.length === 0 && (
+              <p className="px-3 py-1.5 text-[12px] text-muted-foreground">
+                Every site is already a project.
+              </p>
+            )}
+            <div className="my-1 h-px bg-border" />
+            <button
+              onClick={() => {
+                setAddMenu(null);
+                navigate('/sites', { state: { addForAgents: true } });
+              }}
+              className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[13px] text-muted-foreground hover:bg-accent hover:text-foreground"
+            >
+              <Plus size={14} />
+              Create new site…
+            </button>
+          </div>
+        </>
+      )}
+
+      {newMenu && newMenu.siteId && (
+        <LaunchMenu
+          key={newMenu.siteId}
+          siteId={newMenu.siteId}
+          anchor={newMenu}
+          onClose={() => setNewMenu(null)}
+          onLaunch={(agentId, targetId) => launch(newMenu.siteId, agentId, targetId)}
+          header={
+            <div className="px-3 pt-1 pb-1.5 text-[11px] font-medium text-muted-foreground truncate">
+              {sites.find((s) => s.id === newMenu.siteId)?.name}
+            </div>
+          }
+          footer={
+            projects.length > 1 && (
+              <>
+                <div className="my-1 h-px bg-border" />
+                <button
+                  onClick={() => setNewMenu((m) => ({ ...m, siteId: null }))}
+                  className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[13px] text-muted-foreground hover:bg-accent hover:text-foreground"
+                >
+                  <ChevronRight size={14} />
+                  In another project…
+                </button>
+              </>
+            )
+          }
+        />
+      )}
+
+      {newMenu && !newMenu.siteId && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setNewMenu(null)} />
+          <div
+            className="panel fixed z-50 min-w-[200px] max-w-[280px] max-h-[60vh] overflow-y-auto py-1"
+            style={{ left: newMenu.x, top: newMenu.y }}
+          >
+            {current && (
+              <>
+                <button
+                  onClick={() => setNewMenu((m) => ({ ...m, siteId: current }))}
+                  className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[13px] text-muted-foreground hover:bg-accent hover:text-foreground"
+                >
+                  <ChevronLeft size={14} />
+                  Back
+                </button>
+                <div className="my-1 h-px bg-border" />
+              </>
+            )}
+            {projects.map(({ site }) => (
+              <button
+                key={site.id}
+                onClick={() => setNewMenu((m) => ({ ...m, siteId: site.id }))}
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[13px] text-foreground hover:bg-accent"
+              >
+                <Globe size={14} className="flex-shrink-0 text-muted-foreground" />
+                <span className="truncate flex-1">{site.name}</span>
+                <ChevronRight size={13} className="text-muted-foreground" />
+              </button>
+            ))}
+            {projects.length === 0 && (
+              <p className="px-3 py-1.5 text-[12px] text-muted-foreground">
+                Add a project first.
+              </p>
+            )}
+          </div>
+        </>
+      )}
+
+      <ConfirmDialog
+        open={removing != null}
+        title="Remove project?"
+        description={
+          removing
+            ? `End ${removing.live} running session${removing.live === 1 ? '' : 's'} in ${
+                removing.site.name
+              } and remove it from Projects? The site itself is not deleted.`
+            : ''
+        }
+        confirmLabel="End & Remove"
+        danger
+        onConfirm={() => {
+          window.electronAPI.removeAgentProject(removing.site.id);
+          setRemoving(null);
+        }}
+        onCancel={() => setRemoving(null)}
+      />
     </div>
   );
 }

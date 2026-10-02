@@ -16,6 +16,8 @@ export default function LaunchMenu({
   onOpenSettings,
   agents: agentsProp,
   targets: targetsProp,
+  header,
+  footer,
 }) {
   const [agents, setAgents] = useState(agentsProp || null);
   const [targets, setTargets] = useState(targetsProp || null);
@@ -48,6 +50,7 @@ export default function LaunchMenu({
         className="panel fixed z-50 min-w-[200px] max-w-[280px] py-1"
         style={{ left: anchor.x, top: anchor.y }}
       >
+        {header}
         {list.map((a) => {
           const agentTargets = targetList.filter((t) => t.agentId === a.id);
           return (
@@ -92,6 +95,7 @@ export default function LaunchMenu({
             </button>
           </>
         )}
+        {footer}
       </div>
     </>
   );

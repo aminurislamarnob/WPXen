@@ -318,6 +318,24 @@ function registerHandlers(win, storeInstance) {
   });
 
   ipcMain.handle('agent-projects-get', () => getProjectIds());
+  ipcMain.handle('agent-project-add', (_e, siteId) => {
+    if (!findSite(siteId)) return { error: 'Site not found' };
+    addToProjects(siteId);
+    return { ok: true };
+  });
+  // Removing a Project ends its Sessions first (the renderer confirms) — a
+  // Session with no row would be an agent running where nothing shows it.
+  ipcMain.handle('agent-project-remove', (_e, siteId) => {
+    for (const s of agents.listAllSessions()) {
+      if (s.siteId === siteId) agents.stop(s.sessionId);
+    }
+    store.set(
+      agentProjects.STORE_KEY,
+      agentProjects.removeProject(getProjectIds(), siteId)
+    );
+    sendProjects();
+    return { ok: true };
+  });
   ipcMain.handle('agent-projects-reorder', (_e, order) => {
     const next = agentProjects.reorderProjects(getProjectIds(), order);
     store.set(agentProjects.STORE_KEY, next);

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { Plus, Search, Globe, AlertTriangle, Loader, Upload, Check } from 'lucide-react';
 import SiteCard from './SiteCard';
 import AddSiteModal from './AddSiteModal';
@@ -78,7 +79,12 @@ function DeleteConfirmModal({ site, onConfirm, onClose }) {
 }
 
 export default function Sites({ sites, setSites, refreshSites }) {
-  const [showAddModal, setShowAddModal] = useState(false);
+  const location = useLocation();
+  const navigate = useNavigate();
+  // The Agents sidebar's "Add project → Create new site…" lands here with the
+  // modal requested, and wants the new site handed back as a project.
+  const fromAgents = !!location.state?.addForAgents;
+  const [showAddModal, setShowAddModal] = useState(fromAgents);
   const [showImportModal, setShowImportModal] = useState(false);
   const [cloningSite, setCloningSite] = useState(null);
   const [blueprintSite, setBlueprintSite] = useState(null);
@@ -239,8 +245,12 @@ export default function Sites({ sites, setSites, refreshSites }) {
     setDeletingSite(null);
   }
 
-  function handleSiteAdded(site) {
+  async function handleSiteAdded(site) {
     setSites((prev) => [...prev, site]);
+    if (fromAgents && site?.id) {
+      await window.electronAPI.addAgentProject(site.id);
+      navigate(`/agents/${encodeURIComponent(site.id)}`);
+    }
   }
 
   async function handleToggleHttps(site) {
