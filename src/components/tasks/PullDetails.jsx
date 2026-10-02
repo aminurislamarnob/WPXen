@@ -354,7 +354,7 @@ export default function PullDetails({
               {tab === 'conversation' && (
                 <>
                   <CommentCard
-                    author={{ login: pull.author }}
+                    author={{ login: pull.author, avatarUrl: pull.authorAvatar }}
                     at={pull.createdAt}
                     body={pull.body}
                     url={pull.url}

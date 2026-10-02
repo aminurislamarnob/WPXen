@@ -284,7 +284,7 @@ export default function IssueDetails({
           <div className="grid grid-cols-[1fr_220px] gap-6 items-start">
             <div className="min-w-0 space-y-4">
               <CommentCard
-                author={{ login: issue.author }}
+                author={{ login: issue.author, avatarUrl: issue.authorAvatar }}
                 at={issue.createdAt}
                 body={issue.body}
                 url={issue.url}
