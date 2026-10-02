@@ -184,6 +184,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   addAgentProject: (siteId) => ipcRenderer.invoke('agent-project-add', siteId),
   removeAgentProject: (siteId) => ipcRenderer.invoke('agent-project-remove', siteId),
   getGitBranch: (rootPath) => ipcRenderer.invoke('git-branch', rootPath),
+  setAgentView: (sessionId) => ipcRenderer.send('agent-view', sessionId),
+  markSessionRead: (sessionId, read) =>
+    ipcRenderer.invoke('agent-session-mark', sessionId, read),
   launchAgent: (siteId, agentId, targetId) =>
     ipcRenderer.invoke('agent-launch', siteId, agentId, targetId),
 

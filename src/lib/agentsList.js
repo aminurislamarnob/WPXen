@@ -52,3 +52,16 @@ export function formatAge(ms) {
   if (h < 24) return `${h}h`;
   return `${Math.floor(h / 24)}d`;
 }
+
+// How urgently a Session state wants the user, most first. A collapsed
+// project shows its most urgent Session's glyph, so it still rings or spins.
+const URGENCY = ['needs-input', 'working', 'error', 'done', 'exited', 'idle'];
+
+export function mostUrgent(sessions) {
+  let best = null;
+  for (const s of sessions || []) {
+    const rank = URGENCY.indexOf(s.state);
+    if (rank !== -1 && (best === null || rank < URGENCY.indexOf(best))) best = s.state;
+  }
+  return best;
+}

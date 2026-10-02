@@ -350,6 +350,23 @@ function registerHandlers(win, storeInstance) {
   });
   ipcMain.handle('git-branch', (_e, rootPath) => git.currentBranch(rootPath));
 
+  // Unread bookkeeping needs to know what's actually on screen: the Session
+  // the Agents pane shows (renderer-reported) and whether the window is
+  // focused (observed here).
+  ipcMain.on('agent-view', (_e, sessionId) =>
+    agents.setView({ selected: sessionId || null })
+  );
+  ipcMain.handle('agent-session-mark', (_e, sessionId, read) => {
+    agents.markRead(sessionId, !!read);
+    return { ok: true };
+  });
+  if (win) {
+    agents.setView({ focused: win.isFocused() });
+    win.on('focus', () => agents.setView({ focused: true }));
+    win.on('blur', () => agents.setView({ focused: false }));
+    win.on('hide', () => agents.setView({ focused: false }));
+  }
+
   // Launch an Agent for a Site. Always spawns a NEW Session (many per Site are
   // allowed), returning its sessionId for the renderer to attach a terminal to.
   // `targetId` (optional) selects a saved Launch Target on the Site; without it

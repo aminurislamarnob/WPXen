@@ -10,12 +10,14 @@ import {
   X,
   FolderPlus,
   FolderMinus,
+  Bell,
+  BellOff,
 } from 'lucide-react';
 import { ProviderIcon } from './providerIcons';
 import { Tooltip, ConfirmDialog } from './ui';
 import LaunchMenu from './LaunchMenu';
 import AgentStatusGlyph from './AgentStatusGlyph';
-import { buildProjects, formatAge } from '../lib/agentsList';
+import { buildProjects, formatAge, mostUrgent } from '../lib/agentsList';
 import {
   useAgentSessions,
   useAgentProjects,
@@ -40,14 +42,33 @@ function useNow(ms) {
   return now;
 }
 
+// A small hover action on a row (mark read, dismiss), kept from opening it.
+function RowAction({ label, onClick, children }) {
+  return (
+    <Tooltip label={label}>
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          onClick();
+        }}
+        aria-label={label}
+        className="hidden group-hover/row:flex p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent"
+      >
+        {children}
+      </button>
+    </Tooltip>
+  );
+}
+
 // One agent Session: status glyph, provider mark, title, and how long since
-// its status last changed. Exited rows get a dismiss button on hover.
-function SessionRow({ session: s, now, selected, onOpen }) {
+// its status last changed. Unread rows are bold. On hover the age gives way to
+// a read/unread toggle, plus dismiss on an exited row.
+export function SessionRow({ session: s, now, selected, onOpen, siteName }) {
   const ended = s.state === 'exited' || s.state === 'error';
   return (
     <div
       onClick={onOpen}
-      title={s.displayTitle}
+      title={siteName ? `${siteName} · ${s.displayTitle}` : s.displayTitle}
       className={`group/row w-full min-w-0 flex items-center gap-1.5 pl-1.5 pr-1 py-[5px] rounded-md text-[13px] cursor-pointer ${
         selected
           ? 'bg-sidebar-accent text-sidebar-foreground'
@@ -56,29 +77,36 @@ function SessionRow({ session: s, now, selected, onOpen }) {
     >
       <AgentStatusGlyph state={s.state} />
       <ProviderIcon agentId={s.agentId} brand size={13} className="flex-shrink-0" />
-      <span className={`truncate flex-1 ${ended ? 'text-muted-foreground' : ''}`}>
-        {s.displayTitle}
-      </span>
       <span
-        className={`text-[11px] text-muted-foreground tabular-nums flex-shrink-0 ${
-          ended ? 'group-hover/row:hidden' : ''
+        className={`truncate flex-1 ${
+          s.unread
+            ? 'font-semibold text-sidebar-foreground'
+            : ended
+              ? 'text-muted-foreground'
+              : ''
         }`}
       >
+        {s.displayTitle}
+        {siteName && (
+          <span className="font-normal text-muted-foreground"> · {siteName}</span>
+        )}
+      </span>
+      <span className="text-[11px] text-muted-foreground tabular-nums flex-shrink-0 group-hover/row:hidden">
         {formatAge(now - s.changedAt)}
       </span>
+      <RowAction
+        label={s.unread ? 'Mark as read' : 'Mark as unread'}
+        onClick={() => window.electronAPI.markSessionRead(s.sessionId, s.unread)}
+      >
+        {s.unread ? <BellOff size={12} /> : <Bell size={12} />}
+      </RowAction>
       {ended && (
-        <Tooltip label="Dismiss">
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              window.electronAPI.dismissSession(s.sessionId);
-            }}
-            aria-label="Dismiss session"
-            className="hidden group-hover/row:flex p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent"
-          >
-            <X size={12} />
-          </button>
-        </Tooltip>
+        <RowAction
+          label="Dismiss"
+          onClick={() => window.electronAPI.dismissSession(s.sessionId)}
+        >
+          <X size={12} />
+        </RowAction>
       )}
     </div>
   );
@@ -222,6 +250,10 @@ export default function AgentsSidebar() {
       <nav className="flex-1 px-3 overflow-y-auto space-y-0.5">
         {projects.map(({ site, sessions: rows }) => {
           const isOpen = !collapsed.has(site.id);
+          // Collapsed, the project stands in for its sessions: their most
+          // urgent glyph replaces the globe, and any unread makes it bold.
+          const urgent = isOpen ? null : mostUrgent(rows);
+          const anyUnread = !isOpen && rows.some((r) => r.unread);
           const branch = branches[site.id];
           return (
             <div key={site.id}>
@@ -244,8 +276,14 @@ export default function AgentsSidebar() {
                     className="text-muted-foreground flex-shrink-0"
                   />
                 )}
-                <Globe size={13} className="text-muted-foreground flex-shrink-0" />
-                <span className="truncate font-medium">{site.name}</span>
+                {urgent && urgent !== 'idle' ? (
+                  <AgentStatusGlyph state={urgent} />
+                ) : (
+                  <Globe size={13} className="text-muted-foreground flex-shrink-0" />
+                )}
+                <span className={`truncate ${anyUnread ? 'font-bold' : 'font-medium'}`}>
+                  {site.name}
+                </span>
                 <span className="flex-1" />
                 {branch && (
                   <span

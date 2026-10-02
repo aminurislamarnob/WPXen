@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { buildProjects, sessionTitle, formatAge } from '../src/lib/agentsList';
+import {
+  buildProjects,
+  sessionTitle,
+  formatAge,
+  mostUrgent,
+} from '../src/lib/agentsList';
 
 const site = (id, name = id) => ({ id, name });
 let seq = 0;
@@ -95,5 +100,23 @@ describe('formatAge', () => {
 
   it('never goes negative under clock skew', () => {
     expect(formatAge(-10_000)).toBe('now');
+  });
+});
+
+describe('mostUrgent', () => {
+  const st = (state) => ({ state });
+
+  it('ranks needs-input over working over error over done over exited', () => {
+    expect(mostUrgent([st('done'), st('needs-input'), st('working')])).toBe(
+      'needs-input'
+    );
+    expect(mostUrgent([st('done'), st('working'), st('error')])).toBe('working');
+    expect(mostUrgent([st('exited'), st('done'), st('error')])).toBe('error');
+    expect(mostUrgent([st('exited'), st('done')])).toBe('done');
+    expect(mostUrgent([st('idle'), st('exited')])).toBe('exited');
+  });
+
+  it('is null for a project with no sessions', () => {
+    expect(mostUrgent([])).toBe(null);
   });
 });

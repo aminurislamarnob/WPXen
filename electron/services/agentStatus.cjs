@@ -79,8 +79,9 @@ function cleanTitle(t) {
 
 // Incremental OSC parser. Escape sequences routinely straddle pty chunks, so
 // parser state survives between `feed` calls. Calls `onTitle(text)` for every
-// OSC 0/2 (set window title) sequence.
-function createOscParser({ onTitle }) {
+// OSC 0/2 (set window title) sequence, and `onBell()` for a BEL that is a real
+// bell — not the BEL that terminates an OSC.
+function createOscParser({ onTitle, onBell = () => {} }) {
   let state = 'normal'; // normal | esc | osc | oscEsc
   let buf = '';
 
@@ -98,6 +99,7 @@ function createOscParser({ onTitle }) {
       switch (state) {
         case 'normal':
           if (ch === ESC) state = 'esc';
+          else if (ch === BEL) onBell();
           break;
         case 'esc':
           if (ch === ']') {
@@ -124,47 +126,88 @@ function createOscParser({ onTitle }) {
   };
 }
 
+// Input xterm sends on its own — device attributes, status and cursor
+// position reports, focus in/out, colour query answers. It travels the same
+// path as keystrokes, so `typed()` callers filter it out with this.
+const TERMINAL_REPLY =
+  // eslint-disable-next-line no-control-regex -- matching escape sequences is the point
+  /^(?:\x1b\[[?>=]?[\d;]*[cnRIOt]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\))+$/;
+
+function isTerminalReply(data) {
+  return TERMINAL_REPLY.test(String(data || ''));
+}
+
+const ENDED = new Set(['exited', 'error']);
+// States that mean "there's something here for you" — entering one while the
+// session isn't on screen marks it unread.
+const ATTENTION = new Set(['done', 'needs-input', 'error']);
+
 // One tracker per Session. `now` is injected so tests control the clock.
-// `keywords: false` for a plain shell session (see TITLE_KEYWORDS).
-function createTracker({ now = Date.now, keywords = true } = {}) {
-  const snap = { state: 'idle', title: '', changedAt: now() };
+// `agent: false` for a plain shell session: no keyword title rules (a shell's
+// title is a path), and its bell — a failed tab completion, usually — marks
+// the row unread but doesn't claim anything needs input.
+function createTracker({ now = Date.now, agent = true } = {}) {
+  const snap = { state: 'idle', title: '', changedAt: now(), unread: false };
   let dirty = false;
+  let onScreen = false; // selected in the Agents pane AND the window focused
+  let beforeInput = 'idle'; // the state needs-input interrupted
+
+  const touch = () => {
+    dirty = true;
+  };
+  const setUnread = (v) => {
+    if (snap.unread !== v) {
+      snap.unread = v;
+      touch();
+    }
+  };
+  const attention = () => {
+    if (!onScreen) setUnread(true);
+  };
 
   const setState = (state) => {
     if (state === snap.state) return;
+    if (state === 'needs-input')
+      beforeInput = snap.state === 'working' ? 'done' : snap.state;
     snap.state = state;
     snap.changedAt = now();
-    dirty = true;
+    touch();
+    if (ATTENTION.has(state)) attention();
   };
 
   // The one entry point every source goes through.
   const apply = ({ state }) => {
     // An exited session is final; late output can't revive it.
-    if (snap.state === 'exited' || snap.state === 'error') return;
-    if (state === 'working') return setState('working');
-    if (state === 'idle') {
-      // Coming to rest after work is what "done" means; at rest from the
-      // start is just idle, and a reviewed "done" stays done until new work.
-      if (snap.state === 'working') setState('done');
-      return;
+    if (ENDED.has(snap.state)) return;
+    if (state === 'working' || state === 'needs-input' || ENDED.has(state)) {
+      return setState(state);
     }
-    if (state === 'exited' || state === 'error') setState(state);
+    if (state === 'idle') {
+      // Coming to rest after work (or after a prompt) is what "done" means; at
+      // rest from the start is just idle, and a reviewed "done" stays done
+      // until new work.
+      if (snap.state === 'working' || snap.state === 'needs-input') setState('done');
+    }
   };
 
   const feed = createOscParser({
     onTitle(raw) {
-      const kind = classifyTitle(raw, { keywords });
-      // A working agent whose title loses its status glyph has gone back to
-      // the shell prompt (the agent CLI exited) — treat it as at rest.
-      if (kind === 'working' || kind === 'idle') apply({ state: kind, source: 'title' });
-      else if (kind === null && snap.state === 'working') {
-        apply({ state: 'idle', source: 'title' });
-      }
+      const kind = classifyTitle(raw, { keywords: agent });
+      if (kind === 'permission') apply({ state: 'needs-input', source: 'title' });
+      else if (kind) apply({ state: kind, source: 'title' });
+      // A busy agent whose title loses its status glyph has gone back to the
+      // shell prompt (the agent CLI exited) — treat it as at rest.
+      else if (snap.state === 'working') apply({ state: 'idle', source: 'title' });
       const title = cleanTitle(raw);
       if (title && title !== snap.title) {
         snap.title = title;
-        dirty = true;
+        touch();
       }
+    },
+    onBell() {
+      if (ENDED.has(snap.state)) return;
+      if (agent) apply({ state: 'needs-input', source: 'bell' });
+      attention();
     },
   });
 
@@ -190,6 +233,33 @@ function createTracker({ now = Date.now, keywords = true } = {}) {
       apply(event);
       return flush();
     },
+    // Whether the session is on screen (selected + window focused). Coming on
+    // screen is "viewing" it, which reads it.
+    view(visible) {
+      onScreen = !!visible;
+      if (onScreen) setUnread(false);
+      return flush();
+    },
+    // The user typed into the session: they've seen it, and if it was waiting
+    // on them, they've answered — back to where it was until the agent says
+    // otherwise.
+    typed() {
+      setUnread(false);
+      if (snap.state === 'needs-input') {
+        snap.state = beforeInput;
+        snap.changedAt = now();
+        touch();
+      }
+      return flush();
+    },
+    markRead() {
+      setUnread(false);
+      return flush();
+    },
+    markUnread() {
+      setUnread(true);
+      return flush();
+    },
     snapshot() {
       return { ...snap };
     },
@@ -201,5 +271,6 @@ module.exports = {
   createOscParser,
   cleanTitle,
   classifyTitle,
+  isTerminalReply,
   TITLE_GLYPHS,
 };

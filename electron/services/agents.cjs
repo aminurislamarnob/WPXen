@@ -12,7 +12,7 @@ const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
 const pty = require('node-pty');
-const { createTracker } = require('./agentStatus.cjs');
+const { createTracker, isTerminalReply } = require('./agentStatus.cjs');
 
 // ── Registry ────────────────────────────────────────────────────────────────
 // Curated, data-shaped so user-defined Agents can drop in later (Q5). `cmd` is
@@ -686,6 +686,7 @@ function listAllSessions() {
       title: snap.title,
       state: snap.state,
       changedAt: snap.changedAt,
+      unread: snap.unread,
     });
   }
   return out;
@@ -768,13 +769,13 @@ function launch({ site, agentId, target = null, globalArgs = '' }) {
     exited: false,
     exitCode: null,
     startedAt: Date.now(),
-    // Keyword title rules are for agents; a plain shell's title is a path.
-    tracker: createTracker({ keywords: agent.id !== SHELL_ID }),
+    tracker: createTracker({ agent: agent.id !== SHELL_ID }),
     // `started` gates the type-the-command step; a shell session has already
     // arrived at what the user wanted, so it starts out done.
     started: startsImmediately,
   };
   sessions.set(sessionId, session);
+  session.tracker.view(isOnScreen(sessionId));
 
   // Run the agent once the shell is ready: wait a short settle window after the
   // first output (so rc files that print during init don't swallow the typed
@@ -796,9 +797,12 @@ function launch({ site, agentId, target = null, globalArgs = '' }) {
   term.onData((data) => {
     scheduleRun();
     const before = session.tracker.snapshot().state;
+    const unreadBefore = session.tracker.snapshot().unread;
     if (session.tracker.output(data)) {
-      // Status flips go out at once; title-only churn (spinner frames) waits.
-      emitChange({ immediate: session.tracker.snapshot().state !== before });
+      // Status and unread flips go out at once; title-only churn (spinner
+      // frames) waits.
+      const after = session.tracker.snapshot();
+      emitChange({ immediate: after.state !== before || after.unread !== unreadBefore });
     }
     session.buffer += data;
     if (session.buffer.length > MAX_BUFFER) {
@@ -843,7 +847,39 @@ function attach(sessionId, win) {
 
 function write(sessionId, data) {
   const session = sessions.get(sessionId);
-  if (session && !session.exited) session.pty.write(data);
+  if (session && !session.exited) {
+    session.pty.write(data);
+    // xterm's own replies (device/cursor reports, focus events) share this
+    // path with keystrokes but aren't the user answering anything.
+    if (!isTerminalReply(data) && session.tracker.typed()) {
+      emitChange({ immediate: true });
+    }
+  }
+}
+
+// What's on screen: the Session selected in the Agents pane (null when the
+// pane isn't showing) and whether the window has focus. A Session counts as
+// viewed only when both hold — selected in a background window isn't seen.
+const view = { selected: null, focused: false };
+
+function isOnScreen(sessionId) {
+  return view.focused && view.selected === sessionId;
+}
+
+function setView(patch) {
+  Object.assign(view, patch);
+  let changed = false;
+  for (const s of sessions.values()) {
+    if (s.tracker.view(isOnScreen(s.sessionId))) changed = true;
+  }
+  if (changed) emitChange({ immediate: true });
+}
+
+function markRead(sessionId, read = true) {
+  const session = sessions.get(sessionId);
+  if (!session) return;
+  const changed = read ? session.tracker.markRead() : session.tracker.markUnread();
+  if (changed) emitChange({ immediate: true });
 }
 
 // Clear a Session's ring buffer so a later reattach doesn't replay content the
@@ -918,6 +954,8 @@ module.exports = {
   launch,
   attach,
   write,
+  setView,
+  markRead,
   clearBuffer,
   resize,
   stop,

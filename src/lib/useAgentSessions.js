@@ -47,6 +47,8 @@ const listeners = new Set();
 export function setSelectedSession(sessionId) {
   if (selected === sessionId) return;
   selected = sessionId;
+  // The main process clears unread for whatever is on screen.
+  window.electronAPI.setAgentView(sessionId);
   for (const l of listeners) l();
 }
 

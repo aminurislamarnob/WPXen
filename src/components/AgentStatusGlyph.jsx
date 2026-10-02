@@ -1,4 +1,4 @@
-import { Check } from 'lucide-react';
+import { Check, Bell } from 'lucide-react';
 
 // The status mark at the head of an agent Session row (see agentStatus.cjs
 // for the states). Fixed 14px box so rows align whatever the state.
@@ -14,6 +14,15 @@ export default function AgentStatusGlyph({ state }) {
         onAnimationStart={(e) => {
           for (const a of e.currentTarget.getAnimations?.() || []) a.startTime = 0;
         }}
+      />
+    );
+  } else if (state === 'needs-input') {
+    label = 'Needs your input';
+    mark = (
+      <Bell
+        size={12}
+        strokeWidth={2.25}
+        className="text-status-warning fill-status-warning"
       />
     );
   } else if (state === 'done') {

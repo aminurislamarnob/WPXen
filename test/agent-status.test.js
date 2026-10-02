@@ -3,6 +3,7 @@ import {
   createTracker,
   cleanTitle,
   classifyTitle,
+  isTerminalReply,
 } from '../electron/services/agentStatus.cjs';
 
 const osc = (text, term = '\x07') => `\x1b]0;${text}${term}`;
@@ -133,7 +134,7 @@ describe('agent status tracker — state', () => {
     agent.output(osc('Codex: thinking'));
     expect(agent.snapshot().state).toBe('working');
 
-    const shell = createTracker({ keywords: false });
+    const shell = createTracker({ agent: false });
     shell.output(osc('~/projects/running-shoes'));
     expect(shell.snapshot().state).toBe('idle');
   });
@@ -168,5 +169,136 @@ describe('classifyTitle', () => {
   it('returns null for a title with no signal', () => {
     expect(classifyTitle('Claude Code')).toBe(null);
     expect(classifyTitle('')).toBe(null);
+  });
+});
+
+describe('agent status tracker — needs input', () => {
+  it('a bell outside any escape sequence means needs input', () => {
+    const t = createTracker();
+    t.output(osc('⠐ Task'));
+    expect(t.output('Allow edit to cart.php? \x07')).toBe(true);
+    expect(t.snapshot().state).toBe('needs-input');
+  });
+
+  it('the BEL terminating an OSC title is not a bell', () => {
+    const t = createTracker();
+    t.output(osc('✳ Claude Code'));
+    expect(t.snapshot().state).toBe('idle');
+    expect(t.snapshot().unread).toBe(false);
+  });
+
+  it('a Gemini ✋ title means needs input', () => {
+    const t = createTracker();
+    t.output(osc('✋ Gemini'));
+    expect(t.snapshot().state).toBe('needs-input');
+  });
+
+  it('a "permission" keyword title means needs input', () => {
+    const t = createTracker();
+    t.output(osc('Codex: action required'));
+    expect(t.snapshot().state).toBe('needs-input');
+  });
+
+  it('resumes working when the agent picks back up', () => {
+    const t = createTracker();
+    t.output('\x07');
+    t.output(osc('⠐ Task'));
+    expect(t.snapshot().state).toBe('working');
+  });
+
+  it('typing an answer drops needs-input back to the prior resting state', () => {
+    const t = createTracker();
+    t.output(osc('⠐ Task'));
+    t.output('\x07');
+    t.typed();
+    expect(t.snapshot().state).toBe('done');
+  });
+
+  it("a plain shell's bell marks unread but claims no input is needed", () => {
+    const t = createTracker({ agent: false });
+    t.output('\x07');
+    expect(t.snapshot()).toMatchObject({ state: 'idle', unread: true });
+  });
+});
+
+describe('agent status tracker — unread', () => {
+  const finish = (t) => {
+    t.output(osc('⠐ Task'));
+    t.output(osc('✳ Task'));
+  };
+
+  it('becomes unread when it finishes off screen', () => {
+    const t = createTracker();
+    finish(t);
+    expect(t.snapshot().unread).toBe(true);
+  });
+
+  it('stays read when it finishes on screen', () => {
+    const t = createTracker();
+    t.view(true);
+    finish(t);
+    expect(t.snapshot().unread).toBe(false);
+  });
+
+  it('becomes unread on needs-input, error exit, and bell — not on clean exit or work', () => {
+    const working = createTracker();
+    working.output(osc('⠐ Task'));
+    expect(working.snapshot().unread).toBe(false);
+
+    const asking = createTracker();
+    asking.output('\x07');
+    expect(asking.snapshot().unread).toBe(true);
+
+    const crashed = createTracker();
+    crashed.exit(2);
+    expect(crashed.snapshot().unread).toBe(true);
+
+    const clean = createTracker();
+    clean.exit(0);
+    expect(clean.snapshot().unread).toBe(false);
+  });
+
+  it('viewing clears unread', () => {
+    const t = createTracker();
+    finish(t);
+    expect(t.view(true)).toBe(true);
+    expect(t.snapshot().unread).toBe(false);
+  });
+
+  it('leaving the screen does not clear or set unread by itself', () => {
+    const t = createTracker();
+    t.view(true);
+    t.view(false);
+    expect(t.snapshot().unread).toBe(false);
+  });
+
+  it('typing clears unread', () => {
+    const t = createTracker();
+    finish(t);
+    t.typed();
+    expect(t.snapshot().unread).toBe(false);
+  });
+
+  it('can be marked read and unread by hand', () => {
+    const t = createTracker();
+    t.markUnread();
+    expect(t.snapshot().unread).toBe(true);
+    t.markRead();
+    expect(t.snapshot().unread).toBe(false);
+  });
+});
+
+describe('isTerminalReply', () => {
+  it('recognises xterm auto-replies', () => {
+    expect(isTerminalReply('\x1b[?1;2c')).toBe(true); // device attributes
+    expect(isTerminalReply('\x1b[12;40R')).toBe(true); // cursor position
+    expect(isTerminalReply('\x1b[I')).toBe(true); // focus in
+    expect(isTerminalReply('\x1b]11;rgb:0000/0000/0000\x1b\\')).toBe(true);
+  });
+
+  it('does not swallow real keystrokes', () => {
+    expect(isTerminalReply('\r')).toBe(false);
+    expect(isTerminalReply('y')).toBe(false);
+    expect(isTerminalReply('\x1b[A')).toBe(false); // arrow up
   });
 });
