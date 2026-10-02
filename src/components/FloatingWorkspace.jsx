@@ -1,6 +1,14 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { Minus, PanelsTopLeft, Plus, TerminalSquare, X } from 'lucide-react';
+import {
+  Maximize2,
+  Minimize2,
+  Minus,
+  PanelsTopLeft,
+  Plus,
+  TerminalSquare,
+  X,
+} from 'lucide-react';
 import Terminal from './Terminal';
 import AgentStatusGlyph from './AgentStatusGlyph';
 import { Tooltip } from './ui';
@@ -14,6 +22,14 @@ import {
   terminalTabTitle,
   workspaceReducer,
 } from '../lib/floatingWorkspace';
+import {
+  isDrag,
+  moveBounds,
+  pointToTrigger,
+  resizeBounds,
+  triggerToPoint,
+} from '../lib/floatingGeometry';
+import { trackPointer, useFloatingGeometry } from '../lib/useFloatingGeometry';
 
 // Floating Workspace — a launcher button in the bottom-right of every page and
 // the floating panel it opens, modelled on Orca's floating terminal. Tabs are
@@ -47,12 +63,42 @@ function useFloatingSessions() {
   return sessions;
 }
 
-const isToggleChord = (e) =>
-  e.code === 'KeyA' && e.metaKey && e.altKey && !e.ctrlKey && !e.shiftKey;
+// ⌘⌥A toggles the panel; ⌘⌥⇧A toggles maximise. Matched by code, since ⌥
+// composes a character (å) into `key`.
+const chordOf = (e) => {
+  if (e.code !== 'KeyA' || !e.metaKey || !e.altKey || e.ctrlKey) return null;
+  return e.shiftKey ? 'floating-max' : 'floating';
+};
+
+// The 8 resize handles: edge or corner, and where it sits on the panel.
+const RESIZE_HANDLES = [
+  ['n', 'top-0 inset-x-2 h-1.5 cursor-ns-resize'],
+  ['s', 'bottom-0 inset-x-2 h-1.5 cursor-ns-resize'],
+  ['w', 'left-0 inset-y-2 w-1.5 cursor-ew-resize'],
+  ['e', 'right-0 inset-y-2 w-1.5 cursor-ew-resize'],
+  ['nw', 'top-0 left-0 size-2.5 cursor-nwse-resize'],
+  ['se', 'bottom-0 right-0 size-2.5 cursor-nwse-resize'],
+  ['ne', 'top-0 right-0 size-2.5 cursor-nesw-resize'],
+  ['sw', 'bottom-0 left-0 size-2.5 cursor-nesw-resize'],
+];
 
 export default function FloatingWorkspace() {
   const location = useLocation();
-  const [open, setOpen] = useState(false);
+  const {
+    viewport,
+    open,
+    setOpen,
+    maximized,
+    setMaximized,
+    bounds,
+    restoredBounds,
+    saveBounds,
+    triggerPoint,
+    saveTrigger,
+  } = useFloatingGeometry();
+  // While a move or resize is under way, the live bounds; saved on release.
+  const [dragBounds, setDragBounds] = useState(null);
+  const [dragTrigger, setDragTrigger] = useState(null);
   const [workspace, dispatch] = useReducer(workspaceReducer, EMPTY_WORKSPACE);
   const [error, setError] = useState(null);
   const sessions = useFloatingSessions();
@@ -99,34 +145,108 @@ export default function FloatingWorkspace() {
   }, [open, active]);
   useEffect(() => () => window.electronAPI.setFloatingView(null), []);
 
-  const toggle = useCallback(() => setOpen((v) => !v), []);
+  const toggle = useCallback(() => setOpen((v) => !v), [setOpen]);
+  const toggleMaximized = useCallback(() => {
+    setOpen(true);
+    setMaximized((v) => !v);
+  }, [setOpen, setMaximized]);
 
-  // ⌘⌥A from anywhere. xterm bubbles every ⌘ chord, so this fires with a
-  // terminal focused too; a focused webview forwards it via browser-shortcut.
+  // The chords from anywhere. xterm bubbles every ⌘ chord, so these fire with
+  // a terminal focused too; a focused webview forwards them via
+  // browser-shortcut.
   useEffect(() => {
+    const run = (chord) => {
+      if (chord === 'floating') toggle();
+      else if (chord === 'floating-max') toggleMaximized();
+      else return false;
+      return true;
+    };
     const onKey = (e) => {
-      if (!isToggleChord(e)) return;
-      e.preventDefault();
-      toggle();
+      if (run(chordOf(e))) e.preventDefault();
     };
     window.addEventListener('keydown', onKey);
-    const off = window.electronAPI.on('browser-shortcut', ({ key }) => {
-      if (key === 'floating') toggle();
-    });
+    const off = window.electronAPI.on('browser-shortcut', ({ key }) => run(key));
     return () => {
       window.removeEventListener('keydown', onKey);
       off();
     };
-  }, [toggle]);
+  }, [toggle, toggleMaximized]);
 
-  // Opening the panel puts the cursor in the active terminal.
+  // Opening the panel remembers what had focus and puts the cursor in the
+  // active terminal; minimising hands focus back, so typing carries on where
+  // it was.
+  const returnFocusRef = useRef(null);
   useEffect(() => {
-    if (!open) return;
+    const panel = panelRef.current;
+    if (!open) {
+      const back = returnFocusRef.current;
+      returnFocusRef.current = null;
+      const focusIsOurs =
+        !document.activeElement ||
+        document.activeElement === document.body ||
+        panel?.contains(document.activeElement);
+      if (back?.isConnected && focusIsOurs) back.focus();
+      return undefined;
+    }
+    const prev = document.activeElement;
+    if (prev && prev !== document.body && !panel?.contains(prev)) {
+      returnFocusRef.current = prev;
+    }
+    return undefined;
+  }, [open]);
+  useEffect(() => {
+    if (!open) return undefined;
     const t = setTimeout(() => {
       panelRef.current?.querySelector('.xterm-helper-textarea')?.focus();
     }, 0);
     return () => clearTimeout(t);
   }, [open, active?.id]);
+
+  // Move the panel by its title bar — from the bar itself, not from a tab or
+  // button on it. Double-click toggles maximise, as a window title bar does.
+  const startMove = (e) => {
+    if (e.button !== 0 || maximized) return;
+    if (e.target.closest('button, [data-tab]')) return;
+    const start = restoredBounds;
+    trackPointer(e, {
+      onMove: (dx, dy) => setDragBounds(moveBounds(start, dx, dy, viewport)),
+      onEnd: (dx, dy) => {
+        setDragBounds(null);
+        if (isDrag(dx, dy)) saveBounds(moveBounds(start, dx, dy, viewport));
+      },
+    });
+  };
+
+  const startResize = (edge) => (e) => {
+    if (e.button !== 0 || maximized) return;
+    e.stopPropagation();
+    const start = restoredBounds;
+    trackPointer(e, {
+      onMove: (dx, dy) => setDragBounds(resizeBounds(start, edge, dx, dy, viewport)),
+      onEnd: (dx, dy) => {
+        setDragBounds(null);
+        saveBounds(resizeBounds(start, edge, dx, dy, viewport));
+      },
+    });
+  };
+
+  // The launcher drags anywhere; a press that moves less than the threshold is
+  // a click. Keyboard activation (detail 0) goes through onClick instead.
+  const startTriggerDrag = (e) => {
+    if (e.button !== 0) return;
+    const start = triggerPoint;
+    const at = (dx, dy) => ({ x: start.x + dx, y: start.y + dy });
+    trackPointer(e, {
+      onMove: (dx, dy) => {
+        if (isDrag(dx, dy)) setDragTrigger(pointToTrigger(at(dx, dy), viewport));
+      },
+      onEnd: (dx, dy) => {
+        setDragTrigger(null);
+        if (isDrag(dx, dy)) saveTrigger(pointToTrigger(at(dx, dy), viewport));
+        else toggle();
+      },
+    });
+  };
 
   const newTerminal = async () => {
     setError(null);
@@ -161,6 +281,10 @@ export default function FloatingWorkspace() {
 
   const hasTabs = workspace.tabs.length > 0;
   const attention = !open && needsAttention(sessions);
+  const panelBounds = dragBounds || bounds;
+  const launcherPoint = dragTrigger
+    ? triggerToPoint(dragTrigger, viewport)
+    : triggerPoint;
 
   return (
     <>
@@ -169,12 +293,37 @@ export default function FloatingWorkspace() {
           ref={panelRef}
           aria-label="Floating workspace"
           aria-hidden={!open}
-          className={`panel fixed z-[35] right-6 bottom-[84px] flex flex-col overflow-hidden w-[min(920px,calc(100vw-48px))] h-[min(560px,calc(100vh-120px))] ${
+          style={{
+            left: panelBounds.x,
+            top: panelBounds.y,
+            width: panelBounds.width,
+            height: panelBounds.height,
+          }}
+          className={`panel fixed z-[35] flex flex-col overflow-hidden ${
             open ? '' : 'invisible pointer-events-none'
           }`}
         >
-          {/* Title bar: tabs, then the "+" and window controls. */}
-          <div className="flex items-center gap-1 h-9 pl-1.5 pr-1 flex-shrink-0 bg-tertiary border-b border-border">
+          {!maximized &&
+            RESIZE_HANDLES.map(([edge, cls]) => (
+              <div
+                key={edge}
+                aria-hidden
+                onPointerDown={startResize(edge)}
+                className={`absolute z-10 ${cls}`}
+              />
+            ))}
+
+          {/* Title bar: tabs, then the "+" and window controls. Dragging the
+              bar's empty space moves the panel. */}
+          <div
+            onPointerDown={startMove}
+            onDoubleClick={(e) => {
+              if (!e.target.closest('button, [data-tab]')) toggleMaximized();
+            }}
+            className={`flex items-center gap-1 h-9 pl-1.5 pr-1 flex-shrink-0 bg-tertiary border-b border-border select-none ${
+              maximized ? '' : 'cursor-grab active:cursor-grabbing'
+            }`}
+          >
             <div className="flex items-center gap-1 min-w-0 overflow-x-auto">
               {workspace.tabs.map((tab) => {
                 const session = sessionById.get(tab.sessionId);
@@ -182,6 +331,7 @@ export default function FloatingWorkspace() {
                 return (
                   <div
                     key={tab.id}
+                    data-tab
                     onClick={() => dispatch({ type: 'activate', id: tab.id })}
                     className={`group flex items-center gap-1.5 pl-2 pr-1 h-7 rounded-md text-[12.5px] cursor-pointer whitespace-nowrap ${
                       isActive
@@ -225,6 +375,18 @@ export default function FloatingWorkspace() {
               </button>
             </Tooltip>
             <div className="flex-1" />
+            <Tooltip
+              label={maximized ? 'Restore' : 'Maximize'}
+              keys={['⌘', '⌥', '⇧', 'A']}
+            >
+              <button
+                onClick={toggleMaximized}
+                aria-label={maximized ? 'Restore' : 'Maximize'}
+                className="flex-shrink-0 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent"
+              >
+                {maximized ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+              </button>
+            </Tooltip>
             <Tooltip label="Minimize" keys={['⌘', '⌥', 'A']}>
               <button
                 onClick={() => setOpen(false)}
@@ -267,10 +429,16 @@ export default function FloatingWorkspace() {
 
       <Tooltip label="Floating workspace" keys={['⌘', '⌥', 'A']} side="left">
         <button
-          onClick={toggle}
+          onPointerDown={startTriggerDrag}
+          onClick={(e) => {
+            // Pointer clicks are resolved on release (click vs drag); this
+            // handles Enter/Space only.
+            if (e.detail === 0) toggle();
+          }}
           aria-label={open ? 'Minimize floating workspace' : 'Open floating workspace'}
           aria-expanded={open}
-          className="fixed z-[36] right-6 bottom-[72px] size-9 flex items-center justify-center rounded-lg bg-popover border border-border shadow-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+          style={{ left: launcherPoint.x, top: launcherPoint.y }}
+          className="fixed z-[36] size-9 touch-none flex items-center justify-center rounded-lg bg-popover border border-border shadow-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
         >
           <PanelsTopLeft size={17} strokeWidth={1.8} />
           {attention && (
