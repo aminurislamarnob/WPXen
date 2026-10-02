@@ -382,9 +382,11 @@ export default function AgentsPane() {
   // Cmd+click on a URL in agent output. Unlike useOpenLink there's no
   // navigation to do — we're already on the Agents screen — so the in-app case
   // is just another tab.
+  // `destination` ('system' | 'app') comes from a terminal link click; without
+  // one, the setting decides.
   const handleOpenLink = useCallback(
-    (url) => {
-      if (settings['app.openLinksIn'] === 'app') openBrowser(url);
+    (url, destination = settings['app.openLinksIn']) => {
+      if (destination === 'app') openBrowser(url);
       else window.electronAPI.openSiteInBrowser(url);
     },
     [settings, openBrowser]
