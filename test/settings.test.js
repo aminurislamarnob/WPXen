@@ -353,3 +353,20 @@ describe('Floating Workspace settings', () => {
     expect(store.get('settings.floatingWorkspace.enabled', undefined)).toBeUndefined();
   });
 });
+
+describe('Tasks settings', () => {
+  it('requires {{number}} in the branch template', () => {
+    const v = SETTINGS['tasks.branchTemplate'].validate;
+    expect(v('issue-{{number}}-{{slug}}')).toBe(true);
+    expect(v('feat/{{ number }}')).toBe(true);
+    expect(v('issue-{{slug}}')).toMatch(/number/);
+  });
+
+  it('defaults Start to a new branch in place with the issue URL as the prompt', () => {
+    expect(SETTINGS['tasks.startMode']).toMatchObject({
+      default: 'branch',
+      values: ['branch', 'worktree', 'current'],
+    });
+    expect(SETTINGS['tasks.startPrompt'].default).toBe('Complete {{url}}');
+  });
+});

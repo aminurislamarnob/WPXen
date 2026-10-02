@@ -262,3 +262,27 @@ export function activeFilterCount(query) {
     f.labels.length
   );
 }
+
+// ── Linked Sessions ──────────────────────────────────────────────────────────
+// Start → puts the issue on the Session it launches; while that Session is
+// live, the issue's Start → becomes Open →.
+
+const linkKey = (repo, number) => `${String(repo).toLowerCase()}#${number}`;
+
+// Live Sessions by `repo#number`, newest first within an issue.
+export function linkedSessions(sessions) {
+  const map = new Map();
+  const live = (sessions || [])
+    .filter((s) => s.issue?.repo && s.issue?.number && !s.exited)
+    .sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0));
+  for (const s of live) {
+    const key = linkKey(s.issue.repo, s.issue.number);
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(s);
+  }
+  return map;
+}
+
+export function sessionsFor(map, item) {
+  return map.get(linkKey(item.repo, item.number)) || [];
+}

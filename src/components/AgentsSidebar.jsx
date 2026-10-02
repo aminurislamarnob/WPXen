@@ -178,6 +178,14 @@ export function SessionRow({ session: s, now, selected, onOpen, siteName, compac
     >
       <AgentStatusGlyph state={s.state} />
       <ProviderIcon agentId={s.agentId} brand size={13} className="flex-shrink-0" />
+      {s.issue?.number && (
+        <span
+          title={`${s.issue.repo}#${s.issue.number} · ${s.issue.title}`}
+          className="flex-shrink-0 rounded-sm bg-muted px-1 font-mono text-[10.5px] text-muted-foreground"
+        >
+          #{s.issue.number}
+        </span>
+      )}
       <span
         className={`truncate flex-1 ${
           s.unread

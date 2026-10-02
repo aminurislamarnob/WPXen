@@ -13,6 +13,7 @@ import {
   ChevronRight,
   Copy,
   ExternalLink,
+  FolderGit2,
   MoreVertical,
   SlidersHorizontal,
   Plus,
@@ -29,12 +30,16 @@ import FiltersMenu from './FiltersMenu';
 import { MultiPicker, Popover, StatusMenu } from './pickers';
 import { useIssueMutation } from './useIssueMutation';
 import { useOpenLink } from '../../lib/useOpenLink';
-import { AvatarStack, LabelChip, StateBadge, stateIcon } from './parts';
+import { AvatarStack, LabelChip, StartButton, StateBadge, stateIcon } from './parts';
+import StartDialog from './StartDialog';
+import { useAgentSessions } from '../../lib/useAgentSessions';
 import {
   ALL,
   ISSUE_CHIPS,
   activeFilterCount,
   chipMatches,
+  linkedSessions,
+  sessionsFor,
   DEFAULT_ISSUE_QUERY,
   buildPickerTree,
   detailPath,
@@ -188,6 +193,14 @@ export default function Tasks() {
     .filter((o) => o.value.startsWith('repo:'))
     .map((o) => ({ repo: o.repos[0], label: o.repos[0] }));
 
+  // Start → / Open →: live Sessions linked to an issue, and the dialog.
+  const linked = linkedSessions(useAgentSessions());
+  const [starting, setStarting] = useState(null); // { issue, mode? }
+  const openSession = (session) =>
+    navigate(`/agents/${encodeURIComponent(session.siteId)}`, {
+      state: { focus: session.sessionId, nonce: Date.now() },
+    });
+
   const [filtersAnchor, setFiltersAnchor] = useState(null);
   const [rowMenu, setRowMenu] = useState(null); // { issue, anchor }
 
@@ -243,6 +256,9 @@ export default function Tasks() {
           siteId={siteIdFor(detail.repo)}
           onBack={() => navigate('/tasks')}
           onChanged={() => search({ force: true, quiet: true })}
+          linked={linked}
+          onStart={(issue) => setStarting({ issue })}
+          onOpenSession={openSession}
         />
       )}
       <div className={detail ? 'hidden' : undefined}>
@@ -383,6 +399,9 @@ export default function Tasks() {
                 items={paged?.items || []}
                 loading={loading && !results}
                 onOpen={openDetails}
+                linked={linked}
+                onStart={(issue) => setStarting({ issue })}
+                onOpenSession={openSession}
                 onEdit={(kind, issue, anchor) =>
                   kind === 'menu'
                     ? setRowMenu({ issue, anchor })
@@ -478,7 +497,15 @@ export default function Tasks() {
           issue={rowMenu.issue}
           anchor={rowMenu.anchor}
           onLink={(url) => openLink(url, siteIdFor(rowMenu.issue.repo))}
+          onStartWorktree={() => setStarting({ issue: rowMenu.issue, mode: 'worktree' })}
           onClose={() => setRowMenu(null)}
+        />
+      )}
+      {starting && (
+        <StartDialog
+          issue={starting.issue}
+          initialMode={starting.mode}
+          onClose={() => setStarting(null)}
         />
       )}
       {creating && (
@@ -498,16 +525,17 @@ export default function Tasks() {
   );
 }
 
-function IssueTable({ items, loading, onOpen, onEdit }) {
+function IssueTable({ items, loading, onOpen, onEdit, linked, onStart, onOpenSession }) {
   const now = Date.now();
   return (
     <div className="bg-card border border-border rounded-xl shadow-sm overflow-hidden">
-      <div className="grid grid-cols-[72px_1fr_120px_96px_96px_28px] gap-3 px-4 h-9 items-center border-b border-border text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+      <div className="grid grid-cols-[64px_1fr_104px_92px_84px_72px_28px] gap-3 px-4 h-9 items-center border-b border-border text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
         <span>ID</span>
         <span>Title / context</span>
         <span>Assignees</span>
         <span>Status</span>
         <span>Updated</span>
+        <span />
         <span />
       </div>
       {loading ? (
@@ -526,6 +554,9 @@ function IssueTable({ items, loading, onOpen, onEdit }) {
             now={now}
             onOpen={onOpen}
             onEdit={onEdit}
+            sessions={sessionsFor(linked, issue)}
+            onStart={onStart}
+            onOpenSession={onOpenSession}
           />
         ))
       )}
@@ -533,7 +564,7 @@ function IssueTable({ items, loading, onOpen, onEdit }) {
   );
 }
 
-function RowMenu({ issue, anchor, onLink, onClose }) {
+function RowMenu({ issue, anchor, onLink, onStartWorktree, onClose }) {
   const item = (Icon, label, fn) => (
     <button
       onClick={() => {
@@ -549,6 +580,7 @@ function RowMenu({ issue, anchor, onLink, onClose }) {
   return (
     <Popover anchor={anchor} onClose={onClose} width={190}>
       {item(ExternalLink, 'Open on GitHub', () => onLink(issue.url))}
+      {item(FolderGit2, 'Start in a new worktree', onStartWorktree)}
       {item(Copy, 'Copy link', () =>
         navigator.clipboard?.writeText(issue.url).catch(() => {
           // clipboard unavailable — Open on GitHub still works
@@ -576,7 +608,7 @@ function RowEdit({ label, onClick, children }) {
   );
 }
 
-function IssueRow({ issue, now, onOpen, onEdit }) {
+function IssueRow({ issue, now, onOpen, onEdit, sessions, onStart, onOpenSession }) {
   const open = issue.state === 'open';
   const Icon = stateIcon(issue);
   return (
@@ -585,7 +617,7 @@ function IssueRow({ issue, now, onOpen, onEdit }) {
       tabIndex={0}
       onClick={() => onOpen(issue)}
       onKeyDown={(e) => e.key === 'Enter' && onOpen(issue)}
-      className="grid grid-cols-[72px_1fr_120px_96px_96px_28px] gap-3 px-4 py-2.5 items-center border-b border-border last:border-b-0 cursor-pointer hover:bg-accent/50"
+      className="grid grid-cols-[64px_1fr_104px_92px_84px_72px_28px] gap-3 px-4 py-2.5 items-center border-b border-border last:border-b-0 cursor-pointer hover:bg-accent/50"
     >
       <span className="flex items-center gap-1.5 text-[12.5px] text-muted-foreground tabular-nums">
         <Icon
@@ -621,6 +653,13 @@ function IssueRow({ issue, now, onOpen, onEdit }) {
       </span>
       <span className="text-[12px] text-muted-foreground">
         {timeAgo(issue.updatedAt, now)}
+      </span>
+      <span>
+        <StartButton
+          sessions={sessions}
+          onStart={() => onStart(issue)}
+          onOpenSession={onOpenSession}
+        />
       </span>
       <RowEdit label="More" onClick={(a) => onEdit('menu', issue, a)}>
         <MoreVertical size={14} className="text-muted-foreground" />

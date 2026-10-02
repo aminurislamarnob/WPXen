@@ -174,3 +174,63 @@ describe('floating Sessions are kept apart from Site Sessions', () => {
     expect(agents.listFloatingSessions()).toEqual([]);
   });
 });
+
+describe('agents.launch for Start →', () => {
+  const site = () => ({ id: 'shop', name: 'Shop', path: home });
+  beforeEach(() => {
+    // `sh` is on every PATH, so this custom agent is always "installed".
+    agents.setConfig({ custom: [{ id: 'fake', name: 'Fake', cmd: 'sh --agent' }] });
+  });
+  afterEach(() => agents.setConfig({}));
+
+  it('runs at the given cwd, with the prompt quoted onto the command line', () => {
+    vi.useFakeTimers();
+    try {
+      const res = agents.launch({
+        site: site(),
+        agentId: 'fake',
+        cwd: path.join(home, 'code'),
+        prompt: "Complete it's\nhttps://x/1",
+      });
+      expect(res.ok).toBe(true);
+      expect(ptys[0].spawnedWith.opts.cwd).toBe(path.join(home, 'code'));
+      ptys[0].emitData('% ');
+      vi.advanceTimersByTime(200);
+      expect(ptys[0].write).toHaveBeenCalledWith(
+        "sh --agent 'Complete it'\\''s https://x/1'\r"
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('carries the issue on the Session row', () => {
+    const { sessionId } = agents.launch({
+      site: site(),
+      agentId: 'fake',
+      issue: {
+        repo: 'acme/shop',
+        number: '7',
+        url: 'u',
+        title: 'T',
+        kind: 'bogus',
+        extra: 1,
+      },
+    });
+    const row = agents.listAllSessions().find((s) => s.sessionId === sessionId);
+    expect(row.issue).toEqual({
+      repo: 'acme/shop',
+      number: 7,
+      url: 'u',
+      title: 'T',
+      kind: 'issue',
+    });
+  });
+
+  it('leaves an ordinary launch unlinked', () => {
+    const { sessionId } = agents.launch({ site: site(), agentId: 'fake' });
+    expect(
+      agents.listAllSessions().find((s) => s.sessionId === sessionId).issue
+    ).toBeNull();
+  });
+});
