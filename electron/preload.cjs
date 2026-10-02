@@ -222,6 +222,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   tasksPull: (opts) => ipcRenderer.invoke('tasks-pull', opts),
   tasksProjects: (opts) => ipcRenderer.invoke('tasks-projects', opts),
   tasksProject: (opts) => ipcRenderer.invoke('tasks-project', opts),
+  tasksProjectMove: (opts) => ipcRenderer.invoke('tasks-project-move', opts),
   tasksPullFiles: (opts) => ipcRenderer.invoke('tasks-pull-files', opts),
   tasksPullChecks: (opts) => ipcRenderer.invoke('tasks-pull-checks', opts),
   tasksIssue: (opts) => ipcRenderer.invoke('tasks-issue', opts),

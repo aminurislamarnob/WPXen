@@ -381,7 +381,13 @@ export default function Tasks() {
             onReady={() => loadSetup({ force: true })}
           />
         ) : ready && tab === 'projects' ? (
-          <ProjectsView siteIdFor={siteIdFor} />
+          <ProjectsView
+            siteIdFor={siteIdFor}
+            onOpenItem={openDetails}
+            linked={linked}
+            onStart={(item) => setStarting({ issue: item })}
+            onOpenSession={openSession}
+          />
         ) : sites && tree.length <= 1 ? (
           <EmptyState
             title="No Sites with a GitHub repo"

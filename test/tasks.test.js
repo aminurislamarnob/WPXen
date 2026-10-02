@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  moveItem,
   NO_STATUS,
   boardColumns,
   projectColor,
@@ -419,5 +420,28 @@ describe('projects board', () => {
   it('maps GitHub’s colour names', () => {
     expect(projectColor('GREEN')).toBe('#3fb950');
     expect(projectColor('nope')).toBeNull();
+  });
+});
+
+describe('moving a card', () => {
+  const board = {
+    items: [
+      { id: 'a', values: { F: { text: 'Todo', optionId: 'todo' }, P: { text: '3' } } },
+      { id: 'b', values: {} },
+    ],
+  };
+
+  it('sets the moved item’s Status, leaving the rest alone', () => {
+    const next = moveItem(board, 'a', 'F', { id: 'done', name: 'Done' });
+    expect(next.items[0].values).toEqual({
+      F: { text: 'Done', optionId: 'done' },
+      P: { text: '3' },
+    });
+    expect(next.items[1]).toBe(board.items[1]);
+    expect(board.items[0].values.F.optionId).toBe('todo'); // the original is untouched
+  });
+
+  it('clears it for No Status', () => {
+    expect(moveItem(board, 'a', 'F', null).items[0].values).toEqual({ P: { text: '3' } });
   });
 });

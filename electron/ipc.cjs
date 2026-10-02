@@ -557,6 +557,9 @@ function registerHandlers(win, storeInstance) {
   ipcMain.handle('tasks-pull', (_e, opts) => github.getPull(opts || {}));
   ipcMain.handle('tasks-projects', (_e, opts) => github.listProjects(opts || {}));
   ipcMain.handle('tasks-project', (_e, opts) => github.getProject(opts || {}));
+  ipcMain.handle('tasks-project-move', (_e, opts) =>
+    github.setProjectItemOption(opts || {})
+  );
   ipcMain.handle('tasks-pull-files', (_e, opts) => github.getPullFiles(opts || {}));
   ipcMain.handle('tasks-pull-checks', (_e, opts) => github.getPullChecks(opts || {}));
   ipcMain.handle('tasks-search-pulls', (_e, opts) =>
