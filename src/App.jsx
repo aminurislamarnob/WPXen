@@ -5,6 +5,7 @@ import Dashboard from './components/Dashboard';
 import Sites from './components/Sites';
 import SiteDetail from './components/SiteDetail';
 import AgentsPane from './components/AgentsPane';
+import Tasks from './components/Tasks';
 import Services from './components/Services';
 import PHPVersions from './components/PHPVersions';
 import Mail from './components/Mail';
@@ -138,6 +139,7 @@ export default function App() {
             <Route path="sites/:id" element={<SiteDetail {...sharedProps} />} />
             <Route path="agents" element={<AgentsPane />} />
             <Route path="agents/:siteId" element={<AgentsPane />} />
+            <Route path="tasks" element={<Tasks />} />
             <Route path="services" element={<Services {...sharedProps} />} />
             <Route path="php" element={<PHPVersions {...sharedProps} />} />
             <Route path="mail" element={<Mail {...sharedProps} />} />

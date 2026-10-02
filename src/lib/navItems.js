@@ -6,6 +6,7 @@ import {
   Mail,
   Settings,
   Terminal,
+  ListTodo,
 } from 'lucide-react';
 
 // The app's main screens, grouped. Shared by the main sidebar and the Agents
@@ -16,6 +17,7 @@ export const NAV_GROUPS = [
     { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard', color: 'blue' },
     { to: '/sites', icon: Globe, label: 'Sites', color: 'teal' },
     { to: '/agents', icon: Terminal, label: 'Agents', color: 'purple' },
+    { to: '/tasks', icon: ListTodo, label: 'Tasks', color: 'orange' },
   ],
   [
     { to: '/services', icon: Server, label: 'Services', color: 'green' },

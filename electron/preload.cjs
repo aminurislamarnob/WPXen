@@ -211,6 +211,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   notesDiscard: (file, edited) => ipcRenderer.invoke('notes-discard', file, edited),
   notesOpenDialog: () => ipcRenderer.invoke('notes-open-dialog'),
 
+  // Tasks (GitHub via the gh CLI)
+  tasksPreflight: () => ipcRenderer.invoke('tasks-preflight'),
+  tasksRepos: (opts) => ipcRenderer.invoke('tasks-repos', opts),
+  tasksSearchIssues: (opts) => ipcRenderer.invoke('tasks-search-issues', opts),
+
   // Launch Presets (global, per-Agent) & Launch Targets (per-Site)
   getAgentPresets: () => ipcRenderer.invoke('agent-presets-get'),
   setAgentPreset: (agentId, args) =>

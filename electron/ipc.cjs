@@ -38,6 +38,7 @@ const logs = require('./services/logs.cjs');
 const validation = require('./services/validation.cjs');
 const agents = require('./services/agents.cjs');
 const notes = require('./services/notes.cjs');
+const github = require('./services/github.cjs');
 const agentProjects = require('./services/agentProjects.cjs');
 const files = require('./services/files.cjs');
 const git = require('./services/git.cjs');
@@ -415,6 +416,20 @@ function registerHandlers(win, storeInstance) {
     const file = result.filePaths[0];
     return notes.allow(file) ? file : null;
   });
+
+  // Tasks (services/github.cjs) — GitHub through the `gh` CLI, for every Site
+  // with a GitHub repo.
+  ipcMain.handle('tasks-preflight', () => github.preflight());
+  ipcMain.handle('tasks-repos', (_e, opts) =>
+    github.sitesWithRepos(store.get('sites', []), { force: !!opts?.force })
+  );
+  ipcMain.handle('tasks-search-issues', (_e, opts) =>
+    github.searchIssues({
+      repos: opts?.repos,
+      query: opts?.query,
+      force: !!opts?.force,
+    })
+  );
   // Dismissing a row is the same teardown as closing its tab.
   ipcMain.handle('agent-session-dismiss', (_e, sessionId) => {
     agents.stop(sessionId);
