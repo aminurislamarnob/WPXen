@@ -1,6 +1,15 @@
 'use strict';
 
 const fs = require('fs');
+const os = require('os');
+const path = require('path');
+
+// `~` and `~/…` against the home directory; anything else unchanged.
+function expandHome(p) {
+  if (p === '~') return os.homedir();
+  if (p.startsWith('~/')) return path.join(os.homedir(), p.slice(2));
+  return p;
+}
 
 // Global settings: one schema, one validator, one place for side effects.
 //
@@ -70,6 +79,27 @@ const SETTINGS = {
   // browser. Defaults to 'system' so the actions keep behaving as they always
   // have until someone opts in.
   'app.openLinksIn': { type: 'enum', values: ['system', 'app'], default: 'system' },
+
+  // ── Floating Workspace ───────────────────────────────────────────────────
+  // Off hides the launcher and minimises the panel; its tabs keep running.
+  'floatingWorkspace.enabled': { type: 'bool', default: true },
+  // Where a new floating terminal opens off a Site page. `~` (or `~/…`) is
+  // kept as typed and expanded at launch, so the setting follows the account.
+  'floatingWorkspace.terminalDirectory': {
+    type: 'path',
+    default: '~',
+    validate: (v) => {
+      const dir = expandHome(v.trim());
+      if (!path.isAbsolute(dir)) return 'use a full path, or one starting with ~';
+      let stat;
+      try {
+        stat = fs.statSync(dir);
+      } catch {
+        return 'that folder does not exist';
+      }
+      return stat.isDirectory() || 'that path is not a folder';
+    },
+  },
 
   // ── Appearance ───────────────────────────────────────────────────────────
   // Drives Electron's nativeTheme.themeSource, which forces the renderer's

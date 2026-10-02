@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import {
+  EyeOff,
   Maximize2,
   Minimize2,
   Minus,
@@ -12,6 +13,7 @@ import {
 import Terminal from './Terminal';
 import AgentStatusGlyph from './AgentStatusGlyph';
 import { Tooltip } from './ui';
+import { useSettings } from '../lib/useSettings';
 import * as sessionCache from '../lib/terminal/sessionCache';
 import {
   EMPTY_WORKSPACE,
@@ -96,6 +98,11 @@ export default function FloatingWorkspace() {
     triggerPoint,
     saveTrigger,
   } = useFloatingGeometry();
+  const { settings, setSetting, loaded: settingsLoaded } = useSettings();
+  // Shown until settings say otherwise — but the launcher waits for them (see
+  // the render), so a disabled one never flashes in at launch.
+  const enabled = settings['floatingWorkspace.enabled'] !== false;
+  const [launcherMenu, setLauncherMenu] = useState(null); // { x, y } on right-click
   // While a move or resize is under way, the live bounds; saved on release.
   const [dragBounds, setDragBounds] = useState(null);
   const [dragTrigger, setDragTrigger] = useState(null);
@@ -145,11 +152,31 @@ export default function FloatingWorkspace() {
   }, [open, active]);
   useEffect(() => () => window.electronAPI.setFloatingView(null), []);
 
-  const toggle = useCallback(() => setOpen((v) => !v), [setOpen]);
+  // Turning the feature off hides the launcher and minimises the panel; its
+  // tabs and shells keep running for when it comes back. Waits for settings to
+  // load, so the restored open state isn't clobbered by a not-yet-read default.
+  useEffect(() => {
+    if (settingsLoaded && !enabled) {
+      setOpen(false);
+      setLauncherMenu(null);
+    }
+  }, [settingsLoaded, enabled, setOpen]);
+
+  useEffect(() => {
+    if (!launcherMenu) return undefined;
+    const onKey = (e) => e.key === 'Escape' && setLauncherMenu(null);
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [launcherMenu]);
+
+  const toggle = useCallback(() => {
+    if (enabled) setOpen((v) => !v);
+  }, [enabled, setOpen]);
   const toggleMaximized = useCallback(() => {
+    if (!enabled) return;
     setOpen(true);
     setMaximized((v) => !v);
-  }, [setOpen, setMaximized]);
+  }, [enabled, setOpen, setMaximized]);
 
   // The chords from anywhere. xterm bubbles every ⌘ chord, so these fire with
   // a terminal focused too; a focused webview forwards them via
@@ -251,7 +278,11 @@ export default function FloatingWorkspace() {
   const newTerminal = async () => {
     setError(null);
     const sites = (await window.electronAPI.getSites()) || [];
-    const { cwd } = resolveContext({ pathname: pathnameRef.current, sites });
+    const { cwd } = resolveContext({
+      pathname: pathnameRef.current,
+      sites,
+      terminalDirectory: settings['floatingWorkspace.terminalDirectory'],
+    });
     const res = await window.electronAPI.launchFloatingTerminal(cwd);
     if (res?.error) return setError(res.error);
     dispatch({
@@ -427,25 +458,68 @@ export default function FloatingWorkspace() {
         </section>
       )}
 
-      <Tooltip label="Floating workspace" keys={['⌘', '⌥', 'A']} side="left">
-        <button
-          onPointerDown={startTriggerDrag}
-          onClick={(e) => {
-            // Pointer clicks are resolved on release (click vs drag); this
-            // handles Enter/Space only.
-            if (e.detail === 0) toggle();
-          }}
-          aria-label={open ? 'Minimize floating workspace' : 'Open floating workspace'}
-          aria-expanded={open}
-          style={{ left: launcherPoint.x, top: launcherPoint.y }}
-          className="fixed z-[36] size-9 touch-none flex items-center justify-center rounded-lg bg-popover border border-border shadow-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+      {settingsLoaded && enabled && (
+        <Tooltip
+          label="Floating workspace"
+          keys={['⌘', '⌥', 'A']}
+          side="left"
+          disabled={!!launcherMenu}
         >
-          <PanelsTopLeft size={17} strokeWidth={1.8} />
-          {attention && (
-            <span className="absolute -top-0.5 -right-0.5 size-2.5 rounded-full bg-status-warning ring-2 ring-background" />
-          )}
-        </button>
-      </Tooltip>
+          <button
+            onPointerDown={startTriggerDrag}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setLauncherMenu({ x: e.clientX, y: e.clientY });
+            }}
+            onClick={(e) => {
+              // Pointer clicks are resolved on release (click vs drag); this
+              // handles Enter/Space only.
+              if (e.detail === 0) toggle();
+            }}
+            aria-label={open ? 'Minimize floating workspace' : 'Open floating workspace'}
+            aria-expanded={open}
+            style={{ left: launcherPoint.x, top: launcherPoint.y }}
+            className="fixed z-[36] size-9 touch-none flex items-center justify-center rounded-lg bg-popover border border-border shadow-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+          >
+            <PanelsTopLeft size={17} strokeWidth={1.8} />
+            {attention && (
+              <span className="absolute -top-0.5 -right-0.5 size-2.5 rounded-full bg-status-warning ring-2 ring-background" />
+            )}
+          </button>
+        </Tooltip>
+      )}
+
+      {launcherMenu && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setLauncherMenu(null)} />
+          <div
+            role="menu"
+            aria-label="Floating workspace"
+            className="panel-menu fixed z-50 w-60 p-1"
+            style={{
+              left: Math.min(launcherMenu.x, viewport.width - 248),
+              top: Math.min(launcherMenu.y, viewport.height - 56),
+            }}
+          >
+            <button
+              role="menuitem"
+              onClick={() => {
+                setLauncherMenu(null);
+                setSetting('floatingWorkspace.enabled', false);
+              }}
+              className="panel-item items-start text-left"
+            >
+              <EyeOff size={14} className="mt-0.5 flex-shrink-0 text-muted-foreground" />
+              <span className="min-w-0">
+                <span className="block">Hide Floating Workspace</span>
+                <span className="block text-[11px] text-muted-foreground">
+                  Turn it back on in Settings → General
+                </span>
+              </span>
+            </button>
+          </div>
+        </>
+      )}
     </>
   );
 }
