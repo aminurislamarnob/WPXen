@@ -1003,3 +1003,185 @@ describe('checkoutPull', () => {
     );
   });
 });
+
+describe('projects', () => {
+  const proj = (id, owner, extra = {}) => ({
+    id,
+    number: 1,
+    title: `P ${id}`,
+    url: `https://github.com/orgs/${owner}/projects/1`,
+    closed: false,
+    updatedAt: '2026-09-01T00:00:00Z',
+    owner: { __typename: owner === 'ana' ? 'User' : 'Organization', login: owner },
+    ...extra,
+  });
+
+  it("finds the viewer's and their organisations' projects, deduped, closed last", () => {
+    const list = github.normalizeProjects({
+      projectsV2: {
+        nodes: [proj('PVT_a', 'ana', { closed: true }), proj('PVT_b', 'ana')],
+      },
+      organizations: {
+        nodes: [
+          {
+            login: 'acme',
+            projectsV2: { nodes: [proj('PVT_c', 'acme'), proj('PVT_b', 'ana')] },
+          },
+        ],
+      },
+    });
+    expect(list.map((p) => [p.id, p.owner, p.ownerType, p.closed])).toEqual([
+      ['PVT_b', 'ana', 'user', false],
+      ['PVT_c', 'acme', 'org', false],
+      ['PVT_a', 'ana', 'user', true],
+    ]);
+  });
+
+  it('keeps only the project’s own fields', () => {
+    const fields = github.normalizeFields([
+      { id: 'F_title', name: 'Title', dataType: 'TITLE' },
+      {
+        id: 'F_status',
+        name: 'Status',
+        dataType: 'SINGLE_SELECT',
+        options: [{ id: 'o1', name: 'Todo', color: 'GRAY' }],
+      },
+      {
+        id: 'F_iter',
+        name: 'Sprint',
+        dataType: 'ITERATION',
+        configuration: {
+          iterations: [{ id: 'i1', title: 'Sprint 1', startDate: '2026-09-01' }],
+        },
+      },
+      { id: 'F_pts', name: 'Points', dataType: 'NUMBER' },
+      { id: 'F_asg', name: 'Assignees', dataType: 'ASSIGNEES' },
+    ]);
+    expect(fields.map((f) => [f.id, f.type])).toEqual([
+      ['F_status', 'SINGLE_SELECT'],
+      ['F_iter', 'ITERATION'],
+      ['F_pts', 'NUMBER'],
+    ]);
+    expect(fields[0].options).toEqual([{ id: 'o1', name: 'Todo', color: 'GRAY' }]);
+    expect(fields[1].iterations[0].title).toBe('Sprint 1');
+  });
+
+  const item = (id, extra = {}) => ({
+    id,
+    type: 'ISSUE',
+    isArchived: false,
+    content: {
+      __typename: 'Issue',
+      number: 7,
+      title: 'Cart',
+      url: 'https://github.com/acme/shop/issues/7',
+      state: 'OPEN',
+      repository: { nameWithOwner: 'acme/shop' },
+      assignees: { nodes: [{ login: 'bo', avatarUrl: null }] },
+      labels: { nodes: [{ name: 'bug', color: 'd73a4a' }] },
+    },
+    fieldValues: {
+      nodes: [
+        {
+          __typename: 'ProjectV2ItemFieldSingleSelectValue',
+          name: 'Todo',
+          optionId: 'o1',
+          field: { id: 'F_status' },
+        },
+        {
+          __typename: 'ProjectV2ItemFieldNumberValue',
+          number: 3,
+          field: { id: 'F_pts' },
+        },
+        {
+          __typename: 'ProjectV2ItemFieldIterationValue',
+          title: 'Sprint 1',
+          iterationId: 'i1',
+          field: { id: 'F_iter' },
+        },
+        { __typename: 'ProjectV2ItemFieldRepositoryValue' },
+      ],
+    },
+    ...extra,
+  });
+
+  it('normalises an item with its field values', () => {
+    expect(github.normalizeProjectItem(item('PVTI_1'))).toEqual({
+      id: 'PVTI_1',
+      kind: 'issue',
+      archived: false,
+      repo: 'acme/shop',
+      number: 7,
+      title: 'Cart',
+      url: 'https://github.com/acme/shop/issues/7',
+      state: 'open',
+      stateReason: null,
+      assignees: [{ login: 'bo', avatarUrl: null }],
+      labels: [{ name: 'bug', color: 'd73a4a' }],
+      values: {
+        F_status: { text: 'Todo', optionId: 'o1' },
+        F_pts: { text: '3', number: 3 },
+        F_iter: { text: 'Sprint 1', iterationId: 'i1' },
+      },
+    });
+    const draft = github.normalizeProjectItem({
+      id: 'PVTI_2',
+      type: 'DRAFT_ISSUE',
+      content: { __typename: 'DraftIssue', title: 'Idea' },
+      fieldValues: { nodes: [] },
+    });
+    expect(draft).toMatchObject({ kind: 'draft', title: 'Idea', repo: null, url: null });
+  });
+
+  it('pages through a project’s items and drops archived ones', async () => {
+    const page = (nodes, hasNextPage, endCursor) =>
+      JSON.stringify({
+        data: {
+          node: {
+            id: 'PVT_x',
+            number: 2,
+            title: 'Roadmap',
+            url: 'u',
+            closed: false,
+            owner: { __typename: 'Organization', login: 'acme' },
+            fields: {
+              nodes: [
+                {
+                  id: 'F_status',
+                  name: 'Status',
+                  dataType: 'SINGLE_SELECT',
+                  options: [],
+                },
+              ],
+            },
+            items: { pageInfo: { hasNextPage, endCursor }, nodes },
+          },
+        },
+      });
+    fakeGh((args) =>
+      args.includes('after=c1')
+        ? page([item('PVTI_3', { isArchived: true })], false, null)
+        : page([item('PVTI_1'), item('PVTI_2')], true, 'c1')
+    );
+    const res = await github.getProject({ id: 'PVT_x' });
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toContain('id=PVT_x');
+    expect(calls[1]).toContain('after=c1');
+    expect(res.items.map((i) => i.id)).toEqual(['PVTI_1', 'PVTI_2']);
+    expect(res.statusFieldId).toBe('F_status');
+    expect(res.project).toMatchObject({ title: 'Roadmap', owner: 'acme' });
+    expect((await github.getProject({ id: 'nope' })).error.code).toBe('validation');
+  });
+
+  it('reports a missing read:project scope so the page can offer Grant access', async () => {
+    fakeGh(() => {
+      throw ghError(
+        "gh: Your token has not been granted the required scopes to execute this query. The 'id' field requires one of the following scopes: ['read:project'], but your token has only been granted the: ['gist', 'read:org', 'repo'] scopes."
+      );
+    });
+    expect((await github.listProjects()).error).toMatchObject({
+      code: 'missing-scope',
+      scope: 'read:project',
+    });
+  });
+});
