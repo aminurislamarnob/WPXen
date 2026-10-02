@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
+  NO_STATUS,
+  boardColumns,
+  projectColor,
   PR_CHIPS,
   linkedSessions,
   sessionsFor,
@@ -378,5 +381,43 @@ describe('patchToSides', () => {
 
   it('handles an empty or missing patch', () => {
     expect(patchToSides(null)).toEqual({ original: '', modified: '' });
+  });
+});
+
+describe('projects board', () => {
+  const field = {
+    id: 'F',
+    options: [
+      { id: 'todo', name: 'Todo', color: 'GRAY' },
+      { id: 'done', name: 'Done', color: 'GREEN' },
+    ],
+  };
+  const item = (id, optionId) => ({ id, values: optionId ? { F: { optionId } } : {} });
+
+  it('groups by the Status options in order, No Status first when needed', () => {
+    const cols = boardColumns(
+      [item(1, 'done'), item(2), item(3, 'todo'), item(4, 'gone')],
+      field
+    );
+    expect(cols.map((c) => [c.id, c.items.map((i) => i.id)])).toEqual([
+      [NO_STATUS, [2, 4]],
+      ['todo', [3]],
+      ['done', [1]],
+    ]);
+    expect(boardColumns([item(1, 'todo')], field).map((c) => c.id)).toEqual([
+      'todo',
+      'done',
+    ]);
+  });
+
+  it('puts everything in one column when the project has no Status field', () => {
+    expect(boardColumns([item(1), item(2)], null)).toEqual([
+      { id: NO_STATUS, name: 'Items', color: null, items: [item(1), item(2)] },
+    ]);
+  });
+
+  it('maps GitHub’s colour names', () => {
+    expect(projectColor('GREEN')).toBe('#3fb950');
+    expect(projectColor('nope')).toBeNull();
   });
 });

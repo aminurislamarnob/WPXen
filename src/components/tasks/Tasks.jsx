@@ -19,6 +19,7 @@ import {
   Plus,
   CircleDot,
   GitPullRequest,
+  KanbanSquare,
   RefreshCw,
   Search,
   X,
@@ -35,6 +36,7 @@ import { AvatarStack, LabelChip, StartButton, StateBadge, stateIcon } from './pa
 import StartDialog from './StartDialog';
 import PullTable from './PullTable';
 import PullDetails from './PullDetails';
+import ProjectsView from './ProjectsView';
 import { useAgentSessions } from '../../lib/useAgentSessions';
 import {
   ALL,
@@ -71,6 +73,7 @@ const TAB_KEY = 'wpxen.tasks.tab';
 const TABS = [
   { value: 'issues', label: 'Issues', icon: CircleDot },
   { value: 'pulls', label: 'PRs', icon: GitPullRequest },
+  { value: 'projects', label: 'Projects', icon: KanbanSquare },
 ];
 const TAB_VIEW = {
   issues: {
@@ -111,10 +114,13 @@ export default function Tasks() {
   const [preflight, setPreflight] = useState(null); // { installed, authenticated, error? }
   const [sites, setSites] = useState(null); // [{ siteId, siteName, repos }]
   const [selection, setSelection] = useState(() => readStored(SELECTION_KEY) || ALL);
-  const [tab, setTab] = useState(() =>
-    readStored(TAB_KEY) === 'pulls' ? 'pulls' : 'issues'
-  );
-  const view = TAB_VIEW[tab];
+  const [tab, setTab] = useState(() => {
+    const stored = readStored(TAB_KEY);
+    return TABS.some((t) => t.value === stored) ? stored : 'issues';
+  });
+  // Issues and PRs share the list machinery; Projects is its own view.
+  const isList = tab !== 'projects';
+  const view = TAB_VIEW[tab] || TAB_VIEW.issues;
   const [query, setQuery] = useState(DEFAULT_ISSUE_QUERY);
   const [draft, setDraft] = useState(DEFAULT_ISSUE_QUERY);
   const draftRef = useRef(draft);
@@ -180,7 +186,7 @@ export default function Tasks() {
   const search = useCallback(
     async ({ force = false, quiet = false } = {}) => {
       const seq = ++searchSeq.current;
-      if (!ready || repos.length === 0) {
+      if (!ready || repos.length === 0 || !TAB_VIEW[tab]) {
         setResults(null);
         return;
       }
@@ -330,7 +336,7 @@ export default function Tasks() {
       <div className={detail ? 'hidden' : undefined}>
         <div className="flex items-center gap-2 mb-3">
           <SegmentedTabs tabs={TABS} value={tab} onChange={switchTab} />
-          {ready && tree.length > 1 && (
+          {ready && isList && tree.length > 1 && (
             <select
               value={option?.value || ALL}
               onChange={(e) => choose(e.target.value)}
@@ -351,7 +357,7 @@ export default function Tasks() {
               New issue
             </button>
           )}
-          {ready && (
+          {ready && isList && (
             <Tooltip label="Refresh">
               <button
                 onClick={refresh}
@@ -374,6 +380,8 @@ export default function Tasks() {
             onRetry={() => loadSetup({ force: true })}
             onReady={() => loadSetup({ force: true })}
           />
+        ) : ready && tab === 'projects' ? (
+          <ProjectsView siteIdFor={siteIdFor} />
         ) : sites && tree.length <= 1 ? (
           <EmptyState
             title="No Sites with a GitHub repo"

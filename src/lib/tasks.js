@@ -307,3 +307,38 @@ export function linkedSessions(sessions) {
 export function sessionsFor(map, item) {
   return map.get(linkKey(item.repo, item.number)) || [];
 }
+
+// ── Projects board ───────────────────────────────────────────────────────────
+
+export const NO_STATUS = '__none__';
+
+// Board columns from the Status field's options, in the project's order,
+// with "No Status" first (as GitHub shows it) when anything lacks one.
+// `field` null → a single column holding every item.
+export function boardColumns(items, field) {
+  if (!field) return [{ id: NO_STATUS, name: 'Items', color: null, items: [...items] }];
+  const columns = field.options.map((o) => ({ ...o, items: [] }));
+  const byId = new Map(columns.map((c) => [c.id, c]));
+  const none = { id: NO_STATUS, name: 'No Status', color: null, items: [] };
+  for (const item of items) {
+    const optionId = item.values?.[field.id]?.optionId;
+    (byId.get(optionId) || none).items.push(item);
+  }
+  return none.items.length ? [none, ...columns] : columns;
+}
+
+// GitHub's named project colours → swatches that read on both themes.
+const PROJECT_COLORS = {
+  GRAY: '#8b949e',
+  BLUE: '#4493f8',
+  GREEN: '#3fb950',
+  YELLOW: '#d29922',
+  ORANGE: '#db6d28',
+  RED: '#f85149',
+  PINK: '#db61a2',
+  PURPLE: '#ab7df8',
+};
+
+export function projectColor(name) {
+  return PROJECT_COLORS[String(name || '').toUpperCase()] || null;
+}

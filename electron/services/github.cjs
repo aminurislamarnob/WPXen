@@ -533,6 +533,19 @@ async function graphql(query, q) {
   return data.data || {};
 }
 
+// GraphQL with string variables (`-f name=value`).
+async function graphqlVars(query, vars) {
+  const args = ['api', 'graphql', '-f', `query=${query}`];
+  for (const [k, v] of Object.entries(vars)) args.push('-f', `${k}=${v}`);
+  const data = JSON.parse(await gh(args));
+  if (data.errors?.length) {
+    const err = new Error('graphql');
+    err.stderr = data.errors.map((e) => e.message).join('\n');
+    throw err;
+  }
+  return data.data || {};
+}
+
 async function searchPullRepo(repo, query, force) {
   const q = buildSearchQuery(query, repo, 'pr');
   const key = `pr-graphql\n${q}`;
@@ -879,6 +892,235 @@ function getPullChecks({ repo, sha, force = false } = {}) {
   });
 }
 
+// ── Projects (v2) ────────────────────────────────────────────────────────────
+// GraphQL only, and it needs the `read:project` scope that `gh auth login`
+// doesn't grant by default — the missing-scope error is how the page learns
+// to offer Grant access.
+
+const PROJECT_FIELDS = `id number title url closed updatedAt
+  owner { __typename ... on User { login } ... on Organization { login } }`;
+
+const PROJECTS_QUERY = `query {
+  viewer {
+    login
+    projectsV2(first: 50, orderBy: { field: UPDATED_AT, direction: DESC }) {
+      nodes { ${PROJECT_FIELDS} }
+    }
+    organizations(first: 50) {
+      nodes {
+        login
+        projectsV2(first: 50, orderBy: { field: UPDATED_AT, direction: DESC }) {
+          nodes { ${PROJECT_FIELDS} }
+        }
+      }
+    }
+  }
+}`;
+
+const PROJECT_QUERY = `
+  query($id: ID!, $after: String) {
+    node(id: $id) {
+      ... on ProjectV2 {
+        id number title url closed
+        fields(first: 50) {
+          nodes {
+            __typename
+            ... on ProjectV2FieldCommon { id name dataType }
+            ... on ProjectV2SingleSelectField { options { id name color } }
+            ... on ProjectV2IterationField { configuration { iterations { id title startDate duration } } }
+          }
+        }
+        items(first: 100, after: $after) {
+          pageInfo { hasNextPage endCursor }
+          nodes {
+            id type isArchived
+            content {
+              __typename
+              ... on Issue {
+                number title url state stateReason
+                repository { nameWithOwner }
+                assignees(first: 10) { nodes { login avatarUrl } }
+                labels(first: 10) { nodes { name color } }
+              }
+              ... on PullRequest {
+                number title url state merged
+                repository { nameWithOwner }
+                assignees(first: 10) { nodes { login avatarUrl } }
+                labels(first: 10) { nodes { name color } }
+              }
+              ... on DraftIssue { title }
+            }
+            fieldValues(first: 30) {
+              nodes {
+                __typename
+                ... on ProjectV2ItemFieldSingleSelectValue { name optionId field { ... on ProjectV2FieldCommon { id } } }
+                ... on ProjectV2ItemFieldTextValue { text field { ... on ProjectV2FieldCommon { id } } }
+                ... on ProjectV2ItemFieldNumberValue { number field { ... on ProjectV2FieldCommon { id } } }
+                ... on ProjectV2ItemFieldDateValue { date field { ... on ProjectV2FieldCommon { id } } }
+                ... on ProjectV2ItemFieldIterationValue { title startDate iterationId field { ... on ProjectV2FieldCommon { id } } }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+`;
+
+const PROJECT_PAGES = 5; // 500 items; a bigger board says so
+
+function normalizeProject(p) {
+  return {
+    id: p.id,
+    number: p.number,
+    title: p.title || 'Untitled project',
+    url: p.url,
+    closed: !!p.closed,
+    updatedAt: p.updatedAt || null,
+    owner: p.owner?.login || null,
+    ownerType: p.owner?.__typename === 'Organization' ? 'org' : 'user',
+  };
+}
+
+// The viewer's projects, then each organisation's, deduped by id. Closed
+// projects sort last.
+function normalizeProjects(viewer) {
+  const all = [
+    ...(viewer?.projectsV2?.nodes || []),
+    ...(viewer?.organizations?.nodes || []).flatMap((o) => o?.projectsV2?.nodes || []),
+  ].filter((p) => p && p.id);
+  const seen = new Set();
+  const out = [];
+  for (const p of all) {
+    if (seen.has(p.id)) continue;
+    seen.add(p.id);
+    out.push(normalizeProject(p));
+  }
+  return out.sort((a, b) => Number(a.closed) - Number(b.closed));
+}
+
+// The project's own fields — not the built-ins every item already carries
+// (title, assignees, labels, repository…), which the table shows from the
+// item itself.
+const FIELD_TYPES = ['SINGLE_SELECT', 'ITERATION', 'TEXT', 'NUMBER', 'DATE'];
+
+function normalizeFields(nodes) {
+  return (nodes || [])
+    .filter((f) => f && f.id && FIELD_TYPES.includes(f.dataType))
+    .map((f) => ({
+      id: f.id,
+      name: f.name,
+      type: f.dataType,
+      options: (f.options || []).map((o) => ({
+        id: o.id,
+        name: o.name,
+        color: o.color || null,
+      })),
+      iterations: (f.configuration?.iterations || []).map((i) => ({
+        id: i.id,
+        title: i.title,
+        startDate: i.startDate,
+      })),
+    }));
+}
+
+// The board's columns come from the Status field — the single select GitHub
+// creates as "Status" — falling back to the first single select a project
+// has, else none (Board then shows one column).
+function statusField(fields) {
+  const selects = fields.filter((f) => f.type === 'SINGLE_SELECT');
+  return selects.find((f) => f.name.toLowerCase() === 'status') || selects[0] || null;
+}
+
+function fieldValue(v) {
+  switch (v.__typename) {
+    case 'ProjectV2ItemFieldSingleSelectValue':
+      return { text: v.name || '', optionId: v.optionId || null };
+    case 'ProjectV2ItemFieldTextValue':
+      return { text: v.text || '' };
+    case 'ProjectV2ItemFieldNumberValue':
+      return { text: v.number == null ? '' : String(v.number), number: v.number };
+    case 'ProjectV2ItemFieldDateValue':
+      return { text: v.date || '', date: v.date || null };
+    case 'ProjectV2ItemFieldIterationValue':
+      return { text: v.title || '', iterationId: v.iterationId || null };
+    default:
+      return null;
+  }
+}
+
+const ITEM_KIND = { ISSUE: 'issue', PULL_REQUEST: 'pr', DRAFT_ISSUE: 'draft' };
+
+function normalizeProjectItem(node) {
+  const c = node.content || {};
+  const values = {};
+  for (const v of node.fieldValues?.nodes || []) {
+    const id = v?.field?.id;
+    const value = v && fieldValue(v);
+    if (id && value) values[id] = value;
+  }
+  const kind = ITEM_KIND[node.type] || 'redacted';
+  return {
+    id: node.id,
+    kind,
+    archived: !!node.isArchived,
+    repo: c.repository?.nameWithOwner || null,
+    number: c.number ?? null,
+    title: c.title || (kind === 'redacted' ? 'Private item' : 'Untitled'),
+    url: c.url || null,
+    state: c.state === 'OPEN' ? 'open' : c.state ? 'closed' : null,
+    stateReason: c.merged ? 'merged' : String(c.stateReason || '').toLowerCase() || null,
+    assignees: (c.assignees?.nodes || []).map((u) => ({
+      login: u.login,
+      avatarUrl: u.avatarUrl || null,
+    })),
+    labels: (c.labels?.nodes || []).map((l) => ({
+      name: l.name,
+      color: l.color || null,
+    })),
+    values,
+  };
+}
+
+async function listProjects({ force = false } = {}) {
+  return cached('projects', force, async () => {
+    const data = await graphqlVars(PROJECTS_QUERY, {});
+    return { projects: normalizeProjects(data.viewer) };
+  });
+}
+
+async function getProject({ id, force = false } = {}) {
+  if (!/^PVT_[A-Za-z0-9_-]+$/.test(String(id || ''))) {
+    return { error: { code: 'validation', message: 'Not a project.' } };
+  }
+  return cached(`project:${id}`, force, async () => {
+    let after = null;
+    let project = null;
+    const items = [];
+    let truncated = false;
+    for (let page = 0; page < PROJECT_PAGES; page += 1) {
+      const data = await graphqlVars(PROJECT_QUERY, after ? { id, after } : { id });
+      const node = data.node;
+      if (!node)
+        throw Object.assign(new Error('Not Found'), { stderr: 'HTTP 404: Not Found' });
+      project = project || node;
+      items.push(...(node.items?.nodes || []).filter(Boolean));
+      const info = node.items?.pageInfo;
+      if (!info?.hasNextPage) break;
+      after = info.endCursor;
+      truncated = page === PROJECT_PAGES - 1;
+    }
+    const fields = normalizeFields(project.fields?.nodes);
+    return {
+      project: normalizeProject(project),
+      fields,
+      statusFieldId: statusField(fields)?.id || null,
+      items: items.map(normalizeProjectItem).filter((i) => !i.archived),
+      truncated,
+    };
+  });
+}
+
 // ── Writes ───────────────────────────────────────────────────────────────────
 // Every write is one REST call with its JSON body on stdin. A write drops the
 // caches it could have made stale — the issue's details and every list — so
@@ -1092,6 +1334,11 @@ module.exports = {
   getPullFiles,
   getPullChecks,
   checkoutPull,
+  normalizeProjects,
+  normalizeFields,
+  normalizeProjectItem,
+  listProjects,
+  getProject,
   addComment,
   setIssueState,
   editIssue,
