@@ -49,6 +49,25 @@ afterEach(() => {
 });
 
 describe('agents.launchFloating', () => {
+  it('types a given one-line command once the shell settles', () => {
+    vi.useFakeTimers();
+    try {
+      agents.launchFloating({ cwd: home, command: '  gh auth login --web ' });
+      ptys[0].emitData('% ');
+      vi.advanceTimersByTime(200);
+      expect(ptys[0].write).toHaveBeenCalledWith('gh auth login --web\r');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('refuses a multi-line command — it would be typed, not exec’d', () => {
+    expect(agents.launchFloating({ cwd: home, command: 'ls\nrm -rf x' }).error).toMatch(
+      /single line/
+    );
+    expect(ptys).toHaveLength(0);
+  });
+
   it('starts a login shell in the given directory, with no Site', () => {
     const res = agents.launchFloating({ cwd: path.join(home, 'code') });
     expect(res.ok).toBe(true);

@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
+  ghSetupCommand,
+  hasScope,
+  setupStep,
   ALL,
   PAGE_SIZE,
   buildPickerTree,
@@ -154,5 +157,32 @@ describe('labelColor', () => {
     expect(labelColor('red')).toBeNull();
     expect(labelColor('d73a4a;background:url(x)')).toBeNull();
     expect(labelColor(null)).toBeNull();
+  });
+});
+
+describe('gh setup', () => {
+  it('names the one step between the page and a list', () => {
+    expect(setupStep(null)).toBe('checking');
+    expect(setupStep({ installed: false })).toBe('install');
+    expect(setupStep({ installed: true, authenticated: false })).toBe('sign-in');
+    expect(setupStep({ installed: true, authenticated: true })).toBe('ready');
+  });
+
+  it('checks a scope, treating the write scope as covering read', () => {
+    const pre = { scopes: ['repo', 'project'] };
+    expect(hasScope(pre, 'read:project')).toBe(true);
+    expect(hasScope({ scopes: ['repo'] }, 'read:project')).toBe(false);
+    expect(hasScope({ scopes: null }, 'read:project')).toBe(true); // unknown → just try
+    expect(hasScope({ scopes: [] }, null)).toBe(true);
+  });
+
+  it('builds the sign-in and grant commands, refusing an odd scope', () => {
+    expect(ghSetupCommand()).toBe(
+      'gh auth login --hostname github.com --git-protocol https --web'
+    );
+    expect(ghSetupCommand({ scope: 'read:project' })).toBe(
+      'gh auth refresh --hostname github.com --scopes read:project'
+    );
+    expect(ghSetupCommand({ scope: 'x; rm -rf ~' })).toBeNull();
   });
 });

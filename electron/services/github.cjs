@@ -54,6 +54,8 @@ function defaultRunGh(args) {
 
 const deps = {
   runGh: defaultRunGh,
+  runBrewStreaming: (args, onProgress) =>
+    require('./brew.cjs').runBrewStreaming(args, onProgress),
   githubReposFor: (sitePath) => require('./git.cjs').githubReposFor(sitePath),
   now: () => Date.now(),
 };
@@ -85,6 +87,13 @@ async function gh(args) {
 // gh's stderr, mapped to a code the page can act on and a sentence a person
 // can read.
 
+// GraphQL's answer when the token lacks an OAuth scope (Projects needs
+// `read:project`, which `gh auth login` doesn't grant by default):
+//   "…has not been granted the required scopes… requires one of the following
+//    scopes: ['read:project'], but your token has only been granted…"
+const MISSING_SCOPE = /not been granted the required scopes/i;
+const REQUIRED_SCOPE = /requires one of the following scopes:\s*\[\s*'([a-z:_-]+)'/i;
+
 function classifyError(err) {
   if (err?.code === 'ENOENT') {
     return { code: 'not-installed', message: 'The GitHub CLI (gh) is not installed.' };
@@ -93,6 +102,16 @@ function classifyError(err) {
   // — the part that says *why* — on stdout, so both are read.
   const summary = String(err?.stderr || err?.message || '');
   const text = `${summary}\n${err?.stdout || ''}`;
+  if (MISSING_SCOPE.test(text)) {
+    const scope = text.match(REQUIRED_SCOPE)?.[1] || null;
+    return {
+      code: 'missing-scope',
+      scope,
+      message: scope
+        ? `The GitHub CLI needs the ${scope} scope for this.`
+        : 'The GitHub CLI needs an extra scope for this.',
+    };
+  }
   const rules = [
     [
       /auth login|not logged in|authentication required|HTTP 401|bad credentials/i,
@@ -136,6 +155,35 @@ function classifyError(err) {
 
 // ── Preflight ────────────────────────────────────────────────────────────────
 
+// `gh api -i user` answers three questions in one request: is the login still
+// valid (not just present in gh's config), who is it, and which OAuth scopes
+// it carries (the X-Oauth-Scopes header) — the page asks for `read:project`
+// before Projects rather than failing on it.
+
+// Splits `gh api -i` output into its lowercased headers and the body.
+function parseHttpResponse(out) {
+  const text = String(out || '').replace(/\r\n/g, '\n');
+  const split = text.indexOf('\n\n');
+  const head = split === -1 ? text : text.slice(0, split);
+  const body = split === -1 ? '' : text.slice(split + 2);
+  const headers = {};
+  for (const line of head.split('\n').slice(1)) {
+    const i = line.indexOf(':');
+    if (i > 0) headers[line.slice(0, i).trim().toLowerCase()] = line.slice(i + 1).trim();
+  }
+  return { headers, body };
+}
+
+// null when the header is absent — a fine-grained or app token has no OAuth
+// scopes to report, so nothing can be said about them up front.
+function parseScopes(header) {
+  if (header == null) return null;
+  return String(header)
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
 async function preflight() {
   try {
     await gh(['--version']);
@@ -145,11 +193,30 @@ async function preflight() {
     return { installed: true, authenticated: false, error: e };
   }
   try {
-    await gh(['auth', 'status', '--hostname', 'github.com']);
-    return { installed: true, authenticated: true };
+    const { headers, body } = parseHttpResponse(await gh(['api', '-i', 'user']));
+    let login = null;
+    try {
+      login = JSON.parse(body).login || null;
+    } catch {
+      login = null;
+    }
+    return {
+      installed: true,
+      authenticated: true,
+      login,
+      scopes: parseScopes(headers['x-oauth-scopes']),
+    };
   } catch (err) {
     return { installed: true, authenticated: false, error: classifyError(err) };
   }
+}
+
+// `brew install gh`, streaming brew's lines to `onProgress`. The CLI is the
+// only one WPXen installs for Tasks, so the formula is fixed here rather than
+// taken from the caller.
+async function installGh(onProgress) {
+  await deps.runBrewStreaming(['install', 'gh'], onProgress);
+  return preflight();
 }
 
 // ── Repos ────────────────────────────────────────────────────────────────────
@@ -284,6 +351,9 @@ module.exports = {
   SEARCH_PER_PAGE,
   classifyError,
   preflight,
+  parseHttpResponse,
+  parseScopes,
+  installGh,
   sitesWithRepos,
   buildSearchQuery,
   normalizeIssue,

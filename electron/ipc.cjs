@@ -392,7 +392,9 @@ function registerHandlers(win, storeInstance) {
     }
   });
   ipcMain.handle('agent-floating-sessions', () => agents.listFloatingSessions());
-  ipcMain.handle('agent-launch-floating', (_e, cwd) => agents.launchFloating({ cwd }));
+  ipcMain.handle('agent-launch-floating', (_e, cwd, command) =>
+    agents.launchFloating({ cwd, command })
+  );
 
   // Floating Workspace notes (services/notes.cjs). Reads and writes are
   // confined to the notes folder plus files the user picked below.
@@ -420,6 +422,18 @@ function registerHandlers(win, storeInstance) {
   // Tasks (services/github.cjs) — GitHub through the `gh` CLI, for every Site
   // with a GitHub repo.
   ipcMain.handle('tasks-preflight', () => github.preflight());
+  ipcMain.handle('tasks-install-gh', async (event) => {
+    try {
+      const progress = (line) => {
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('tasks-gh-install-progress', { line });
+        }
+      };
+      return { success: true, status: await github.installGh(progress) };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
   ipcMain.handle('tasks-repos', (_e, opts) =>
     github.sitesWithRepos(store.get('sites', []), { force: !!opts?.force })
   );
