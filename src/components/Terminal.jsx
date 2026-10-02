@@ -1,9 +1,12 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowDown } from 'lucide-react';
 import '@xterm/xterm/css/xterm.css';
 import { shellEscape } from '../lib/terminal/keys';
 import * as sessionCache from '../lib/terminal/sessionCache';
 import TerminalSearchBar from './TerminalSearchBar';
+import LinkActionCard from './LinkActionCard';
+import { useSettings } from '../lib/useSettings';
+import { resolveLinkClick } from '../lib/terminal/linkActions';
 
 // Embedded view over a cached main-process Session (by sessionId). The xterm
 // instance lives in sessionCache and is re-parented here on mount, so switching
@@ -19,6 +22,24 @@ export default function Terminal({
   onOpenLink,
   onTitle,
 }) {
+  // Link clicks: plain → the action card, ⌘ / ⇧⌘ → straight to a destination.
+  // `onOpenLink(url, destination)` — 'system' or 'app' — is the owner's.
+  const { settings } = useSettings();
+  const openLinksIn = settings['app.openLinksIn'];
+  const [linkRequest, setLinkRequest] = useState(null); // { url, x, y }
+  const onLinkClick = useCallback(
+    (event, url) => {
+      const action = resolveLinkClick(event, openLinksIn);
+      if (action === 'actions') {
+        setLinkRequest({ url, x: event.clientX, y: event.clientY });
+      } else if (action) {
+        if (onOpenLink) onOpenLink(url, action);
+        else window.electronAPI.openSiteInBrowser(url);
+      }
+    },
+    [openLinksIn, onOpenLink]
+  );
+
   const hostRef = useRef(null);
   const searchAddonRef = useRef(null);
   const termRef = useRef(null);
@@ -35,6 +56,7 @@ export default function Terminal({
       rootPath,
       onOpenFile,
       onOpenLink,
+      onLinkClick,
       onTitle: (title) => onTitle?.(sessionId, title),
       onToggleSearch: () => setSearchOpen((v) => !v),
       onExit: (code) => setExit({ code }),
@@ -75,13 +97,14 @@ export default function Terminal({
       rootPath,
       onOpenFile,
       onOpenLink,
+      onLinkClick,
       onTitle: (title) => onTitle?.(sessionId, title),
       onToggleSearch: () => setSearchOpen((v) => !v),
       onExit: (code) => setExit({ code }),
     });
     // getOrCreate already replaced entry.handlers; nothing else to do.
     void entry;
-  }, [sessionId, rootPath, onOpenFile, onOpenLink, onTitle]);
+  }, [sessionId, rootPath, onOpenFile, onOpenLink, onLinkClick, onTitle]);
 
   const onDragOver = (e) => {
     e.preventDefault();
@@ -114,6 +137,21 @@ export default function Terminal({
       onDrop={onDrop}
     >
       <div ref={hostRef} className="h-full w-full p-2" />
+      {linkRequest && (
+        <LinkActionCard
+          request={linkRequest}
+          openLinksIn={openLinksIn}
+          onOpen={(url, destination) =>
+            onOpenLink
+              ? onOpenLink(url, destination)
+              : window.electronAPI.openSiteInBrowser(url)
+          }
+          onClose={() => {
+            setLinkRequest(null);
+            termRef.current?.focus();
+          }}
+        />
+      )}
       {searchOpen && (
         <TerminalSearchBar
           searchAddon={searchAddonRef.current}

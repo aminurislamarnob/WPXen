@@ -603,8 +603,10 @@ export default function FloatingWorkspace() {
     return () => window.removeEventListener('keydown', onKey);
   }, [addMenu]);
 
-  const openLink = (url) => {
-    if (settings['app.openLinksIn'] === 'app') newBrowser(url);
+  // `destination` ('system' | 'app') comes from a terminal link click; without
+  // one, the setting decides. In-app here is a floating browser tab.
+  const openLink = (url, destination = settings['app.openLinksIn']) => {
+    if (destination === 'app') newBrowser(url);
     else window.electronAPI.openSiteInBrowser(url);
   };
 
