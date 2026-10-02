@@ -437,6 +437,9 @@ function registerHandlers(win, storeInstance) {
   ipcMain.handle('tasks-repos', (_e, opts) =>
     github.sitesWithRepos(store.get('sites', []), { force: !!opts?.force })
   );
+  ipcMain.handle('tasks-issue', (_e, opts) =>
+    github.getIssue({ repo: opts?.repo, number: opts?.number, force: !!opts?.force })
+  );
   ipcMain.handle('tasks-search-issues', (_e, opts) =>
     github.searchIssues({
       repos: opts?.repos,

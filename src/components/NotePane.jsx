@@ -5,7 +5,7 @@ import { markdown } from '@codemirror/lang-markdown';
 import { buildEditorMetrics, editorThemes } from '../lib/editorTheme';
 import { editorTypography, onTypographyChange } from '../lib/typography';
 import { onThemeChange, themeName } from '../lib/theme';
-import { previewLinkTarget, renderNoteHtml } from '../lib/notePreview';
+import { previewLinkTarget, renderMarkdownHtml } from '../lib/notePreview';
 
 // One markdown note in the Floating Workspace: the app's CodeMirror editor in
 // markdown mode, a Source / Preview toggle, and autosave.
@@ -151,7 +151,7 @@ export default function NotePane({ path, onEdited, onOpenLink }) {
   };
 
   const html = useMemo(
-    () => (mode === 'preview' ? renderNoteHtml(previewText) : ''),
+    () => (mode === 'preview' ? renderMarkdownHtml(previewText) : ''),
     [mode, previewText]
   );
 
@@ -243,7 +243,7 @@ export default function NotePane({ path, onEdited, onOpenLink }) {
           <div
             className="note-preview flex-1 min-h-0 overflow-y-auto px-6 py-4"
             onClick={onPreviewClick}
-            // Sanitised by DOMPurify in renderNoteHtml.
+            // Sanitised by DOMPurify in renderMarkdownHtml.
             dangerouslySetInnerHTML={{ __html: html }}
           />
         ) : null}

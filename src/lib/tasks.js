@@ -151,3 +151,27 @@ export function ghSetupCommand({ scope } = {}) {
   }
   return 'gh auth login --hostname github.com --git-protocol https --web';
 }
+
+// ── Detail routes ────────────────────────────────────────────────────────────
+// An item's details live at /tasks/<owner>/<name>/issues/<number>, under the
+// Tasks route, so Back (and the window's back arrow) returns to the list.
+
+const OWNER = /^[A-Za-z0-9-]+$/;
+const NAME = /^[A-Za-z0-9._-]+$/;
+
+export function detailPath(item) {
+  const [owner, name] = String(item?.repo || '').split('/');
+  return `/tasks/${owner}/${name}/issues/${item.number}`;
+}
+
+// The part of the path after /tasks/ → { repo, number }, or null for the list.
+export function parseDetailPath(rest) {
+  const [owner, name, kind, num, ...extra] = String(rest || '')
+    .split('/')
+    .filter(Boolean);
+  if (extra.length || kind !== 'issues') return null;
+  if (!OWNER.test(owner || '') || !NAME.test(name || '')) return null;
+  const number = Number(num);
+  if (!Number.isInteger(number) || number <= 0 || String(number) !== num) return null;
+  return { repo: `${owner}/${name}`, number };
+}

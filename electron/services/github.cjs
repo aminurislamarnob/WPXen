@@ -19,6 +19,8 @@ const MAX_CONCURRENT = 4;
 const SEARCH_PER_PAGE = 100; // one request per repo; the list pages locally
 const SEARCH_CACHE_MS = 20000;
 const REPOS_CACHE_MS = 30000;
+const DETAIL_CACHE_MS = 15000;
+const TIMELINE_PER_PAGE = 100;
 
 function defaultRunGh(args) {
   return new Promise((resolve, reject) => {
@@ -63,6 +65,7 @@ const deps = {
 function __setDeps(next) {
   Object.assign(deps, next);
   searchCache.clear();
+  detailCache.clear();
   reposCache = null;
 }
 
@@ -346,6 +349,112 @@ async function searchIssues({ repos, query = '', force = false } = {}) {
   return { results };
 }
 
+// ── Details ──────────────────────────────────────────────────────────────────
+// One issue with its timeline: the comments plus the events worth showing
+// (closed, reopened, labeled, assigned, referenced). Everything else GitHub
+// records — subscribed, mentioned, renamed… — is dropped.
+
+function normalizeTimelineEvent(e) {
+  if (!e || !e.event) return null;
+  const at = e.created_at || e.submitted_at || null;
+  const base = {
+    id: String(e.id || e.node_id || `${e.event}-${at}`),
+    at,
+    actor: person(e.actor || e.user),
+  };
+  switch (e.event) {
+    case 'commented':
+      return {
+        ...base,
+        type: 'comment',
+        actor: person(e.user || e.actor),
+        body: e.body || '',
+        url: e.html_url || null,
+      };
+    case 'closed':
+      return { ...base, type: 'closed', stateReason: e.state_reason || null };
+    case 'reopened':
+      return { ...base, type: 'reopened' };
+    case 'labeled':
+    case 'unlabeled':
+      if (!e.label) return null;
+      return {
+        ...base,
+        type: e.event,
+        label: { name: e.label.name, color: e.label.color || null },
+      };
+    case 'assigned':
+    case 'unassigned':
+      if (!e.assignee) return null;
+      return { ...base, type: e.event, assignee: person(e.assignee) };
+    case 'cross-referenced': {
+      const src = e.source?.issue;
+      if (!src) return null;
+      return {
+        ...base,
+        type: 'referenced',
+        source: {
+          kind: src.pull_request ? 'pr' : 'issue',
+          repo: src.repository?.full_name || null,
+          number: src.number,
+          title: src.title || '',
+          url: src.html_url || null,
+          state: src.state === 'closed' ? 'closed' : 'open',
+          merged: !!src.pull_request?.merged_at,
+        },
+      };
+    }
+    default:
+      return null;
+  }
+}
+
+// Oldest first. GitHub already sends them in order; a stable sort keeps a
+// comment ahead of the close it came with when both share a timestamp.
+function normalizeTimeline(events) {
+  return (Array.isArray(events) ? events : [])
+    .map(normalizeTimelineEvent)
+    .filter(Boolean)
+    .sort((a, b) => String(a.at).localeCompare(String(b.at)));
+}
+
+const detailCache = new Map(); // `${repo}#${number}` -> { at, value }
+
+async function getIssue({ repo, number, force = false } = {}) {
+  const n = Number(number);
+  if (!REPO_SLUG.test(String(repo)) || !Number.isInteger(n) || n <= 0) {
+    return { error: { code: 'validation', message: 'Not an issue.' } };
+  }
+  const key = `${repo}#${n}`;
+  const hit = detailCache.get(key);
+  if (!force && hit && deps.now() - hit.at < DETAIL_CACHE_MS) return hit.value;
+  try {
+    const [issueOut, timelineOut] = await Promise.all([
+      gh(['api', `repos/${repo}/issues/${n}`]),
+      gh([
+        'api',
+        '-X',
+        'GET',
+        `repos/${repo}/issues/${n}/timeline`,
+        '-f',
+        `per_page=${TIMELINE_PER_PAGE}`,
+      ]),
+    ]);
+    const item = JSON.parse(issueOut);
+    const events = JSON.parse(timelineOut);
+    const value = {
+      issue: { ...normalizeIssue(item, repo), body: item.body || '' },
+      timeline: normalizeTimeline(events),
+      // One page of history; a longer thread says so and links to GitHub.
+      truncated: Array.isArray(events) && events.length >= TIMELINE_PER_PAGE,
+    };
+    detailCache.set(key, { at: deps.now(), value });
+    return value;
+  } catch (err) {
+    return { error: classifyError(err) };
+  }
+}
+
 module.exports = {
   MAX_CONCURRENT,
   SEARCH_PER_PAGE,
@@ -358,5 +467,7 @@ module.exports = {
   buildSearchQuery,
   normalizeIssue,
   searchIssues,
+  normalizeTimeline,
+  getIssue,
   __setDeps,
 };

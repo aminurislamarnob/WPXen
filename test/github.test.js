@@ -373,3 +373,119 @@ describe('sitesWithRepos', () => {
     expect(await github.sitesWithRepos(sites)).toEqual([]);
   });
 });
+
+describe('issue details', () => {
+  const ev = (event, extra = {}) => ({
+    event,
+    id: Math.floor(Math.random() * 1e9),
+    actor: { login: 'bo', avatar_url: 'https://avatars/bo' },
+    created_at: '2026-09-03T10:00:00Z',
+    ...extra,
+  });
+
+  it('keeps comments and key events, in order, and drops the rest', () => {
+    const timeline = github.normalizeTimeline([
+      ev('labeled', {
+        created_at: '2026-09-01T00:00:00Z',
+        label: { name: 'bug', color: 'd73a4a' },
+      }),
+      ev('subscribed'),
+      ev('commented', {
+        created_at: '2026-09-02T00:00:00Z',
+        user: { login: 'ana' },
+        body: 'Seeing this too',
+        html_url: 'https://github.com/acme/shop/issues/7#issuecomment-1',
+      }),
+      ev('assigned', { created_at: '2026-09-02T00:00:00Z', assignee: { login: 'bo' } }),
+      ev('mentioned'),
+      ev('cross-referenced', {
+        created_at: '2026-09-04T00:00:00Z',
+        source: {
+          issue: {
+            number: 9,
+            title: 'Fix it',
+            html_url: 'https://github.com/acme/shop/pull/9',
+            state: 'closed',
+            repository: { full_name: 'acme/shop' },
+            pull_request: { merged_at: '2026-09-05T00:00:00Z' },
+          },
+        },
+      }),
+      ev('closed', { created_at: '2026-09-05T00:00:00Z', state_reason: 'completed' }),
+      ev('reopened', { created_at: '2026-09-06T00:00:00Z' }),
+    ]);
+    expect(timeline.map((t) => t.type)).toEqual([
+      'labeled',
+      'comment',
+      'assigned',
+      'referenced',
+      'closed',
+      'reopened',
+    ]);
+    expect(timeline[0].label).toEqual({ name: 'bug', color: 'd73a4a' });
+    expect(timeline[1]).toMatchObject({
+      actor: { login: 'ana' },
+      body: 'Seeing this too',
+      url: 'https://github.com/acme/shop/issues/7#issuecomment-1',
+    });
+    expect(timeline[2].assignee.login).toBe('bo');
+    expect(timeline[3].source).toEqual({
+      kind: 'pr',
+      repo: 'acme/shop',
+      number: 9,
+      title: 'Fix it',
+      url: 'https://github.com/acme/shop/pull/9',
+      state: 'closed',
+      merged: true,
+    });
+    expect(timeline[4].stateReason).toBe('completed');
+  });
+
+  it('keeps a comment ahead of the close it shares a timestamp with', () => {
+    const at = '2026-09-02T00:00:00Z';
+    const timeline = github.normalizeTimeline([
+      ev('commented', { created_at: at, user: { login: 'ana' }, body: 'Done' }),
+      ev('closed', { created_at: at }),
+    ]);
+    expect(timeline.map((t) => t.type)).toEqual(['comment', 'closed']);
+  });
+
+  it('fetches the issue and its timeline, normalised', async () => {
+    fakeGh((args) =>
+      args[1] === 'repos/acme/shop/issues/7'
+        ? JSON.stringify({ ...apiIssue(7), body: 'Steps to reproduce' })
+        : JSON.stringify([ev('reopened')])
+    );
+    const res = await github.getIssue({ repo: 'acme/shop', number: 7 });
+    expect(calls).toContainEqual([
+      'api',
+      '-X',
+      'GET',
+      'repos/acme/shop/issues/7/timeline',
+      '-f',
+      'per_page=100',
+    ]);
+    expect(res.issue).toMatchObject({
+      number: 7,
+      body: 'Steps to reproduce',
+      repo: 'acme/shop',
+    });
+    expect(res.timeline.map((t) => t.type)).toEqual(['reopened']);
+    expect(res.truncated).toBe(false);
+  });
+
+  it('reports an error instead of throwing, and refuses a bad reference', async () => {
+    fakeGh(() => {
+      throw ghError('HTTP 404: Not Found');
+    });
+    expect((await github.getIssue({ repo: 'acme/shop', number: 7 })).error.code).toBe(
+      'not-found'
+    );
+    expect((await github.getIssue({ repo: '../x', number: 7 })).error.code).toBe(
+      'validation'
+    );
+    expect((await github.getIssue({ repo: 'acme/shop', number: 'x' })).error.code).toBe(
+      'validation'
+    );
+  });
+});

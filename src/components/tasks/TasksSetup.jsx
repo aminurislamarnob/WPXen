@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Copy, Download, Github, KeyRound, Loader2, LogIn } from 'lucide-react';
-import { ghSetupCommand, hasScope, setupStep } from '../lib/tasks';
-import { hasFloatingRunner, runInFloatingTerminal } from '../lib/floatingBus';
+import { ghSetupCommand, hasScope, setupStep } from '../../lib/tasks';
+import { hasFloatingRunner, runInFloatingTerminal } from '../../lib/floatingBus';
 
 // Getting `gh` ready for Tasks: one-click install through Homebrew, and
 // sign-in (or a missing scope) run as `gh auth …` in a Floating Workspace
