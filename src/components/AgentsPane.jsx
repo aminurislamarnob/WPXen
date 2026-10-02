@@ -1,11 +1,10 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { useParams, useLocation, useNavigate, useOutletContext } from 'react-router-dom';
 import {
   Terminal as TerminalIcon,
   Plus,
   X,
   Settings2,
-  CornerDownRight,
   Globe,
   Gauge,
   Database,
@@ -19,15 +18,14 @@ import FileExplorer from './FileExplorer';
 import CodeEditor from './CodeEditor';
 import ResizeHandle from './ResizeHandle';
 import LaunchTargetsDialog from './LaunchTargetsDialog';
+import LaunchMenu from './LaunchMenu';
 import { ConfirmDialog, Tooltip } from './ui';
 import * as sessionCache from '../lib/terminal/sessionCache';
 import * as webviewCache from '../lib/browser/webviewCache';
 import { useSettings } from '../lib/useSettings';
 import { LAST_AGENTS_SITE_KEY, resolveLastSite } from '../lib/activityBar';
-
-// Strip a leading emoji/symbol + space from an OSC title (agents like Claude
-// Code prefix a status glyph) so the tab label reads cleanly.
-const cleanTitle = (t) => t.trim().replace(/^[\p{Emoji}\p{Symbol}]\s*/u, '');
+import { sessionTitle } from '../lib/agentsList';
+import { useAgentSessions, setSelectedSession } from '../lib/useAgentSessions';
 
 const CLOSE_CONFIRM_KEY = 'wpxen.terminalCloseConfirmSuppressed';
 
@@ -42,7 +40,10 @@ const BROWSER_TARGETS = [
 
 // Main pane for the Agents section. A Site can host MANY concurrent Sessions
 // (any mix of Agents, incl. several of the same provider); each is a terminal
-// tab. The sidebar spawns a Session via navigation state; the "+" spawns more.
+// tab. The tabs are the Site's Sessions as the main process lists them — the
+// same list the Projects sidebar shows — so a launch, exit or dismiss anywhere
+// lands here too. The sidebar spawns or focuses a Session via navigation
+// state; the "+" spawns more.
 export default function AgentsPane() {
   const { siteId } = useParams();
   const location = useLocation();
@@ -59,7 +60,14 @@ export default function AgentsPane() {
   const [settingsOpen, setSettingsOpen] = useState(false); // launch-settings dialog
   const [error, setError] = useState(null);
 
-  const [tabs, setTabs] = useState([]); // [{ sessionId, agentId, agentName }]
+  const allSessions = useAgentSessions();
+  const tabs = useMemo(
+    () =>
+      allSessions
+        .filter((s) => s.siteId === siteId)
+        .sort((a, b) => a.startedAt - b.startedAt),
+    [allSessions, siteId]
+  );
   const [activeTab, setActiveTab] = useState(null); // sessionId
   const [addMenu, setAddMenu] = useState(null); // { x, y } when the + menu is open
   const [browserMenu, setBrowserMenu] = useState(null); // { x, y } for the browser targets
@@ -71,7 +79,6 @@ export default function AgentsPane() {
   // themselves live in webviewCache, not here.
   const [browserState, setBrowserState] = useState({}); // key -> {url,title,loading,error}
   const browserSeq = useRef(0);
-  const [titles, setTitles] = useState({}); // sessionId -> OSC title
   const [closeConfirm, setCloseConfirm] = useState(null); // sessionId pending confirm
   const [suppressClose, setSuppressClose] = useState(false); // checkbox in dialog
 
@@ -128,21 +135,29 @@ export default function AgentsPane() {
       // load above rather than in its own effect.
       if (location.state?.openBrowser) openBrowser(location.state.openBrowser);
 
-      // Honour a pending spawn from the sidebar (create the Session first, so the
-      // subsequent listSessions below includes it).
+      // Honour a pending spawn or focus request from the sidebar.
       const spawnAgent = location.state?.spawn;
-      let preferActive = null;
+      let preferActive = location.state?.focus || null;
       if (spawnAgent) {
-        const res = await window.electronAPI.launchAgent(siteId, spawnAgent);
+        const res = await window.electronAPI.launchAgent(
+          siteId,
+          spawnAgent,
+          location.state?.target || null
+        );
         if (cancelled) return;
         if (res?.error) setError(res.error);
         else preferActive = res?.sessionId || null;
       }
 
-      const sessions = await window.electronAPI.listSessions(siteId);
-      if (cancelled) return;
-      setTabs(sessions);
-      setActiveTab(preferActive || sessions[0]?.sessionId || null);
+      if (preferActive) setActiveTab(preferActive);
+      else {
+        const all = await window.electronAPI.listAllSessions();
+        if (cancelled) return;
+        const first = (all || [])
+          .filter((s) => s.siteId === siteId)
+          .sort((a, b) => a.startedAt - b.startedAt)[0];
+        setActiveTab(first?.sessionId || null);
+      }
     })();
 
     return () => {
@@ -190,35 +205,41 @@ export default function AgentsPane() {
     setAddMenu(null);
     const res = await window.electronAPI.launchAgent(siteId, agentId, targetId);
     if (res?.error) return setError(res.error);
-    if (!res?.sessionId) return;
-    const name = agents.find((a) => a.id === agentId)?.name || agentId;
-    const label = targetId ? targets.find((t) => t.id === targetId)?.label || null : null;
-    setTabs((prev) => [
-      ...prev,
-      { sessionId: res.sessionId, agentId, agentName: name, targetId, label },
-    ]);
-    setActiveTab(res.sessionId);
+    if (res?.sessionId) setActiveTab(res.sessionId);
   };
 
-  // Actually tear the Session down: stop the pty, dispose the cached xterm,
-  // drop the tab.
+  // Actually tear the Session down: stop the pty (which drops it from the
+  // session list, and so from the tabs) and dispose the cached xterm.
   const destroyTab = async (sessionId) => {
     await window.electronAPI.terminalStop(sessionId);
     sessionCache.dispose(sessionId);
-    setTitles((prev) => {
-      const next = { ...prev };
-      delete next[sessionId];
-      return next;
-    });
-    setTabs((prev) => {
-      const idx = prev.findIndex((t) => t.sessionId === sessionId);
-      const next = prev.filter((t) => t.sessionId !== sessionId);
-      if (activeTab === sessionId) {
-        setActiveTab((next[idx] || next[idx - 1])?.sessionId || null);
-      }
-      return next;
-    });
   };
+
+  // Keep the active tab valid as Sessions disappear — closed here, dismissed
+  // from the sidebar, or reaped. Only a tab that was actually listed counts as
+  // gone: a just-launched Session may be active before its first list arrives.
+  // Disposal keys off the list across ALL Sites, so switching Site keeps the
+  // other Sites' terminals cached.
+  const listedRef = useRef(new Set());
+  const prevTabsRef = useRef([]);
+  useEffect(() => {
+    const ids = new Set(allSessions.map((s) => s.sessionId));
+    for (const id of listedRef.current) if (!ids.has(id)) sessionCache.dispose(id);
+    if (activeTab && !ids.has(activeTab) && listedRef.current.has(activeTab)) {
+      const prev = prevTabsRef.current.map((t) => t.sessionId);
+      const after = prev.slice(prev.indexOf(activeTab) + 1).find((id) => ids.has(id));
+      const before = prev.filter((id) => ids.has(id)).pop();
+      setActiveTab(after || before || null);
+    }
+    listedRef.current = ids;
+    prevTabsRef.current = tabs;
+  }, [allSessions, tabs, activeTab]);
+
+  // Tell the sidebar which Session is on screen.
+  useEffect(() => {
+    setSelectedSession(siteId ? activeTab : null);
+  }, [siteId, activeTab]);
+  useEffect(() => () => setSelectedSession(null), []);
 
   // Close request from the tab's X: confirm first if the session is still
   // running and the user hasn't suppressed the prompt. An already-exited
@@ -241,29 +262,18 @@ export default function AgentsPane() {
     destroyTab(id);
   };
 
-  // Respawn the same Agent in place after its shell exited: reap the dead
-  // session, launch a fresh one, and swap it into the same tab position.
+  // Respawn the same Agent after its shell exited: launch a fresh Session and
+  // reap the dead one. The new Session takes the end of the tab strip.
   const respawn = async (sessionId) => {
     const tab = tabs.find((t) => t.sessionId === sessionId);
     if (!tab) return;
     const res = await window.electronAPI.launchAgent(siteId, tab.agentId, tab.targetId);
     if (res?.error) return setError(res.error);
     if (!res?.sessionId) return;
+    setActiveTab(res.sessionId);
     window.electronAPI.terminalStop(sessionId);
     sessionCache.dispose(sessionId);
-    setTabs((prev) =>
-      prev.map((t) =>
-        t.sessionId === sessionId ? { ...t, sessionId: res.sessionId } : t
-      )
-    );
-    setActiveTab(res.sessionId);
   };
-
-  // Stable per-render callbacks passed into the cached terminal handlers.
-  const handleTitle = useCallback((sessionId, title) => {
-    const cleaned = cleanTitle(title);
-    if (cleaned) setTitles((prev) => ({ ...prev, [sessionId]: cleaned }));
-  }, []);
 
   // A file-path link Cmd+clicked in terminal output → open/focus an editor tab
   // at the given line.
@@ -433,7 +443,7 @@ export default function AgentsPane() {
         </div>
         <p className="text-[15px] font-semibold text-foreground">Agents</p>
         <p className="mt-1 max-w-sm text-[13px] text-muted-foreground">
-          Pick a site in the sidebar, expand it, and choose an AI agent to open it in that
+          Add a project in the sidebar, then start an AI agent session in that
           site&rsquo;s directory.
         </p>
       </div>
@@ -446,12 +456,6 @@ export default function AgentsPane() {
   // "reveal in tree" behavior in the explorer.
   const activeTabEntry = openFiles.find((f) => f.key === activeKey) || null;
   const activeFileTab = activeTabEntry?.kind === 'file' ? activeTabEntry : null;
-  // Ordinal suffix for duplicate providers, so identical tabs are tellable apart.
-  const ordinal = (tab, i) => {
-    const sameBefore = tabs.slice(0, i).filter((t) => t.agentId === tab.agentId).length;
-    const total = tabs.filter((t) => t.agentId === tab.agentId).length;
-    return total > 1 ? ` ${sameBefore + 1}` : '';
-  };
 
   return (
     <>
@@ -484,7 +488,7 @@ export default function AgentsPane() {
           <div className="h-full min-w-0 flex flex-col">
             {/* Tab strip */}
             <div className="flex items-center gap-1 px-2 h-10 flex-shrink-0 overflow-x-auto">
-              {tabs.map((tab, i) => {
+              {tabs.map((tab) => {
                 const isActive = tab.sessionId === activeTab;
                 return (
                   <div
@@ -503,9 +507,7 @@ export default function AgentsPane() {
                       className="flex-shrink-0"
                     />
                     <span className="truncate max-w-[140px]">
-                      {titles[tab.sessionId] ||
-                        tab.label ||
-                        `${tab.agentName}${ordinal(tab, i)}`}
+                      {sessionTitle(tab, tabs)}
                     </span>
                     <Tooltip label="Close session">
                       <button
@@ -604,52 +606,18 @@ export default function AgentsPane() {
             )}
 
             {addMenu && (
-              <>
-                <div className="fixed inset-0 z-40" onClick={() => setAddMenu(null)} />
-                <div
-                  className="panel fixed z-50 min-w-[200px] max-w-[280px] py-1"
-                  style={{ left: addMenu.x, top: addMenu.y }}
-                >
-                  {detected.map((a) => {
-                    const agentTargets = targets.filter((t) => t.agentId === a.id);
-                    return (
-                      <div key={a.id}>
-                        {/* Default launch: webroot + the agent's global flags. */}
-                        <button
-                          onClick={() => spawn(a.id)}
-                          className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[13px] text-foreground hover:bg-accent"
-                        >
-                          <ProviderIcon agentId={a.id} brand size={14} />
-                          {a.name}
-                        </button>
-                        {/* Saved targets: a pinned directory (+ optional flags). */}
-                        {agentTargets.map((t) => (
-                          <button
-                            key={t.id}
-                            onClick={() => spawn(a.id, t.id)}
-                            title={t.cwd}
-                            className="w-full flex items-center gap-1.5 pl-7 pr-3 py-1 text-left text-[12px] text-muted-foreground hover:bg-accent hover:text-foreground"
-                          >
-                            <CornerDownRight size={11} className="flex-shrink-0" />
-                            <span className="truncate">{t.label || t.cwd}</span>
-                          </button>
-                        ))}
-                      </div>
-                    );
-                  })}
-                  <div className="my-1 h-px bg-border" />
-                  <button
-                    onClick={() => {
-                      setAddMenu(null);
-                      setSettingsOpen(true);
-                    }}
-                    className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[13px] text-muted-foreground hover:bg-accent hover:text-foreground"
-                  >
-                    <Settings2 size={14} />
-                    Launch settings…
-                  </button>
-                </div>
-              </>
+              <LaunchMenu
+                siteId={siteId}
+                anchor={addMenu}
+                agents={detected}
+                targets={targets}
+                onClose={() => setAddMenu(null)}
+                onLaunch={spawn}
+                onOpenSettings={() => {
+                  setAddMenu(null);
+                  setSettingsOpen(true);
+                }}
+              />
             )}
 
             {error && (
@@ -668,7 +636,6 @@ export default function AgentsPane() {
                   rootPath={sitePath}
                   onOpenFile={openFileAtLine}
                   onOpenLink={handleOpenLink}
-                  onTitle={handleTitle}
                   onExited={() => destroyTab(activeTab)}
                   onRestart={() => respawn(activeTab)}
                 />

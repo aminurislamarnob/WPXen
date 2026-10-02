@@ -135,6 +135,19 @@ const SETTINGS = {
       Object.values(v).every((c) => typeof c === 'string') ||
       'each command must be a string',
   },
+  // Native notifications when an agent session finishes (or crashes), needs
+  // input, or rings the terminal bell — see agentStatus.cjs createNotifier.
+  'agents.notifications.enabled': { type: 'bool', default: true },
+  'agents.notifications.onDone': { type: 'bool', default: true },
+  'agents.notifications.onNeedsInput': { type: 'bool', default: true },
+  'agents.notifications.onBell': { type: 'bool', default: true },
+  // Skip the notification for the session already on screen in a focused window.
+  'agents.notifications.suppressWhenFocused': { type: 'bool', default: true },
+  'agents.notifications.sound': {
+    type: 'enum',
+    values: ['system', 'none'],
+    default: 'system',
+  },
   // User-defined agents: [{ id, name, cmd }]
   'agents.custom': {
     type: 'object',

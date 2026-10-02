@@ -3,7 +3,7 @@
 // Agent Launcher — see CONTEXT.md and docs/adr/0001-main-process-pty-no-daemon.md.
 //
 // Runs an AI-provider CLI ("Agent") in a pseudo-terminal ("Session") rooted at a
-// Site's webroot. One Session per Site. The pty lives in THIS (main) process —
+// Site's webroot. A Site may host many Sessions. The pty lives in THIS (main) process —
 // no daemon — so it survives the window hiding to the tray and is reaped on quit.
 // Reattach after a window reopen is served from an in-memory ring buffer.
 
@@ -12,6 +12,7 @@ const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
 const pty = require('node-pty');
+const { createTracker, createNotifier, isTerminalReply } = require('./agentStatus.cjs');
 
 // ── Registry ────────────────────────────────────────────────────────────────
 // Curated, data-shaped so user-defined Agents can drop in later (Q5). `cmd` is
@@ -616,6 +617,82 @@ const { randomUUID } = require('crypto');
 const MAX_BUFFER = 1024 * 1024; // ~1 MB ring buffer (Q9)
 const sessions = new Map(); // sessionId -> session
 
+// Change feed for the Agents sidebar. Title updates arrive at spinner rate, so
+// notifications are coalesced into one per CHANGE_DEBOUNCE_MS; launches, exits
+// and stops are flushed immediately.
+const CHANGE_DEBOUNCE_MS = 200;
+const changeListeners = new Set();
+let changeTimer = null;
+
+function onSessionsChanged(cb) {
+  changeListeners.add(cb);
+  return () => changeListeners.delete(cb);
+}
+
+function emitChange({ immediate = false } = {}) {
+  if (changeTimer && !immediate) return;
+  if (changeTimer) clearTimeout(changeTimer);
+  const fire = () => {
+    changeTimer = null;
+    const list = listAllSessions();
+    for (const cb of changeListeners) {
+      try {
+        cb(list);
+      } catch {}
+    }
+  };
+  if (immediate) fire();
+  else changeTimer = setTimeout(fire, CHANGE_DEBOUNCE_MS);
+}
+
+// Native alerts. The tracker reports what happened, the notifier decides what
+// deserves a notification, and whoever registered with onAlert delivers it —
+// ipc.cjs, with Electron's Notification — so this module stays electron-free.
+const notifier = createNotifier();
+const alertListeners = new Set();
+let notifySettings = {
+  enabled: true,
+  onDone: true,
+  onNeedsInput: true,
+  onBell: true,
+  suppressWhenFocused: true,
+};
+
+function setNotificationSettings(next) {
+  notifySettings = { ...notifySettings, ...next };
+}
+
+function onAlert(cb) {
+  alertListeners.add(cb);
+  return () => alertListeners.delete(cb);
+}
+
+function deliverAlerts(session) {
+  for (const kind of session.tracker.drainEvents()) {
+    const ok = notifier.decide({
+      sessionId: session.sessionId,
+      kind,
+      onScreen: isOnScreen(session.sessionId),
+      settings: notifySettings,
+    });
+    if (!ok) continue;
+    const snap = session.tracker.snapshot();
+    const alert = {
+      kind,
+      sessionId: session.sessionId,
+      siteId: session.siteId,
+      agentId: session.agentId,
+      agentName: session.agentName,
+      title: snap.title || session.label || session.agentName,
+    };
+    for (const cb of alertListeners) {
+      try {
+        cb(alert);
+      } catch {}
+    }
+  }
+}
+
 function getSession(sessionId) {
   return sessions.get(sessionId) || null;
 }
@@ -633,6 +710,32 @@ function listSessions(siteId) {
         label: s.label,
       });
     }
+  }
+  return out;
+}
+
+// Every Session across all Sites, live and exited, oldest first — the Agents
+// sidebar's rows. An exited Session stays listed until it is dismissed (stop)
+// or the app quits, so finishing or crashing while unwatched stays visible.
+function listAllSessions() {
+  const out = [];
+  for (const s of sessions.values()) {
+    const snap = s.tracker.snapshot();
+    out.push({
+      sessionId: s.sessionId,
+      siteId: s.siteId,
+      agentId: s.agentId,
+      agentName: s.agentName,
+      targetId: s.targetId,
+      label: s.label,
+      startedAt: s.startedAt,
+      exited: s.exited,
+      exitCode: s.exitCode,
+      title: snap.title,
+      state: snap.state,
+      changedAt: snap.changedAt,
+      unread: snap.unread,
+    });
   }
   return out;
 }
@@ -712,11 +815,15 @@ function launch({ site, agentId, target = null, globalArgs = '' }) {
     buffer: '',
     window: null,
     exited: false,
+    exitCode: null,
+    startedAt: Date.now(),
+    tracker: createTracker({ agent: agent.id !== SHELL_ID }),
     // `started` gates the type-the-command step; a shell session has already
     // arrived at what the user wanted, so it starts out done.
     started: startsImmediately,
   };
   sessions.set(sessionId, session);
+  session.tracker.view(isOnScreen(sessionId));
 
   // Run the agent once the shell is ready: wait a short settle window after the
   // first output (so rc files that print during init don't swallow the typed
@@ -737,6 +844,15 @@ function launch({ site, agentId, target = null, globalArgs = '' }) {
 
   term.onData((data) => {
     scheduleRun();
+    const before = session.tracker.snapshot().state;
+    const unreadBefore = session.tracker.snapshot().unread;
+    if (session.tracker.output(data)) {
+      // Status and unread flips go out at once; title-only churn (spinner
+      // frames) waits.
+      const after = session.tracker.snapshot();
+      emitChange({ immediate: after.state !== before || after.unread !== unreadBefore });
+    }
+    deliverAlerts(session);
     session.buffer += data;
     if (session.buffer.length > MAX_BUFFER) {
       session.buffer = session.buffer.slice(session.buffer.length - MAX_BUFFER);
@@ -749,12 +865,18 @@ function launch({ site, agentId, target = null, globalArgs = '' }) {
 
   term.onExit(({ exitCode }) => {
     session.exited = true;
+    session.exitCode = exitCode;
+    session.tracker.exit(exitCode);
+    deliverAlerts(session);
     const win = session.window;
     if (win && !win.isDestroyed()) {
       win.webContents.send('terminal-exit', { sessionId, code: exitCode });
     }
+    // stop() already deleted a dismissed session; don't resurrect its row.
+    if (sessions.has(sessionId)) emitChange({ immediate: true });
   });
 
+  emitChange({ immediate: true });
   return { ok: true, sessionId };
 }
 
@@ -775,7 +897,39 @@ function attach(sessionId, win) {
 
 function write(sessionId, data) {
   const session = sessions.get(sessionId);
-  if (session && !session.exited) session.pty.write(data);
+  if (session && !session.exited) {
+    session.pty.write(data);
+    // xterm's own replies (device/cursor reports, focus events) share this
+    // path with keystrokes but aren't the user answering anything.
+    if (!isTerminalReply(data) && session.tracker.typed()) {
+      emitChange({ immediate: true });
+    }
+  }
+}
+
+// What's on screen: the Session selected in the Agents pane (null when the
+// pane isn't showing) and whether the window has focus. A Session counts as
+// viewed only when both hold — selected in a background window isn't seen.
+const view = { selected: null, focused: false };
+
+function isOnScreen(sessionId) {
+  return view.focused && view.selected === sessionId;
+}
+
+function setView(patch) {
+  Object.assign(view, patch);
+  let changed = false;
+  for (const s of sessions.values()) {
+    if (s.tracker.view(isOnScreen(s.sessionId))) changed = true;
+  }
+  if (changed) emitChange({ immediate: true });
+}
+
+function markRead(sessionId, read = true) {
+  const session = sessions.get(sessionId);
+  if (!session) return;
+  const changed = read ? session.tracker.markRead() : session.tracker.markUnread();
+  if (changed) emitChange({ immediate: true });
 }
 
 // Clear a Session's ring buffer so a later reattach doesn't replay content the
@@ -812,6 +966,8 @@ function stop(sessionId) {
     }, 3000);
   }
   sessions.delete(sessionId);
+  notifier.forget(sessionId);
+  emitChange({ immediate: true });
 }
 
 function hasActiveSessions() {
@@ -843,10 +999,16 @@ module.exports = {
   installScriptUrl,
   assertShellScript,
   listSessions,
+  listAllSessions,
+  onSessionsChanged,
   resolveLaunch,
   launch,
   attach,
   write,
+  setView,
+  markRead,
+  onAlert,
+  setNotificationSettings,
   clearBuffer,
   resize,
   stop,

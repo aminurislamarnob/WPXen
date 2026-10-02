@@ -8,6 +8,7 @@ const {
   BrowserWindow,
   nativeTheme,
   session,
+  Notification,
 } = require('electron');
 const crypto = require('crypto');
 const path = require('path');
@@ -35,6 +36,7 @@ const setup = require('./services/setup.cjs');
 const logs = require('./services/logs.cjs');
 const validation = require('./services/validation.cjs');
 const agents = require('./services/agents.cjs');
+const agentProjects = require('./services/agentProjects.cjs');
 const files = require('./services/files.cjs');
 const git = require('./services/git.cjs');
 const browser = require('./services/browser.cjs');
@@ -98,6 +100,17 @@ function applyAgentConfig(all) {
     enabled: enabled && enabled.length ? enabled : null,
     commands: all['agents.commands'],
     custom: all['agents.custom']?.list || [],
+  });
+}
+
+// Hands the session manager the notification switches it gates alerts on.
+function applyNotificationConfig(all) {
+  agents.setNotificationSettings({
+    enabled: all['agents.notifications.enabled'],
+    onDone: all['agents.notifications.onDone'],
+    onNeedsInput: all['agents.notifications.onNeedsInput'],
+    onBell: all['agents.notifications.onBell'],
+    suppressWhenFocused: all['agents.notifications.suppressWhenFocused'],
   });
 }
 
@@ -226,6 +239,12 @@ function registerHandlers(win, storeInstance) {
       'agents.enabled': (_v, all) => applyAgentConfig(all),
       'agents.commands': (_v, all) => applyAgentConfig(all),
       'agents.custom': (_v, all) => applyAgentConfig(all),
+      'agents.notifications.enabled': (_v, all) => applyNotificationConfig(all),
+      'agents.notifications.onDone': (_v, all) => applyNotificationConfig(all),
+      'agents.notifications.onNeedsInput': (_v, all) => applyNotificationConfig(all),
+      'agents.notifications.onBell': (_v, all) => applyNotificationConfig(all),
+      'agents.notifications.suppressWhenFocused': (_v, all) =>
+        applyNotificationConfig(all),
     },
   });
   settings.migrateLegacy();
@@ -234,6 +253,7 @@ function registerHandlers(win, storeInstance) {
   procman.setMaxLogSizeMb(settings.get('services.logMaxSizeMb'));
   nativeTheme.themeSource = settings.get('appearance.themeMode');
   applyAgentConfig(settings.read());
+  applyNotificationConfig(settings.read());
 
   // Apply persisted DB credentials so MySQL operations authenticate correctly.
   mysql.setCredentials({
@@ -288,6 +308,119 @@ function registerHandlers(win, storeInstance) {
   // The live Sessions for a Site — the renderer restores its terminal tabs.
   ipcMain.handle('agent-sessions', (_e, siteId) => agents.listSessions(siteId));
 
+  // ── Agents working set ("Projects") & session rows ─────────────────────────
+  // The sidebar lists working-set Sites with every Session under them, live or
+  // exited. Both lists are pushed on change so it never polls.
+  const getProjectIds = () => {
+    const sites = store.get('sites', []);
+    const list = store.get(agentProjects.STORE_KEY, []);
+    const pruned = agentProjects.pruneProjects(list, sites);
+    if (pruned !== list) store.set(agentProjects.STORE_KEY, pruned);
+    return pruned;
+  };
+  const sendProjects = () => {
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('agent-projects-update', getProjectIds());
+    }
+  };
+  const addToProjects = (siteId) => {
+    const list = getProjectIds();
+    const next = agentProjects.addProject(list, siteId);
+    if (next !== list) {
+      store.set(agentProjects.STORE_KEY, next);
+      sendProjects();
+    }
+  };
+
+  agents.onSessionsChanged((list) => {
+    if (win && !win.isDestroyed()) win.webContents.send('agent-sessions-update', list);
+  });
+
+  ipcMain.handle('agent-projects-get', () => getProjectIds());
+  ipcMain.handle('agent-project-add', (_e, siteId) => {
+    if (!findSite(siteId)) return { error: 'Site not found' };
+    addToProjects(siteId);
+    return { ok: true };
+  });
+  // Removing a Project ends its Sessions first (the renderer confirms) — a
+  // Session with no row would be an agent running where nothing shows it.
+  ipcMain.handle('agent-project-remove', (_e, siteId) => {
+    for (const s of agents.listAllSessions()) {
+      if (s.siteId === siteId) agents.stop(s.sessionId);
+    }
+    store.set(
+      agentProjects.STORE_KEY,
+      agentProjects.removeProject(getProjectIds(), siteId)
+    );
+    sendProjects();
+    return { ok: true };
+  });
+  ipcMain.handle('agent-projects-reorder', (_e, order) => {
+    const next = agentProjects.reorderProjects(getProjectIds(), order);
+    store.set(agentProjects.STORE_KEY, next);
+    sendProjects();
+    return next;
+  });
+  ipcMain.handle('agent-sessions-all', () => agents.listAllSessions());
+  // Dismissing a row is the same teardown as closing its tab.
+  ipcMain.handle('agent-session-dismiss', (_e, sessionId) => {
+    agents.stop(sessionId);
+    return { ok: true };
+  });
+  ipcMain.handle('git-branch', (_e, rootPath) => git.currentBranch(rootPath));
+
+  // Native notifications for agent alerts (gated in agents.cjs). Clicking one
+  // brings the window up on that session; the renderer navigates.
+  const liveNotifications = new Set(); // keep a ref, or GC can drop the click
+  agents.onAlert((alert) => {
+    if (!Notification.isSupported()) return;
+    const site = findSite(alert.siteId);
+    const where = site ? ` · ${site.name}` : '';
+    const body = {
+      done: alert.title,
+      error: `Exited with an error — ${alert.title}`,
+      'needs-input': `Needs your input — ${alert.title}`,
+      bell: alert.title,
+    }[alert.kind];
+    const n = new Notification({
+      title: `${alert.agentName}${where}`,
+      body,
+      silent: settings.get('agents.notifications.sound') === 'none',
+    });
+    liveNotifications.add(n);
+    const drop = () => liveNotifications.delete(n);
+    n.on('close', drop);
+    n.on('click', () => {
+      drop();
+      if (win && !win.isDestroyed()) {
+        win.show();
+        win.focus();
+        win.webContents.send('agent-open-session', {
+          siteId: alert.siteId,
+          sessionId: alert.sessionId,
+        });
+      }
+    });
+    n.show();
+  });
+
+  // Unread bookkeeping needs to know what's actually on screen: the Session
+  // the Agents pane shows (renderer-reported) and whether the window is
+  // focused (observed here).
+  ipcMain.on('agent-view', (_e, sessionId) =>
+    agents.setView({ selected: sessionId || null })
+  );
+  ipcMain.handle('agent-session-mark', (_e, sessionId, read) => {
+    agents.markRead(sessionId, !!read);
+    return { ok: true };
+  });
+  if (win) {
+    agents.setView({ focused: win.isFocused() });
+    win.on('focus', () => agents.setView({ focused: true }));
+    win.on('blur', () => agents.setView({ focused: false }));
+    win.on('hide', () => agents.setView({ focused: false }));
+  }
+
   // Launch an Agent for a Site. Always spawns a NEW Session (many per Site are
   // allowed), returning its sessionId for the renderer to attach a terminal to.
   // `targetId` (optional) selects a saved Launch Target on the Site; without it
@@ -301,7 +434,10 @@ function registerHandlers(win, storeInstance) {
       target = (site.launchTargets || []).find((t) => t.id === targetId) || null;
       if (!target) return { error: 'Launch target not found' };
     }
-    return agents.launch({ site, agentId, target, globalArgs });
+    const res = agents.launch({ site, agentId, target, globalArgs });
+    // Launching is the common way a Site joins the working set.
+    if (res?.ok) addToProjects(siteId);
+    return res;
   });
 
   // ── Launch Presets (global, per-Agent) & Launch Targets (per-Site) ─────────
@@ -757,6 +893,16 @@ function registerHandlers(win, storeInstance) {
         'sites',
         sites.filter((s) => s.id !== id)
       );
+      store.set(
+        agentProjects.STORE_KEY,
+        agentProjects.removeProject(store.get(agentProjects.STORE_KEY, []), id)
+      );
+      if (win && !win.isDestroyed()) {
+        win.webContents.send(
+          'agent-projects-update',
+          store.get(agentProjects.STORE_KEY, [])
+        );
+      }
       return { success: true };
     } catch (err) {
       return { success: false, error: humanize(err) };

@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { downCoreServices, servicesLabel, resolveLastSite } from '../src/lib/activityBar';
+import {
+  downCoreServices,
+  servicesLabel,
+  resolveLastSite,
+  agentsLabel,
+} from '../src/lib/activityBar';
 
 const up = (name) => ({ running: true, name });
 
@@ -60,5 +65,16 @@ describe('resolveLastSite', () => {
 
   it('falls back when nothing is remembered', () => {
     expect(resolveLastSite(null, sites)).toBeNull();
+  });
+});
+
+describe('agentsLabel', () => {
+  it('is the plain label with nothing unread', () => {
+    expect(agentsLabel(0)).toBe('Agents');
+  });
+
+  it('counts sessions needing attention', () => {
+    expect(agentsLabel(1)).toBe('Agents — 1 session needs attention');
+    expect(agentsLabel(3)).toBe('Agents — 3 sessions need attention');
   });
 });

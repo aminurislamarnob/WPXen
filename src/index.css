@@ -167,6 +167,30 @@ body {
   animation: blink 2s ease-in-out infinite;
 }
 
+/* Agent working spinner (AgentStatusGlyph.jsx): a ring with one transparent
+   quarter, rotated in 12 discrete steps per second — a stepped animation
+   repaints 12 times a second rather than every frame, which matters with a
+   dozen spinners in the sidebar. The component pins every instance's start
+   time to 0, so they all turn in phase (after Orca's AgentWorkingSpinner). */
+@keyframes agent-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.agent-spinner {
+  @apply rounded-full border-2 border-status-warning;
+  border-top-color: transparent;
+  animation: agent-spin 1s steps(12, end) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-spinner {
+    animation: none;
+    border-top-color: rgb(var(--status-warning));
+  }
+}
+
 /* Smooth transitions */
 .sidebar-item {
   @apply transition-colors duration-150;

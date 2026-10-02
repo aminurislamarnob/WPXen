@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ChevronDown, Download, Loader, Plus, RotateCcw, Trash2 } from 'lucide-react';
-import { Button, Card, SectionLabel, Toggle, Tooltip } from '../../ui';
-import { TextSetting } from '../controls';
+import { Button, Card, SectionLabel, SettingsRow, Toggle, Tooltip } from '../../ui';
+import { SelectSetting, TextSetting } from '../controls';
 import { ProviderIcon } from '../../providerIcons';
 import { useSettings } from '../../../lib/useSettings';
 import { useSettingsContext } from '../SettingsLayout';
@@ -115,6 +115,78 @@ export default function AgentsSection() {
       agent,
       overridden: Boolean((commands[agent.id] || '').trim()),
     }));
+
+  // The per-trigger switches mean nothing with notifications off, so they
+  // grey out rather than vanish — the user can see what turning it on gives.
+  const notifyOn = settings['agents.notifications.enabled'] !== false;
+  const notifyToggle = (id, title, subtitle, dependent = true) => (
+    <SettingsRow id={id} visible={visible} title={title} subtitle={subtitle}>
+      <Toggle
+        checked={settings[id] !== false}
+        onChange={(v) => setSetting(id, v)}
+        disabled={dependent && !notifyOn}
+        label={title}
+      />
+    </SettingsRow>
+  );
+  const notificationIds = [
+    'agents.notifications.enabled',
+    'agents.notifications.onDone',
+    'agents.notifications.onNeedsInput',
+    'agents.notifications.onBell',
+    'agents.notifications.suppressWhenFocused',
+    'agents.notifications.sound',
+  ];
+  const notificationRows = (!visible ||
+    notificationIds.some((id) => visible.includes(id))) && (
+    <div>
+      <SectionLabel>Notifications</SectionLabel>
+      <Card>
+        {notifyToggle(
+          'agents.notifications.enabled',
+          'Agent notifications',
+          'A macOS notification when a session you aren’t looking at needs you',
+          false
+        )}
+        {notifyToggle(
+          'agents.notifications.onDone',
+          'When an agent finishes',
+          'It comes to rest after working, or its session exits with an error'
+        )}
+        {notifyToggle(
+          'agents.notifications.onNeedsInput',
+          'When an agent needs input',
+          'It is waiting on a permission prompt or an answer'
+        )}
+        {notifyToggle(
+          'agents.notifications.onBell',
+          'On terminal bell',
+          'Any session rings the terminal bell'
+        )}
+        {notifyToggle(
+          'agents.notifications.suppressWhenFocused',
+          'Not while I’m looking',
+          'Skip it for the session already on screen in a focused window'
+        )}
+        <SettingsRow
+          id="agents.notifications.sound"
+          visible={visible}
+          title="Sound"
+          subtitle="Played with each agent notification"
+        >
+          <SelectSetting
+            value={settings['agents.notifications.sound']}
+            onChange={(v) => setSetting('agents.notifications.sound', v)}
+            ariaLabel="Notification sound"
+            options={[
+              { value: 'system', label: 'System sound' },
+              { value: 'none', label: 'Silent' },
+            ]}
+          />
+        </SettingsRow>
+      </Card>
+    </div>
+  );
 
   return (
     <div className="space-y-6">
@@ -292,6 +364,8 @@ export default function AgentsSection() {
           preference applies. Expand a row to change the command it launches with.
         </p>
       </div>
+
+      {notificationRows}
 
       <div>
         <SectionLabel>Add an Agent</SectionLabel>

@@ -147,7 +147,23 @@ refetch.
 ### Agents
 
 `services/agents.cjs` runs an AI-provider CLI in a pseudo-terminal rooted at a
-site's webroot — one Session per Site. The pty lives in the **main process, with
+site's webroot — a Site may host many Sessions, keyed by `sessionId`. The
+Agents sidebar is a **Projects** list: the opt-in working set of Sites
+(`agentProjects` in the store, see `services/agentProjects.cjs`) with every
+Session under it, live or exited, pushed on `agent-sessions-update`. Each
+Session's terminal title and status (`idle | working | done | needs-input |
+exited | error`, plus `unread`) are derived from pty output by
+`services/agentStatus.cjs` — OSC title glyphs (kept as data in
+`TITLE_GLYPHS`), real BELs, and the shell's exit code — so background Sessions
+whose xterm isn't mounted are still tracked. Unread needs to know what's on
+screen: the renderer reports the selected Session (`agent-view`) and
+`ipc.cjs` watches window focus. The same module's `createNotifier` gates
+native notifications (settings switches, suppress-when-focused, 5 s
+per-session cooldown); `agents.cjs` stays electron-free by handing approved
+alerts to `onAlert`, and `ipc.cjs` / `main.cjs` deliver them as a
+`Notification`, the tray count + "Agents needing attention" menu, and the dock
+badge. Agent hooks can feed the engine later through its normalized
+`apply({ state, source })` entry point. The pty lives in the **main process, with
 no daemon** (see `docs/adr/0001-main-process-pty-no-daemon.md`), so it survives
 the window hiding to the tray and is reaped on quit; reattach after a window
 reopen is served from an in-memory ring buffer. The provider registry is

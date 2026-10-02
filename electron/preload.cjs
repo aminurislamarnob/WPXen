@@ -23,6 +23,9 @@ const VALID_EVENT_CHANNELS = [
   'terminal-data',
   'terminal-replay',
   'terminal-exit',
+  'agent-sessions-update',
+  'agent-projects-update',
+  'agent-open-session',
   'browser-new-window',
   'browser-shortcut',
   'settings-updated',
@@ -175,6 +178,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
   listAgents: () => ipcRenderer.invoke('agent-list'),
   installAgent: (agentId) => ipcRenderer.invoke('agent-install', agentId),
   listSessions: (siteId) => ipcRenderer.invoke('agent-sessions', siteId),
+  listAllSessions: () => ipcRenderer.invoke('agent-sessions-all'),
+  dismissSession: (sessionId) => ipcRenderer.invoke('agent-session-dismiss', sessionId),
+  getAgentProjects: () => ipcRenderer.invoke('agent-projects-get'),
+  reorderAgentProjects: (order) => ipcRenderer.invoke('agent-projects-reorder', order),
+  addAgentProject: (siteId) => ipcRenderer.invoke('agent-project-add', siteId),
+  removeAgentProject: (siteId) => ipcRenderer.invoke('agent-project-remove', siteId),
+  getGitBranch: (rootPath) => ipcRenderer.invoke('git-branch', rootPath),
+  setAgentView: (sessionId) => ipcRenderer.send('agent-view', sessionId),
+  markSessionRead: (sessionId, read) =>
+    ipcRenderer.invoke('agent-session-mark', sessionId, read),
   launchAgent: (siteId, agentId, targetId) =>
     ipcRenderer.invoke('agent-launch', siteId, agentId, targetId),
 

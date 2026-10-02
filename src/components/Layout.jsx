@@ -6,7 +6,8 @@ import ActivityBar from './ActivityBar';
 import AgentsSidebar from './AgentsSidebar';
 import { Tooltip } from './ui';
 import { NAV_GROUPS } from '../lib/navItems';
-import { ACTIVITY_BAR_WIDTH, WINDOW_CONTROLS_END } from '../lib/activityBar';
+import { ACTIVITY_BAR_WIDTH, WINDOW_CONTROLS_END, agentsLabel } from '../lib/activityBar';
+import { useAgentSessions } from '../lib/useAgentSessions';
 
 // System Settings-style nav (NAV_GROUPS): grouped items, each with its own
 // colored tile.
@@ -65,6 +66,21 @@ export default function Layout({ serviceStatus }) {
     };
   }, [navigate]);
 
+  // A clicked agent notification (or tray entry) opens its session.
+  useEffect(
+    () =>
+      window.electronAPI.on('agent-open-session', ({ siteId, sessionId }) =>
+        navigate(`/agents/${encodeURIComponent(siteId)}`, {
+          state: { focus: sessionId, nonce: Date.now() },
+        })
+      ),
+    [navigate]
+  );
+
+  // Unread agent Sessions put an amber dot on every Agents entry point, so
+  // attention shows from any screen.
+  const agentsUnread = useAgentSessions().filter((s) => s.unread).length;
+
   const q = filter.trim().toLowerCase();
   const groups = q
     ? NAV_GROUPS.map((g) => g.filter((i) => i.label.toLowerCase().includes(q))).filter(
@@ -80,6 +96,7 @@ export default function Layout({ serviceStatus }) {
       {agentsMode && (
         <ActivityBar
           serviceStatus={serviceStatus}
+          agentsUnread={agentsUnread}
           onToggleTree={() => setSidebarCollapsed((v) => !v)}
         />
       )}
@@ -88,15 +105,15 @@ export default function Layout({ serviceStatus }) {
           top bar. */}
       <aside
         className={`flex flex-col flex-shrink-0 overflow-hidden bg-sidebar text-sidebar-foreground border-r border-sidebar-border transition-[width] duration-200 ease-out ${
-          sidebarCollapsed ? 'w-0 border-r-0' : 'w-56'
+          sidebarCollapsed ? 'w-0 border-r-0' : agentsMode ? 'w-64' : 'w-56'
         }`}
       >
         {/* Title bar drag region (hosts the traffic lights) */}
         <div className="drag-region h-12 flex-shrink-0" />
 
         {agentsMode ? (
-          // Agents mode: the sidebar becomes a Sites → providers tree, in place
-          // of the main menu.
+          // Agents mode: the sidebar becomes the Projects list (Sites → agent
+          // Sessions), in place of the main menu.
           <AgentsSidebar />
         ) : (
           <>
@@ -143,6 +160,13 @@ export default function Layout({ serviceStatus }) {
                             <Icon size={13} strokeWidth={2.2} />
                           </span>
                           {label}
+                          {to === '/agents' && agentsUnread > 0 && (
+                            <span
+                              className="ml-auto size-2 rounded-full bg-status-warning"
+                              title={agentsLabel(agentsUnread)}
+                              aria-label={agentsLabel(agentsUnread)}
+                            />
+                          )}
                         </>
                       )}
                     </NavLink>
