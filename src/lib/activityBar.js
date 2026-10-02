@@ -36,6 +36,13 @@ export function servicesLabel(down) {
   return `Services — ${down.join(', ')} ${down.length === 1 ? 'is' : 'are'} down`;
 }
 
+// Tooltip / accessible label for the Agents icon, naming how many agent
+// Sessions want attention (unread) when any do.
+export function agentsLabel(unread) {
+  if (!unread) return 'Agents';
+  return `Agents — ${unread} ${unread === 1 ? 'session needs' : 'sessions need'} attention`;
+}
+
 // localStorage key holding the last Site viewed on the Agents screen.
 export const LAST_AGENTS_SITE_KEY = 'wpxen.lastAgentsSite';
 

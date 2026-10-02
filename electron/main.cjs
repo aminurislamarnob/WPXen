@@ -139,12 +139,37 @@ app.whenReady().then(() => {
   // Register IPC handlers
   registerHandlers(win, store);
 
-  // Create system tray
-  createTray(
+  // Create system tray. Unread agent Sessions surface there (a count beside
+  // the icon and an "Agents needing attention" section) and on the dock
+  // badge, so attention shows even with the window hidden.
+  const agents = require('./services/agents.cjs');
+  let attention = [];
+  const openSession = (s) => {
+    win.show();
+    win.focus();
+    win.webContents.send('agent-open-session', {
+      siteId: s.siteId,
+      sessionId: s.sessionId,
+    });
+  };
+  const trayCtl = createTray(
     win,
     () => getServiceStatus(),
-    () => store.get('sites', [])
+    () => store.get('sites', []),
+    { getAttention: () => attention, onOpenSession: openSession }
   );
+  let attentionKey = '';
+  agents.onSessionsChanged((list) => {
+    attention = list.filter((s) => s.unread);
+    // Session lists arrive at spinner rate; only rebuild when the set (or a
+    // member's state/title) actually changed.
+    const key = attention.map((s) => `${s.sessionId}:${s.state}:${s.title}`).join('|');
+    if (key === attentionKey) return;
+    attentionKey = key;
+    trayCtl.setAttention();
+    // A no-op while the dock icon is hidden; it shows whenever the dock does.
+    app.dock?.setBadge(attention.length > 0 ? String(attention.length) : '');
+  });
 
   // Start polling service status
   startStatusPoller(win);
