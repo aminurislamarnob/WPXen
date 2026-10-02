@@ -10,6 +10,8 @@ import {
   needsAttention,
   serializeLayout,
   parseLayout,
+  newTabId,
+  browserTabTitle,
 } from '../src/lib/floatingWorkspace';
 
 const term = (id, extra = {}) => ({
@@ -272,5 +274,63 @@ describe('layout persistence', () => {
     for (const raw of [null, '', 'nope', '{}', '{"tabs":[]}', '{"tabs":"x"}']) {
       expect(parseLayout(raw)).toBeNull();
     }
+  });
+});
+
+describe('browser tabs', () => {
+  const browser = (id, url) => ({ kind: 'browser', id, url });
+
+  it('never share the Agents pane browser key prefix', () => {
+    expect(newTabId('browser').startsWith('browser:')).toBe(false);
+    expect(newTabId('browser')).toMatch(/^floating-browser:/);
+  });
+
+  it('round-trip through the saved layout with their URL', () => {
+    const s = [term('a'), browser('b', 'https://shop.test/wp-admin/')].reduce(
+      (acc, tab) => workspaceReducer(acc, { type: 'add', tab }),
+      EMPTY_WORKSPACE
+    );
+    expect(parseLayout(serializeLayout(s))).toEqual({
+      tabs: [
+        { kind: 'terminal', id: 'a', sessionId: null, cwd: '~' },
+        { kind: 'browser', id: 'b', url: 'https://shop.test/wp-admin/' },
+      ],
+      activeId: 'b',
+    });
+  });
+
+  it('reopen blank rather than restore a URL the browser would refuse', () => {
+    const raw = JSON.stringify({
+      tabs: [
+        { kind: 'browser', id: 'a', url: 'file:///etc/passwd' },
+        { kind: 'browser', id: 'b', url: 'javascript:alert(1)' },
+        { kind: 'browser', id: 'c' },
+        { kind: 'browser', id: 'd', url: 'about:blank' },
+      ],
+    });
+    expect(parseLayout(raw).tabs.map((t) => t.url)).toEqual([
+      'about:blank',
+      'about:blank',
+      'about:blank',
+      'about:blank',
+    ]);
+  });
+
+  it('are never pruned with the terminals', () => {
+    const s = workspaceReducer(EMPTY_WORKSPACE, {
+      type: 'add',
+      tab: browser('b', 'https://shop.test'),
+    });
+    expect(workspaceReducer(s, { type: 'prune', sessionIds: [] }).tabs).toHaveLength(1);
+  });
+
+  it('are titled by page title, then host, then "New Tab"', () => {
+    const tab = browser('b', 'https://shop.test/cart');
+    expect(browserTabTitle(tab, { title: 'Cart – Shop' })).toBe('Cart – Shop');
+    expect(browserTabTitle(tab, { title: '' })).toBe('shop.test');
+    expect(browserTabTitle(tab, { url: 'http://blog.test:8080/' })).toBe(
+      'blog.test:8080'
+    );
+    expect(browserTabTitle(browser('x', 'about:blank'), null)).toBe('New Tab');
   });
 });

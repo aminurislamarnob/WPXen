@@ -5,16 +5,19 @@
 // ── Tabs ─────────────────────────────────────────────────────────────────────
 // A tab is one of:
 //   { kind: 'terminal', id, sessionId, cwd }
-// (browser and note tabs join in their own tickets). `id` is the tab's own
-// identity, separate from the sessionId, so a Restart can swap the Session
-// underneath without the tab moving or losing focus.
+//   { kind: 'browser', id, url }   — `id` doubles as the webview cache key
+// (note tabs join in their own ticket). `id` is the tab's own identity,
+// separate from the sessionId, so a Restart can swap the Session underneath
+// without the tab moving or losing focus.
 
 export const EMPTY_WORKSPACE = Object.freeze({ tabs: [], activeId: null });
 
 let seq = 0;
+// Ids are prefixed `floating-…`: a browser tab's id is its key in the webview
+// cache, which the Agents pane shares, and its keys are `browser:<n>`.
 export function newTabId(kind) {
   seq += 1;
-  return `${kind}:${Date.now().toString(36)}:${seq}`;
+  return `floating-${kind}:${Date.now().toString(36)}:${seq}`;
 }
 
 export function workspaceReducer(state, action) {
@@ -138,6 +141,20 @@ export function terminalTabTitle(tab, session) {
   return title || folderName(session?.cwd || tab.cwd);
 }
 
+// A browser tab shows the page title, else its host, else "New Tab".
+export function browserTabTitle(tab, state) {
+  const title = state?.title?.trim();
+  if (title) return title;
+  const url = state?.url || tab.url;
+  try {
+    const { protocol, host } = new URL(url);
+    if (protocol === 'http:' || protocol === 'https:') return host;
+  } catch {
+    // not a URL yet — fall through
+  }
+  return 'New Tab';
+}
+
 // Whether the minimised launcher should show its attention dot.
 export function needsAttention(sessions) {
   return sessions.some((s) => !s.exited && (s.unread || s.state === 'needs-input'));
@@ -149,11 +166,16 @@ export function needsAttention(sessions) {
 // (ADR 0001: no daemon, nothing outlives the app).
 
 export const LAYOUT_STORAGE_KEY = 'wpxen.floatingWorkspace.tabs';
+const RESTORABLE_URL = /^(https?:\/\/|about:blank$)/i;
 
 export function serializeLayout(state) {
   const tabs = state.tabs
-    .filter((t) => t.kind === 'terminal')
-    .map((t) => ({ kind: 'terminal', id: t.id, cwd: t.cwd }));
+    .map((t) => {
+      if (t.kind === 'terminal') return { kind: 'terminal', id: t.id, cwd: t.cwd };
+      if (t.kind === 'browser') return { kind: 'browser', id: t.id, url: t.url };
+      return null;
+    })
+    .filter(Boolean);
   const activeId = tabs.some((t) => t.id === state.activeId) ? state.activeId : null;
   return JSON.stringify({ tabs, activeId });
 }
@@ -172,11 +194,19 @@ export function parseLayout(raw) {
   const seen = new Set();
   const tabs = [];
   for (const t of data.tabs) {
-    if (!t || t.kind !== 'terminal') continue;
-    if (typeof t.id !== 'string' || !t.id || seen.has(t.id)) continue;
-    if (typeof t.cwd !== 'string' || !t.cwd.trim()) continue;
+    if (!t || typeof t.id !== 'string' || !t.id || seen.has(t.id)) continue;
+    if (t.kind === 'terminal') {
+      if (typeof t.cwd !== 'string' || !t.cwd.trim()) continue;
+      tabs.push({ kind: 'terminal', id: t.id, sessionId: null, cwd: t.cwd });
+    } else if (t.kind === 'browser') {
+      // Only what the browser would load anyway; anything else reopens blank.
+      const url =
+        typeof t.url === 'string' && RESTORABLE_URL.test(t.url) ? t.url : 'about:blank';
+      tabs.push({ kind: 'browser', id: t.id, url });
+    } else {
+      continue;
+    }
     seen.add(t.id);
-    tabs.push({ kind: 'terminal', id: t.id, sessionId: null, cwd: t.cwd });
   }
   if (tabs.length === 0) return null;
   const activeId = tabs.some((t) => t.id === data.activeId) ? data.activeId : tabs[0].id;

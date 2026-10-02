@@ -6,7 +6,7 @@ import { Tooltip } from '../ui';
 // A history entry's favicon, falling back to the generic globe. Remote favicon
 // URLs are fetched by the renderer itself, so a dead one must not leave a
 // broken-image glyph behind.
-function Favicon({ src }) {
+export function Favicon({ src }) {
   const [failed, setFailed] = useState(false);
   useEffect(() => setFailed(false), [src]);
 
@@ -41,8 +41,11 @@ export default function BrowserToolbar({
   onGoForward,
   onReload,
   onNavigate,
+  autoEdit = false,
 }) {
-  const [editing, setEditing] = useState(false);
+  // `autoEdit` starts in the address field — for a new blank tab, where the
+  // only thing to do is type a URL.
+  const [editing, setEditing] = useState(autoEdit);
   const [draft, setDraft] = useState('');
   const [suggestions, setSuggestions] = useState([]);
   const [highlighted, setHighlighted] = useState(-1);
