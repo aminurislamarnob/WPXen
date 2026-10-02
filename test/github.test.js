@@ -27,12 +27,15 @@ const apiIssue = (n, extra = {}) => ({
 });
 
 let calls;
+let inputs;
 let now;
 function fakeGh(handler) {
   calls = [];
+  inputs = [];
   github.__setDeps({
-    runGh: async (args) => {
+    runGh: async (args, opts) => {
       calls.push(args);
+      inputs.push(opts?.input == null ? null : JSON.parse(opts.input));
       return handler(args);
     },
     now: () => now,
@@ -487,5 +490,166 @@ describe('issue details', () => {
     expect((await github.getIssue({ repo: 'acme/shop', number: 'x' })).error.code).toBe(
       'validation'
     );
+  });
+});
+
+describe('issue writes', () => {
+  const issueJson = (extra = {}) =>
+    JSON.stringify({ ...apiIssue(7), body: 'b', ...extra });
+  const W = (method, path) => ['api', '-X', method, path, '--input', '-'];
+
+  it('comments', async () => {
+    fakeGh(() =>
+      JSON.stringify({
+        id: 5,
+        user: { login: 'ana' },
+        body: 'On it\n\nThanks',
+        created_at: '2026-09-03T00:00:00Z',
+        html_url: 'https://github.com/acme/shop/issues/7#issuecomment-5',
+      })
+    );
+    const res = await github.addComment({
+      repo: 'acme/shop',
+      number: 7,
+      body: 'On it\n\nThanks',
+    });
+    expect(calls).toEqual([W('POST', 'repos/acme/shop/issues/7/comments')]);
+    expect(inputs).toEqual([{ body: 'On it\n\nThanks' }]);
+    expect(res.comment).toMatchObject({ type: 'comment', body: 'On it\n\nThanks' });
+  });
+
+  it('refuses an empty comment without calling gh', async () => {
+    fakeGh(() => '');
+    expect(
+      (await github.addComment({ repo: 'acme/shop', number: 7, body: '  ' })).error.code
+    ).toBe('validation');
+    expect(calls).toHaveLength(0);
+  });
+
+  it('closes as completed or not planned, and reopens', async () => {
+    fakeGh(() => issueJson({ state: 'closed', state_reason: 'not_planned' }));
+    const res = await github.setIssueState({
+      repo: 'acme/shop',
+      number: 7,
+      state: 'closed',
+      reason: 'not_planned',
+    });
+    await github.setIssueState({ repo: 'acme/shop', number: 7, state: 'closed' });
+    await github.setIssueState({ repo: 'acme/shop', number: 7, state: 'open' });
+    expect(calls).toEqual([
+      W('PATCH', 'repos/acme/shop/issues/7'),
+      W('PATCH', 'repos/acme/shop/issues/7'),
+      W('PATCH', 'repos/acme/shop/issues/7'),
+    ]);
+    expect(inputs).toEqual([
+      { state: 'closed', state_reason: 'not_planned' },
+      { state: 'closed', state_reason: 'completed' },
+      { state: 'open', state_reason: 'reopened' },
+    ]);
+    expect(res.issue).toMatchObject({ state: 'closed', stateReason: 'not_planned' });
+  });
+
+  it('edits the title and body, refusing an empty title', async () => {
+    fakeGh(() => issueJson());
+    await github.editIssue({ repo: 'acme/shop', number: 7, title: ' New ' });
+    await github.editIssue({ repo: 'acme/shop', number: 7, body: '' });
+    expect(inputs).toEqual([{ title: 'New' }, { body: '' }]);
+    expect(
+      (await github.editIssue({ repo: 'acme/shop', number: 7, title: ' ' })).error.code
+    ).toBe('validation');
+    expect(calls).toHaveLength(2);
+  });
+
+  it('replaces assignees, including clearing them', async () => {
+    fakeGh(() => issueJson());
+    await github.setAssignees({
+      repo: 'acme/shop',
+      number: 7,
+      assignees: ['bo', 'bo', 'x y'],
+    });
+    await github.setAssignees({ repo: 'acme/shop', number: 7, assignees: [] });
+    expect(calls).toEqual([
+      W('PATCH', 'repos/acme/shop/issues/7'),
+      W('PATCH', 'repos/acme/shop/issues/7'),
+    ]);
+    expect(inputs).toEqual([{ assignees: ['bo'] }, { assignees: [] }]);
+  });
+
+  it('replaces labels, then re-reads the issue', async () => {
+    fakeGh((args) => (args[2] === 'PUT' ? '[]' : issueJson()));
+    const res = await github.setLabels({
+      repo: 'acme/shop',
+      number: 7,
+      labels: ['bug', 'good first issue'],
+    });
+    expect(calls).toEqual([
+      W('PUT', 'repos/acme/shop/issues/7/labels'),
+      ['api', 'repos/acme/shop/issues/7'],
+    ]);
+    expect(inputs[0]).toEqual({ labels: ['bug', 'good first issue'] });
+    expect(res.issue.number).toBe(7);
+  });
+
+  it('creates an issue in the chosen repo', async () => {
+    fakeGh(() => issueJson({ number: 12 }));
+    const res = await github.createIssue({
+      repo: 'acme/shop',
+      title: ' Broken cart ',
+      body: 'x',
+    });
+    expect(calls).toEqual([W('POST', 'repos/acme/shop/issues')]);
+    expect(inputs).toEqual([{ title: 'Broken cart', body: 'x' }]);
+    expect(res.issue.number).toBe(12);
+    expect((await github.createIssue({ repo: 'nope', title: 't' })).error.code).toBe(
+      'validation'
+    );
+  });
+
+  it('drops the cached details and lists after a write', async () => {
+    fakeGh((args) => {
+      if (args[1] === 'repos/acme/shop/issues/7') return issueJson();
+      if (args[3] === 'search/issues') return searchResponse([]);
+      if (args.includes('--input')) return issueJson();
+      return '[]';
+    });
+    await github.getIssue({ repo: 'acme/shop', number: 7 });
+    await github.searchIssues({ repos: ['acme/shop'] });
+    const before = calls.length;
+    await github.setIssueState({ repo: 'acme/shop', number: 7, state: 'closed' });
+    await github.getIssue({ repo: 'acme/shop', number: 7 });
+    await github.searchIssues({ repos: ['acme/shop'] });
+    // the write, then both reads go back to gh
+    expect(calls.length - before).toBe(1 + 2 + 1);
+  });
+
+  it('reports a failed write as a classified error', async () => {
+    fakeGh(() => {
+      throw ghError('HTTP 403: Resource not accessible by integration');
+    });
+    expect(
+      (await github.setIssueState({ repo: 'acme/shop', number: 7, state: 'open' })).error
+        .code
+    ).toBe('permission');
+  });
+});
+
+describe('picker lookups', () => {
+  it("lists the repo's assignable users and labels, cached", async () => {
+    fakeGh((args) =>
+      args[3] === 'repos/acme/shop/assignees'
+        ? JSON.stringify([{ login: 'bo', avatar_url: 'https://avatars/bo' }])
+        : JSON.stringify([{ name: 'bug', color: 'd73a4a', description: 'Broken' }])
+    );
+    expect((await github.repoAssignees({ repo: 'acme/shop' })).items).toEqual([
+      { login: 'bo', avatarUrl: 'https://avatars/bo' },
+    ]);
+    expect((await github.repoLabels({ repo: 'acme/shop' })).items).toEqual([
+      { name: 'bug', color: 'd73a4a', description: 'Broken' },
+    ]);
+    await github.repoLabels({ repo: 'acme/shop' });
+    expect(calls).toEqual([
+      ['api', '-X', 'GET', 'repos/acme/shop/assignees', '-f', 'per_page=100'],
+      ['api', '-X', 'GET', 'repos/acme/shop/labels', '-f', 'per_page=100'],
+    ]);
   });
 });

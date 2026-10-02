@@ -11,6 +11,7 @@ import {
   AlertTriangle,
   ChevronLeft,
   ChevronRight,
+  Plus,
   CircleDot,
   RefreshCw,
   Search,
@@ -19,6 +20,10 @@ import {
 import { SegmentedTabs, Tooltip } from '../ui';
 import { SetupBanner } from './TasksSetup';
 import IssueDetails from './IssueDetails';
+import NewIssueDialog from './NewIssueDialog';
+import { MultiPicker, StatusMenu } from './pickers';
+import { useIssueMutation } from './useIssueMutation';
+import { useOpenLink } from '../../lib/useOpenLink';
 import { AvatarStack, LabelChip, StateBadge, stateIcon } from './parts';
 import {
   ALL,
@@ -143,6 +148,38 @@ export default function Tasks() {
     return () => clearInterval(id);
   }, [ready, search]);
 
+  // Inline Status / Assignees edits on a row: the row takes GitHub's answer
+  // at once, then a quiet forced search brings the list in line.
+  const rowMutation = useIssueMutation();
+  const [rowPopover, setRowPopover] = useState(null); // { kind, issue, anchor }
+  const applyRow = async (issue, method, opts) => {
+    const res = await rowMutation.run(method, {
+      repo: issue.repo,
+      number: issue.number,
+      ...opts,
+    });
+    if (!res?.issue) return;
+    const row = { ...res.issue };
+    delete row.body; // rows carry no body
+    setResults((r) =>
+      r
+        ? {
+            ...r,
+            items: r.items.map((i) =>
+              i.repo === row.repo && i.number === row.number ? { ...i, ...row } : i
+            ),
+          }
+        : r
+    );
+    search({ force: true, quiet: true });
+  };
+
+  const openLink = useOpenLink();
+  const [creating, setCreating] = useState(false);
+  const repoOptions = tree
+    .filter((o) => o.value.startsWith('repo:'))
+    .map((o) => ({ repo: o.repos[0], label: o.repos[0] }));
+
   const refresh = async () => {
     await loadSetup({ force: true });
     search({ force: true, quiet: true });
@@ -194,6 +231,7 @@ export default function Tasks() {
           number={detail.number}
           siteId={siteIdFor(detail.repo)}
           onBack={() => navigate('/tasks')}
+          onChanged={() => search({ force: true, quiet: true })}
         />
       )}
       <div className={detail ? 'hidden' : undefined}>
@@ -218,6 +256,12 @@ export default function Tasks() {
             </select>
           )}
           <div className="flex-1" />
+          {ready && repoOptions.length > 0 && (
+            <button className="btn btn-secondary" onClick={() => setCreating(true)}>
+              <Plus size={14} />
+              New issue
+            </button>
+          )}
           {ready && (
             <Tooltip label="Refresh">
               <button
@@ -316,6 +360,7 @@ export default function Tasks() {
                 items={paged?.items || []}
                 loading={loading && !results}
                 onOpen={openDetails}
+                onEdit={(kind, issue, anchor) => setRowPopover({ kind, issue, anchor })}
               />
 
               {results && (
@@ -356,11 +401,58 @@ export default function Tasks() {
           )
         )}
       </div>
+
+      {rowMutation.error && (
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[60] flex items-center gap-2 rounded-md border border-border bg-popover px-3 py-2 text-[12.5px] text-destructive shadow-md">
+          <AlertTriangle size={13} />
+          {rowMutation.error}
+          <button
+            aria-label="Dismiss"
+            className="text-muted-foreground hover:text-foreground"
+            onClick={rowMutation.clearError}
+          >
+            <X size={13} />
+          </button>
+        </div>
+      )}
+      {rowPopover?.kind === 'status' && (
+        <StatusMenu
+          anchor={rowPopover.anchor}
+          item={rowPopover.issue}
+          onPick={(choice) => applyRow(rowPopover.issue, 'tasksIssueState', choice)}
+          onClose={() => setRowPopover(null)}
+        />
+      )}
+      {rowPopover?.kind === 'assignees' && (
+        <MultiPicker
+          kind="assignees"
+          repo={rowPopover.issue.repo}
+          anchor={rowPopover.anchor}
+          selected={rowPopover.issue.assignees.map((a) => a.login)}
+          onApply={(assignees) =>
+            applyRow(rowPopover.issue, 'tasksIssueAssignees', { assignees })
+          }
+          onClose={() => setRowPopover(null)}
+        />
+      )}
+      {creating && (
+        <NewIssueDialog
+          repos={repoOptions}
+          defaultRepo={repos.length === 1 ? repos[0] : null}
+          onLink={(url) => openLink(url)}
+          onClose={() => setCreating(false)}
+          onCreated={(issue) => {
+            setCreating(false);
+            search({ force: true, quiet: true });
+            openDetails(issue);
+          }}
+        />
+      )}
     </div>
   );
 }
 
-function IssueTable({ items, loading, onOpen }) {
+function IssueTable({ items, loading, onOpen, onEdit }) {
   const now = Date.now();
   return (
     <div className="bg-card border border-border rounded-xl shadow-sm overflow-hidden">
@@ -386,6 +478,7 @@ function IssueTable({ items, loading, onOpen }) {
             issue={issue}
             now={now}
             onOpen={onOpen}
+            onEdit={onEdit}
           />
         ))
       )}
@@ -393,7 +486,25 @@ function IssueTable({ items, loading, onOpen }) {
   );
 }
 
-function IssueRow({ issue, now, onOpen }) {
+// Opens a row's inline editor without opening the row itself.
+function RowEdit({ label, onClick, children }) {
+  return (
+    <Tooltip label={label}>
+      <button
+        className="-m-1 p-1 rounded-md hover:bg-accent"
+        onClick={(e) => {
+          e.stopPropagation();
+          onClick(e.currentTarget);
+        }}
+        onKeyDown={(e) => e.stopPropagation()}
+      >
+        {children}
+      </button>
+    </Tooltip>
+  );
+}
+
+function IssueRow({ issue, now, onOpen, onEdit }) {
   const open = issue.state === 'open';
   const Icon = stateIcon(issue);
   return (
@@ -426,9 +537,15 @@ function IssueRow({ issue, now, onOpen }) {
           ))}
         </div>
       </div>
-      <AvatarStack people={issue.assignees} />
-      <span>
-        <StateBadge item={issue} />
+      <span className="justify-self-start">
+        <RowEdit label="Assignees" onClick={(a) => onEdit('assignees', issue, a)}>
+          <AvatarStack people={issue.assignees} />
+        </RowEdit>
+      </span>
+      <span className="justify-self-start">
+        <RowEdit label="Status" onClick={(a) => onEdit('status', issue, a)}>
+          <StateBadge item={issue} />
+        </RowEdit>
       </span>
       <span className="text-[12px] text-muted-foreground">
         {timeAgo(issue.updatedAt, now)}

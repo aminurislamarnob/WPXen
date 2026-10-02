@@ -22,7 +22,9 @@ const REPOS_CACHE_MS = 30000;
 const DETAIL_CACHE_MS = 15000;
 const TIMELINE_PER_PAGE = 100;
 
-function defaultRunGh(args) {
+// `input`, when given, is written to gh's stdin — writes send their JSON body
+// that way (`--input -`), so empty arrays and multi-line text survive intact.
+function defaultRunGh(args, { input } = {}) {
   return new Promise((resolve, reject) => {
     const agents = require('./agents.cjs');
     const env = agents.resolveShellEnv();
@@ -33,7 +35,7 @@ function defaultRunGh(args) {
       reject(err);
       return;
     }
-    execFile(
+    const child = execFile(
       bin,
       args,
       {
@@ -51,6 +53,7 @@ function defaultRunGh(args) {
         }
       }
     );
+    if (input != null) child.stdin.end(input);
   });
 }
 
@@ -66,6 +69,7 @@ function __setDeps(next) {
   Object.assign(deps, next);
   searchCache.clear();
   detailCache.clear();
+  lookupCache.clear();
   reposCache = null;
 }
 
@@ -75,11 +79,11 @@ function __setDeps(next) {
 let active = 0;
 const waiting = [];
 
-async function gh(args) {
+async function gh(args, opts) {
   if (active >= MAX_CONCURRENT) await new Promise((r) => waiting.push(r));
   active += 1;
   try {
-    return await deps.runGh(args);
+    return await deps.runGh(args, opts);
   } finally {
     active -= 1;
     waiting.shift()?.();
@@ -455,6 +459,170 @@ async function getIssue({ repo, number, force = false } = {}) {
   }
 }
 
+// ── Writes ───────────────────────────────────────────────────────────────────
+// Every write is one REST call with its JSON body on stdin. A write drops the
+// caches it could have made stale — the issue's details and every list — so
+// the next read shows the change.
+
+function validRef(repo, number) {
+  const n = Number(number);
+  return REPO_SLUG.test(String(repo)) && Number.isInteger(n) && n > 0 ? n : null;
+}
+
+async function write(method, path, body) {
+  const out = await gh(['api', '-X', method, path, '--input', '-'], {
+    input: JSON.stringify(body),
+  });
+  return out.trim() ? JSON.parse(out) : null;
+}
+
+function invalidate(repo, number) {
+  if (number != null) detailCache.delete(`${repo}#${number}`);
+  searchCache.clear();
+}
+
+// Runs `fn` for a valid issue reference; errors come back classified.
+async function onIssue(repo, number, fn) {
+  const n = validRef(repo, number);
+  if (!n) return { error: { code: 'validation', message: 'Not an issue.' } };
+  try {
+    const result = await fn(n);
+    invalidate(repo, n);
+    return result;
+  } catch (err) {
+    return { error: classifyError(err) };
+  }
+}
+
+const issueResult = (item, repo) => ({
+  issue: { ...normalizeIssue(item, repo), body: item.body || '' },
+});
+
+function addComment({ repo, number, body } = {}) {
+  const text = String(body || '');
+  if (!text.trim())
+    return { error: { code: 'validation', message: 'Write a comment first.' } };
+  return onIssue(repo, number, async (n) => {
+    const c = await write('POST', `repos/${repo}/issues/${n}/comments`, { body: text });
+    return { comment: normalizeTimelineEvent({ ...c, event: 'commented' }) };
+  });
+}
+
+const CLOSE_REASONS = ['completed', 'not_planned'];
+
+// state 'closed' (with reason completed | not_planned) or 'open' (reopen).
+function setIssueState({ repo, number, state, reason = 'completed' } = {}) {
+  if (state !== 'open' && state !== 'closed') {
+    return { error: { code: 'validation', message: 'Unknown state.' } };
+  }
+  const body =
+    state === 'open'
+      ? { state: 'open', state_reason: 'reopened' }
+      : {
+          state: 'closed',
+          state_reason: CLOSE_REASONS.includes(reason) ? reason : 'completed',
+        };
+  return onIssue(repo, number, async (n) =>
+    issueResult(await write('PATCH', `repos/${repo}/issues/${n}`, body), repo)
+  );
+}
+
+function editIssue({ repo, number, title, body } = {}) {
+  const patch = {};
+  if (title != null) {
+    const t = String(title).trim();
+    if (!t) return { error: { code: 'validation', message: 'A title is required.' } };
+    patch.title = t;
+  }
+  if (body != null) patch.body = String(body);
+  if (!Object.keys(patch).length) {
+    return { error: { code: 'validation', message: 'Nothing to save.' } };
+  }
+  return onIssue(repo, number, async (n) =>
+    issueResult(await write('PATCH', `repos/${repo}/issues/${n}`, patch), repo)
+  );
+}
+
+const LOGIN = /^[A-Za-z0-9-]{1,39}$/;
+const cleanList = (list, ok) => [...new Set((list || []).map(String).filter(ok))];
+
+// Replaces the whole set — the picker sends what should be there.
+function setAssignees({ repo, number, assignees } = {}) {
+  const logins = cleanList(assignees, (l) => LOGIN.test(l));
+  return onIssue(repo, number, async (n) =>
+    issueResult(
+      await write('PATCH', `repos/${repo}/issues/${n}`, { assignees: logins }),
+      repo
+    )
+  );
+}
+
+function setLabels({ repo, number, labels } = {}) {
+  const names = cleanList(labels, (l) => l.trim() && l.length <= 100);
+  return onIssue(repo, number, async (n) => {
+    await write('PUT', `repos/${repo}/issues/${n}/labels`, { labels: names });
+    // PUT answers with the labels alone; the caller wants the whole issue.
+    const item = JSON.parse(await gh(['api', `repos/${repo}/issues/${n}`]));
+    return issueResult(item, repo);
+  });
+}
+
+async function createIssue({ repo, title, body = '' } = {}) {
+  if (!REPO_SLUG.test(String(repo))) {
+    return { error: { code: 'validation', message: 'Pick a repository.' } };
+  }
+  const t = String(title || '').trim();
+  if (!t) return { error: { code: 'validation', message: 'A title is required.' } };
+  try {
+    const item = await write('POST', `repos/${repo}/issues`, {
+      title: t,
+      body: String(body),
+    });
+    invalidate(repo, null);
+    return issueResult(item, repo);
+  } catch (err) {
+    return { error: classifyError(err) };
+  }
+}
+
+// ── Lookups ──────────────────────────────────────────────────────────────────
+// What the Assignees and Labels pickers offer: the repo's own assignable
+// users and labels. Cached a minute — they rarely change mid-session.
+
+const LOOKUP_CACHE_MS = 60000;
+const lookupCache = new Map();
+
+async function lookup(kind, repo, path, map, force) {
+  if (!REPO_SLUG.test(String(repo))) {
+    return { error: { code: 'validation', message: 'Not a repository.' } };
+  }
+  const key = `${kind}:${repo}`;
+  const hit = lookupCache.get(key);
+  if (!force && hit && deps.now() - hit.at < LOOKUP_CACHE_MS) return hit.value;
+  try {
+    const out = await gh(['api', '-X', 'GET', path, '-f', 'per_page=100']);
+    const value = { items: (JSON.parse(out) || []).map(map) };
+    lookupCache.set(key, { at: deps.now(), value });
+    return value;
+  } catch (err) {
+    return { error: classifyError(err) };
+  }
+}
+
+function repoAssignees({ repo, force = false } = {}) {
+  return lookup('assignees', repo, `repos/${repo}/assignees`, person, force);
+}
+
+function repoLabels({ repo, force = false } = {}) {
+  return lookup(
+    'labels',
+    repo,
+    `repos/${repo}/labels`,
+    (l) => ({ name: l.name, color: l.color || null, description: l.description || '' }),
+    force
+  );
+}
+
 module.exports = {
   MAX_CONCURRENT,
   SEARCH_PER_PAGE,
@@ -469,5 +637,13 @@ module.exports = {
   searchIssues,
   normalizeTimeline,
   getIssue,
+  addComment,
+  setIssueState,
+  editIssue,
+  setAssignees,
+  setLabels,
+  createIssue,
+  repoAssignees,
+  repoLabels,
   __setDeps,
 };

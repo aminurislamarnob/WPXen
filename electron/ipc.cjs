@@ -440,6 +440,20 @@ function registerHandlers(win, storeInstance) {
   ipcMain.handle('tasks-issue', (_e, opts) =>
     github.getIssue({ repo: opts?.repo, number: opts?.number, force: !!opts?.force })
   );
+  // Issue writes and the pickers' lookups; each takes one options object and
+  // answers { issue | comment | items } or { error }.
+  for (const [channel, fn] of [
+    ['tasks-issue-comment', github.addComment],
+    ['tasks-issue-state', github.setIssueState],
+    ['tasks-issue-edit', github.editIssue],
+    ['tasks-issue-assignees', github.setAssignees],
+    ['tasks-issue-labels', github.setLabels],
+    ['tasks-issue-create', github.createIssue],
+    ['tasks-repo-assignees', github.repoAssignees],
+    ['tasks-repo-labels', github.repoLabels],
+  ]) {
+    ipcMain.handle(channel, (_e, opts) => fn(opts || {}));
+  }
   ipcMain.handle('tasks-search-issues', (_e, opts) =>
     github.searchIssues({
       repos: opts?.repos,

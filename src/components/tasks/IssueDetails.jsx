@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
+  AlertTriangle,
   ArrowLeft,
   CheckCircle,
   CircleDot,
@@ -9,46 +10,27 @@ import {
   GitMerge,
   GitPullRequest,
   Link2,
+  Loader2,
+  Pencil,
   RefreshCw,
   Tag,
   UserRound,
+  X,
 } from 'lucide-react';
 import { Tooltip } from '../ui';
 import { useOpenLink } from '../../lib/useOpenLink';
-import { previewLinkTarget, renderMarkdownHtml } from '../../lib/notePreview';
 import { timeAgo } from '../../lib/tasks';
 import { Avatar, LabelChip, StateBadge } from './parts';
+import { Markdown, MarkdownEditor } from './markdown';
+import { MultiPicker, StatusMenu } from './pickers';
+import { useIssueMutation } from './useIssueMutation';
 
 // One issue inside Tasks: header, the description as GitHub-flavoured
 // markdown, the timeline of comments and key events, and a read-only sidebar.
 // The data is `services/github.cjs` getIssue — the issue plus a normalised
 // timeline — fetched on open and again on ↻.
 
-function Markdown({ text, onLink, empty }) {
-  // Sanitised by DOMPurify in renderMarkdownHtml.
-  const html = useMemo(() => renderMarkdownHtml(text), [text]);
-  if (!String(text || '').trim()) {
-    return <p className="text-[13px] italic text-muted-foreground">{empty}</p>;
-  }
-  // Links never navigate the app's own window; they go through the app's
-  // link setting instead.
-  const onClick = (e) => {
-    const a = e.target.closest('a');
-    if (!a) return;
-    e.preventDefault();
-    const url = previewLinkTarget(a.getAttribute('href'));
-    if (url) onLink(url);
-  };
-  return (
-    <div
-      className="note-preview break-words"
-      onClick={onClick}
-      dangerouslySetInnerHTML={{ __html: html }}
-    />
-  );
-}
-
-function CommentCard({ author, at, body, url, onLink, now, empty }) {
+function CommentCard({ author, at, body, url, onLink, now, empty, action, children }) {
   return (
     <div className="flex gap-3">
       <Avatar person={author} size={28} ring={false} />
@@ -63,9 +45,11 @@ function CommentCard({ author, at, body, url, onLink, now, empty }) {
           ) : (
             <span>{timeAgo(at, now)}</span>
           )}
+          <div className="flex-1" />
+          {action}
         </div>
         <div className="px-4 py-3">
-          <Markdown text={body} onLink={onLink} empty={empty} />
+          {children || <Markdown text={body} onLink={onLink} empty={empty} />}
         </div>
       </div>
     </div>
@@ -194,11 +178,35 @@ function None() {
   return <span className="text-[12.5px] text-muted-foreground">None</span>;
 }
 
-export default function IssueDetails({ repo, number, siteId, onBack }) {
+// A sidebar heading that doubles as the picker's anchor, GitHub-style.
+function EditableSection({ title, onEdit, busy, children }) {
+  return (
+    <SidebarSection
+      title={
+        <button
+          className="flex w-full items-center justify-between hover:text-foreground"
+          onClick={(e) => onEdit(e.currentTarget)}
+        >
+          {title}
+          {busy ? <Loader2 size={12} className="animate-spin" /> : <Pencil size={11} />}
+        </button>
+      }
+    >
+      {children}
+    </SidebarSection>
+  );
+}
+
+export default function IssueDetails({ repo, number, siteId, onBack, onChanged }) {
   const openLink = useOpenLink();
   const [data, setData] = useState(null); // { issue, timeline, truncated } | { error }
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState(false);
+  const mutation = useIssueMutation();
+  const [titleDraft, setTitleDraft] = useState(null); // string while editing
+  const [bodyDraft, setBodyDraft] = useState(null);
+  const [comment, setComment] = useState('');
+  const [popover, setPopover] = useState(null); // { kind, anchor }
 
   const load = useCallback(
     async ({ force = false } = {}) => {
@@ -219,6 +227,61 @@ export default function IssueDetails({ repo, number, siteId, onBack }) {
   const onLink = (url) => openLink(url, siteId);
   const issue = data?.issue;
   const now = Date.now();
+  const ref = { repo, number };
+
+  // A write landed: show the issue GitHub sent back at once, then refetch so
+  // the timeline gains its event, and let the list know.
+  const landed = (res) => {
+    if (res?.issue) setData((d) => (d?.issue ? { ...d, issue: res.issue } : d));
+    load({ force: true });
+    onChanged?.();
+  };
+
+  const saveTitle = async () => {
+    if (titleDraft.trim() === issue.title) return setTitleDraft(null);
+    const res = await mutation.run('tasksIssueEdit', { ...ref, title: titleDraft });
+    if (res) {
+      setTitleDraft(null);
+      landed(res);
+    }
+  };
+
+  const saveBody = async () => {
+    const res = await mutation.run('tasksIssueEdit', { ...ref, body: bodyDraft });
+    if (res) {
+      setBodyDraft(null);
+      landed(res);
+    }
+  };
+
+  const setState = async (choice) => {
+    const res = await mutation.run('tasksIssueState', { ...ref, ...choice });
+    if (res) landed(res);
+  };
+
+  // Comment, optionally followed by a close or reopen. The comment posts
+  // first, so a failed state change never loses it.
+  const submitComment = async (then) => {
+    if (comment.trim()) {
+      const res = await mutation.run('tasksIssueComment', { ...ref, body: comment });
+      if (!res) return;
+      setComment('');
+    }
+    if (then) {
+      const res = await mutation.run('tasksIssueState', { ...ref, ...then });
+      if (!res) return load({ force: true });
+      return landed(res);
+    }
+    landed(null);
+  };
+
+  const applyPicker = async (kind, keys) => {
+    const res =
+      kind === 'labels'
+        ? await mutation.run('tasksIssueLabels', { ...ref, labels: keys })
+        : await mutation.run('tasksIssueAssignees', { ...ref, assignees: keys });
+    if (res) landed(res);
+  };
 
   const copyLink = async () => {
     try {
@@ -229,6 +292,9 @@ export default function IssueDetails({ repo, number, siteId, onBack }) {
       // clipboard unavailable — Open on GitHub still works
     }
   };
+
+  const open = issue?.state === 'open';
+  const busy = mutation.busy;
 
   return (
     <div className="animate-fade-in">
@@ -284,10 +350,50 @@ export default function IssueDetails({ repo, number, siteId, onBack }) {
         </div>
       ) : (
         <>
-          <h1 className="text-[20px] font-semibold text-foreground leading-snug">
-            {issue.title}{' '}
-            <span className="font-normal text-muted-foreground">#{issue.number}</span>
-          </h1>
+          {titleDraft !== null ? (
+            <form
+              className="flex items-center gap-2"
+              onSubmit={(e) => {
+                e.preventDefault();
+                saveTitle();
+              }}
+            >
+              <input
+                autoFocus
+                value={titleDraft}
+                onChange={(e) => setTitleDraft(e.target.value)}
+                onKeyDown={(e) => e.key === 'Escape' && setTitleDraft(null)}
+                aria-label="Title"
+                className="form-input flex-1 !text-[15px]"
+              />
+              <button className="btn btn-primary" disabled={!!busy}>
+                Save
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setTitleDraft(null)}
+              >
+                Cancel
+              </button>
+            </form>
+          ) : (
+            <div className="group flex items-start gap-2">
+              <h1 className="flex-1 text-[20px] font-semibold text-foreground leading-snug">
+                {issue.title}{' '}
+                <span className="font-normal text-muted-foreground">#{issue.number}</span>
+              </h1>
+              <Tooltip label="Edit title">
+                <button
+                  className="btn btn-ghost !px-2 opacity-0 group-hover:opacity-100 focus:opacity-100"
+                  aria-label="Edit title"
+                  onClick={() => setTitleDraft(issue.title)}
+                >
+                  <Pencil size={13} />
+                </button>
+              </Tooltip>
+            </div>
+          )}
           <div className="mt-2 mb-5 flex items-center gap-2 text-[12.5px] text-muted-foreground">
             <StateBadge item={issue} size="md" />
             <span>
@@ -299,6 +405,20 @@ export default function IssueDetails({ repo, number, siteId, onBack }) {
             </span>
           </div>
 
+          {mutation.error && (
+            <div className="mb-4 flex items-center gap-2 rounded-md border border-border bg-destructive/10 px-3 py-2 text-[12.5px] text-destructive">
+              <AlertTriangle size={13} />
+              <span className="flex-1">{mutation.error}</span>
+              <button
+                aria-label="Dismiss"
+                className="hover:text-foreground"
+                onClick={mutation.clearError}
+              >
+                <X size={13} />
+              </button>
+            </div>
+          )}
+
           <div className="grid grid-cols-[1fr_220px] gap-6 items-start">
             <div className="min-w-0 space-y-4">
               <CommentCard
@@ -309,7 +429,45 @@ export default function IssueDetails({ repo, number, siteId, onBack }) {
                 onLink={onLink}
                 now={now}
                 empty="No description provided."
-              />
+                action={
+                  bodyDraft === null && (
+                    <button
+                      className="hover:text-foreground"
+                      onClick={() => setBodyDraft(issue.body)}
+                    >
+                      Edit
+                    </button>
+                  )
+                }
+              >
+                {bodyDraft !== null && (
+                  <div className="space-y-2">
+                    <MarkdownEditor
+                      value={bodyDraft}
+                      onChange={setBodyDraft}
+                      onLink={onLink}
+                      onSubmit={saveBody}
+                      rows={10}
+                      autoFocus
+                    />
+                    <div className="flex justify-end gap-2">
+                      <button
+                        className="btn btn-secondary"
+                        onClick={() => setBodyDraft(null)}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        className="btn btn-primary"
+                        onClick={saveBody}
+                        disabled={!!busy}
+                      >
+                        Save
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </CommentCard>
               {data.timeline.map((event) => (
                 <TimelineEvent key={event.id} event={event} now={now} onLink={onLink} />
               ))}
@@ -325,6 +483,48 @@ export default function IssueDetails({ repo, number, siteId, onBack }) {
                   .
                 </p>
               )}
+
+              <div className="pt-2 border-t border-border space-y-2">
+                <MarkdownEditor
+                  value={comment}
+                  onChange={setComment}
+                  onLink={onLink}
+                  onSubmit={() => comment.trim() && submitComment()}
+                  placeholder="Leave a comment — markdown, ⌘↩ to send"
+                />
+                <div className="flex justify-end gap-2">
+                  <button
+                    className="btn btn-secondary"
+                    disabled={!!busy}
+                    onClick={() =>
+                      submitComment(
+                        open
+                          ? { state: 'closed', reason: 'completed' }
+                          : { state: 'open' }
+                      )
+                    }
+                  >
+                    {open ? <CheckCircle size={13} /> : <CircleDot size={13} />}
+                    {open
+                      ? comment.trim()
+                        ? 'Close with comment'
+                        : 'Close issue'
+                      : comment.trim()
+                        ? 'Reopen with comment'
+                        : 'Reopen issue'}
+                  </button>
+                  <button
+                    className="btn btn-primary"
+                    disabled={!!busy || !comment.trim()}
+                    onClick={() => submitComment()}
+                  >
+                    {busy === 'tasksIssueComment' && (
+                      <Loader2 size={13} className="animate-spin" />
+                    )}
+                    Comment
+                  </button>
+                </div>
+              </div>
             </div>
 
             <aside className="text-[12.5px]">
@@ -333,10 +533,18 @@ export default function IssueDetails({ repo, number, siteId, onBack }) {
                   {issue.repo}
                 </span>
               </SidebarSection>
-              <SidebarSection title="Status">
+              <EditableSection
+                title="Status"
+                busy={busy === 'tasksIssueState'}
+                onEdit={(anchor) => setPopover({ kind: 'status', anchor })}
+              >
                 <StateBadge item={issue} />
-              </SidebarSection>
-              <SidebarSection title="Assignees">
+              </EditableSection>
+              <EditableSection
+                title="Assignees"
+                busy={busy === 'tasksIssueAssignees'}
+                onEdit={(anchor) => setPopover({ kind: 'assignees', anchor })}
+              >
                 {issue.assignees.length === 0 ? (
                   <None />
                 ) : (
@@ -352,8 +560,12 @@ export default function IssueDetails({ repo, number, siteId, onBack }) {
                     ))}
                   </div>
                 )}
-              </SidebarSection>
-              <SidebarSection title="Labels">
+              </EditableSection>
+              <EditableSection
+                title="Labels"
+                busy={busy === 'tasksIssueLabels'}
+                onEdit={(anchor) => setPopover({ kind: 'labels', anchor })}
+              >
                 {issue.labels.length === 0 ? (
                   <None />
                 ) : (
@@ -363,13 +575,36 @@ export default function IssueDetails({ repo, number, siteId, onBack }) {
                     ))}
                   </div>
                 )}
-              </SidebarSection>
+              </EditableSection>
               {/* Filled by Start → (an agent Session working this issue). */}
               <SidebarSection title="Linked work">
                 <None />
               </SidebarSection>
             </aside>
           </div>
+
+          {popover?.kind === 'status' && (
+            <StatusMenu
+              anchor={popover.anchor}
+              item={issue}
+              onPick={setState}
+              onClose={() => setPopover(null)}
+            />
+          )}
+          {(popover?.kind === 'assignees' || popover?.kind === 'labels') && (
+            <MultiPicker
+              kind={popover.kind}
+              repo={repo}
+              anchor={popover.anchor}
+              selected={
+                popover.kind === 'labels'
+                  ? issue.labels.map((l) => l.name)
+                  : issue.assignees.map((a) => a.login)
+              }
+              onApply={(keys) => applyPicker(popover.kind, keys)}
+              onClose={() => setPopover(null)}
+            />
+          )}
         </>
       )}
     </div>
