@@ -4,7 +4,6 @@ import {
   ChevronRight,
   ChevronDown,
   ChevronLeft,
-  Globe,
   GitBranch,
   Plus,
   X,
@@ -18,6 +17,7 @@ import {
 import { ProviderIcon } from './providerIcons';
 import { Tooltip, ConfirmDialog } from './ui';
 import LaunchMenu from './LaunchMenu';
+import ProjectIcon from './ProjectIcon';
 import AgentStatusGlyph from './AgentStatusGlyph';
 import {
   buildProjects,
@@ -499,7 +499,7 @@ export default function AgentsSidebar() {
                 {urgent && urgent !== 'idle' ? (
                   <AgentStatusGlyph state={urgent} />
                 ) : (
-                  <Globe size={13} className="text-muted-foreground flex-shrink-0" />
+                  <ProjectIcon siteId={site.id} size={16} />
                 )}
                 <span className={`truncate ${anyUnread ? 'font-bold' : 'font-medium'}`}>
                   {site.name}
@@ -605,7 +605,7 @@ export default function AgentsSidebar() {
                 onClick={() => addProject(site.id)}
                 className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[13px] text-foreground hover:bg-accent"
               >
-                <Globe size={14} className="flex-shrink-0 text-muted-foreground" />
+                <ProjectIcon siteId={site.id} size={14} />
                 <span className="truncate">{site.name}</span>
               </button>
             ))}
@@ -683,7 +683,7 @@ export default function AgentsSidebar() {
                 onClick={() => setNewMenu((m) => ({ ...m, siteId: site.id }))}
                 className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[13px] text-foreground hover:bg-accent"
               >
-                <Globe size={14} className="flex-shrink-0 text-muted-foreground" />
+                <ProjectIcon siteId={site.id} size={14} />
                 <span className="truncate flex-1">{site.name}</span>
                 <ChevronRight size={13} className="text-muted-foreground" />
               </button>

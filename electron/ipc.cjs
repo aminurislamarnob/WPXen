@@ -40,6 +40,7 @@ const agents = require('./services/agents.cjs');
 const notes = require('./services/notes.cjs');
 const github = require('./services/github.cjs');
 const taskStart = require('./services/taskStart.cjs');
+const projectIcon = require('./services/projectIcon.cjs');
 const agentProjects = require('./services/agentProjects.cjs');
 const files = require('./services/files.cjs');
 const git = require('./services/git.cjs');
@@ -359,6 +360,14 @@ function registerHandlers(win, storeInstance) {
   });
 
   ipcMain.handle('agent-projects-get', () => getProjectIds());
+
+  // A project's sidebar icon (services/projectIcon.cjs): its WordPress Site
+  // Icon, Orca's repo icon when the Site's folder is a GitHub repo, else the
+  // WordPress logo.
+  ipcMain.handle('project-icon', (_e, siteId, opts) => {
+    const site = findSite(siteId);
+    return projectIcon.projectIcon(site, { force: !!opts?.force });
+  });
   ipcMain.handle('agent-project-add', (_e, siteId) => {
     if (!findSite(siteId)) return { error: 'Site not found' };
     addToProjects(siteId);

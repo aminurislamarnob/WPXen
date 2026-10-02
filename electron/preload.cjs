@@ -215,6 +215,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Tasks (GitHub via the gh CLI)
   tasksPreflight: () => ipcRenderer.invoke('tasks-preflight'),
+  projectIcon: (siteId, opts) => ipcRenderer.invoke('project-icon', siteId, opts),
   tasksInstallGh: () => ipcRenderer.invoke('tasks-install-gh'),
   tasksRepos: (opts) => ipcRenderer.invoke('tasks-repos', opts),
   tasksSearchIssues: (opts) => ipcRenderer.invoke('tasks-search-issues', opts),
