@@ -17,7 +17,7 @@ import { ProviderIcon } from './providerIcons';
 import { Tooltip, ConfirmDialog } from './ui';
 import LaunchMenu from './LaunchMenu';
 import AgentStatusGlyph from './AgentStatusGlyph';
-import { buildProjects, formatAge, mostUrgent } from '../lib/agentsList';
+import { buildProjects, buildActivity, formatAge, mostUrgent } from '../lib/agentsList';
 import {
   useAgentSessions,
   useAgentProjects,
@@ -32,6 +32,25 @@ import {
 // (Add project) or starts a Session in the current one (New workspace).
 // Leaving Agents mode goes through the activity bar to its left
 // (ActivityBar.jsx) or the back arrow (⌘[).
+// Whether the sidebar shows the flat Activity list instead of the project
+// tree. A per-viewer preference, so localStorage — guarded, since storage can
+// be unavailable.
+const ACTIVITY_VIEW_KEY = 'wpxen.agentsActivityView';
+function readActivityView() {
+  try {
+    return localStorage.getItem(ACTIVITY_VIEW_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+function writeActivityView(on) {
+  try {
+    localStorage.setItem(ACTIVITY_VIEW_KEY, on ? '1' : '0');
+  } catch {
+    // Storage unavailable — the choice just won't survive a reload.
+  }
+}
+
 // Current time, re-read every `ms` so row ages ("4m") stay fresh.
 function useNow(ms) {
   const [now, setNow] = useState(() => Date.now());
@@ -128,6 +147,7 @@ export default function AgentsSidebar() {
   const [sites, setSites] = useState([]);
   const [branches, setBranches] = useState({}); // siteId -> branch | null
   const [collapsed, setCollapsed] = useState(() => new Set());
+  const [activityView, setActivityView] = useState(readActivityView);
   const [launchMenu, setLaunchMenu] = useState(null); // { siteId, x, y }
   const [addMenu, setAddMenu] = useState(null); // { x, y } — Add project picker
   // New workspace menu; `siteId: null` shows the project list first.
@@ -209,6 +229,15 @@ export default function AgentsSidebar() {
     else setRemoving({ site, live });
   };
 
+  const activity = activityView ? buildActivity(projects) : null;
+  const anyUnread = sessions.some((s) => s.unread);
+  const toggleActivity = () => {
+    setActivityView((v) => {
+      writeActivityView(!v);
+      return !v;
+    });
+  };
+
   const outside = sites.filter((s) => !projectIds.includes(s.id));
   // The "current" project for New workspace: the open Site, if it's one.
   const current = activeSite && projectIds.includes(activeSite) ? activeSite : null;
@@ -217,22 +246,41 @@ export default function AgentsSidebar() {
     <div className="flex-1 flex flex-col min-h-0 no-drag">
       <div className="flex items-center gap-0.5 pl-4 pr-3 pb-1">
         <span className="flex-1 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
-          Projects
+          {activityView ? 'Activity' : 'Projects'}
         </span>
-        <Tooltip label="Add project">
+        <Tooltip label={activityView ? 'Show projects' : 'Show activity'}>
           <button
-            onClick={(e) => {
-              // Refresh first: the picker must offer sites created since mount.
-              window.electronAPI.getSites().then((s) => setSites(s || []));
-              const pos = menuBelow(e);
-              setAddMenu((m) => (m ? null : pos));
-            }}
-            aria-label="Add project"
-            className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-sidebar-accent"
+            onClick={toggleActivity}
+            aria-label={activityView ? 'Show projects' : 'Show activity'}
+            aria-pressed={activityView}
+            className={`relative p-1 rounded-md hover:bg-sidebar-accent ${
+              activityView
+                ? 'bg-highlight/15 text-highlight'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
           >
-            <FolderPlus size={14} />
+            <Bell size={14} />
+            {anyUnread && (
+              <span className="absolute top-0.5 right-0.5 size-1.5 rounded-full bg-status-warning ring-2 ring-sidebar" />
+            )}
           </button>
         </Tooltip>
+        {!activityView && (
+          <Tooltip label="Add project">
+            <button
+              onClick={(e) => {
+                // Refresh first: the picker must offer sites created since mount.
+                window.electronAPI.getSites().then((s) => setSites(s || []));
+                const pos = menuBelow(e);
+                setAddMenu((m) => (m ? null : pos));
+              }}
+              aria-label="Add project"
+              className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-sidebar-accent"
+            >
+              <FolderPlus size={14} />
+            </button>
+          </Tooltip>
+        )}
         <Tooltip label="New workspace">
           <button
             onClick={(e) => {
@@ -247,7 +295,29 @@ export default function AgentsSidebar() {
         </Tooltip>
       </div>
 
-      <nav className="flex-1 px-3 overflow-y-auto space-y-0.5">
+      {activity && (
+        <nav className="flex-1 px-3 overflow-y-auto space-y-0.5">
+          {activity.map((s) => (
+            <SessionRow
+              key={s.sessionId}
+              session={s}
+              siteName={s.siteName}
+              now={now}
+              selected={s.sessionId === selected}
+              onOpen={() => openSession(s.siteId, s.sessionId)}
+            />
+          ))}
+          {activity.length === 0 && (
+            <p className="px-2 py-1 text-xs text-muted-foreground leading-relaxed">
+              No agent sessions running.
+            </p>
+          )}
+        </nav>
+      )}
+
+      <nav
+        className={`flex-1 px-3 overflow-y-auto space-y-0.5 ${activity ? 'hidden' : ''}`}
+      >
         {projects.map(({ site, sessions: rows }) => {
           const isOpen = !collapsed.has(site.id);
           // Collapsed, the project stands in for its sessions: their most

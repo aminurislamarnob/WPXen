@@ -4,6 +4,7 @@ import {
   sessionTitle,
   formatAge,
   mostUrgent,
+  buildActivity,
 } from '../src/lib/agentsList';
 
 const site = (id, name = id) => ({ id, name });
@@ -118,5 +119,42 @@ describe('mostUrgent', () => {
 
   it('is null for a project with no sessions', () => {
     expect(mostUrgent([])).toBe(null);
+  });
+});
+
+describe('buildActivity', () => {
+  const row = (sessionId, state, changedAt) => ({ sessionId, state, changedAt });
+
+  it('flattens every project, tagging rows with their site name', () => {
+    const rows = buildActivity([
+      { site: { id: 'a', name: 'Shop' }, sessions: [row('s1', 'done', 1)] },
+      { site: { id: 'b', name: 'Blog' }, sessions: [row('s2', 'done', 2)] },
+    ]);
+    expect(rows.map((r) => [r.sessionId, r.siteName])).toEqual([
+      ['s2', 'Blog'],
+      ['s1', 'Shop'],
+    ]);
+  });
+
+  it('puts needs-input first, then working, then the rest by recency', () => {
+    const rows = buildActivity([
+      {
+        site: { id: 'a', name: 'Shop' },
+        sessions: [
+          row('old-done', 'done', 1),
+          row('working', 'working', 2),
+          row('new-exit', 'exited', 9),
+          row('asking', 'needs-input', 0),
+          row('mid-error', 'error', 5),
+        ],
+      },
+    ]);
+    expect(rows.map((r) => r.sessionId)).toEqual([
+      'asking',
+      'working',
+      'new-exit',
+      'mid-error',
+      'old-done',
+    ]);
   });
 });

@@ -65,3 +65,17 @@ export function mostUrgent(sessions) {
   }
   return best;
 }
+
+// The Activity view: every Session across the working set in one flat list,
+// with what needs the user on top — needs-input, then working, then the rest
+// by most recent status change. Each row carries its Site's name.
+const ACTIVITY_RANK = { 'needs-input': 0, working: 1 };
+
+export function buildActivity(projects) {
+  const rows = [];
+  for (const { site, sessions } of projects || []) {
+    for (const s of sessions) rows.push({ ...s, siteName: site.name });
+  }
+  const rank = (s) => ACTIVITY_RANK[s.state] ?? 2;
+  return rows.sort((a, b) => rank(a) - rank(b) || b.changedAt - a.changedAt);
+}
