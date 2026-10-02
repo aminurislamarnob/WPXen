@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
+  detailPath,
+  parseDetailPath,
   ghSetupCommand,
   hasScope,
   setupStep,
@@ -184,5 +186,33 @@ describe('gh setup', () => {
       'gh auth refresh --hostname github.com --scopes read:project'
     );
     expect(ghSetupCommand({ scope: 'x; rm -rf ~' })).toBeNull();
+  });
+});
+
+describe('detail routes', () => {
+  it('round-trips an issue through its path', () => {
+    const path = detailPath({ repo: 'acme/shop.site', number: 42 });
+    expect(path).toBe('/tasks/acme/shop.site/issues/42');
+    expect(parseDetailPath(path.replace('/tasks/', ''))).toEqual({
+      repo: 'acme/shop.site',
+      number: 42,
+    });
+  });
+
+  it('treats anything else as the list', () => {
+    for (const rest of [
+      '',
+      undefined,
+      'acme/shop',
+      'acme/shop/issues',
+      'acme/shop/issues/0',
+      'acme/shop/issues/4x',
+      'acme/shop/issues/042',
+      'acme/shop/pulls/4',
+      'acme/shop/issues/4/extra',
+      'ac me/shop/issues/4',
+    ]) {
+      expect(parseDetailPath(rest)).toBeNull();
+    }
   });
 });

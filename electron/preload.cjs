@@ -218,6 +218,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   tasksInstallGh: () => ipcRenderer.invoke('tasks-install-gh'),
   tasksRepos: (opts) => ipcRenderer.invoke('tasks-repos', opts),
   tasksSearchIssues: (opts) => ipcRenderer.invoke('tasks-search-issues', opts),
+  tasksIssue: (opts) => ipcRenderer.invoke('tasks-issue', opts),
 
   // Launch Presets (global, per-Agent) & Launch Targets (per-Site)
   getAgentPresets: () => ipcRenderer.invoke('agent-presets-get'),

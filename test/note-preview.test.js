@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { previewLinkTarget } from '../src/lib/notePreview';
 
-// renderNoteHtml needs a DOM for DOMPurify, which the test env doesn't have;
+// renderMarkdownHtml needs a DOM for DOMPurify, which the test env doesn't have;
 // the link rule — what a click in a Preview may open — is pure.
 describe('previewLinkTarget', () => {
   it('lets web links through', () => {
