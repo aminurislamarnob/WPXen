@@ -593,6 +593,21 @@ function normalizeTimelineEvent(e) {
       return { ...base, type: 'closed', stateReason: e.state_reason || null };
     case 'reopened':
       return { ...base, type: 'reopened' };
+    case 'merged':
+      return { ...base, type: 'merged' };
+    // A PR review: its verdict, and its summary comment if it has one.
+    case 'reviewed': {
+      const state = REVIEW_STATES[String(e.state || '').toLowerCase()];
+      if (!state) return null;
+      return {
+        ...base,
+        type: 'review',
+        actor: person(e.user || e.actor),
+        state,
+        body: e.body || '',
+        url: e.html_url || null,
+      };
+    }
     case 'labeled':
     case 'unlabeled':
       if (!e.label) return null;
@@ -626,6 +641,13 @@ function normalizeTimelineEvent(e) {
       return null;
   }
 }
+
+const REVIEW_STATES = {
+  approved: 'approved',
+  changes_requested: 'changes-requested',
+  commented: 'commented',
+  dismissed: 'dismissed',
+};
 
 // Oldest first. GitHub already sends them in order; a stable sort keeps a
 // comment ahead of the close it came with when both share a timestamp.
@@ -671,6 +693,185 @@ async function getIssue({ repo, number, force = false } = {}) {
   } catch (err) {
     return { error: classifyError(err) };
   }
+}
+
+// ── PR details ───────────────────────────────────────────────────────────────
+// Read-only: the PR with its conversation (the issue timeline, which carries
+// reviews and their verdicts), then its files and checks, each fetched when
+// its tab first opens.
+
+function normalizePullDetail(pr, repo) {
+  const merged = !!pr.merged || !!pr.merged_at;
+  return {
+    kind: 'pr',
+    repo,
+    number: pr.number,
+    title: pr.title || '',
+    url: pr.html_url,
+    state: pr.state === 'closed' ? 'closed' : 'open',
+    stateReason: merged ? 'merged' : null,
+    merged,
+    draft: !!pr.draft,
+    author: pr.user?.login || null,
+    body: pr.body || '',
+    headRef: pr.head?.ref || null,
+    baseRef: pr.base?.ref || null,
+    headSha: pr.head?.sha || null,
+    additions: pr.additions || 0,
+    deletions: pr.deletions || 0,
+    changedFiles: pr.changed_files || 0,
+    commits: pr.commits || 0,
+    labels: (pr.labels || []).map((l) => ({ name: l.name, color: l.color || null })),
+    assignees: (pr.assignees || []).map(person).filter(Boolean),
+    reviewers: (pr.requested_reviewers || []).map(person).filter(Boolean),
+    // REST spells the merge box in lowercase (mergeable_state: clean, dirty…);
+    // folded through the same rules the list uses.
+    merge: normalizeMerge({
+      merged,
+      state: pr.state === 'closed' ? 'CLOSED' : 'OPEN',
+      isDraft: !!pr.draft,
+      mergeable: pr.mergeable === false ? 'CONFLICTING' : null,
+      mergeStateStatus: String(pr.mergeable_state || '').toUpperCase(),
+    }),
+    createdAt: pr.created_at,
+    updatedAt: pr.updated_at,
+    mergedAt: pr.merged_at || null,
+  };
+}
+
+const FILE_STATUS = [
+  'added',
+  'removed',
+  'modified',
+  'renamed',
+  'copied',
+  'changed',
+  'unchanged',
+];
+
+function normalizeFile(f) {
+  return {
+    path: f.filename,
+    previousPath: f.previous_filename || null,
+    status: FILE_STATUS.includes(f.status) ? f.status : 'modified',
+    additions: f.additions || 0,
+    deletions: f.deletions || 0,
+    // null for a binary file or one too large for GitHub to diff.
+    patch: typeof f.patch === 'string' ? f.patch : null,
+  };
+}
+
+// A check run or a commit status, as one row: name, where it stands, how
+// long it took and where its logs are.
+function normalizeCheckRun(r) {
+  const done = r.status === 'completed';
+  const started = r.started_at ? Date.parse(r.started_at) : null;
+  const finished = r.completed_at ? Date.parse(r.completed_at) : null;
+  return {
+    id: String(r.id ?? r.name),
+    name: r.name || 'check',
+    // Same buckets as the list's checks rollup.
+    state: done
+      ? CHECK_BUCKETS[String(r.conclusion || '').toUpperCase()] || 'passing'
+      : 'pending',
+    conclusion: done ? r.conclusion || null : r.status || 'queued',
+    durationMs: started && finished && finished >= started ? finished - started : null,
+    url: r.html_url || r.details_url || null,
+  };
+}
+
+function normalizeStatus(st) {
+  return {
+    id: `status:${st.context}`,
+    name: st.context || 'status',
+    state: CHECK_BUCKETS[String(st.state || '').toUpperCase()] || 'pending',
+    conclusion: st.state || null,
+    durationMs: null,
+    url: st.target_url || null,
+    description: st.description || '',
+  };
+}
+
+async function cached(key, force, fn) {
+  const hit = detailCache.get(key);
+  if (!force && hit && deps.now() - hit.at < DETAIL_CACHE_MS) return hit.value;
+  try {
+    const value = await fn();
+    detailCache.set(key, { at: deps.now(), value });
+    return value;
+  } catch (err) {
+    return { error: classifyError(err) };
+  }
+}
+
+function getPull({ repo, number, force = false } = {}) {
+  const n = validRef(repo, number);
+  if (!n) return { error: { code: 'validation', message: 'Not a pull request.' } };
+  return cached(`pr:${repo}#${n}`, force, async () => {
+    const [prOut, timelineOut] = await Promise.all([
+      gh(['api', `repos/${repo}/pulls/${n}`]),
+      gh([
+        'api',
+        '-X',
+        'GET',
+        `repos/${repo}/issues/${n}/timeline`,
+        '-f',
+        `per_page=${TIMELINE_PER_PAGE}`,
+      ]),
+    ]);
+    const events = JSON.parse(timelineOut);
+    return {
+      pull: normalizePullDetail(JSON.parse(prOut), repo),
+      timeline: normalizeTimeline(events),
+      truncated: Array.isArray(events) && events.length >= TIMELINE_PER_PAGE,
+    };
+  });
+}
+
+function getPullFiles({ repo, number, force = false } = {}) {
+  const n = validRef(repo, number);
+  if (!n) return { error: { code: 'validation', message: 'Not a pull request.' } };
+  return cached(`pr-files:${repo}#${n}`, force, async () => {
+    const out = await gh([
+      'api',
+      '-X',
+      'GET',
+      `repos/${repo}/pulls/${n}/files`,
+      '-f',
+      'per_page=100',
+    ]);
+    const files = JSON.parse(out) || [];
+    return { files: files.map(normalizeFile), truncated: files.length >= 100 };
+  });
+}
+
+// Check runs (Actions and apps) and classic commit statuses for the PR's
+// head commit, failing first, then pending, then passing.
+const CHECK_ORDER = { failing: 0, pending: 1, passing: 2 };
+function getPullChecks({ repo, sha, force = false } = {}) {
+  if (!REPO_SLUG.test(String(repo)) || !/^[0-9a-f]{7,40}$/i.test(String(sha))) {
+    return { error: { code: 'validation', message: 'Not a commit.' } };
+  }
+  return cached(`pr-checks:${repo}@${sha}`, force, async () => {
+    const [runsOut, statusOut] = await Promise.all([
+      gh([
+        'api',
+        '-X',
+        'GET',
+        `repos/${repo}/commits/${sha}/check-runs`,
+        '-f',
+        'per_page=100',
+      ]),
+      gh(['api', `repos/${repo}/commits/${sha}/status`]),
+    ]);
+    const runs = (JSON.parse(runsOut).check_runs || []).map(normalizeCheckRun);
+    const statuses = (JSON.parse(statusOut).statuses || []).map(normalizeStatus);
+    const checks = [...runs, ...statuses].sort(
+      (a, b) =>
+        CHECK_ORDER[a.state] - CHECK_ORDER[b.state] || a.name.localeCompare(b.name)
+    );
+    return { checks };
+  });
 }
 
 // ── Writes ───────────────────────────────────────────────────────────────────
@@ -857,6 +1058,13 @@ module.exports = {
   searchPulls,
   normalizeTimeline,
   getIssue,
+  normalizePullDetail,
+  normalizeFile,
+  normalizeCheckRun,
+  normalizeStatus,
+  getPull,
+  getPullFiles,
+  getPullChecks,
   addComment,
   setIssueState,
   editIssue,

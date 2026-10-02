@@ -803,3 +803,168 @@ describe('pull requests', () => {
     ).toBe('network');
   });
 });
+
+describe('PR details', () => {
+  it('normalises the PR, including the merge box from REST', () => {
+    const pr = github.normalizePullDetail(
+      {
+        number: 12,
+        title: 'Sync',
+        html_url: 'https://github.com/acme/shop/pull/12',
+        state: 'open',
+        draft: false,
+        merged: false,
+        merged_at: null,
+        user: { login: 'ana' },
+        body: 'Adds sync',
+        head: { ref: 'sync', sha: 'abc1234' },
+        base: { ref: 'main' },
+        additions: 10,
+        deletions: 2,
+        changed_files: 3,
+        commits: 2,
+        labels: [],
+        assignees: [],
+        requested_reviewers: [{ login: 'bo', avatar_url: 'x' }],
+        mergeable: false,
+        mergeable_state: 'dirty',
+        created_at: 'c',
+        updated_at: 'u',
+      },
+      'acme/shop'
+    );
+    expect(pr).toMatchObject({
+      kind: 'pr',
+      headRef: 'sync',
+      baseRef: 'main',
+      headSha: 'abc1234',
+      changedFiles: 3,
+      reviewers: [{ login: 'bo', avatarUrl: 'x' }],
+      merge: 'conflicts',
+      merged: false,
+    });
+    expect(
+      github.normalizePullDetail(
+        { state: 'closed', merged: true, merged_at: 'm', head: {}, base: {} },
+        'acme/shop'
+      )
+    ).toMatchObject({ merge: 'merged', stateReason: 'merged', state: 'closed' });
+  });
+
+  it('normalises files, keeping a missing patch as null', () => {
+    expect(
+      github.normalizeFile({
+        filename: 'src/b.js',
+        previous_filename: 'src/a.js',
+        status: 'renamed',
+        additions: 1,
+        deletions: 0,
+        patch: '@@ -1 +1 @@\n-a\n+b',
+      })
+    ).toEqual({
+      path: 'src/b.js',
+      previousPath: 'src/a.js',
+      status: 'renamed',
+      additions: 1,
+      deletions: 0,
+      patch: '@@ -1 +1 @@\n-a\n+b',
+    });
+    expect(
+      github.normalizeFile({ filename: 'logo.png', status: 'added' }).patch
+    ).toBeNull();
+  });
+
+  it('normalises check runs and statuses with duration and log links', () => {
+    expect(
+      github.normalizeCheckRun({
+        id: 9,
+        name: 'build',
+        status: 'completed',
+        conclusion: 'failure',
+        started_at: '2026-09-01T00:00:00Z',
+        completed_at: '2026-09-01T00:01:30Z',
+        html_url: 'https://github.com/acme/shop/actions/runs/1/job/9',
+      })
+    ).toEqual({
+      id: '9',
+      name: 'build',
+      state: 'failing',
+      conclusion: 'failure',
+      durationMs: 90000,
+      url: 'https://github.com/acme/shop/actions/runs/1/job/9',
+    });
+    expect(
+      github.normalizeCheckRun({ id: 1, name: 'lint', status: 'in_progress' })
+    ).toMatchObject({ state: 'pending', conclusion: 'in_progress', durationMs: null });
+    expect(
+      github.normalizeCheckRun({
+        id: 2,
+        name: 'docs',
+        status: 'completed',
+        conclusion: 'skipped',
+      }).state
+    ).toBe('passing');
+    expect(
+      github.normalizeStatus({
+        context: 'ci/legacy',
+        state: 'error',
+        target_url: 'https://ci/1',
+        description: 'Broke',
+      })
+    ).toMatchObject({ name: 'ci/legacy', state: 'failing', url: 'https://ci/1' });
+  });
+
+  it('keeps review verdicts and the merge in the conversation', () => {
+    const timeline = github.normalizeTimeline([
+      {
+        event: 'reviewed',
+        id: 1,
+        state: 'changes_requested',
+        user: { login: 'bo' },
+        body: 'Please rename',
+        submitted_at: '2026-09-01T00:00:00Z',
+        html_url: 'https://github.com/acme/shop/pull/12#pullrequestreview-1',
+      },
+      {
+        event: 'reviewed',
+        id: 2,
+        state: 'approved',
+        user: { login: 'bo' },
+        body: '',
+        submitted_at: '2026-09-02T00:00:00Z',
+      },
+      {
+        event: 'merged',
+        id: 3,
+        actor: { login: 'ana' },
+        created_at: '2026-09-03T00:00:00Z',
+      },
+      { event: 'committed', sha: 'abc' },
+    ]);
+    expect(timeline.map((t) => [t.type, t.state])).toEqual([
+      ['review', 'changes-requested'],
+      ['review', 'approved'],
+      ['merged', undefined],
+    ]);
+    expect(timeline[0]).toMatchObject({ actor: { login: 'bo' }, body: 'Please rename' });
+  });
+
+  it('fetches checks for the head commit, failing first', async () => {
+    fakeGh((args) =>
+      args.includes('repos/acme/shop/commits/abc1234/check-runs')
+        ? JSON.stringify({
+            check_runs: [
+              { id: 1, name: 'b', status: 'completed', conclusion: 'success' },
+              { id: 2, name: 'a', status: 'completed', conclusion: 'failure' },
+              { id: 3, name: 'c', status: 'queued' },
+            ],
+          })
+        : JSON.stringify({ statuses: [] })
+    );
+    const res = await github.getPullChecks({ repo: 'acme/shop', sha: 'abc1234' });
+    expect(res.checks.map((c) => c.name)).toEqual(['a', 'c', 'b']);
+    expect(
+      (await github.getPullChecks({ repo: 'acme/shop', sha: 'not a sha' })).error.code
+    ).toBe('validation');
+  });
+});

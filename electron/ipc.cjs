@@ -542,6 +542,9 @@ function registerHandlers(win, storeInstance) {
     return { ok: true, siteId: site.id, sessionId: res.sessionId };
   });
 
+  ipcMain.handle('tasks-pull', (_e, opts) => github.getPull(opts || {}));
+  ipcMain.handle('tasks-pull-files', (_e, opts) => github.getPullFiles(opts || {}));
+  ipcMain.handle('tasks-pull-checks', (_e, opts) => github.getPullChecks(opts || {}));
   ipcMain.handle('tasks-search-pulls', (_e, opts) =>
     github.searchPulls({
       repos: opts?.repos,

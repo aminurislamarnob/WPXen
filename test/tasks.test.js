@@ -24,6 +24,7 @@ import {
   timeAgo,
   labelColor,
 } from '../src/lib/tasks';
+import { hunkMarker, patchToSides } from '../src/lib/patch';
 
 const sites = [
   {
@@ -205,6 +206,14 @@ describe('detail routes', () => {
     expect(parseDetailPath(path.replace('/tasks/', ''))).toEqual({
       repo: 'acme/shop.site',
       number: 42,
+      kind: 'issue',
+    });
+    const pr = detailPath({ repo: 'acme/shop', number: 7, kind: 'pr' });
+    expect(pr).toBe('/tasks/acme/shop/pulls/7');
+    expect(parseDetailPath(pr.replace('/tasks/', ''))).toEqual({
+      repo: 'acme/shop',
+      number: 7,
+      kind: 'pr',
     });
   });
 
@@ -217,7 +226,7 @@ describe('detail routes', () => {
       'acme/shop/issues/0',
       'acme/shop/issues/4x',
       'acme/shop/issues/042',
-      'acme/shop/pulls/4',
+      'acme/shop/pull/4',
       'acme/shop/issues/4/extra',
       'ac me/shop/issues/4',
     ]) {
@@ -331,5 +340,43 @@ describe('PR chips and Filters', () => {
     expect(q).toBe('fix is:merged review-requested:ana label:release');
     expect(parseFilters(q)).toEqual(filters);
     expect(activeFilterCount(q)).toBe(3);
+  });
+});
+
+describe('patchToSides', () => {
+  it('splits hunks into the two sides, marking skipped code between them', () => {
+    const patch = [
+      '@@ -1,3 +1,3 @@ header',
+      ' keep',
+      '-old',
+      '+new',
+      ' tail',
+      '@@ -20,2 +20,3 @@',
+      ' a',
+      '+b',
+      '\\ No newline at end of file',
+    ].join('\n');
+    const { original, modified } = patchToSides(patch);
+    expect(original.split('\n')).toEqual([
+      hunkMarker('1', '1', ' header'),
+      'keep',
+      'old',
+      'tail',
+      hunkMarker('20', '20'),
+      'a',
+    ]);
+    expect(modified.split('\n')).toEqual([
+      hunkMarker('1', '1', ' header'),
+      'keep',
+      'new',
+      'tail',
+      hunkMarker('20', '20'),
+      'a',
+      'b',
+    ]);
+  });
+
+  it('handles an empty or missing patch', () => {
+    expect(patchToSides(null)).toEqual({ original: '', modified: '' });
   });
 });

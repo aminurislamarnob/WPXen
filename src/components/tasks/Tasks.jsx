@@ -34,6 +34,7 @@ import { useOpenLink } from '../../lib/useOpenLink';
 import { AvatarStack, LabelChip, StartButton, StateBadge, stateIcon } from './parts';
 import StartDialog from './StartDialog';
 import PullTable from './PullTable';
+import PullDetails from './PullDetails';
 import { useAgentSessions } from '../../lib/useAgentSessions';
 import {
   ALL,
@@ -301,7 +302,16 @@ export default function Tasks() {
 
   return (
     <div className="px-6 pb-6 max-w-[1100px] mx-auto animate-fade-in" ref={listRef}>
-      {detail && (
+      {detail?.kind === 'pr' && (
+        <PullDetails
+          key={`${detail.repo}#${detail.number}`}
+          repo={detail.repo}
+          number={detail.number}
+          siteId={siteIdFor(detail.repo)}
+          onBack={() => navigate('/tasks')}
+        />
+      )}
+      {detail?.kind === 'issue' && (
         <IssueDetails
           key={`${detail.repo}#${detail.number}`}
           repo={detail.repo}
@@ -448,7 +458,7 @@ export default function Tasks() {
                 <PullTable
                   items={paged?.items || []}
                   loading={loading && !results}
-                  onOpen={(pr) => openLink(pr.url, siteIdFor(pr.repo))}
+                  onOpen={openDetails}
                   onMenu={(pr, anchor) => setRowMenu({ issue: pr, anchor })}
                 />
               ) : (

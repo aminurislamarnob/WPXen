@@ -4,25 +4,20 @@ import {
   ArrowLeft,
   CheckCircle,
   CircleDot,
-  CircleSlash,
   Copy,
   ExternalLink,
-  GitMerge,
-  GitPullRequest,
-  Link2,
   Loader2,
   Pencil,
   RefreshCw,
-  Tag,
-  UserRound,
   X,
 } from 'lucide-react';
 import { Tooltip } from '../ui';
 import { useOpenLink } from '../../lib/useOpenLink';
 import { sessionsFor, timeAgo } from '../../lib/tasks';
 import { Avatar, LabelChip, StartButton, StateBadge } from './parts';
+import { CommentCard, None, SidebarSection, TimelineEvent } from './timeline';
 import { ProviderIcon } from '../providerIcons';
-import { Markdown, MarkdownEditor } from './markdown';
+import { MarkdownEditor } from './markdown';
 import { MultiPicker, StatusMenu } from './pickers';
 import { useIssueMutation } from './useIssueMutation';
 
@@ -30,154 +25,6 @@ import { useIssueMutation } from './useIssueMutation';
 // markdown, the timeline of comments and key events, and a read-only sidebar.
 // The data is `services/github.cjs` getIssue — the issue plus a normalised
 // timeline — fetched on open and again on ↻.
-
-function CommentCard({ author, at, body, url, onLink, now, empty, action, children }) {
-  return (
-    <div className="flex gap-3">
-      <Avatar person={author} size={28} ring={false} />
-      <div className="flex-1 min-w-0 bg-card border border-border rounded-xl shadow-sm overflow-hidden">
-        <div className="flex items-center gap-1.5 px-4 h-9 border-b border-border bg-tertiary text-[12px] text-muted-foreground">
-          <span className="font-medium text-foreground">{author?.login || 'ghost'}</span>
-          <span>commented</span>
-          {url ? (
-            <button className="hover:underline" onClick={() => onLink(url)}>
-              {timeAgo(at, now)}
-            </button>
-          ) : (
-            <span>{timeAgo(at, now)}</span>
-          )}
-          <div className="flex-1" />
-          {action}
-        </div>
-        <div className="px-4 py-3">
-          {children || <Markdown text={body} onLink={onLink} empty={empty} />}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// A one-line event: an icon in the timeline's rail and a sentence.
-function EventRow({ icon: Icon, tone = 'text-muted-foreground', children }) {
-  return (
-    <div className="flex items-center gap-3 pl-[6px] text-[12.5px] text-muted-foreground">
-      <span
-        className={`size-[18px] flex items-center justify-center rounded-full bg-muted ${tone}`}
-      >
-        <Icon size={11} strokeWidth={2.2} />
-      </span>
-      <div className="flex items-center gap-1.5 flex-wrap min-w-0">{children}</div>
-    </div>
-  );
-}
-
-function Actor({ person }) {
-  return <span className="font-medium text-foreground">{person?.login || 'ghost'}</span>;
-}
-
-function TimelineEvent({ event, now, onLink }) {
-  const when = <span>{timeAgo(event.at, now)}</span>;
-  switch (event.type) {
-    case 'comment':
-      return (
-        <CommentCard
-          author={event.actor}
-          at={event.at}
-          body={event.body}
-          url={event.url}
-          onLink={onLink}
-          now={now}
-          empty="No content."
-        />
-      );
-    case 'closed':
-      return (
-        <EventRow
-          icon={event.stateReason === 'not_planned' ? CircleSlash : CheckCircle}
-          tone="text-highlight"
-        >
-          <Actor person={event.actor} />
-          <span>
-            closed this
-            {event.stateReason === 'not_planned' ? ' as not planned' : ' as completed'}
-          </span>
-          {when}
-        </EventRow>
-      );
-    case 'reopened':
-      return (
-        <EventRow icon={CircleDot} tone="text-status-running">
-          <Actor person={event.actor} />
-          <span>reopened this</span>
-          {when}
-        </EventRow>
-      );
-    case 'labeled':
-    case 'unlabeled':
-      return (
-        <EventRow icon={Tag}>
-          <Actor person={event.actor} />
-          <span>{event.type === 'labeled' ? 'added' : 'removed'}</span>
-          <LabelChip label={event.label} />
-          {when}
-        </EventRow>
-      );
-    case 'assigned':
-    case 'unassigned': {
-      const self = event.actor?.login === event.assignee?.login;
-      return (
-        <EventRow icon={UserRound}>
-          <Actor person={event.actor} />
-          <span>
-            {event.type === 'assigned'
-              ? self
-                ? 'self-assigned this'
-                : 'assigned'
-              : self
-                ? 'removed their assignment'
-                : 'unassigned'}
-          </span>
-          {!self && <Actor person={event.assignee} />}
-          {when}
-        </EventRow>
-      );
-    }
-    case 'referenced': {
-      const src = event.source;
-      const Icon = src.kind === 'pr' ? (src.merged ? GitMerge : GitPullRequest) : Link2;
-      return (
-        <EventRow icon={Icon} tone={src.merged ? 'text-highlight' : undefined}>
-          <Actor person={event.actor} />
-          <span>mentioned this in</span>
-          <button
-            className="min-w-0 truncate text-foreground hover:underline"
-            onClick={() => src.url && onLink(src.url)}
-          >
-            {src.title} <span className="text-muted-foreground">#{src.number}</span>
-          </button>
-          {when}
-        </EventRow>
-      );
-    }
-    default:
-      return null;
-  }
-}
-
-function SidebarSection({ title, children }) {
-  return (
-    <div className="py-3 border-b border-border last:border-b-0">
-      <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-        {title}
-      </div>
-      {children}
-    </div>
-  );
-}
-
-function None() {
-  return <span className="text-[12.5px] text-muted-foreground">None</span>;
-}
 
 // A sidebar heading that doubles as the picker's anchor, GitHub-style.
 function EditableSection({ title, onEdit, busy, children }) {
