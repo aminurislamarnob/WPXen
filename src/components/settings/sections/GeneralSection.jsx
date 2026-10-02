@@ -1,6 +1,7 @@
 import { useState } from 'react';
+import { FolderOpen } from 'lucide-react';
 import { Button, Card, ConfirmDialog, SectionLabel, SettingsRow, Toggle } from '../../ui';
-import { SelectSetting } from '../controls';
+import { SelectSetting, TextSetting } from '../controls';
 import { useSettings } from '../../../lib/useSettings';
 import { useSettingsContext } from '../SettingsLayout';
 
@@ -10,6 +11,11 @@ export default function GeneralSection() {
   // 'history' | 'data' while the matching confirmation is up.
   const [confirming, setConfirming] = useState(null);
   const [cleared, setCleared] = useState(null);
+
+  const pickTerminalDir = async () => {
+    const folder = await window.electronAPI.selectFolder();
+    if (folder) setSetting('floatingWorkspace.terminalDirectory', folder);
+  };
 
   const clear = async () => {
     const what = confirming;
@@ -64,6 +70,44 @@ export default function GeneralSection() {
               { value: 'quit', label: 'Quit WPXen' },
             ]}
           />
+        </SettingsRow>
+      </Card>
+
+      <SectionLabel>Floating Workspace</SectionLabel>
+      <Card>
+        <SettingsRow
+          id="floatingWorkspace.enabled"
+          visible={visible}
+          title="Show floating workspace"
+          subtitle="A button in the corner of every page opens a floating terminal (⌘⌥A)"
+        >
+          <Toggle
+            checked={settings['floatingWorkspace.enabled'] !== false}
+            onChange={(v) => setSetting('floatingWorkspace.enabled', v)}
+            label="Show floating workspace"
+          />
+        </SettingsRow>
+
+        <SettingsRow
+          id="floatingWorkspace.terminalDirectory"
+          visible={visible}
+          title="Terminal directory"
+          subtitle="Where a new terminal opens when you’re not on a site"
+        >
+          <TextSetting
+            value={settings['floatingWorkspace.terminalDirectory']}
+            onCommit={(v) => setSetting('floatingWorkspace.terminalDirectory', v)}
+            ariaLabel="Floating terminal directory"
+            className="font-mono !text-xs !w-56"
+            placeholder="~"
+          />
+          <button
+            onClick={pickTerminalDir}
+            aria-label="Choose terminal directory"
+            className="btn-secondary !px-2.5 !py-1.5"
+          >
+            <FolderOpen size={13} />
+          </button>
         </SettingsRow>
       </Card>
 
