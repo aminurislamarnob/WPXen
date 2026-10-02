@@ -39,6 +39,7 @@ const validation = require('./services/validation.cjs');
 const agents = require('./services/agents.cjs');
 const notes = require('./services/notes.cjs');
 const github = require('./services/github.cjs');
+const taskStart = require('./services/taskStart.cjs');
 const agentProjects = require('./services/agentProjects.cjs');
 const files = require('./services/files.cjs');
 const git = require('./services/git.cjs');
@@ -454,6 +455,93 @@ function registerHandlers(win, storeInstance) {
   ]) {
     ipcMain.handle(channel, (_e, opts) => fn(opts || {}));
   }
+  // ── Start → ──────────────────────────────────────────────────────────────
+  // The checkouts an issue's repo lives in: every Site whose discovered repos
+  // include it (usually one).
+  const checkoutsFor = async (repo) => {
+    const tree = await github.sitesWithRepos(store.get('sites', []));
+    const out = [];
+    for (const site of tree) {
+      for (const r of site.repos) {
+        if (r.repo.toLowerCase() === String(repo || '').toLowerCase()) {
+          out.push({
+            siteId: site.siteId,
+            siteName: site.siteName,
+            repoRoot: r.repoRoot,
+          });
+        }
+      }
+    }
+    return out;
+  };
+
+  // What the Start dialog opens with: the checkouts, the rendered prompt and
+  // branch, the default mode, and the chosen checkout's git state.
+  ipcMain.handle('tasks-start-inspect', async (_e, opts) => {
+    const issue = opts?.issue;
+    if (!issue?.repo || !issue?.number) return { error: 'Not an issue' };
+    const checkouts = await checkoutsFor(issue.repo);
+    if (checkouts.length === 0)
+      return { error: `No Site has a checkout of ${issue.repo}` };
+    const checkout = checkouts.find((c) => c.repoRoot === opts?.repoRoot) || checkouts[0];
+    const branch = taskStart.branchName(settings.get('tasks.branchTemplate'), issue);
+    const git = await taskStart.inspect({ repoRoot: checkout.repoRoot, branch });
+    return {
+      checkouts,
+      checkout,
+      branch,
+      prompt: taskStart.renderTemplate(settings.get('tasks.startPrompt'), issue),
+      mode: settings.get('tasks.startMode'),
+      git,
+    };
+  });
+
+  // Run the git plan, then launch the agent there with the prompt and the
+  // issue link. A worktree is saved as a Launch Target on the Site so it can
+  // be launched again from Agents.
+  ipcMain.handle('tasks-start', async (_e, opts) => {
+    const { issue, agentId, prompt, mode, branch, repoRoot } = opts || {};
+    if (!issue?.repo || !issue?.number) return { error: 'Not an issue' };
+    const checkout = (await checkoutsFor(issue.repo)).find(
+      (c) => c.repoRoot === repoRoot
+    );
+    if (!checkout) return { error: 'That checkout is no longer a Site’s repo' };
+    const site = findSite(checkout.siteId);
+    if (!site) return { error: 'Site not found' };
+
+    const plan = await taskStart.applyPlan({ mode, repoRoot: checkout.repoRoot, branch });
+    if (plan.error) return { error: plan.error };
+
+    let target = null;
+    if (plan.worktree) {
+      const sites = store.get('sites', []);
+      const s = sites.find((x) => x.id === site.id);
+      target = {
+        id: crypto.randomUUID(),
+        agentId,
+        label: `#${issue.number} ${branch}`,
+        cwd: plan.worktree,
+        args: null,
+      };
+      s.launchTargets = [...(s.launchTargets || []), target];
+      store.set('sites', sites);
+    }
+
+    const globalArgs = store.get('agentPresets', {})[agentId]?.args || '';
+    const res = agents.launch({
+      site,
+      agentId,
+      target,
+      globalArgs,
+      cwd: plan.cwd,
+      prompt,
+      issue,
+    });
+    if (res?.error) return res;
+    addToProjects(site.id);
+    return { ok: true, siteId: site.id, sessionId: res.sessionId };
+  });
+
   ipcMain.handle('tasks-search-issues', (_e, opts) =>
     github.searchIssues({
       repos: opts?.repos,

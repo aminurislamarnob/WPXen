@@ -64,3 +64,24 @@ export function AvatarStack({ people, max = 4 }) {
     </div>
   );
 }
+
+// Start → for an issue with no live Session, Open → for one that has one.
+// `onStart()` opens the Start dialog; Open → focuses the newest Session.
+export function StartButton({ sessions, onStart, onOpenSession, size = 'sm' }) {
+  const live = sessions?.[0];
+  const cls =
+    size === 'sm' ? 'btn btn-secondary !h-7 !px-2 !text-[12px]' : 'btn btn-primary';
+  return (
+    <button
+      className={cls}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (live) onOpenSession(live);
+        else onStart();
+      }}
+      onKeyDown={(e) => e.stopPropagation()}
+    >
+      {live ? 'Open →' : 'Start →'}
+    </button>
+  );
+}

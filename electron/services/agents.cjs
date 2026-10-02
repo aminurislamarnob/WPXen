@@ -599,6 +599,22 @@ async function installAgent(id, onProgress) {
 //
 // A plain-shell launch passes `cmd: ''`, so `command` collapses to the args
 // alone — or to '' when there are none, which `launch` reads as "type nothing".
+// POSIX single-quoting: everything literal, `'` as '\''.
+function shellQuote(text) {
+  return `'${String(text).replace(/'/g, `'\\''`)}'`;
+}
+
+// The issue a Session works on, trimmed to what the list and sidebar show.
+function cleanIssueLink(issue) {
+  return {
+    repo: String(issue.repo || ''),
+    number: Number(issue.number) || null,
+    url: String(issue.url || ''),
+    title: String(issue.title || '').slice(0, 300),
+    kind: issue.kind === 'pr' ? 'pr' : 'issue',
+  };
+}
+
 function resolveLaunch({ cmd, sitePath, globalArgs = '', target = null }) {
   const rawArgs = target && target.args != null ? target.args : globalArgs || '';
   const args = String(rawArgs).trim();
@@ -770,6 +786,8 @@ function sessionRow(s) {
     agentName: s.agentName,
     targetId: s.targetId,
     label: s.label,
+    // The issue or PR Start → launched this Session for, else null.
+    issue: s.issue || null,
     startedAt: s.startedAt,
     exited: s.exited,
     exitCode: s.exitCode,
@@ -790,8 +808,22 @@ function sessionRow(s) {
 // per directory. `target` (a saved Launch Target) and `globalArgs` (the Agent's
 // global default flags) are optional; both flow through `resolveLaunch` to
 // decide the cwd and the command line typed into the shell.
+//
+// Tasks' Start → adds three: `cwd` (the repo root or a fresh worktree, in
+// place of the webroot), `prompt` (passed to the agent as its first message,
+// shell-quoted onto the command line) and `issue` ({ repo, number, url,
+// title, kind }), which the Session carries so Tasks and the sidebar can link
+// back to it.
 // Returns { ok, sessionId } or { error }.
-function launch({ site, agentId, target = null, globalArgs = '' }) {
+function launch({
+  site,
+  agentId,
+  target = null,
+  globalArgs = '',
+  cwd: cwdOverride = null,
+  prompt = '',
+  issue = null,
+}) {
   // `all` so launching by id still works for an agent hidden from the
   // launcher (e.g. a saved session being restored).
   const agent = listAgents({ all: true }).find((a) => a.id === agentId);
@@ -799,12 +831,19 @@ function launch({ site, agentId, target = null, globalArgs = '' }) {
   // The shell is always present, so this only ever rejects a missing provider.
   if (!agent.detected) return { error: `${agent.name} is not installed` };
 
-  const { command, cwd, label } = resolveLaunch({
+  const resolved = resolveLaunch({
     cmd: agent.cmd,
     sitePath: site.path,
     globalArgs,
     target,
   });
+  const cwd = cwdOverride ? path.normalize(cwdOverride) : resolved.cwd;
+  // The shell never runs with an agent command line it can't type: the
+  // prompt is one line, single-quoted.
+  const line = String(prompt || '')
+    .replace(/\s*[\r\n]+\s*/g, ' ')
+    .trim();
+  const command = line ? `${resolved.command} ${shellQuote(line)}` : resolved.command;
 
   return startSession({
     cwd,
@@ -815,7 +854,8 @@ function launch({ site, agentId, target = null, globalArgs = '' }) {
       agentId: agent.id,
       agentName: agent.name,
       targetId: target?.id || null,
-      label,
+      label: resolved.label,
+      issue: issue ? cleanIssueLink(issue) : null,
     },
     failLabel: agent.name,
   });
@@ -1093,6 +1133,7 @@ module.exports = {
   effectiveRegistry,
   listAgents,
   resolveBin,
+  shellQuote,
   resolveShellEnv,
   isWrapperShim,
   installAgent,

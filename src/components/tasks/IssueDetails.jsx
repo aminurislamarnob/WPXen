@@ -19,8 +19,9 @@ import {
 } from 'lucide-react';
 import { Tooltip } from '../ui';
 import { useOpenLink } from '../../lib/useOpenLink';
-import { timeAgo } from '../../lib/tasks';
-import { Avatar, LabelChip, StateBadge } from './parts';
+import { sessionsFor, timeAgo } from '../../lib/tasks';
+import { Avatar, LabelChip, StartButton, StateBadge } from './parts';
+import { ProviderIcon } from '../providerIcons';
 import { Markdown, MarkdownEditor } from './markdown';
 import { MultiPicker, StatusMenu } from './pickers';
 import { useIssueMutation } from './useIssueMutation';
@@ -197,7 +198,16 @@ function EditableSection({ title, onEdit, busy, children }) {
   );
 }
 
-export default function IssueDetails({ repo, number, siteId, onBack, onChanged }) {
+export default function IssueDetails({
+  repo,
+  number,
+  siteId,
+  onBack,
+  onChanged,
+  linked,
+  onStart,
+  onOpenSession,
+}) {
   const openLink = useOpenLink();
   const [data, setData] = useState(null); // { issue, timeline, truncated } | { error }
   const [loading, setLoading] = useState(true);
@@ -319,6 +329,12 @@ export default function IssueDetails({ repo, number, siteId, onBack, onChanged }
         </Tooltip>
         {issue && (
           <>
+            <StartButton
+              size="md"
+              sessions={sessionsFor(linked, issue)}
+              onStart={() => onStart(issue)}
+              onOpenSession={onOpenSession}
+            />
             <button className="btn btn-secondary" onClick={copyLink}>
               <Copy size={13} />
               {copied ? 'Copied' : 'Copy link'}
@@ -576,9 +592,24 @@ export default function IssueDetails({ repo, number, siteId, onBack, onChanged }
                   </div>
                 )}
               </EditableSection>
-              {/* Filled by Start → (an agent Session working this issue). */}
+              {/* Live agent Sessions Start → launched for this issue. */}
               <SidebarSection title="Linked work">
-                <None />
+                {sessionsFor(linked, issue).length === 0 ? (
+                  <None />
+                ) : (
+                  <div className="space-y-1">
+                    {sessionsFor(linked, issue).map((s) => (
+                      <button
+                        key={s.sessionId}
+                        onClick={() => onOpenSession(s)}
+                        className="flex w-full items-center gap-1.5 rounded-sm px-1 py-0.5 text-left text-foreground hover:bg-accent"
+                      >
+                        <ProviderIcon agentId={s.agentId} brand size={13} />
+                        <span className="truncate">{s.title || s.agentName}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </SidebarSection>
             </aside>
           </div>

@@ -219,6 +219,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   tasksRepos: (opts) => ipcRenderer.invoke('tasks-repos', opts),
   tasksSearchIssues: (opts) => ipcRenderer.invoke('tasks-search-issues', opts),
   tasksIssue: (opts) => ipcRenderer.invoke('tasks-issue', opts),
+  tasksStartInspect: (opts) => ipcRenderer.invoke('tasks-start-inspect', opts),
+  tasksStart: (opts) => ipcRenderer.invoke('tasks-start', opts),
   tasksIssueComment: (opts) => ipcRenderer.invoke('tasks-issue-comment', opts),
   tasksIssueState: (opts) => ipcRenderer.invoke('tasks-issue-state', opts),
   tasksIssueEdit: (opts) => ipcRenderer.invoke('tasks-issue-edit', opts),

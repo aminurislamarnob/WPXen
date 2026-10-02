@@ -21,6 +21,13 @@ import {
   useKeepAwakeStatus,
 } from '../../../lib/useKeepAwake';
 
+const TASKS_KEYS = ['tasks.startPrompt', 'tasks.branchTemplate', 'tasks.startMode'];
+const START_MODES = [
+  { value: 'branch', label: 'New branch in place' },
+  { value: 'worktree', label: 'New worktree' },
+  { value: 'current', label: 'Current branch' },
+];
+
 export default function AgentsSection() {
   const { settings, setSetting } = useSettings();
   const { visible } = useSettingsContext();
@@ -228,6 +235,53 @@ export default function AgentsSection() {
             Your display can still sleep and lock. With the lid closed on battery, macOS
             sleeps regardless.
           </p>
+        </div>
+      )}
+
+      {(!visible || TASKS_KEYS.some((k) => visible.includes(k))) && (
+        <div>
+          <SectionLabel>Tasks</SectionLabel>
+          <Card>
+            <SettingsRow
+              id="tasks.startPrompt"
+              visible={visible}
+              title="Start prompt"
+              subtitle="Typed to the agent by Start → · {{url}} {{number}} {{title}} {{repo}}"
+            >
+              <TextSetting
+                value={settings['tasks.startPrompt']}
+                onCommit={(v) => setSetting('tasks.startPrompt', v)}
+                ariaLabel="Start prompt"
+                className="font-mono !text-xs !w-64"
+              />
+            </SettingsRow>
+            <SettingsRow
+              id="tasks.branchTemplate"
+              visible={visible}
+              title="Branch name"
+              subtitle="Must contain {{number}} · {{slug}} is the title, shortened"
+            >
+              <TextSetting
+                value={settings['tasks.branchTemplate']}
+                onCommit={(v) => setSetting('tasks.branchTemplate', v)}
+                ariaLabel="Branch name template"
+                className="font-mono !text-xs !w-64"
+              />
+            </SettingsRow>
+            <SettingsRow
+              id="tasks.startMode"
+              visible={visible}
+              title="Default “Where”"
+              subtitle="Where Start → puts the work unless you pick otherwise"
+            >
+              <SelectSetting
+                value={settings['tasks.startMode']}
+                onChange={(v) => setSetting('tasks.startMode', v)}
+                ariaLabel="Default where"
+                options={START_MODES}
+              />
+            </SettingsRow>
+          </Card>
         </div>
       )}
 

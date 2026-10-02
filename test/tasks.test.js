@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
+  linkedSessions,
+  sessionsFor,
   ASSIGNED_TO_ME_QUERY,
   activeFilterCount,
   applyFilters,
@@ -283,5 +285,25 @@ describe('chips and Filters ↔ query', () => {
   it('counts the Filters a query applies', () => {
     expect(activeFilterCount('is:open label:a label:b author:x')).toBe(4);
     expect(activeFilterCount('crash')).toBe(0);
+  });
+});
+
+describe('linked Sessions', () => {
+  it('maps live Sessions to their issue, newest first, ignoring exited ones', () => {
+    const map = linkedSessions([
+      { sessionId: 'a', startedAt: 1, issue: { repo: 'Acme/Shop', number: 7 } },
+      { sessionId: 'b', startedAt: 2, issue: { repo: 'acme/shop', number: 7 } },
+      {
+        sessionId: 'c',
+        startedAt: 3,
+        exited: true,
+        issue: { repo: 'acme/shop', number: 7 },
+      },
+      { sessionId: 'd', startedAt: 4 },
+    ]);
+    expect(
+      sessionsFor(map, { repo: 'acme/shop', number: 7 }).map((s) => s.sessionId)
+    ).toEqual(['b', 'a']);
+    expect(sessionsFor(map, { repo: 'acme/shop', number: 8 })).toEqual([]);
   });
 });

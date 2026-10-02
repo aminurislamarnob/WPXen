@@ -199,6 +199,27 @@ const SETTINGS = {
       'each agent needs a slug id and a command',
   },
 
+  // ── Tasks (Start →) ──────────────────────────────────────────────────────
+  // What Start → types to the agent and which branch it works on, rendered
+  // from the issue ({{url}} {{number}} {{title}} {{repo}} {{slug}}).
+  'tasks.startPrompt': {
+    type: 'string',
+    default: 'Complete {{url}}',
+    validate: (v) => v.trim().length > 0 || 'the prompt can’t be empty',
+  },
+  // {{number}} is required: the branch is what links a Session's work back
+  // to its issue after a restart, and the existing-branch check keys on it.
+  'tasks.branchTemplate': {
+    type: 'string',
+    default: 'issue-{{number}}-{{slug}}',
+    validate: (v) => /\{\{\s*number\s*\}\}/.test(v) || 'must contain {{number}}',
+  },
+  'tasks.startMode': {
+    type: 'enum',
+    values: ['branch', 'worktree', 'current'],
+    default: 'branch',
+  },
+
   // ── Database ─────────────────────────────────────────────────────────────
   'db.user': { type: 'string', default: 'root' },
   'db.password': { type: 'string', default: '' },

@@ -478,6 +478,37 @@ export const SETTINGS_ITEMS = [
     keywords: ['agents', 'custom', 'add', 'new', 'own', 'cli', 'define', 'user'],
   },
 
+  {
+    id: 'tasks.startPrompt',
+    section: 'agents',
+    title: 'Start prompt',
+    description: 'What Start → on an issue types to the agent',
+    keywords: ['tasks', 'start', 'prompt', 'issue', 'github', 'template', 'message'],
+  },
+  {
+    id: 'tasks.branchTemplate',
+    section: 'agents',
+    title: 'Branch name',
+    description: 'The branch Start → creates for an issue',
+    keywords: ['tasks', 'start', 'branch', 'name', 'issue', 'github', 'template', 'git'],
+  },
+  {
+    id: 'tasks.startMode',
+    section: 'agents',
+    title: 'Default “Where”',
+    description: 'New branch in place, new worktree, or the current branch',
+    keywords: [
+      'tasks',
+      'start',
+      'worktree',
+      'branch',
+      'checkout',
+      'where',
+      'mode',
+      'git',
+    ],
+  },
+
   // ── External tools ───────────────────────────────────────────────────────
   {
     id: 'tools.editor',
