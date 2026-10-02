@@ -152,6 +152,18 @@ body {
   -webkit-app-region: no-drag;
 }
 
+/* A pane's top strip that doubles as title bar: its empty space drags the
+   window (and double-clicks to zoom it), while every control in it — the
+   direct children — stays clickable. A child marked .drag-region, such as a
+   spacer, drags too. */
+.drag-strip {
+  -webkit-app-region: drag;
+}
+
+.drag-strip > :not(.drag-region) {
+  -webkit-app-region: no-drag;
+}
+
 /* Status dot animations */
 @keyframes blink {
   0%,

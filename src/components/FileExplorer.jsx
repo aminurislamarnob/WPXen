@@ -68,7 +68,6 @@ export default function FileExplorer({
   rootName,
   onOpenFile,
   onOpenDiff,
-  controlsInset,
   activeFilePath,
 }) {
   const [childrenByPath, setChildrenByPath] = useState({});
@@ -654,12 +653,8 @@ export default function FileExplorer({
 
   return (
     <div className="h-full flex flex-col">
-      {/* Files / Changes tabs. When the app sidebar is hidden, inset past the
-          floating window controls so they don't overlap the tabs. */}
-      <div
-        className="flex items-center gap-0.5 px-2 pt-2 pb-1.5 border-b border-border"
-        style={controlsInset ? { paddingLeft: controlsInset } : undefined}
-      >
+      {/* Files / Changes tabs */}
+      <div className="drag-strip flex items-center gap-0.5 px-2 pt-2 pb-1.5 border-b border-border">
         <TabButton
           icon={FileText}
           label="Files"
