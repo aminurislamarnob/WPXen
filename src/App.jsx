@@ -131,7 +131,7 @@ export default function App() {
     <SettingsProvider>
       <HashRouter>
         <Routes>
-          <Route path="/" element={<Layout />}>
+          <Route path="/" element={<Layout serviceStatus={serviceStatus} />}>
             <Route index element={<Navigate to="/dashboard" replace />} />
             <Route path="dashboard" element={<Dashboard {...sharedProps} />} />
             <Route path="sites" element={<Sites {...sharedProps} />} />

@@ -68,7 +68,7 @@ export default function FileExplorer({
   rootName,
   onOpenFile,
   onOpenDiff,
-  insetForControls,
+  controlsInset,
   activeFilePath,
 }) {
   const [childrenByPath, setChildrenByPath] = useState({});
@@ -658,7 +658,7 @@ export default function FileExplorer({
           floating window controls so they don't overlap the tabs. */}
       <div
         className="flex items-center gap-0.5 px-2 pt-2 pb-1.5 border-b border-border"
-        style={insetForControls ? { paddingLeft: 190 } : undefined}
+        style={controlsInset ? { paddingLeft: controlsInset } : undefined}
       >
         <TabButton
           icon={FileText}

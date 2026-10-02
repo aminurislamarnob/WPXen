@@ -1,36 +1,15 @@
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import {
-  LayoutDashboard,
-  Globe,
-  Server,
-  Code2,
-  Mail,
-  Settings,
-  Search,
-  ArrowLeft,
-  ArrowRight,
-  PanelLeft,
-  Terminal,
-} from 'lucide-react';
+import { Search, ArrowLeft, ArrowRight, PanelLeft } from 'lucide-react';
 import logo from '../assets/logo.png';
+import ActivityBar from './ActivityBar';
 import AgentsSidebar from './AgentsSidebar';
 import { Tooltip } from './ui';
+import { NAV_GROUPS } from '../lib/navItems';
+import { ACTIVITY_BAR_WIDTH, WINDOW_CONTROLS_END } from '../lib/activityBar';
 
-// System Settings-style nav: grouped items, each with its own colored tile.
-const NAV_GROUPS = [
-  [
-    { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard', color: 'blue' },
-    { to: '/sites', icon: Globe, label: 'Sites', color: 'teal' },
-    { to: '/agents', icon: Terminal, label: 'Agents', color: 'purple' },
-  ],
-  [
-    { to: '/services', icon: Server, label: 'Services', color: 'green' },
-    { to: '/php', icon: Code2, label: 'PHP', color: 'indigo' },
-    { to: '/mail', icon: Mail, label: 'Mail', color: 'red' },
-  ],
-  [{ to: '/settings', icon: Settings, label: 'Settings', color: 'gray' }],
-];
+// System Settings-style nav (NAV_GROUPS): grouped items, each with its own
+// colored tile.
 
 const TILE_COLORS = {
   blue: 'bg-[#0a7aff]',
@@ -42,13 +21,20 @@ const TILE_COLORS = {
   purple: 'bg-[#af52de]',
 };
 
-export default function Layout() {
+export default function Layout({ serviceStatus }) {
   const [filter, setFilter] = useState('');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
 
   const agentsMode = location.pathname.startsWith('/agents');
+
+  // How far content flush against the left of <main> must inset to clear the
+  // floating window controls — only needed once the sidebar is collapsed, and
+  // less on Agents, where the activity bar already covers part of the span.
+  const controlsInset = sidebarCollapsed
+    ? WINDOW_CONTROLS_END - (agentsMode ? ACTIVITY_BAR_WIDTH : 0)
+    : 0;
 
   // Shortcuts for the window controls, matching the keycaps in their tooltips.
   // ⌘[ / ⌘] are the macOS system bindings for history; ⌘B is the usual
@@ -88,6 +74,16 @@ export default function Layout() {
 
   return (
     <div className="h-screen flex overflow-hidden relative">
+      {/* Agents mode: a VS Code-style activity bar to the left of the Sites
+          tree, so every main screen stays one click away. ⌘B collapses only
+          the tree beside it. */}
+      {agentsMode && (
+        <ActivityBar
+          serviceStatus={serviceStatus}
+          onToggleTree={() => setSidebarCollapsed((v) => !v)}
+        />
+      )}
+
       {/* Sidebar — opaque, one shade off the content pane. Collapsible from the
           top bar. */}
       <aside
@@ -175,7 +171,7 @@ export default function Layout() {
             (tabs) up against the controls, so drop the gap there. */}
         <div className={`drag-region flex-shrink-0 ${agentsMode ? 'h-0' : 'h-11'}`} />
         <div className="flex-1 overflow-y-auto">
-          <Outlet context={{ sidebarCollapsed, agentsMode }} />
+          <Outlet context={{ sidebarCollapsed, agentsMode, controlsInset }} />
         </div>
       </main>
 
