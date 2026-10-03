@@ -2344,14 +2344,10 @@ function registerHandlers(win, storeInstance) {
 
   ipcMain.handle('switch-php-version', async (_, version) => {
     try {
-      phpService.switchActivePhpVersion(version);
-      // If FPM is running another version, swap it to the new one — sites
-      // would otherwise silently keep executing on the old version (brew's
-      // KeepAlive used to mask that nothing restarted FPM here).
-      const running = phpService.getRunningFpmVersion();
-      if (running && running !== version) {
-        await phpService.startPhpFpm(version);
-      }
+      // Links the CLI and swaps a running FPM to the new version — sites would
+      // otherwise silently keep executing on the old one. Rolls both back if
+      // the new FPM won't start, so a failed switch never takes sites down.
+      await phpService.switchPhpVersion(version);
       return { success: true };
     } catch (err) {
       return { success: false, error: humanize(err) };

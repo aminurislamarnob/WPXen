@@ -88,6 +88,35 @@ async function isPhpFpmRunningAsync(_version) {
   }
 }
 
+// The php-fpm masters in `psOutput` (`ps -axo pid=,ppid=,command=`) that run
+// under the Homebrew prefix and are NOT children of `ownPid`. Our own child is
+// never "outside WPXen" — counting it as a conflict refuses to start PHP at all.
+function foreignFpmMasters(psOutput, ownPid, prefix) {
+  const needle = `${prefix}/etc/php`;
+  return psOutput
+    .split('\n')
+    .map((line) => line.trim().match(/^(\d+)\s+(\d+)\s+(.*)$/))
+    .filter(
+      (m) =>
+        m &&
+        Number(m[2]) !== ownPid &&
+        m[3].startsWith('php-fpm: master') &&
+        m[3].includes(needle)
+    )
+    .map((m) => Number(m[1]));
+}
+
+async function isForeignPhpFpmRunningAsync() {
+  const prefix = brew.getBrewPrefix();
+  if (!prefix) return false;
+  try {
+    const { stdout } = await execAsync('ps -axo pid=,ppid=,command=', { timeout: 4000 });
+    return foreignFpmMasters(stdout, process.pid, prefix).length > 0;
+  } catch {
+    return false;
+  }
+}
+
 // php-fpm runs as a single supervised child of WPXen (registry slot 'php',
 // see procman.cjs) — one version at a time, matching today's behavior: every
 // version's pool listens on 127.0.0.1:9000, so two can't coexist anyway.
@@ -117,8 +146,9 @@ function buildFpmSpec(version) {
     },
     readyProbe: () => isPhpFpmRunningAsync(),
     readyTimeoutMs: 10_000,
-    // A pre-migration launchd instance may still hold :9000 — clear it.
-    conflictProbe: () => isPhpFpmRunningAsync(),
+    // A pre-migration launchd instance may still hold :9000 — clear it. Only
+    // masters we didn't spawn count; the ready probe above must see ours.
+    conflictProbe: () => isForeignPhpFpmRunningAsync(),
     takeover: async () => {
       for (const v of brew.getInstalledPhpVersions()) {
         try {
@@ -129,21 +159,79 @@ function buildFpmSpec(version) {
   };
 }
 
+// Seams for tests — vi.mock can't reach CJS modules (see browser.cjs).
+let overrides = {};
+
+const deps = {
+  get procman() {
+    return 'procman' in overrides ? overrides.procman : procman;
+  },
+  get fpmSpec() {
+    return 'fpmSpec' in overrides ? overrides.fpmSpec : buildFpmSpec;
+  },
+  get linkPhp() {
+    return 'linkPhp' in overrides ? overrides.linkPhp : switchActivePhpVersion;
+  },
+  get activePhpVersion() {
+    return 'activePhpVersion' in overrides
+      ? overrides.activePhpVersion
+      : () => brew.getActivePhpVersion();
+  },
+};
+
+function __setDeps(next) {
+  overrides = { ...overrides, ...next };
+}
+
 // The version the supervised FPM child is currently running, or null.
 function getRunningFpmVersion() {
-  const st = procman.status('php');
+  const st = deps.procman.status('php');
   if (st.state === 'running' || st.state === 'starting') {
     return st.meta?.version ?? null;
   }
   return null;
 }
 
+// Swaps the FPM child to `version`. If the new version won't start, the one
+// that was serving is put back before the error propagates — a failed swap
+// must never leave every site on a 502.
 async function startPhpFpm(version) {
-  const running = getRunningFpmVersion();
-  if (running && running !== version) {
-    await procman.stop('php');
+  const previous = getRunningFpmVersion();
+  if (!previous || previous === version) {
+    return deps.procman.start(deps.fpmSpec(version));
   }
-  return procman.start(buildFpmSpec(version));
+  await deps.procman.stop('php');
+  try {
+    return await deps.procman.start(deps.fpmSpec(version));
+  } catch (err) {
+    // `previous` was serving sites a moment ago next to whatever else is
+    // running, so the foreign-FPM check that may have refused `version` must
+    // not refuse the rollback too — that is exactly how sites end up down.
+    try {
+      await deps.procman.start({ ...deps.fpmSpec(previous), conflictProbe: undefined });
+    } catch {}
+    throw err;
+  }
+}
+
+// Makes `version` the active PHP: the CLI link, and FPM if it's running.
+// All-or-nothing — if FPM can't move, the CLI link goes back too, so the
+// version the app reports as active is always the one serving sites.
+async function switchPhpVersion(version) {
+  const previousLink = deps.activePhpVersion();
+  deps.linkPhp(version);
+  const running = getRunningFpmVersion();
+  if (!running || running === version) return;
+  try {
+    await startPhpFpm(version);
+  } catch (err) {
+    if (previousLink && previousLink !== version) {
+      try {
+        deps.linkPhp(previousLink);
+      } catch {}
+    }
+    throw err;
+  }
 }
 
 // Version argument kept for API compatibility; only one FPM child exists.
@@ -688,6 +776,8 @@ module.exports = {
   installPhpVersion,
   updatePhpVersion,
   switchActivePhpVersion,
+  switchPhpVersion,
+  foreignFpmMasters,
   getBrewServiceName,
   getPhpIniSettings,
   reloadPhpFpmIfRunning,
@@ -697,4 +787,5 @@ module.exports = {
   getGlobalSitePhpValues,
   validateSitePhpSettings,
   buildSitePhpValue,
+  __setDeps,
 };
