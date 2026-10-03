@@ -1,36 +1,18 @@
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import {
-  LayoutDashboard,
-  Globe,
-  Server,
-  Code2,
-  Mail,
-  Settings,
-  Search,
-  ArrowLeft,
-  ArrowRight,
-  PanelLeft,
-  Terminal,
-} from 'lucide-react';
+import { Search, ArrowLeft, ArrowRight, PanelLeft } from 'lucide-react';
 import logo from '../assets/logo.png';
+import ActivityBar from './ActivityBar';
 import AgentsSidebar from './AgentsSidebar';
+import KeepAwakeButton from './KeepAwakeButton';
+import FloatingWorkspace from './FloatingWorkspace';
 import { Tooltip } from './ui';
+import { NAV_GROUPS } from '../lib/navItems';
+import { ACTIVITY_BAR_WIDTH, WINDOW_CONTROLS_END, agentsLabel } from '../lib/activityBar';
+import { useAgentSessions } from '../lib/useAgentSessions';
 
-// System Settings-style nav: grouped items, each with its own colored tile.
-const NAV_GROUPS = [
-  [
-    { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard', color: 'blue' },
-    { to: '/sites', icon: Globe, label: 'Sites', color: 'teal' },
-    { to: '/agents', icon: Terminal, label: 'Agents', color: 'purple' },
-  ],
-  [
-    { to: '/services', icon: Server, label: 'Services', color: 'green' },
-    { to: '/php', icon: Code2, label: 'PHP', color: 'indigo' },
-    { to: '/mail', icon: Mail, label: 'Mail', color: 'red' },
-  ],
-  [{ to: '/settings', icon: Settings, label: 'Settings', color: 'gray' }],
-];
+// System Settings-style nav (NAV_GROUPS): grouped items, each with its own
+// colored tile.
 
 const TILE_COLORS = {
   blue: 'bg-[#0a7aff]',
@@ -40,15 +22,23 @@ const TILE_COLORS = {
   red: 'bg-[#ff3b30]',
   gray: 'bg-[#8e8e93]',
   purple: 'bg-[#af52de]',
+  orange: 'bg-[#ff9500]',
 };
 
-export default function Layout() {
+export default function Layout({ serviceStatus }) {
   const [filter, setFilter] = useState('');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
 
   const agentsMode = location.pathname.startsWith('/agents');
+
+  // How far content flush against the left of <main> must inset to clear the
+  // floating window controls — only needed once the sidebar is collapsed, and
+  // less on Agents, where the activity bar already covers part of the span.
+  const controlsInset = sidebarCollapsed
+    ? WINDOW_CONTROLS_END - (agentsMode ? ACTIVITY_BAR_WIDTH : 0)
+    : 0;
 
   // Shortcuts for the window controls, matching the keycaps in their tooltips.
   // ⌘[ / ⌘] are the macOS system bindings for history; ⌘B is the usual
@@ -79,6 +69,21 @@ export default function Layout() {
     };
   }, [navigate]);
 
+  // A clicked agent notification (or tray entry) opens its session.
+  useEffect(
+    () =>
+      window.electronAPI.on('agent-open-session', ({ siteId, sessionId }) =>
+        navigate(`/agents/${encodeURIComponent(siteId)}`, {
+          state: { focus: sessionId, nonce: Date.now() },
+        })
+      ),
+    [navigate]
+  );
+
+  // Unread agent Sessions put an amber dot on every Agents entry point, so
+  // attention shows from any screen.
+  const agentsUnread = useAgentSessions().filter((s) => s.unread).length;
+
   const q = filter.trim().toLowerCase();
   const groups = q
     ? NAV_GROUPS.map((g) => g.filter((i) => i.label.toLowerCase().includes(q))).filter(
@@ -88,19 +93,30 @@ export default function Layout() {
 
   return (
     <div className="h-screen flex overflow-hidden relative">
+      {/* Agents mode: a VS Code-style activity bar to the left of the Sites
+          tree, so every main screen stays one click away. ⌘B collapses only
+          the tree beside it. */}
+      {agentsMode && (
+        <ActivityBar
+          serviceStatus={serviceStatus}
+          agentsUnread={agentsUnread}
+          onToggleTree={() => setSidebarCollapsed((v) => !v)}
+        />
+      )}
+
       {/* Sidebar — opaque, one shade off the content pane. Collapsible from the
           top bar. */}
       <aside
         className={`flex flex-col flex-shrink-0 overflow-hidden bg-sidebar text-sidebar-foreground border-r border-sidebar-border transition-[width] duration-200 ease-out ${
-          sidebarCollapsed ? 'w-0 border-r-0' : 'w-56'
+          sidebarCollapsed ? 'w-0 border-r-0' : agentsMode ? 'w-64' : 'w-56'
         }`}
       >
         {/* Title bar drag region (hosts the traffic lights) */}
         <div className="drag-region h-12 flex-shrink-0" />
 
         {agentsMode ? (
-          // Agents mode: the sidebar becomes a Sites → providers tree, in place
-          // of the main menu.
+          // Agents mode: the sidebar becomes the Projects list (Sites → agent
+          // Sessions), in place of the main menu.
           <AgentsSidebar />
         ) : (
           <>
@@ -147,6 +163,13 @@ export default function Layout() {
                             <Icon size={13} strokeWidth={2.2} />
                           </span>
                           {label}
+                          {to === '/agents' && agentsUnread > 0 && (
+                            <span
+                              className="ml-auto size-2 rounded-full bg-status-warning"
+                              title={agentsLabel(agentsUnread)}
+                              aria-label={agentsLabel(agentsUnread)}
+                            />
+                          )}
                         </>
                       )}
                     </NavLink>
@@ -157,14 +180,15 @@ export default function Layout() {
           </>
         )}
 
-        {/* Footer — app logo */}
-        <div className="flex items-center px-4 py-3">
+        {/* Footer — app logo, then the keep-awake control */}
+        <div className="flex items-center justify-between gap-2 pl-4 pr-2.5 py-3">
           <img
             src={logo}
             alt="WPXen"
             className="h-5 w-auto object-contain"
             draggable={false}
           />
+          <KeepAwakeButton />
         </div>
       </aside>
 
@@ -175,9 +199,13 @@ export default function Layout() {
             (tabs) up against the controls, so drop the gap there. */}
         <div className={`drag-region flex-shrink-0 ${agentsMode ? 'h-0' : 'h-11'}`} />
         <div className="flex-1 overflow-y-auto">
-          <Outlet context={{ sidebarCollapsed, agentsMode }} />
+          <Outlet context={{ sidebarCollapsed, agentsMode, controlsInset }} />
         </div>
       </main>
+
+      {/* Floating Workspace — launcher + panel, on every page. Before the
+          window controls, which must stay the last child (see below). */}
+      <FloatingWorkspace />
 
       {/* Window controls, docked just after the native macOS traffic lights.
           Absolutely positioned so they stay put whether the sidebar is shown

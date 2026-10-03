@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'fs';
+import { execFileSync } from 'child_process';
 import os from 'os';
 import path from 'path';
 import git from '../electron/services/git.cjs';
@@ -192,5 +193,121 @@ describe('discoverRepos', () => {
   it('returns nothing for a plain non-repo tree', () => {
     fs.mkdirSync(path.join(root, 'a/b/c'), { recursive: true });
     expect(discoverRepos(root)).toEqual([]);
+  });
+});
+
+describe('parseGithubRemote', () => {
+  const { parseGithubRemote } = git;
+
+  it('reads owner/name from every github.com URL form', () => {
+    for (const url of [
+      'https://github.com/acme/shop-theme.git',
+      'https://github.com/acme/shop-theme',
+      'https://github.com/acme/shop-theme/',
+      'https://token@github.com/acme/shop-theme.git',
+      'git@github.com:acme/shop-theme.git',
+      'git@github.com:acme/shop-theme',
+      'ssh://git@github.com/acme/shop-theme.git',
+      'ssh://git@github.com:22/acme/shop-theme',
+    ]) {
+      expect(parseGithubRemote(url)).toEqual({ owner: 'acme', name: 'shop-theme' });
+    }
+  });
+
+  it('keeps dots in repo names', () => {
+    expect(parseGithubRemote('git@github.com:acme/acme.github.io.git')).toEqual({
+      owner: 'acme',
+      name: 'acme.github.io',
+    });
+  });
+
+  it('ignores other hosts and local paths', () => {
+    for (const url of [
+      'https://gitlab.com/acme/shop.git',
+      'git@bitbucket.org:acme/shop.git',
+      '/Users/me/repos/shop.git',
+      'https://github.com/acme',
+      '',
+      null,
+    ]) {
+      expect(parseGithubRemote(url)).toBeNull();
+    }
+  });
+});
+
+describe('pickGithubRemote', () => {
+  const { parseRemotes, pickGithubRemote } = git;
+  const remotes = (lines) => parseRemotes(lines.join('\n'));
+
+  it('prefers upstream over origin', () => {
+    const r = remotes([
+      'origin\tgit@github.com:me/shop.git (fetch)',
+      'origin\tgit@github.com:me/shop.git (push)',
+      'upstream\thttps://github.com/acme/shop.git (fetch)',
+      'upstream\thttps://github.com/acme/shop.git (push)',
+    ]);
+    expect(pickGithubRemote(r)).toEqual({
+      owner: 'acme',
+      name: 'shop',
+      remote: 'upstream',
+    });
+  });
+
+  it('skips a non-GitHub upstream for a GitHub origin', () => {
+    const r = remotes([
+      'origin\tgit@github.com:me/shop.git (fetch)',
+      'upstream\thttps://gitlab.com/acme/shop.git (fetch)',
+    ]);
+    expect(pickGithubRemote(r)).toMatchObject({ owner: 'me', remote: 'origin' });
+  });
+
+  it('falls back to any other GitHub remote', () => {
+    expect(
+      pickGithubRemote(remotes(['work\tgit@github.com:acme/shop.git (fetch)']))
+    ).toEqual({
+      owner: 'acme',
+      name: 'shop',
+      remote: 'work',
+    });
+  });
+
+  it('is null with no GitHub remote', () => {
+    expect(pickGithubRemote(remotes(['origin\t/srv/git/shop.git (fetch)']))).toBeNull();
+    expect(pickGithubRemote({})).toBeNull();
+  });
+});
+
+describe('githubReposFor', () => {
+  let root;
+  const sh = (cwd, ...args) => execFileSync('git', args, { cwd, stdio: 'ignore' });
+
+  beforeEach(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'wpxen-gh-'));
+  });
+  afterEach(() => {
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it("finds the GitHub repos among a Site's nested repos", async () => {
+    const theme = path.join(root, 'wp-content/themes/shop-theme');
+    const plugin = path.join(root, 'wp-content/plugins/local-only');
+    for (const dir of [theme, plugin]) {
+      fs.mkdirSync(dir, { recursive: true });
+      sh(dir, 'init', '-q');
+    }
+    sh(theme, 'remote', 'add', 'origin', 'git@github.com:acme/shop-theme.git');
+
+    expect(await git.githubReposFor(root)).toEqual([
+      {
+        repoRoot: path.resolve(theme),
+        owner: 'acme',
+        name: 'shop-theme',
+        remote: 'origin',
+      },
+    ]);
+  });
+
+  it('is empty for a Site with no repos', async () => {
+    expect(await git.githubReposFor(root)).toEqual([]);
   });
 });

@@ -1,67 +1,15 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import CodeMirror from '@uiw/react-codemirror';
 import { keymap, EditorView } from '@codemirror/view';
-import { unifiedMergeView } from '@codemirror/merge';
 import { buildEditorMetrics, editorThemes } from '../lib/editorTheme';
 import { editorTypography, onTypographyChange } from '../lib/typography';
 import { onThemeChange, themeName } from '../lib/theme';
-import { javascript } from '@codemirror/lang-javascript';
-import { css } from '@codemirror/lang-css';
-import { html } from '@codemirror/lang-html';
-import { json } from '@codemirror/lang-json';
-import { php } from '@codemirror/lang-php';
-import { python } from '@codemirror/lang-python';
-import { markdown } from '@codemirror/lang-markdown';
-import { yaml } from '@codemirror/lang-yaml';
-import { sql } from '@codemirror/lang-sql';
 import { Copy, ExternalLink, Save, X, GitCompare, RefreshCw, Globe } from 'lucide-react';
 import { FileGlyph } from '../lib/fileIcons';
 import { Tooltip } from './ui';
 import BrowserPane from './browser/BrowserPane';
-
-// Pick CodeMirror language extensions from a file's extension.
-function languageFor(name) {
-  const base = name.toLowerCase();
-  if (base === 'dockerfile') return [];
-  const ext = base.includes('.') ? base.slice(base.lastIndexOf('.') + 1) : '';
-  switch (ext) {
-    case 'js':
-    case 'mjs':
-    case 'cjs':
-    case 'jsx':
-      return [javascript({ jsx: true })];
-    case 'ts':
-      return [javascript({ typescript: true })];
-    case 'tsx':
-      return [javascript({ jsx: true, typescript: true })];
-    case 'json':
-      return [json()];
-    case 'css':
-    case 'scss':
-    case 'less':
-      return [css()];
-    case 'html':
-    case 'htm':
-    case 'xml':
-    case 'vue':
-    case 'svg':
-      return [html()];
-    case 'php':
-      return [php()];
-    case 'py':
-      return [python()];
-    case 'md':
-    case 'markdown':
-      return [markdown()];
-    case 'yml':
-    case 'yaml':
-      return [yaml()];
-    case 'sql':
-      return [sql()];
-    default:
-      return [];
-  }
-}
+import DiffView from './DiffView';
+import { languageFor } from '../lib/editorLanguage';
 
 // Load both sides of a diff tab. Original is the pre-change version (HEAD, or
 // the index when the file also has staged edits); modified is what the change
@@ -235,15 +183,8 @@ export default function CodeEditor({
       ]),
     ];
     if (!active) return base;
-    if (isDiff && data?.diff) {
-      return [
-        editorMetrics,
-        unifiedMergeView({ original: data.diff.original, mergeControls: false }),
-        ...languageFor(active.name),
-      ];
-    }
     return [...base, ...languageFor(active.name)];
-  }, [active, isDiff, data, typography]);
+  }, [active, typography]);
 
   return (
     <div className="h-full flex flex-col bg-background text-foreground">
@@ -416,14 +357,11 @@ export default function CodeEditor({
             ) : data.error ? (
               <div className="p-4 text-destructive text-[13px]">{data.error}</div>
             ) : isDiff ? (
-              <CodeMirror
-                value={data.diff.modified}
-                height="100%"
-                theme={theme}
-                extensions={extensions}
-                editable={false}
+              <DiffView
+                name={active.name}
+                original={data.diff.original}
+                modified={data.diff.modified}
                 className="flex-1 min-h-0"
-                basicSetup={{ tabSize: 2 }}
               />
             ) : (
               <>

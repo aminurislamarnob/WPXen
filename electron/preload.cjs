@@ -9,6 +9,7 @@ const VALID_EVENT_CHANNELS = [
   'site-create-progress',
   'php-install-progress',
   'agent-install-progress',
+  'tasks-gh-install-progress',
   'dependencies-update',
   'notification',
   'tunnel-update',
@@ -23,9 +24,16 @@ const VALID_EVENT_CHANNELS = [
   'terminal-data',
   'terminal-replay',
   'terminal-exit',
+  'agent-sessions-update',
+  'agent-floating-sessions-update',
+  'floating-shortcut',
+  'agent-projects-update',
+  'project-icon-changed',
+  'agent-open-session',
   'browser-new-window',
   'browser-shortcut',
   'settings-updated',
+  'keep-awake-status-update',
 ];
 
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -157,6 +165,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // resolves with { ok, applied, rejected } — it never throws on a bad value.
   getAllSettings: () => ipcRenderer.invoke('settings-get-all'),
   setSettings: (patch) => ipcRenderer.invoke('settings-set', patch),
+  // Keep computer awake: { mode, active, workingCount }. Changes are pushed on
+  // 'keep-awake-status-update'; the mode itself is the agents.keepAwake setting.
+  getKeepAwakeStatus: () => ipcRenderer.invoke('keep-awake-status'),
   // Editors/terminals detected on this machine, for the settings pickers.
   listExternalTools: () => ipcRenderer.invoke('list-external-tools'),
   // Every agent including ones hidden from the launcher (settings only).
@@ -175,8 +186,60 @@ contextBridge.exposeInMainWorld('electronAPI', {
   listAgents: () => ipcRenderer.invoke('agent-list'),
   installAgent: (agentId) => ipcRenderer.invoke('agent-install', agentId),
   listSessions: (siteId) => ipcRenderer.invoke('agent-sessions', siteId),
+  listAllSessions: () => ipcRenderer.invoke('agent-sessions-all'),
+  dismissSession: (sessionId) => ipcRenderer.invoke('agent-session-dismiss', sessionId),
+  getAgentProjects: () => ipcRenderer.invoke('agent-projects-get'),
+  reorderAgentProjects: (order) => ipcRenderer.invoke('agent-projects-reorder', order),
+  addAgentProject: (siteId) => ipcRenderer.invoke('agent-project-add', siteId),
+  removeAgentProject: (siteId) => ipcRenderer.invoke('agent-project-remove', siteId),
+  getGitBranch: (rootPath) => ipcRenderer.invoke('git-branch', rootPath),
+  setAgentView: (sessionId) => ipcRenderer.send('agent-view', sessionId),
+  markSessionRead: (sessionId, read) =>
+    ipcRenderer.invoke('agent-session-mark', sessionId, read),
   launchAgent: (siteId, agentId, targetId) =>
     ipcRenderer.invoke('agent-launch', siteId, agentId, targetId),
+
+  // Floating Workspace terminals (no owning Site)
+  launchFloatingTerminal: (cwd, command) =>
+    ipcRenderer.invoke('agent-launch-floating', cwd, command),
+  listFloatingSessions: () => ipcRenderer.invoke('agent-floating-sessions'),
+  setFloatingView: (sessionId) => ipcRenderer.send('agent-floating-view', sessionId),
+  setFloatingFocus: (focused) => ipcRenderer.send('floating-focus', !!focused),
+
+  // Floating Workspace notes
+  notesCreate: () => ipcRenderer.invoke('notes-create'),
+  notesRead: (file) => ipcRenderer.invoke('notes-read', file),
+  notesSave: (file, content, mtimeMs, opts) =>
+    ipcRenderer.invoke('notes-save', file, content, mtimeMs, opts),
+  notesDiscard: (file, edited) => ipcRenderer.invoke('notes-discard', file, edited),
+  notesOpenDialog: () => ipcRenderer.invoke('notes-open-dialog'),
+
+  // Tasks (GitHub via the gh CLI)
+  tasksPreflight: () => ipcRenderer.invoke('tasks-preflight'),
+  projectIcon: (siteId, opts) => ipcRenderer.invoke('project-icon', siteId, opts),
+  setProjectIcon: (siteId, choice) =>
+    ipcRenderer.invoke('project-icon-set', siteId, choice),
+  tasksInstallGh: () => ipcRenderer.invoke('tasks-install-gh'),
+  tasksRepos: (opts) => ipcRenderer.invoke('tasks-repos', opts),
+  tasksSearchIssues: (opts) => ipcRenderer.invoke('tasks-search-issues', opts),
+  tasksSearchPulls: (opts) => ipcRenderer.invoke('tasks-search-pulls', opts),
+  tasksPull: (opts) => ipcRenderer.invoke('tasks-pull', opts),
+  tasksProjects: (opts) => ipcRenderer.invoke('tasks-projects', opts),
+  tasksProject: (opts) => ipcRenderer.invoke('tasks-project', opts),
+  tasksProjectMove: (opts) => ipcRenderer.invoke('tasks-project-move', opts),
+  tasksPullFiles: (opts) => ipcRenderer.invoke('tasks-pull-files', opts),
+  tasksPullChecks: (opts) => ipcRenderer.invoke('tasks-pull-checks', opts),
+  tasksIssue: (opts) => ipcRenderer.invoke('tasks-issue', opts),
+  tasksStartInspect: (opts) => ipcRenderer.invoke('tasks-start-inspect', opts),
+  tasksStart: (opts) => ipcRenderer.invoke('tasks-start', opts),
+  tasksIssueComment: (opts) => ipcRenderer.invoke('tasks-issue-comment', opts),
+  tasksIssueState: (opts) => ipcRenderer.invoke('tasks-issue-state', opts),
+  tasksIssueEdit: (opts) => ipcRenderer.invoke('tasks-issue-edit', opts),
+  tasksIssueAssignees: (opts) => ipcRenderer.invoke('tasks-issue-assignees', opts),
+  tasksIssueLabels: (opts) => ipcRenderer.invoke('tasks-issue-labels', opts),
+  tasksIssueCreate: (opts) => ipcRenderer.invoke('tasks-issue-create', opts),
+  tasksRepoAssignees: (opts) => ipcRenderer.invoke('tasks-repo-assignees', opts),
+  tasksRepoLabels: (opts) => ipcRenderer.invoke('tasks-repo-labels', opts),
 
   // Launch Presets (global, per-Agent) & Launch Targets (per-Site)
   getAgentPresets: () => ipcRenderer.invoke('agent-presets-get'),

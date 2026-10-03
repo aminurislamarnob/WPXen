@@ -291,6 +291,7 @@ export function Kbd({ children, tone = 'inverted' }) {
 
 const TOOLTIP_GAP = 6; // px between the trigger and the pill
 const TOOLTIP_MARGIN = 8; // px minimum clearance from the window edge
+const TOOLTIP_ARROW_INSET = 12; // px the arrow keeps from the pill's corners
 
 // Place the pill on `side` of the trigger, centered, then clamp it inside the
 // window so a control near an edge still shows its label in full.
@@ -314,10 +315,18 @@ function placeTooltip(trigger, tip, side) {
       left = trigger.left + trigger.width / 2 - tip.width / 2;
   }
   const clamp = (v, max) => Math.min(Math.max(TOOLTIP_MARGIN, v), max - TOOLTIP_MARGIN);
-  return {
+  const placed = {
     top: clamp(top, window.innerHeight - tip.height),
     left: clamp(left, window.innerWidth - tip.width),
   };
+  // Where the arrow sits along the pill: the trigger's center, measured from
+  // the pill's clamped left edge, so it still points at the trigger when the
+  // pill has been pushed in from a window edge.
+  placed.arrowLeft = Math.min(
+    Math.max(TOOLTIP_ARROW_INSET, trigger.left + trigger.width / 2 - placed.left),
+    tip.width - TOOLTIP_ARROW_INSET
+  );
+  return placed;
 }
 
 // Hover tooltip: a pill on an inverted surface holding a label and, when the
@@ -332,7 +341,19 @@ function placeTooltip(trigger, tip, side) {
 // <body> and is pointer-events-none, so it never intercepts clicks and never
 // gets clipped by an overflow-hidden ancestor. Prefer this over the native
 // `title` attribute — don't set both, or macOS draws a second tooltip.
-export function Tooltip({ label, keys, side = 'bottom', delay = 300, children }) {
+//
+// `arrow` adds a caret pointing at the trigger (top/bottom sides only).
+// `disabled` suppresses the pill — e.g. while the trigger's own menu is open
+// and the pill would cover it.
+export function Tooltip({
+  label,
+  keys,
+  side = 'bottom',
+  delay = 300,
+  arrow = false,
+  disabled = false,
+  children,
+}) {
   const triggerRef = useRef(null);
   const tipRef = useRef(null);
   const timerRef = useRef(null);
@@ -347,8 +368,13 @@ export function Tooltip({ label, keys, side = 'bottom', delay = 300, children })
 
   const show = useCallback(() => {
     clearTimeout(timerRef.current);
+    if (disabled) return;
     timerRef.current = setTimeout(() => setOpen(true), delay);
-  }, [delay]);
+  }, [delay, disabled]);
+
+  useEffect(() => {
+    if (disabled) hide();
+  }, [disabled, hide]);
 
   useEffect(() => () => clearTimeout(timerRef.current), []);
 
@@ -433,6 +459,15 @@ export function Tooltip({ label, keys, side = 'bottom', delay = 300, children })
                   <Kbd key={k}>{k}</Kbd>
                 ))}
               </span>
+            )}
+            {arrow && (side === 'top' || side === 'bottom') && (
+              <span
+                aria-hidden="true"
+                style={{ left: coords?.arrowLeft ?? '50%' }}
+                className={`absolute size-2 -translate-x-1/2 rotate-45 rounded-[1px] bg-foreground ${
+                  side === 'top' ? '-bottom-1' : '-top-1'
+                }`}
+              />
             )}
           </div>,
           document.body

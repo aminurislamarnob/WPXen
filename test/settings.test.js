@@ -309,3 +309,64 @@ describe('sites.dir validation', () => {
     expect(store.get('settings.sites.dir', undefined)).toBeUndefined();
   });
 });
+
+describe('Floating Workspace settings', () => {
+  const dirSpec = SETTINGS['floatingWorkspace.terminalDirectory'];
+
+  it('is on by default and opens terminals in ~', () => {
+    const s = createSettings({ store: fakeStore() });
+    expect(s.get('floatingWorkspace.enabled')).toBe(true);
+    expect(s.get('floatingWorkspace.terminalDirectory')).toBe('~');
+  });
+
+  it('accepts ~, a path under ~ and an absolute folder', () => {
+    expect(dirSpec.validate('~')).toBe(true);
+    expect(dirSpec.validate(os.tmpdir())).toBe(true);
+    const under = fs.mkdtempSync(path.join(os.homedir(), '.wpxen-settings-test-'));
+    try {
+      expect(dirSpec.validate(`~/${path.basename(under)}`)).toBe(true);
+    } finally {
+      fs.rmdirSync(under);
+    }
+  });
+
+  it('rejects a relative path, a missing folder and a file', () => {
+    expect(dirSpec.validate('code')).toBe('use a full path, or one starting with ~');
+    expect(dirSpec.validate('~/wpxen-no-such-dir-xyz')).toBe(
+      'that folder does not exist'
+    );
+    const file = path.join(os.tmpdir(), `wpxen-settings-test-${Date.now()}`);
+    fs.writeFileSync(file, '');
+    try {
+      expect(dirSpec.validate(file)).toBe('that path is not a folder');
+    } finally {
+      fs.unlinkSync(file);
+    }
+  });
+
+  it('rejects a non-boolean switch through write()', () => {
+    const store = fakeStore();
+    const s = createSettings({ store });
+    const result = s.write({ 'floatingWorkspace.enabled': 'yes' });
+    expect(result.ok).toBe(false);
+    expect(result.rejected[0]).toMatchObject({ key: 'floatingWorkspace.enabled' });
+    expect(store.get('settings.floatingWorkspace.enabled', undefined)).toBeUndefined();
+  });
+});
+
+describe('Tasks settings', () => {
+  it('requires {{number}} in the branch template', () => {
+    const v = SETTINGS['tasks.branchTemplate'].validate;
+    expect(v('issue-{{number}}-{{slug}}')).toBe(true);
+    expect(v('feat/{{ number }}')).toBe(true);
+    expect(v('issue-{{slug}}')).toMatch(/number/);
+  });
+
+  it('defaults Start to a new branch in place with the issue URL as the prompt', () => {
+    expect(SETTINGS['tasks.startMode']).toMatchObject({
+      default: 'branch',
+      values: ['branch', 'worktree', 'current'],
+    });
+    expect(SETTINGS['tasks.startPrompt'].default).toBe('Complete {{url}}');
+  });
+});

@@ -1,16 +1,16 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
-import { useParams, useLocation, useOutletContext } from 'react-router-dom';
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
+import { useParams, useLocation, useNavigate, useOutletContext } from 'react-router-dom';
 import {
   Terminal as TerminalIcon,
   Plus,
   X,
   Settings2,
-  CornerDownRight,
   Globe,
   Gauge,
   Database,
   Mail,
   Loader2,
+  PanelRight,
 } from 'lucide-react';
 import { ProviderIcon } from './providerIcons';
 import { Panel, PanelGroup } from 'react-resizable-panels';
@@ -19,16 +19,56 @@ import FileExplorer from './FileExplorer';
 import CodeEditor from './CodeEditor';
 import ResizeHandle from './ResizeHandle';
 import LaunchTargetsDialog from './LaunchTargetsDialog';
+import LaunchMenu from './LaunchMenu';
 import { ConfirmDialog, Tooltip } from './ui';
 import * as sessionCache from '../lib/terminal/sessionCache';
 import * as webviewCache from '../lib/browser/webviewCache';
 import { useSettings } from '../lib/useSettings';
-
-// Strip a leading emoji/symbol + space from an OSC title (agents like Claude
-// Code prefix a status glyph) so the tab label reads cleanly.
-const cleanTitle = (t) => t.trim().replace(/^[\p{Emoji}\p{Symbol}]\s*/u, '');
+import { LAST_AGENTS_SITE_KEY, resolveLastSite } from '../lib/activityBar';
+import { sessionTitle } from '../lib/agentsList';
+import { useAgentSessions, setSelectedSession } from '../lib/useAgentSessions';
 
 const CLOSE_CONFIRM_KEY = 'wpxen.terminalCloseConfirmSuppressed';
+
+// Whether the right-hand Explorer is collapsed — one choice for every
+// project, like Orca's right sidebar, kept across restarts.
+const EXPLORER_COLLAPSED_KEY = 'wpxen.agentsExplorerCollapsed';
+
+// Its width, in pixels like Orca's (default 350, min 220, and always leaving
+// 320 for the rest), so it holds its size as the window grows or shrinks
+// instead of scaling with it.
+const EXPLORER_WIDTH_KEY = 'wpxen.agentsExplorerWidth';
+const EXPLORER_DEFAULT_WIDTH = 350;
+const EXPLORER_MIN_WIDTH = 220;
+const EXPLORER_MIN_REST = 320;
+
+function readExplorerWidth() {
+  try {
+    const n = Number(localStorage.getItem(EXPLORER_WIDTH_KEY));
+    return Number.isFinite(n) && n > 0 ? n : EXPLORER_DEFAULT_WIDTH;
+  } catch {
+    return EXPLORER_DEFAULT_WIDTH;
+  }
+}
+
+const clampExplorerWidth = (px, groupWidth) =>
+  Math.min(
+    Math.max(EXPLORER_MIN_WIDTH, groupWidth - EXPLORER_MIN_REST),
+    Math.max(EXPLORER_MIN_WIDTH, px)
+  );
+
+function readExplorerCollapsed() {
+  try {
+    return localStorage.getItem(EXPLORER_COLLAPSED_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+// This pane's browser tab keys. The webview cache and the browser IPC events
+// are shared with the Floating Workspace (`floating-browser:` keys), so the
+// prefix is how each side knows which pages are its own.
+const BROWSER_KEY_PREFIX = 'browser:';
 
 // The places you actually want to look at while an agent works on a site.
 // Order is by how often they're reached for, not alphabetical.
@@ -41,13 +81,17 @@ const BROWSER_TARGETS = [
 
 // Main pane for the Agents section. A Site can host MANY concurrent Sessions
 // (any mix of Agents, incl. several of the same provider); each is a terminal
-// tab. The sidebar spawns a Session via navigation state; the "+" spawns more.
+// tab. The tabs are the Site's Sessions as the main process lists them — the
+// same list the Projects sidebar shows — so a launch, exit or dismiss anywhere
+// lands here too. The sidebar spawns or focuses a Session via navigation
+// state; the "+" spawns more.
 export default function AgentsPane() {
   const { siteId } = useParams();
   const location = useLocation();
-  // When the sidebar is hidden the explorer sits under the floating window
-  // controls; inset its tab bar so they don't overlap.
-  const { sidebarCollapsed } = useOutletContext() || {};
+  const navigate = useNavigate();
+  // When the sidebar is hidden the terminal's tab strip sits under the
+  // floating window controls; inset it so they don't overlap.
+  const { controlsInset } = useOutletContext() || {};
   const { settings } = useSettings();
 
   const [meta, setMeta] = useState({ siteName: siteId });
@@ -57,7 +101,14 @@ export default function AgentsPane() {
   const [settingsOpen, setSettingsOpen] = useState(false); // launch-settings dialog
   const [error, setError] = useState(null);
 
-  const [tabs, setTabs] = useState([]); // [{ sessionId, agentId, agentName }]
+  const allSessions = useAgentSessions();
+  const tabs = useMemo(
+    () =>
+      allSessions
+        .filter((s) => s.siteId === siteId)
+        .sort((a, b) => a.startedAt - b.startedAt),
+    [allSessions, siteId]
+  );
   const [activeTab, setActiveTab] = useState(null); // sessionId
   const [addMenu, setAddMenu] = useState(null); // { x, y } when the + menu is open
   const [browserMenu, setBrowserMenu] = useState(null); // { x, y } for the browser targets
@@ -69,9 +120,80 @@ export default function AgentsPane() {
   // themselves live in webviewCache, not here.
   const [browserState, setBrowserState] = useState({}); // key -> {url,title,loading,error}
   const browserSeq = useRef(0);
-  const [titles, setTitles] = useState({}); // sessionId -> OSC title
   const [closeConfirm, setCloseConfirm] = useState(null); // sessionId pending confirm
   const [suppressClose, setSuppressClose] = useState(false); // checkbox in dialog
+
+  // The Explorer is a collapsible right sidebar: the toolbar button, ⌘⇧E, or
+  // dragging its handle to the edge close it.
+  const explorerRef = useRef(null);
+  const [explorerCollapsed, setExplorerCollapsed] = useState(readExplorerCollapsed);
+  useEffect(() => {
+    try {
+      localStorage.setItem(EXPLORER_COLLAPSED_KEY, explorerCollapsed ? '1' : '0');
+    } catch {
+      // storage unavailable — the choice lasts this session only
+    }
+  }, [explorerCollapsed]);
+  // The panels lay out in percentages, so the pixel width is converted
+  // against the group's measured width — and re-applied when that changes.
+  const [groupWidth, setGroupWidth] = useState(0);
+  const groupWidthRef = useRef(0);
+  const explorerWidth = useRef(readExplorerWidth());
+  const groupObserver = useRef(null);
+  const measureGroup = useCallback((node) => {
+    groupObserver.current?.disconnect();
+    groupObserver.current = null;
+    if (!node) return;
+    const ro = new ResizeObserver(([entry]) => {
+      const w = Math.round(entry.contentRect.width);
+      groupWidthRef.current = w;
+      setGroupWidth(w);
+    });
+    ro.observe(node);
+    groupObserver.current = ro;
+  }, []);
+  const explorerPercent = (px) =>
+    groupWidth ? (clampExplorerWidth(px, groupWidth) / groupWidth) * 100 : 20;
+  const onExplorerResize = useCallback((size) => {
+    const w = groupWidthRef.current;
+    if (!w || size <= 0) return;
+    const px = (size / 100) * w;
+    // Squeezed against the cap by a narrow window, not chosen — keep the
+    // preferred width so it comes back when the window grows again.
+    if (Math.abs(px - (w - EXPLORER_MIN_REST)) < 2 && explorerWidth.current > px) return;
+    explorerWidth.current = px;
+    try {
+      localStorage.setItem(EXPLORER_WIDTH_KEY, String(Math.round(explorerWidth.current)));
+    } catch {
+      // storage unavailable — the width lasts this session only
+    }
+  }, []);
+  const toggleExplorer = useCallback(() => {
+    const panel = explorerRef.current;
+    if (!panel) return;
+    if (panel.isCollapsed()) panel.expand();
+    else panel.collapse();
+  }, []);
+  useEffect(() => {
+    const onKey = (e) => {
+      if (!e.metaKey || !e.shiftKey || e.ctrlKey || e.altKey) return;
+      if (e.key.toLowerCase() !== 'e') return;
+      e.preventDefault();
+      toggleExplorer();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [toggleExplorer]);
+  // Hold the Explorer's pixel width as the window resizes and as the editor
+  // column comes and goes (each restores its own saved percentages).
+  const editorShown = openFiles.length > 0;
+  useEffect(() => {
+    const panel = explorerRef.current;
+    if (!panel || !groupWidth || panel.isCollapsed()) return;
+    panel.resize(
+      (clampExplorerWidth(explorerWidth.current, groupWidth) / groupWidth) * 100
+    );
+  }, [groupWidth, editorShown]);
 
   // Open a browser tab in the editor column. Keys are sequential rather than
   // URL-derived so the same URL can be open twice, and so navigating away from
@@ -81,7 +203,7 @@ export default function AgentsPane() {
   // arrays, which are evaluated during render — a `const` declared further down
   // would still be in its temporal dead zone at that point.
   const openBrowser = useCallback((url = 'about:blank') => {
-    const key = `browser:${++browserSeq.current}`;
+    const key = `${BROWSER_KEY_PREFIX}${++browserSeq.current}`;
     setBrowserState((prev) => ({
       ...prev,
       [key]: { url, title: '', loading: true, error: null },
@@ -126,21 +248,29 @@ export default function AgentsPane() {
       // load above rather than in its own effect.
       if (location.state?.openBrowser) openBrowser(location.state.openBrowser);
 
-      // Honour a pending spawn from the sidebar (create the Session first, so the
-      // subsequent listSessions below includes it).
+      // Honour a pending spawn or focus request from the sidebar.
       const spawnAgent = location.state?.spawn;
-      let preferActive = null;
+      let preferActive = location.state?.focus || null;
       if (spawnAgent) {
-        const res = await window.electronAPI.launchAgent(siteId, spawnAgent);
+        const res = await window.electronAPI.launchAgent(
+          siteId,
+          spawnAgent,
+          location.state?.target || null
+        );
         if (cancelled) return;
         if (res?.error) setError(res.error);
         else preferActive = res?.sessionId || null;
       }
 
-      const sessions = await window.electronAPI.listSessions(siteId);
-      if (cancelled) return;
-      setTabs(sessions);
-      setActiveTab(preferActive || sessions[0]?.sessionId || null);
+      if (preferActive) setActiveTab(preferActive);
+      else {
+        const all = await window.electronAPI.listAllSessions();
+        if (cancelled) return;
+        const first = (all || [])
+          .filter((s) => s.siteId === siteId)
+          .sort((a, b) => a.startedAt - b.startedAt)[0];
+        setActiveTab(first?.sessionId || null);
+      }
     })();
 
     return () => {
@@ -152,23 +282,29 @@ export default function AgentsPane() {
   // Drop editor tabs when the Site changes. Browser tabs are site-scoped too,
   // and their webviews would otherwise stay parked off-screen forever.
   useEffect(() => {
-    webviewCache.disposeAll();
+    webviewCache.disposeAll(BROWSER_KEY_PREFIX);
     setBrowserState({});
     setOpenFiles([]);
     setActiveKey(null);
   }, [siteId]);
 
   // Same on unmount — leaving the Agents screen must not leak live pages.
-  useEffect(() => () => webviewCache.disposeAll(), []);
+  useEffect(() => () => webviewCache.disposeAll(BROWSER_KEY_PREFIX), []);
 
   // Popups (target="_blank", window.open) are denied in the main process and
   // re-emitted here, so they land as another tab rather than a chrome-less
   // window. Link context-menu "Open in New Tab" arrives on the same channel.
   useEffect(() => {
     const api = window.electronAPI;
-    const offNewWindow = api.on('browser-new-window', ({ url }) => openBrowser(url));
+    // Both channels carry every browser tab's events; the Floating
+    // Workspace's pages are its own business.
+    const ours = (tabKey) => String(tabKey || '').startsWith(BROWSER_KEY_PREFIX);
+    const offNewWindow = api.on('browser-new-window', ({ tabKey, url }) => {
+      if (ours(tabKey)) openBrowser(url);
+    });
     // Chords the focused page would otherwise swallow (see browser.cjs).
     const offShortcut = api.on('browser-shortcut', ({ tabKey, key }) => {
+      if (!ours(tabKey)) return;
       if (key === 'w') closeFileRef.current(tabKey);
       else if (key === 'r') webviewCache.reload(tabKey);
     });
@@ -188,35 +324,41 @@ export default function AgentsPane() {
     setAddMenu(null);
     const res = await window.electronAPI.launchAgent(siteId, agentId, targetId);
     if (res?.error) return setError(res.error);
-    if (!res?.sessionId) return;
-    const name = agents.find((a) => a.id === agentId)?.name || agentId;
-    const label = targetId ? targets.find((t) => t.id === targetId)?.label || null : null;
-    setTabs((prev) => [
-      ...prev,
-      { sessionId: res.sessionId, agentId, agentName: name, targetId, label },
-    ]);
-    setActiveTab(res.sessionId);
+    if (res?.sessionId) setActiveTab(res.sessionId);
   };
 
-  // Actually tear the Session down: stop the pty, dispose the cached xterm,
-  // drop the tab.
+  // Actually tear the Session down: stop the pty (which drops it from the
+  // session list, and so from the tabs) and dispose the cached xterm.
   const destroyTab = async (sessionId) => {
     await window.electronAPI.terminalStop(sessionId);
     sessionCache.dispose(sessionId);
-    setTitles((prev) => {
-      const next = { ...prev };
-      delete next[sessionId];
-      return next;
-    });
-    setTabs((prev) => {
-      const idx = prev.findIndex((t) => t.sessionId === sessionId);
-      const next = prev.filter((t) => t.sessionId !== sessionId);
-      if (activeTab === sessionId) {
-        setActiveTab((next[idx] || next[idx - 1])?.sessionId || null);
-      }
-      return next;
-    });
   };
+
+  // Keep the active tab valid as Sessions disappear — closed here, dismissed
+  // from the sidebar, or reaped. Only a tab that was actually listed counts as
+  // gone: a just-launched Session may be active before its first list arrives.
+  // Disposal keys off the list across ALL Sites, so switching Site keeps the
+  // other Sites' terminals cached.
+  const listedRef = useRef(new Set());
+  const prevTabsRef = useRef([]);
+  useEffect(() => {
+    const ids = new Set(allSessions.map((s) => s.sessionId));
+    for (const id of listedRef.current) if (!ids.has(id)) sessionCache.dispose(id);
+    if (activeTab && !ids.has(activeTab) && listedRef.current.has(activeTab)) {
+      const prev = prevTabsRef.current.map((t) => t.sessionId);
+      const after = prev.slice(prev.indexOf(activeTab) + 1).find((id) => ids.has(id));
+      const before = prev.filter((id) => ids.has(id)).pop();
+      setActiveTab(after || before || null);
+    }
+    listedRef.current = ids;
+    prevTabsRef.current = tabs;
+  }, [allSessions, tabs, activeTab]);
+
+  // Tell the sidebar which Session is on screen.
+  useEffect(() => {
+    setSelectedSession(siteId ? activeTab : null);
+  }, [siteId, activeTab]);
+  useEffect(() => () => setSelectedSession(null), []);
 
   // Close request from the tab's X: confirm first if the session is still
   // running and the user hasn't suppressed the prompt. An already-exited
@@ -239,29 +381,18 @@ export default function AgentsPane() {
     destroyTab(id);
   };
 
-  // Respawn the same Agent in place after its shell exited: reap the dead
-  // session, launch a fresh one, and swap it into the same tab position.
+  // Respawn the same Agent after its shell exited: launch a fresh Session and
+  // reap the dead one. The new Session takes the end of the tab strip.
   const respawn = async (sessionId) => {
     const tab = tabs.find((t) => t.sessionId === sessionId);
     if (!tab) return;
     const res = await window.electronAPI.launchAgent(siteId, tab.agentId, tab.targetId);
     if (res?.error) return setError(res.error);
     if (!res?.sessionId) return;
+    setActiveTab(res.sessionId);
     window.electronAPI.terminalStop(sessionId);
     sessionCache.dispose(sessionId);
-    setTabs((prev) =>
-      prev.map((t) =>
-        t.sessionId === sessionId ? { ...t, sessionId: res.sessionId } : t
-      )
-    );
-    setActiveTab(res.sessionId);
   };
-
-  // Stable per-render callbacks passed into the cached terminal handlers.
-  const handleTitle = useCallback((sessionId, title) => {
-    const cleaned = cleanTitle(title);
-    if (cleaned) setTitles((prev) => ({ ...prev, [sessionId]: cleaned }));
-  }, []);
 
   // A file-path link Cmd+clicked in terminal output → open/focus an editor tab
   // at the given line.
@@ -359,9 +490,11 @@ export default function AgentsPane() {
   // Cmd+click on a URL in agent output. Unlike useOpenLink there's no
   // navigation to do — we're already on the Agents screen — so the in-app case
   // is just another tab.
+  // `destination` ('system' | 'app') comes from a terminal link click; without
+  // one, the setting decides.
   const handleOpenLink = useCallback(
-    (url) => {
-      if (settings['app.openLinksIn'] === 'app') openBrowser(url);
+    (url, destination = settings['app.openLinksIn']) => {
+      if (destination === 'app') openBrowser(url);
       else window.electronAPI.openSiteInBrowser(url);
     },
     [settings, openBrowser]
@@ -370,7 +503,7 @@ export default function AgentsPane() {
   const closeFile = (key) => {
     // A browser tab's page outlives its React component by design, so closing
     // the tab is the one moment it has to be torn down for real.
-    if (key.startsWith('browser:')) {
+    if (key.startsWith(BROWSER_KEY_PREFIX)) {
       webviewCache.dispose(key);
       setBrowserState((prev) => {
         const next = { ...prev };
@@ -388,12 +521,42 @@ export default function AgentsPane() {
     });
   };
 
+  // Remember the open Site, so coming back to a bare /agents — from the
+  // activity bar or the main nav — lands on it instead of the empty state.
+  useEffect(() => {
+    if (siteId) localStorage.setItem(LAST_AGENTS_SITE_KEY, siteId);
+  }, [siteId]);
+
+  // Bare /agents: reopen the remembered Site if it still exists. Keyed on the
+  // navigation, since this instance is reused across /agents and /agents/:id.
+  const [restoreFailedFor, setRestoreFailedFor] = useState(null);
+  useEffect(() => {
+    if (siteId) return;
+    const last = localStorage.getItem(LAST_AGENTS_SITE_KEY);
+    if (!last) return;
+    let cancelled = false;
+    window.electronAPI.getSites().then((sites) => {
+      if (cancelled) return;
+      const id = resolveLastSite(last, sites);
+      if (id) navigate(`/agents/${encodeURIComponent(id)}`, { replace: true });
+      else setRestoreFailedFor(location.key);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [siteId, location.key, navigate]);
+
   // closeFile closes over activeKey, so the IPC subscription above reaches it
   // through a ref rather than resubscribing on every tab switch.
   const closeFileRef = useRef(closeFile);
   closeFileRef.current = closeFile;
 
   if (!siteId) {
+    // Reopening the last Site (effect above) — render nothing rather than
+    // flashing the empty state on the way there.
+    if (localStorage.getItem(LAST_AGENTS_SITE_KEY) && restoreFailedFor !== location.key) {
+      return null;
+    }
     return (
       <div className="h-full flex flex-col items-center justify-center text-center px-6">
         <div className="icon-tile w-12 h-12 bg-[#af52de] mb-4">
@@ -401,7 +564,7 @@ export default function AgentsPane() {
         </div>
         <p className="text-[15px] font-semibold text-foreground">Agents</p>
         <p className="mt-1 max-w-sm text-[13px] text-muted-foreground">
-          Pick a site in the sidebar, expand it, and choose an AI agent to open it in that
+          Add a project in the sidebar, then start an AI agent session in that
           site&rsquo;s directory.
         </p>
       </div>
@@ -409,282 +572,280 @@ export default function AgentsPane() {
   }
 
   const editorOpen = openFiles.length > 0;
+  const explorerDefault = explorerPercent(explorerWidth.current);
   const detected = agents.filter((a) => a.detected);
   // The active editor tab, when it's a real file (not a diff) — drives the
   // "reveal in tree" behavior in the explorer.
   const activeTabEntry = openFiles.find((f) => f.key === activeKey) || null;
   const activeFileTab = activeTabEntry?.kind === 'file' ? activeTabEntry : null;
-  // Ordinal suffix for duplicate providers, so identical tabs are tellable apart.
-  const ordinal = (tab, i) => {
-    const sameBefore = tabs.slice(0, i).filter((t) => t.agentId === tab.agentId).length;
-    const total = tabs.filter((t) => t.agentId === tab.agentId).length;
-    return total > 1 ? ` ${sameBefore + 1}` : '';
-  };
 
   return (
     <>
-      <PanelGroup
-        direction="horizontal"
-        autoSaveId={editorOpen ? 'agents-3pane' : 'agents-2pane'}
-        className="h-full"
-      >
-        {/* Project explorer */}
-        {sitePath && (
-          <>
-            <Panel id="explorer" order={1} defaultSize={20} minSize={12}>
-              <div className="h-full border-r border-border">
-                <FileExplorer
-                  rootPath={sitePath}
-                  rootName={meta.siteName}
-                  onOpenFile={openFile}
-                  onOpenDiff={openDiff}
-                  insetForControls={sidebarCollapsed}
-                  activeFilePath={activeFileTab?.path}
-                />
-              </div>
-            </Panel>
-            <ResizeHandle />
-          </>
-        )}
-
-        {/* Terminal column: tab strip + active Session */}
-        <Panel id="terminal" order={2} minSize={20} defaultSize={editorOpen ? 50 : 80}>
-          <div className="h-full min-w-0 flex flex-col">
-            {/* Tab strip */}
-            <div className="flex items-center gap-1 px-2 h-10 flex-shrink-0 overflow-x-auto">
-              {tabs.map((tab, i) => {
-                const isActive = tab.sessionId === activeTab;
-                return (
-                  <div
-                    key={tab.sessionId}
-                    onClick={() => setActiveTab(tab.sessionId)}
-                    className={`group flex items-center gap-1.5 pl-2.5 pr-1.5 h-7 rounded-lg text-[12.5px] cursor-pointer whitespace-nowrap ${
-                      isActive
-                        ? 'bg-muted text-foreground font-medium'
-                        : 'text-muted-foreground hover:bg-accent'
-                    }`}
-                  >
-                    <ProviderIcon
-                      agentId={tab.agentId}
-                      brand
-                      size={13}
-                      className="flex-shrink-0"
-                    />
-                    <span className="truncate max-w-[140px]">
-                      {titles[tab.sessionId] ||
-                        tab.label ||
-                        `${tab.agentName}${ordinal(tab, i)}`}
-                    </span>
-                    <Tooltip label="Close session">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          closeTab(tab.sessionId);
-                        }}
-                        aria-label="Close session"
-                        className="p-0.5 rounded hover:bg-accent text-muted-foreground hover:text-foreground"
-                      >
-                        <X size={12} />
-                      </button>
-                    </Tooltip>
-                  </div>
-                );
-              })}
-
-              {/* Add-session button. The menu is rendered fixed (below) so the
-                tab strip's overflow-x-auto can't clip it. */}
-              <Tooltip label="New session">
-                <button
-                  onClick={openAddMenu}
-                  disabled={detected.length === 0}
-                  aria-label="New session"
-                  className="flex-shrink-0 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent disabled:opacity-40"
-                >
-                  <Plus size={16} />
-                </button>
-              </Tooltip>
-              <Tooltip label="Launch settings">
-                <button
-                  onClick={() => setSettingsOpen(true)}
-                  disabled={detected.length === 0}
-                  aria-label="Launch settings"
-                  className="flex-shrink-0 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent disabled:opacity-40"
-                >
-                  <Settings2 size={15} />
-                </button>
-              </Tooltip>
-              <div className="flex-1" />
-              <Tooltip label="Open browser">
-                <button
-                  onClick={(e) => {
-                    const r = e.currentTarget.getBoundingClientRect();
-                    setBrowserMenu((m) =>
-                      m ? null : { x: r.right - 220, y: r.bottom + 4 }
-                    );
-                  }}
-                  aria-label="Open browser"
-                  className="flex-shrink-0 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent"
-                >
-                  <Globe size={15} />
-                </button>
-              </Tooltip>
-            </div>
-
-            {browserMenu && (
-              <>
+      <div ref={measureGroup} className="h-full">
+        {groupWidth > 0 && (
+          <PanelGroup
+            direction="horizontal"
+            autoSaveId={editorOpen ? 'agents-3pane-right' : 'agents-2pane-right'}
+            className="h-full"
+          >
+            {/* Terminal column: tab strip + active Session */}
+            <Panel
+              id="terminal"
+              order={1}
+              minSize={20}
+              defaultSize={
+                100 -
+                (editorOpen ? 30 : 0) -
+                (sitePath && !explorerCollapsed ? explorerDefault : 0)
+              }
+            >
+              <div className="h-full min-w-0 flex flex-col">
+                {/* Tab strip */}
                 <div
-                  className="fixed inset-0 z-40"
-                  onClick={() => setBrowserMenu(null)}
-                />
-                <div
-                  className="panel fixed z-50 min-w-[220px] py-1"
-                  style={{ left: browserMenu.x, top: browserMenu.y }}
+                  className="drag-strip flex items-center gap-1 px-2 h-10 flex-shrink-0 overflow-x-auto"
+                  style={controlsInset ? { paddingLeft: controlsInset } : undefined}
                 >
-                  {BROWSER_TARGETS.map((t) => (
-                    <button
-                      key={t.id}
-                      onClick={() => openBrowserTarget(t.id)}
-                      disabled={browserBusy != null}
-                      className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[13px] text-foreground hover:bg-accent disabled:opacity-50"
-                    >
-                      {browserBusy === t.id ? (
-                        <Loader2 size={14} className="animate-spin flex-shrink-0" />
-                      ) : (
-                        <t.icon
-                          size={14}
-                          className="flex-shrink-0 text-muted-foreground"
-                        />
-                      )}
-                      {t.label}
-                    </button>
-                  ))}
-                  <div className="my-1 h-px bg-border" />
-                  <button
-                    onClick={() => openBrowserTarget('blank')}
-                    disabled={browserBusy != null}
-                    className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[13px] text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
-                  >
-                    <Plus size={14} className="flex-shrink-0" />
-                    Blank tab
-                  </button>
-                </div>
-              </>
-            )}
-
-            {addMenu && (
-              <>
-                <div className="fixed inset-0 z-40" onClick={() => setAddMenu(null)} />
-                <div
-                  className="panel fixed z-50 min-w-[200px] max-w-[280px] py-1"
-                  style={{ left: addMenu.x, top: addMenu.y }}
-                >
-                  {detected.map((a) => {
-                    const agentTargets = targets.filter((t) => t.agentId === a.id);
+                  {tabs.map((tab) => {
+                    const isActive = tab.sessionId === activeTab;
                     return (
-                      <div key={a.id}>
-                        {/* Default launch: webroot + the agent's global flags. */}
-                        <button
-                          onClick={() => spawn(a.id)}
-                          className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[13px] text-foreground hover:bg-accent"
-                        >
-                          <ProviderIcon agentId={a.id} brand size={14} />
-                          {a.name}
-                        </button>
-                        {/* Saved targets: a pinned directory (+ optional flags). */}
-                        {agentTargets.map((t) => (
+                      <div
+                        key={tab.sessionId}
+                        onClick={() => setActiveTab(tab.sessionId)}
+                        className={`group flex items-center gap-1.5 pl-2.5 pr-1.5 h-7 rounded-lg text-[12.5px] cursor-pointer whitespace-nowrap ${
+                          isActive
+                            ? 'bg-muted text-foreground font-medium'
+                            : 'text-muted-foreground hover:bg-accent'
+                        }`}
+                      >
+                        <ProviderIcon
+                          agentId={tab.agentId}
+                          brand
+                          size={13}
+                          className="flex-shrink-0"
+                        />
+                        <span className="truncate max-w-[140px]">
+                          {sessionTitle(tab, tabs)}
+                        </span>
+                        <Tooltip label="Close session">
                           <button
-                            key={t.id}
-                            onClick={() => spawn(a.id, t.id)}
-                            title={t.cwd}
-                            className="w-full flex items-center gap-1.5 pl-7 pr-3 py-1 text-left text-[12px] text-muted-foreground hover:bg-accent hover:text-foreground"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              closeTab(tab.sessionId);
+                            }}
+                            aria-label="Close session"
+                            className="p-0.5 rounded hover:bg-accent text-muted-foreground hover:text-foreground"
                           >
-                            <CornerDownRight size={11} className="flex-shrink-0" />
-                            <span className="truncate">{t.label || t.cwd}</span>
+                            <X size={12} />
                           </button>
-                        ))}
+                        </Tooltip>
                       </div>
                     );
                   })}
-                  <div className="my-1 h-px bg-border" />
-                  <button
-                    onClick={() => {
+
+                  {/* Add-session button. The menu is rendered fixed (below) so the
+                tab strip's overflow-x-auto can't clip it. */}
+                  <Tooltip label="New session">
+                    <button
+                      onClick={openAddMenu}
+                      disabled={detected.length === 0}
+                      aria-label="New session"
+                      className="flex-shrink-0 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent disabled:opacity-40"
+                    >
+                      <Plus size={16} />
+                    </button>
+                  </Tooltip>
+                  <Tooltip label="Launch settings">
+                    <button
+                      onClick={() => setSettingsOpen(true)}
+                      disabled={detected.length === 0}
+                      aria-label="Launch settings"
+                      className="flex-shrink-0 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent disabled:opacity-40"
+                    >
+                      <Settings2 size={15} />
+                    </button>
+                  </Tooltip>
+                  <div className="drag-region flex-1 self-stretch" />
+                  <Tooltip label="Open browser">
+                    <button
+                      onClick={(e) => {
+                        const r = e.currentTarget.getBoundingClientRect();
+                        setBrowserMenu((m) =>
+                          m ? null : { x: r.right - 220, y: r.bottom + 4 }
+                        );
+                      }}
+                      aria-label="Open browser"
+                      className="flex-shrink-0 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent"
+                    >
+                      <Globe size={15} />
+                    </button>
+                  </Tooltip>
+                  {sitePath && (
+                    <Tooltip label="Toggle sidebar" keys={['⌘', '⇧', 'E']}>
+                      <button
+                        onClick={toggleExplorer}
+                        aria-label="Toggle sidebar"
+                        aria-pressed={!explorerCollapsed}
+                        className={`flex-shrink-0 p-1 rounded-md hover:text-foreground hover:bg-accent ${
+                          explorerCollapsed ? 'text-muted-foreground' : 'text-foreground'
+                        }`}
+                      >
+                        <PanelRight size={15} />
+                      </button>
+                    </Tooltip>
+                  )}
+                </div>
+
+                {browserMenu && (
+                  <>
+                    <div
+                      className="fixed inset-0 z-40"
+                      onClick={() => setBrowserMenu(null)}
+                    />
+                    <div
+                      className="panel fixed z-50 min-w-[220px] py-1"
+                      style={{ left: browserMenu.x, top: browserMenu.y }}
+                    >
+                      {BROWSER_TARGETS.map((t) => (
+                        <button
+                          key={t.id}
+                          onClick={() => openBrowserTarget(t.id)}
+                          disabled={browserBusy != null}
+                          className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[13px] text-foreground hover:bg-accent disabled:opacity-50"
+                        >
+                          {browserBusy === t.id ? (
+                            <Loader2 size={14} className="animate-spin flex-shrink-0" />
+                          ) : (
+                            <t.icon
+                              size={14}
+                              className="flex-shrink-0 text-muted-foreground"
+                            />
+                          )}
+                          {t.label}
+                        </button>
+                      ))}
+                      <div className="my-1 h-px bg-border" />
+                      <button
+                        onClick={() => openBrowserTarget('blank')}
+                        disabled={browserBusy != null}
+                        className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[13px] text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
+                      >
+                        <Plus size={14} className="flex-shrink-0" />
+                        Blank tab
+                      </button>
+                    </div>
+                  </>
+                )}
+
+                {addMenu && (
+                  <LaunchMenu
+                    siteId={siteId}
+                    anchor={addMenu}
+                    agents={detected}
+                    targets={targets}
+                    onClose={() => setAddMenu(null)}
+                    onLaunch={spawn}
+                    onOpenSettings={() => {
                       setAddMenu(null);
                       setSettingsOpen(true);
                     }}
-                    className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[13px] text-muted-foreground hover:bg-accent hover:text-foreground"
-                  >
-                    <Settings2 size={14} />
-                    Launch settings…
-                  </button>
-                </div>
-              </>
-            )}
+                  />
+                )}
 
-            {error && (
-              <div className="px-3 py-1 text-[12px] text-destructive">{error}</div>
-            )}
+                {error && (
+                  <div className="px-3 py-1 text-[12px] text-destructive">{error}</div>
+                )}
 
-            {/* Active terminal. Only the active tab is mounted, but its xterm
+                {/* Active terminal. Only the active tab is mounted, but its xterm
               lives in sessionCache and is re-parented on mount — so switching
               tabs keeps scroll, selection and background output instead of
               replaying the ring buffer. */}
-            <div className="flex-1 min-h-0 px-4 pb-4">
-              {activeTab ? (
-                <Terminal
-                  key={activeTab}
-                  sessionId={activeTab}
-                  rootPath={sitePath}
-                  onOpenFile={openFileAtLine}
-                  onOpenLink={handleOpenLink}
-                  onTitle={handleTitle}
-                  onExited={() => destroyTab(activeTab)}
-                  onRestart={() => respawn(activeTab)}
-                />
-              ) : (
-                <div className="h-full flex flex-col items-center justify-center text-center">
-                  <p className="text-[13px] text-muted-foreground">
-                    No sessions yet for {meta.siteName}.
-                  </p>
-                  {detected.length > 0 && (
-                    <div className="mt-3 flex flex-wrap justify-center gap-2">
-                      {detected.map((a) => (
-                        <button
-                          key={a.id}
-                          className="btn btn-secondary"
-                          onClick={() => spawn(a.id)}
-                        >
-                          <ProviderIcon agentId={a.id} brand size={14} />
-                          {a.name}
-                        </button>
-                      ))}
+                <div className="flex-1 min-h-0 px-4 pb-4">
+                  {activeTab ? (
+                    <Terminal
+                      key={activeTab}
+                      sessionId={activeTab}
+                      rootPath={sitePath}
+                      onOpenFile={openFileAtLine}
+                      onOpenLink={handleOpenLink}
+                      onExited={() => destroyTab(activeTab)}
+                      onRestart={() => respawn(activeTab)}
+                    />
+                  ) : (
+                    <div className="h-full flex flex-col items-center justify-center text-center">
+                      <p className="text-[13px] text-muted-foreground">
+                        No sessions yet for {meta.siteName}.
+                      </p>
+                      {detected.length > 0 && (
+                        <div className="mt-3 flex flex-wrap justify-center gap-2">
+                          {detected.map((a) => (
+                            <button
+                              key={a.id}
+                              className="btn btn-secondary"
+                              onClick={() => spawn(a.id)}
+                            >
+                              <ProviderIcon agentId={a.id} brand size={14} />
+                              {a.name}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
-              )}
-            </div>
-          </div>
-        </Panel>
-
-        {/* Code editor column */}
-        {editorOpen && (
-          <>
-            <ResizeHandle />
-            <Panel id="editor" order={3} minSize={20} defaultSize={30}>
-              <div className="h-full min-w-0 border-l border-border">
-                <CodeEditor
-                  rootPath={sitePath}
-                  files={openFiles}
-                  activeKey={activeKey}
-                  onSelect={setActiveKey}
-                  onClose={closeFile}
-                  browserState={browserState}
-                  onBrowserStateChange={onBrowserStateChange}
-                />
               </div>
             </Panel>
-          </>
+
+            {/* Code editor column */}
+            {editorOpen && (
+              <>
+                <ResizeHandle />
+                <Panel id="editor" order={2} minSize={20} defaultSize={30}>
+                  <div className="h-full min-w-0 border-l border-border">
+                    <CodeEditor
+                      rootPath={sitePath}
+                      files={openFiles}
+                      activeKey={activeKey}
+                      onSelect={setActiveKey}
+                      onClose={closeFile}
+                      browserState={browserState}
+                      onBrowserStateChange={onBrowserStateChange}
+                    />
+                  </div>
+                </Panel>
+              </>
+            )}
+
+            {/* Project explorer — a collapsible right sidebar, after Orca's */}
+            {sitePath && (
+              <>
+                <ResizeHandle />
+                <Panel
+                  id="explorer"
+                  order={3}
+                  ref={explorerRef}
+                  defaultSize={explorerCollapsed ? 0 : explorerDefault}
+                  minSize={explorerPercent(EXPLORER_MIN_WIDTH)}
+                  collapsible
+                  collapsedSize={0}
+                  onCollapse={() => setExplorerCollapsed(true)}
+                  onExpand={() => setExplorerCollapsed(false)}
+                  onResize={onExplorerResize}
+                >
+                  <div className="h-full border-l border-border">
+                    <FileExplorer
+                      rootPath={sitePath}
+                      rootName={meta.siteName}
+                      onOpenFile={openFile}
+                      onOpenDiff={openDiff}
+                      activeFilePath={activeFileTab?.path}
+                    />
+                  </div>
+                </Panel>
+              </>
+            )}
+          </PanelGroup>
         )}
-      </PanelGroup>
+      </div>
       <ConfirmDialog
         open={closeConfirm != null}
         title="End session?"

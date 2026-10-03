@@ -1,6 +1,15 @@
 'use strict';
 
 const fs = require('fs');
+const os = require('os');
+const path = require('path');
+
+// `~` and `~/…` against the home directory; anything else unchanged.
+function expandHome(p) {
+  if (p === '~') return os.homedir();
+  if (p.startsWith('~/')) return path.join(os.homedir(), p.slice(2));
+  return p;
+}
 
 // Global settings: one schema, one validator, one place for side effects.
 //
@@ -71,6 +80,27 @@ const SETTINGS = {
   // have until someone opts in.
   'app.openLinksIn': { type: 'enum', values: ['system', 'app'], default: 'system' },
 
+  // ── Floating Workspace ───────────────────────────────────────────────────
+  // Off hides the launcher and minimises the panel; its tabs keep running.
+  'floatingWorkspace.enabled': { type: 'bool', default: true },
+  // Where a new floating terminal opens off a Site page. `~` (or `~/…`) is
+  // kept as typed and expanded at launch, so the setting follows the account.
+  'floatingWorkspace.terminalDirectory': {
+    type: 'path',
+    default: '~',
+    validate: (v) => {
+      const dir = expandHome(v.trim());
+      if (!path.isAbsolute(dir)) return 'use a full path, or one starting with ~';
+      let stat;
+      try {
+        stat = fs.statSync(dir);
+      } catch {
+        return 'that folder does not exist';
+      }
+      return stat.isDirectory() || 'that path is not a folder';
+    },
+  },
+
   // ── Appearance ───────────────────────────────────────────────────────────
   // Drives Electron's nativeTheme.themeSource, which forces the renderer's
   // prefers-color-scheme — so the existing `darkMode: 'media'` tokens and the
@@ -135,6 +165,23 @@ const SETTINGS = {
       Object.values(v).every((c) => typeof c === 'string') ||
       'each command must be a string',
   },
+  // Native notifications when an agent session finishes (or crashes), needs
+  // input, or rings the terminal bell — see agentStatus.cjs createNotifier.
+  'agents.notifications.enabled': { type: 'bool', default: true },
+  'agents.notifications.onDone': { type: 'bool', default: true },
+  'agents.notifications.onNeedsInput': { type: 'bool', default: true },
+  'agents.notifications.onBell': { type: 'bool', default: true },
+  // Skip the notification for the session already on screen in a focused window.
+  'agents.notifications.suppressWhenFocused': { type: 'bool', default: true },
+  'agents.notifications.sound': {
+    type: 'enum',
+    values: ['system', 'none'],
+    default: 'system',
+  },
+  // Keep computer awake (services/keepAwake.cjs). 'agent' holds a sleep
+  // assertion only while an agent Session is working. Off by default: an
+  // update must never silently change how the Mac sleeps.
+  'agents.keepAwake': { type: 'enum', values: ['on', 'agent', 'off'], default: 'off' },
   // User-defined agents: [{ id, name, cmd }]
   'agents.custom': {
     type: 'object',
@@ -150,6 +197,27 @@ const SETTINGS = {
             a.cmd.trim().length > 0
         )) ||
       'each agent needs a slug id and a command',
+  },
+
+  // ── Tasks (Start →) ──────────────────────────────────────────────────────
+  // What Start → types to the agent and which branch it works on, rendered
+  // from the issue ({{url}} {{number}} {{title}} {{repo}} {{slug}}).
+  'tasks.startPrompt': {
+    type: 'string',
+    default: 'Complete {{url}}',
+    validate: (v) => v.trim().length > 0 || 'the prompt can’t be empty',
+  },
+  // {{number}} is required: the branch is what links a Session's work back
+  // to its issue after a restart, and the existing-branch check keys on it.
+  'tasks.branchTemplate': {
+    type: 'string',
+    default: 'issue-{{number}}-{{slug}}',
+    validate: (v) => /\{\{\s*number\s*\}\}/.test(v) || 'must contain {{number}}',
+  },
+  'tasks.startMode': {
+    type: 'enum',
+    values: ['branch', 'worktree', 'current'],
+    default: 'branch',
   },
 
   // ── Database ─────────────────────────────────────────────────────────────

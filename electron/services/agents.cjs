@@ -3,7 +3,7 @@
 // Agent Launcher — see CONTEXT.md and docs/adr/0001-main-process-pty-no-daemon.md.
 //
 // Runs an AI-provider CLI ("Agent") in a pseudo-terminal ("Session") rooted at a
-// Site's webroot. One Session per Site. The pty lives in THIS (main) process —
+// Site's webroot. A Site may host many Sessions. The pty lives in THIS (main) process —
 // no daemon — so it survives the window hiding to the tray and is reaped on quit.
 // Reattach after a window reopen is served from an in-memory ring buffer.
 
@@ -12,6 +12,7 @@ const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
 const pty = require('node-pty');
+const { createTracker, createNotifier, isTerminalReply } = require('./agentStatus.cjs');
 
 // ── Registry ────────────────────────────────────────────────────────────────
 // Curated, data-shaped so user-defined Agents can drop in later (Q5). `cmd` is
@@ -367,6 +368,11 @@ const deps = {
   isBrewInstalled: () => require('./brew.cjs').isBrewInstalled(),
   runScriptStreaming: (url, onProgress) => runVendorScript(url, onProgress),
   runNpmStreaming: (args, onProgress) => runNpmInstall(args, onProgress),
+  // The pty layer, so tests can launch Sessions without a real shell.
+  spawnPty: (file, args, opts) => pty.spawn(file, args, opts),
+  shellEnv: () => resolveShellEnv(),
+  userShell: () => getUserShell(),
+  homedir: () => os.homedir(),
 };
 
 function __setDeps(next) {
@@ -593,6 +599,22 @@ async function installAgent(id, onProgress) {
 //
 // A plain-shell launch passes `cmd: ''`, so `command` collapses to the args
 // alone — or to '' when there are none, which `launch` reads as "type nothing".
+// POSIX single-quoting: everything literal, `'` as '\''.
+function shellQuote(text) {
+  return `'${String(text).replace(/'/g, `'\\''`)}'`;
+}
+
+// The issue a Session works on, trimmed to what the list and sidebar show.
+function cleanIssueLink(issue) {
+  return {
+    repo: String(issue.repo || ''),
+    number: Number(issue.number) || null,
+    url: String(issue.url || ''),
+    title: String(issue.title || '').slice(0, 300),
+    kind: issue.kind === 'pr' ? 'pr' : 'issue',
+  };
+}
+
 function resolveLaunch({ cmd, sitePath, globalArgs = '', target = null }) {
   const rawArgs = target && target.args != null ? target.args : globalArgs || '';
   const args = String(rawArgs).trim();
@@ -616,6 +638,103 @@ const { randomUUID } = require('crypto');
 const MAX_BUFFER = 1024 * 1024; // ~1 MB ring buffer (Q9)
 const sessions = new Map(); // sessionId -> session
 
+// Change feed for the Agents sidebar. Title updates arrive at spinner rate, so
+// notifications are coalesced into one per CHANGE_DEBOUNCE_MS; launches, exits
+// and stops are flushed immediately.
+const CHANGE_DEBOUNCE_MS = 200;
+const changeListeners = new Set();
+const floatingListeners = new Set();
+let changeTimer = null;
+
+function onSessionsChanged(cb) {
+  changeListeners.add(cb);
+  return () => changeListeners.delete(cb);
+}
+
+// The Floating Workspace's own feed — its terminals never reach the Site feed
+// above, so everything keyed on that (Projects, keep-awake, tray) ignores them.
+function onFloatingSessionsChanged(cb) {
+  floatingListeners.add(cb);
+  return () => floatingListeners.delete(cb);
+}
+
+function emitChange({ immediate = false } = {}) {
+  if (changeTimer && !immediate) return;
+  if (changeTimer) clearTimeout(changeTimer);
+  const fire = () => {
+    changeTimer = null;
+    const feeds = [
+      [changeListeners, listAllSessions],
+      [floatingListeners, listFloatingSessions],
+    ];
+    for (const [listeners, list] of feeds) {
+      if (listeners.size === 0) continue;
+      const rows = list();
+      for (const cb of listeners) {
+        try {
+          cb(rows);
+        } catch {}
+      }
+    }
+  };
+  if (immediate) fire();
+  else changeTimer = setTimeout(fire, CHANGE_DEBOUNCE_MS);
+}
+
+// Native alerts. The tracker reports what happened, the notifier decides what
+// deserves a notification, and whoever registered with onAlert delivers it —
+// ipc.cjs, with Electron's Notification — so this module stays electron-free.
+const notifier = createNotifier();
+const alertListeners = new Set();
+let notifySettings = {
+  enabled: true,
+  onDone: true,
+  onNeedsInput: true,
+  onBell: true,
+  suppressWhenFocused: true,
+};
+
+function setNotificationSettings(next) {
+  notifySettings = { ...notifySettings, ...next };
+}
+
+function onAlert(cb) {
+  alertListeners.add(cb);
+  return () => alertListeners.delete(cb);
+}
+
+function deliverAlerts(session) {
+  // Floating terminals are scratch shells: their status still lights the
+  // launcher's dot, but they never raise a native notification.
+  if (session.scope === 'floating') {
+    session.tracker.drainEvents();
+    return;
+  }
+  for (const kind of session.tracker.drainEvents()) {
+    const ok = notifier.decide({
+      sessionId: session.sessionId,
+      kind,
+      onScreen: isOnScreen(session.sessionId),
+      settings: notifySettings,
+    });
+    if (!ok) continue;
+    const snap = session.tracker.snapshot();
+    const alert = {
+      kind,
+      sessionId: session.sessionId,
+      siteId: session.siteId,
+      agentId: session.agentId,
+      agentName: session.agentName,
+      title: snap.title || session.label || session.agentName,
+    };
+    for (const cb of alertListeners) {
+      try {
+        cb(alert);
+      } catch {}
+    }
+  }
+}
+
 function getSession(sessionId) {
   return sessions.get(sessionId) || null;
 }
@@ -637,12 +756,74 @@ function listSessions(siteId) {
   return out;
 }
 
+// Every Session across all Sites, live and exited, oldest first — the Agents
+// sidebar's rows. An exited Session stays listed until it is dismissed (stop)
+// or the app quits, so finishing or crashing while unwatched stays visible.
+function listAllSessions() {
+  const out = [];
+  for (const s of sessions.values()) {
+    if (s.scope === 'floating') continue;
+    out.push(sessionRow(s));
+  }
+  return out;
+}
+
+// The Floating Workspace's terminals, live and exited, oldest first.
+function listFloatingSessions() {
+  const out = [];
+  for (const s of sessions.values()) {
+    if (s.scope === 'floating') out.push({ ...sessionRow(s), cwd: s.cwd });
+  }
+  return out;
+}
+
+function sessionRow(s) {
+  const snap = s.tracker.snapshot();
+  return {
+    sessionId: s.sessionId,
+    siteId: s.siteId,
+    agentId: s.agentId,
+    agentName: s.agentName,
+    targetId: s.targetId,
+    label: s.label,
+    // The issue or PR Start → launched this Session for, else null.
+    issue: s.issue || null,
+    startedAt: s.startedAt,
+    exited: s.exited,
+    exitCode: s.exitCode,
+    title: snap.title,
+    state: snap.state,
+    changedAt: snap.changedAt,
+    unread: snap.unread,
+    // An AI-provider Session rather than the plain shell — keep-awake's
+    // Agent mode counts only these.
+    isAgent: s.agentId !== SHELL_ID,
+    // Last pty output, for keep-awake's stale cutoff. Not itself a change
+    // event: readers that need it fresh call listAllSessions() again.
+    lastOutputAt: s.lastOutputAt,
+  };
+}
+
 // Launch an Agent for a Site. Always creates a NEW Session so multiple can run
 // per directory. `target` (a saved Launch Target) and `globalArgs` (the Agent's
 // global default flags) are optional; both flow through `resolveLaunch` to
 // decide the cwd and the command line typed into the shell.
+//
+// Tasks' Start → adds three: `cwd` (the repo root or a fresh worktree, in
+// place of the webroot), `prompt` (passed to the agent as its first message,
+// shell-quoted onto the command line) and `issue` ({ repo, number, url,
+// title, kind }), which the Session carries so Tasks and the sidebar can link
+// back to it.
 // Returns { ok, sessionId } or { error }.
-function launch({ site, agentId, target = null, globalArgs = '' }) {
+function launch({
+  site,
+  agentId,
+  target = null,
+  globalArgs = '',
+  cwd: cwdOverride = null,
+  prompt = '',
+  issue = null,
+}) {
   // `all` so launching by id still works for an agent hidden from the
   // launcher (e.g. a saved session being restored).
   const agent = listAgents({ all: true }).find((a) => a.id === agentId);
@@ -650,13 +831,72 @@ function launch({ site, agentId, target = null, globalArgs = '' }) {
   // The shell is always present, so this only ever rejects a missing provider.
   if (!agent.detected) return { error: `${agent.name} is not installed` };
 
-  const { command, cwd, label } = resolveLaunch({
+  const resolved = resolveLaunch({
     cmd: agent.cmd,
     sitePath: site.path,
     globalArgs,
     target,
   });
+  const cwd = cwdOverride ? path.normalize(cwdOverride) : resolved.cwd;
+  // The shell never runs with an agent command line it can't type: the
+  // prompt is one line, single-quoted.
+  const line = String(prompt || '')
+    .replace(/\s*[\r\n]+\s*/g, ' ')
+    .trim();
+  const command = line ? `${resolved.command} ${shellQuote(line)}` : resolved.command;
 
+  return startSession({
+    cwd,
+    command,
+    meta: {
+      scope: 'site',
+      siteId: site.id,
+      agentId: agent.id,
+      agentName: agent.name,
+      targetId: target?.id || null,
+      label: resolved.label,
+      issue: issue ? cleanIssueLink(issue) : null,
+    },
+    failLabel: agent.name,
+  });
+}
+
+// A Floating Workspace terminal: a plain shell in `cwd`, owned by no Site. It
+// runs on the same pty engine (ring buffer, status tracking, reaped on quit)
+// but stays out of everything that means "a Site's Sessions" — the Projects
+// list, keep-awake, the tray count, notifications and the quit warning. A
+// leading `~` is expanded here, since the renderer doesn't know the home dir.
+//
+// `command`, when given, is typed into the shell once it settles — the way an
+// agent command is — so a flow like `gh auth login` runs in a real terminal
+// the user can interact with. One line only; it's typed, not exec'd.
+function launchFloating({ cwd, command = '' } = {}) {
+  const line = String(command || '').trim();
+  if (/[\r\n]/.test(line)) return { error: 'A floating command must be a single line' };
+  const raw = String(cwd || '~').trim() || '~';
+  const home = deps.homedir();
+  const resolved =
+    raw === '~' ? home : raw.startsWith('~/') ? path.join(home, raw.slice(2)) : raw;
+  if (!path.isAbsolute(resolved)) return { error: `Directory not found: ${raw}` };
+  return startSession({
+    cwd: path.normalize(resolved),
+    command: line,
+    meta: {
+      scope: 'floating',
+      siteId: null,
+      agentId: SHELL_ID,
+      agentName: SHELL_AGENT.name,
+      targetId: null,
+      label: null,
+    },
+    failLabel: 'the shell',
+  });
+}
+
+// Spawn the pty for a resolved launch and register its Session. `meta` carries
+// who owns it (a Site's agent, or the Floating Workspace); `command` is typed
+// into the shell once it settles, or nothing for a plain shell.
+function startSession({ cwd, command, meta, failLabel }) {
   // A Target's directory can go stale (a deleted worktree, a moved plugin).
   // Fail loudly before spawning a shell in a bad cwd rather than dropping the
   // user into their home dir with no explanation.
@@ -667,15 +907,15 @@ function launch({ site, agentId, target = null, globalArgs = '' }) {
   }
 
   const sessionId = randomUUID();
-  const env = resolveShellEnv();
+  const env = deps.shellEnv();
   // Spawn the user's interactive login SHELL — not the agent binary directly —
   // and type the agent command into it. Exiting the agent CLI then drops back to
   // a normal shell prompt (like Superset), and the Session only ends when the
   // shell itself exits. `-il` sources the user's rc files.
-  const shell = getUserShell();
+  const shell = deps.userShell();
   let term;
   try {
-    term = pty.spawn(shell, ['-il'], {
+    term = deps.spawnPty(shell, ['-il'], {
       name: 'xterm-256color',
       cols: 80,
       rows: 24,
@@ -694,7 +934,7 @@ function launch({ site, agentId, target = null, globalArgs = '' }) {
       },
     });
   } catch (err) {
-    return { error: `Failed to launch ${agent.name}: ${err.message}` };
+    return { error: `Failed to launch ${failLabel}: ${err.message}` };
   }
 
   // A plain shell has nothing to type — the pty is already what was asked for.
@@ -702,21 +942,22 @@ function launch({ site, agentId, target = null, globalArgs = '' }) {
 
   const session = {
     sessionId,
-    siteId: site.id,
-    agentId: agent.id,
-    agentName: agent.name,
-    targetId: target?.id || null,
-    label,
+    ...meta,
     cwd,
     pty: term,
     buffer: '',
     window: null,
     exited: false,
+    exitCode: null,
+    startedAt: Date.now(),
+    lastOutputAt: Date.now(),
+    tracker: createTracker({ agent: meta.agentId !== SHELL_ID }),
     // `started` gates the type-the-command step; a shell session has already
     // arrived at what the user wanted, so it starts out done.
     started: startsImmediately,
   };
   sessions.set(sessionId, session);
+  session.tracker.view(isOnScreen(sessionId));
 
   // Run the agent once the shell is ready: wait a short settle window after the
   // first output (so rc files that print during init don't swallow the typed
@@ -736,7 +977,17 @@ function launch({ site, agentId, target = null, globalArgs = '' }) {
   if (!startsImmediately) setTimeout(runAgent, 1200); // fallback: no output first
 
   term.onData((data) => {
+    session.lastOutputAt = Date.now();
     scheduleRun();
+    const before = session.tracker.snapshot().state;
+    const unreadBefore = session.tracker.snapshot().unread;
+    if (session.tracker.output(data)) {
+      // Status and unread flips go out at once; title-only churn (spinner
+      // frames) waits.
+      const after = session.tracker.snapshot();
+      emitChange({ immediate: after.state !== before || after.unread !== unreadBefore });
+    }
+    deliverAlerts(session);
     session.buffer += data;
     if (session.buffer.length > MAX_BUFFER) {
       session.buffer = session.buffer.slice(session.buffer.length - MAX_BUFFER);
@@ -749,12 +1000,18 @@ function launch({ site, agentId, target = null, globalArgs = '' }) {
 
   term.onExit(({ exitCode }) => {
     session.exited = true;
+    session.exitCode = exitCode;
+    session.tracker.exit(exitCode);
+    deliverAlerts(session);
     const win = session.window;
     if (win && !win.isDestroyed()) {
       win.webContents.send('terminal-exit', { sessionId, code: exitCode });
     }
+    // stop() already deleted a dismissed session; don't resurrect its row.
+    if (sessions.has(sessionId)) emitChange({ immediate: true });
   });
 
+  emitChange({ immediate: true });
   return { ok: true, sessionId };
 }
 
@@ -775,7 +1032,41 @@ function attach(sessionId, win) {
 
 function write(sessionId, data) {
   const session = sessions.get(sessionId);
-  if (session && !session.exited) session.pty.write(data);
+  if (session && !session.exited) {
+    session.pty.write(data);
+    // xterm's own replies (device/cursor reports, focus events) share this
+    // path with keystrokes but aren't the user answering anything.
+    if (!isTerminalReply(data) && session.tracker.typed()) {
+      emitChange({ immediate: true });
+    }
+  }
+}
+
+// What's on screen: the Session selected in the Agents pane (null when the
+// pane isn't showing), the Floating Workspace's active terminal (null while
+// the panel is minimised) and whether the window has focus. A Session counts
+// as viewed only when the window is focused — selected in a background window
+// isn't seen.
+const view = { selected: null, floating: null, focused: false };
+
+function isOnScreen(sessionId) {
+  return view.focused && (view.selected === sessionId || view.floating === sessionId);
+}
+
+function setView(patch) {
+  Object.assign(view, patch);
+  let changed = false;
+  for (const s of sessions.values()) {
+    if (s.tracker.view(isOnScreen(s.sessionId))) changed = true;
+  }
+  if (changed) emitChange({ immediate: true });
+}
+
+function markRead(sessionId, read = true) {
+  const session = sessions.get(sessionId);
+  if (!session) return;
+  const changed = read ? session.tracker.markRead() : session.tracker.markUnread();
+  if (changed) emitChange({ immediate: true });
 }
 
 // Clear a Session's ring buffer so a later reattach doesn't replay content the
@@ -812,17 +1103,23 @@ function stop(sessionId) {
     }, 3000);
   }
   sessions.delete(sessionId);
+  notifier.forget(sessionId);
+  emitChange({ immediate: true });
 }
 
+// Live Site Sessions only — a Floating Workspace shell is scratch and doesn't
+// hold up quitting.
 function hasActiveSessions() {
-  for (const s of sessions.values()) if (!s.exited) return true;
+  for (const s of sessions.values()) if (!s.exited && s.scope !== 'floating') return true;
   return false;
 }
 
 // Distinct Site ids that have a live Session — for the quit-confirmation dialog.
 function activeSiteIds() {
   const ids = new Set();
-  for (const s of sessions.values()) if (!s.exited) ids.add(s.siteId);
+  for (const s of sessions.values()) {
+    if (!s.exited && s.scope !== 'floating') ids.add(s.siteId);
+  }
   return [...ids];
 }
 
@@ -836,6 +1133,8 @@ module.exports = {
   effectiveRegistry,
   listAgents,
   resolveBin,
+  shellQuote,
+  resolveShellEnv,
   isWrapperShim,
   installAgent,
   brewInstallArgs,
@@ -843,10 +1142,19 @@ module.exports = {
   installScriptUrl,
   assertShellScript,
   listSessions,
+  listAllSessions,
+  listFloatingSessions,
+  onSessionsChanged,
+  onFloatingSessionsChanged,
   resolveLaunch,
   launch,
+  launchFloating,
   attach,
   write,
+  setView,
+  markRead,
+  onAlert,
+  setNotificationSettings,
   clearBuffer,
   resize,
   stop,

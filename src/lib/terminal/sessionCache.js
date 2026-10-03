@@ -99,14 +99,14 @@ function createEntry(sessionId, handlers) {
   entry.searchAddon = searchAddon;
   term.loadAddon(new Unicode11Addon());
   term.unicode.activeVersion = '11';
-  // Cmd+click a URL in agent output. Where it lands follows Settings → Open
-  // links in, so the handler comes from the mounting component rather than
-  // going straight out to the default browser.
+  // A click on a URL in agent output. The mounting component decides what it
+  // means (lib/terminal/linkActions: plain click → the action card, ⌘ → the
+  // default destination, ⇧⌘ → the other); without one, ⌘-click goes to the
+  // system browser.
   term.loadAddon(
     new WebLinksAddon((event, uri) => {
-      if (!event.metaKey) return;
-      if (entry.handlers.onOpenLink) entry.handlers.onOpenLink(uri);
-      else api.openSiteInBrowser(uri);
+      if (entry.handlers.onLinkClick) entry.handlers.onLinkClick(event, uri);
+      else if (event.metaKey) api.openSiteInBrowser(uri);
     })
   );
 

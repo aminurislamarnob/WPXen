@@ -265,6 +265,10 @@ export function dispose(tabKey) {
   window.electronAPI.browserUnregister(tabKey);
 }
 
-export function disposeAll() {
-  for (const tabKey of [...cache.keys()]) dispose(tabKey);
+// Tear down every tab whose key starts with `prefix` — each owner (the
+// Agents pane, the Floating Workspace) disposes only its own pages.
+export function disposeAll(prefix = '') {
+  for (const tabKey of [...cache.keys()]) {
+    if (tabKey.startsWith(prefix)) dispose(tabKey);
+  }
 }

@@ -12,6 +12,7 @@ const {
   startStatusPoller,
   getServiceStatus,
   getSetting,
+  setSetting,
 } = require('./ipc.cjs');
 
 const isDev = process.env.NODE_ENV === 'development';
@@ -139,12 +140,48 @@ app.whenReady().then(() => {
   // Register IPC handlers
   registerHandlers(win, store);
 
-  // Create system tray
-  createTray(
+  // Create system tray. Unread agent Sessions surface there (a count beside
+  // the icon and an "Agents needing attention" section) and on the dock
+  // badge, so attention shows even with the window hidden.
+  const agents = require('./services/agents.cjs');
+  let attention = [];
+  const openSession = (s) => {
+    win.show();
+    win.focus();
+    win.webContents.send('agent-open-session', {
+      siteId: s.siteId,
+      sessionId: s.sessionId,
+    });
+  };
+  const keepAwake = require('./services/keepAwake.cjs');
+  const trayCtl = createTray(
     win,
     () => getServiceStatus(),
-    () => store.get('sites', [])
+    () => store.get('sites', []),
+    {
+      getAttention: () => attention,
+      onOpenSession: openSession,
+      keepAwake: {
+        getStatus: () => keepAwake.getStatus(),
+        setMode: (mode) => setSetting('agents.keepAwake', mode),
+      },
+    }
   );
+  // Mode changes from anywhere, and the hold coming and going, show in the
+  // tray at once rather than on the next 5 s refresh.
+  keepAwake.onStatusChange(() => trayCtl.updateMenu());
+  let attentionKey = '';
+  agents.onSessionsChanged((list) => {
+    attention = list.filter((s) => s.unread);
+    // Session lists arrive at spinner rate; only rebuild when the set (or a
+    // member's state/title) actually changed.
+    const key = attention.map((s) => `${s.sessionId}:${s.state}:${s.title}`).join('|');
+    if (key === attentionKey) return;
+    attentionKey = key;
+    trayCtl.setAttention();
+    // A no-op while the dock icon is hidden; it shows whenever the dock does.
+    app.dock?.setBadge(attention.length > 0 ? String(attention.length) : '');
+  });
 
   // Start polling service status
   startStatusPoller(win);
@@ -296,6 +333,11 @@ app.on('before-quit', (e) => {
   } catch {}
   try {
     require('./services/browser.cjs').unregisterAll();
+  } catch {}
+  // Release the sleep assertion now rather than waiting for caffeinate's -w
+  // to notice the app is gone.
+  try {
+    require('./services/keepAwake.cjs').dispose();
   } catch {}
 
   // Allow the window to actually close on quit

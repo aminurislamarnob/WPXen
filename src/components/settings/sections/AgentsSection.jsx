@@ -1,12 +1,32 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ChevronDown, Download, Loader, Plus, RotateCcw, Trash2 } from 'lucide-react';
-import { Button, Card, SectionLabel, Toggle, Tooltip } from '../../ui';
-import { TextSetting } from '../controls';
+import {
+  Button,
+  Card,
+  SectionLabel,
+  SegmentedTabs,
+  SettingsRow,
+  Toggle,
+  Tooltip,
+} from '../../ui';
+import { SelectSetting, TextSetting } from '../controls';
 import { ProviderIcon } from '../../providerIcons';
 import { useSettings } from '../../../lib/useSettings';
 import { useSettingsContext } from '../SettingsLayout';
 import { useAgentInstall } from '../../../lib/useAgentInstall';
 import { installerSubtitle, installerTooltip } from '../../../lib/installerLabel';
+import {
+  KEEP_AWAKE_MODES,
+  keepAwakeMode,
+  useKeepAwakeStatus,
+} from '../../../lib/useKeepAwake';
+
+const TASKS_KEYS = ['tasks.startPrompt', 'tasks.branchTemplate', 'tasks.startMode'];
+const START_MODES = [
+  { value: 'branch', label: 'New branch in place' },
+  { value: 'worktree', label: 'New worktree' },
+  { value: 'current', label: 'Current branch' },
+];
 
 export default function AgentsSection() {
   const { settings, setSetting } = useSettings();
@@ -18,6 +38,7 @@ export default function AgentsSection() {
   // second list, and several open at once just rebuilds the stacked form this
   // replaced.
   const [open, setOpen] = useState(null);
+  const keepAwake = useKeepAwakeStatus();
 
   const refresh = useCallback(() => {
     window.electronAPI
@@ -116,8 +137,154 @@ export default function AgentsSection() {
       overridden: Boolean((commands[agent.id] || '').trim()),
     }));
 
+  // The per-trigger switches mean nothing with notifications off, so they
+  // grey out rather than vanish — the user can see what turning it on gives.
+  const notifyOn = settings['agents.notifications.enabled'] !== false;
+  const notifyToggle = (id, title, subtitle, dependent = true) => (
+    <SettingsRow id={id} visible={visible} title={title} subtitle={subtitle}>
+      <Toggle
+        checked={settings[id] !== false}
+        onChange={(v) => setSetting(id, v)}
+        disabled={dependent && !notifyOn}
+        label={title}
+      />
+    </SettingsRow>
+  );
+  const notificationIds = [
+    'agents.notifications.enabled',
+    'agents.notifications.onDone',
+    'agents.notifications.onNeedsInput',
+    'agents.notifications.onBell',
+    'agents.notifications.suppressWhenFocused',
+    'agents.notifications.sound',
+  ];
+  const notificationRows = (!visible ||
+    notificationIds.some((id) => visible.includes(id))) && (
+    <div>
+      <SectionLabel>Notifications</SectionLabel>
+      <Card>
+        {notifyToggle(
+          'agents.notifications.enabled',
+          'Agent notifications',
+          'A macOS notification when a session you aren’t looking at needs you',
+          false
+        )}
+        {notifyToggle(
+          'agents.notifications.onDone',
+          'When an agent finishes',
+          'It comes to rest after working, or its session exits with an error'
+        )}
+        {notifyToggle(
+          'agents.notifications.onNeedsInput',
+          'When an agent needs input',
+          'It is waiting on a permission prompt or an answer'
+        )}
+        {notifyToggle(
+          'agents.notifications.onBell',
+          'On terminal bell',
+          'Any session rings the terminal bell'
+        )}
+        {notifyToggle(
+          'agents.notifications.suppressWhenFocused',
+          'Not while I’m looking',
+          'Skip it for the session already on screen in a focused window'
+        )}
+        <SettingsRow
+          id="agents.notifications.sound"
+          visible={visible}
+          title="Sound"
+          subtitle="Played with each agent notification"
+        >
+          <SelectSetting
+            value={settings['agents.notifications.sound']}
+            onChange={(v) => setSetting('agents.notifications.sound', v)}
+            ariaLabel="Notification sound"
+            options={[
+              { value: 'system', label: 'System sound' },
+              { value: 'none', label: 'Silent' },
+            ]}
+          />
+        </SettingsRow>
+      </Card>
+    </div>
+  );
+  const awakeMode = keepAwakeMode(settings['agents.keepAwake']);
+
   return (
     <div className="space-y-6">
+      {(!visible || visible.includes('agents.keepAwake')) && (
+        <div>
+          <SectionLabel>Keep Computer Awake</SectionLabel>
+          <Card>
+            <SettingsRow
+              id="agents.keepAwake"
+              visible={visible}
+              title="Keep computer awake"
+              subtitle={`${awakeMode.description} · ${
+                keepAwake.active ? 'Active' : 'Inactive'
+              }`}
+            >
+              <SegmentedTabs
+                tabs={KEEP_AWAKE_MODES}
+                value={awakeMode.value}
+                onChange={(v) => setSetting('agents.keepAwake', v)}
+              />
+            </SettingsRow>
+          </Card>
+          <p className="text-[11px] text-muted-foreground mt-1.5 px-1">
+            Your display can still sleep and lock. With the lid closed on battery, macOS
+            sleeps regardless.
+          </p>
+        </div>
+      )}
+
+      {(!visible || TASKS_KEYS.some((k) => visible.includes(k))) && (
+        <div>
+          <SectionLabel>Tasks</SectionLabel>
+          <Card>
+            <SettingsRow
+              id="tasks.startPrompt"
+              visible={visible}
+              title="Start prompt"
+              subtitle="Typed to the agent by Start → · {{url}} {{number}} {{title}} {{repo}}"
+            >
+              <TextSetting
+                value={settings['tasks.startPrompt']}
+                onCommit={(v) => setSetting('tasks.startPrompt', v)}
+                ariaLabel="Start prompt"
+                className="font-mono !text-xs !w-64"
+              />
+            </SettingsRow>
+            <SettingsRow
+              id="tasks.branchTemplate"
+              visible={visible}
+              title="Branch name"
+              subtitle="Must contain {{number}} · {{slug}} is the title, shortened"
+            >
+              <TextSetting
+                value={settings['tasks.branchTemplate']}
+                onCommit={(v) => setSetting('tasks.branchTemplate', v)}
+                ariaLabel="Branch name template"
+                className="font-mono !text-xs !w-64"
+              />
+            </SettingsRow>
+            <SettingsRow
+              id="tasks.startMode"
+              visible={visible}
+              title="Default “Where”"
+              subtitle="Where Start → puts the work unless you pick otherwise"
+            >
+              <SelectSetting
+                value={settings['tasks.startMode']}
+                onChange={(v) => setSetting('tasks.startMode', v)}
+                ariaLabel="Default where"
+                options={START_MODES}
+              />
+            </SettingsRow>
+          </Card>
+        </div>
+      )}
+
       <div>
         <SectionLabel>Available Agents</SectionLabel>
         <Card>
@@ -292,6 +459,8 @@ export default function AgentsSection() {
           preference applies. Expand a row to change the command it launches with.
         </p>
       </div>
+
+      {notificationRows}
 
       <div>
         <SectionLabel>Add an Agent</SectionLabel>

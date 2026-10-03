@@ -21,6 +21,7 @@ import {
   X,
   KeyRound,
   Pencil,
+  ListTodo,
 } from 'lucide-react';
 import { Toggle, Tooltip } from './ui';
 import ChangeUrlModal from './ChangeUrlModal';
@@ -33,6 +34,7 @@ import SiteLogs from './SiteLogs';
 import BrowserPane from './browser/BrowserPane';
 import * as webviewCache from '../lib/browser/webviewCache';
 import { WordPressIcon } from './icons';
+import ProjectIcon from './ProjectIcon';
 import { useOpenLink } from '../lib/useOpenLink';
 
 const NAV = [
@@ -60,6 +62,7 @@ const NAV = [
 ];
 
 function Overview({ site, onSaved, onOpenPma }) {
+  const navigate = useNavigate();
   const openLink = useOpenLink();
   const [pmaBusy, setPmaBusy] = useState(false);
   const [tunnel, setTunnel] = useState(null);
@@ -212,6 +215,12 @@ function Overview({ site, onSaved, onOpenPma }) {
       icon: Terminal,
       label: 'Terminal',
       onClick: () => window.electronAPI.openSiteInTerminal(site.path),
+    },
+    {
+      // The Site's GitHub issues, on the Tasks page.
+      icon: ListTodo,
+      label: 'Issues',
+      onClick: () => navigate(`/tasks?site=${encodeURIComponent(site.id)}`),
     },
     {
       icon: tunnel?.status === 'starting' ? Loader : Share2,
@@ -483,6 +492,7 @@ export default function SiteDetail({ sites, refreshSites }) {
                 <ChevronLeft size={17} />
               </button>
             </Tooltip>
+            <ProjectIcon siteId={site.id} size={18} className="ml-1 mr-1.5" />
             <span className="text-[15px] font-bold text-foreground truncate">
               {site.name}
             </span>

@@ -5,8 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';"
+      content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://avatars.githubusercontent.com https://*.githubusercontent.com https://github.com https://www.google.com;"
     />
+    <!-- img-src: Tasks shows GitHub avatars and the images in issue and PR
+         bodies (camo, user-attachments); project icons use GitHub avatars and
+         Google's favicon service (www.google.com/s2/favicons). Named hosts
+         only — markdown from anyone can't make the app fetch arbitrary URLs. -->
     <title>WPXen — Local WordPress Development</title>
   </head>
   <body class="overflow-hidden">

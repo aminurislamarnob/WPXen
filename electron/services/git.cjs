@@ -336,9 +336,76 @@ async function discardTracked(rootPath, rel) {
   return runMutate(path.resolve(rootPath), ['restore', '--', rel]);
 }
 
+// The checked-out branch of the repo containing `root`, or null when `root`
+// isn't inside a git repo (or git is missing). A detached HEAD reads "HEAD".
+async function currentBranch(root) {
+  const out = await run(path.resolve(root), ['rev-parse', '--abbrev-ref', 'HEAD']);
+  return out ? out.trim() || null : null;
+}
+
+// ── GitHub remotes (Tasks) ───────────────────────────────────────────────────
+// A Site's GitHub repos are its discovered repos (the webroot, or nested
+// theme/plugin repos) that have a github.com remote. `upstream` wins over
+// `origin`, so a fork shows the project's real issues; any other remote name
+// is only used when neither exists.
+
+// owner/name from a github.com remote URL — https, `git@github.com:` and
+// `ssh://git@github.com/` forms, with or without `.git`. Anything else
+// (another host, a local path) is null.
+function parseGithubRemote(url) {
+  const s = String(url || '').trim();
+  const m =
+    /^(?:https?:\/\/(?:[^@/]+@)?github\.com\/|git@github\.com:|ssh:\/\/git@github\.com(?::\d+)?\/)([A-Za-z0-9-]+)\/([A-Za-z0-9._-]+?)(?:\.git)?\/?$/i.exec(
+      s
+    );
+  if (!m || m[2] === '.' || m[2] === '..') return null;
+  return { owner: m[1], name: m[2] };
+}
+
+// `git remote -v` → { remoteName: fetchUrl }.
+function parseRemotes(out) {
+  const remotes = {};
+  for (const line of String(out || '').split('\n')) {
+    const m = /^(\S+)\s+(\S+)\s+\(fetch\)$/.exec(line.trim());
+    if (m) remotes[m[1]] = m[2];
+  }
+  return remotes;
+}
+
+function pickGithubRemote(remotes) {
+  const names = Object.keys(remotes);
+  const order = [
+    'upstream',
+    'origin',
+    ...names.filter((n) => n !== 'upstream' && n !== 'origin').sort(),
+  ];
+  for (const remote of order) {
+    const repo = remotes[remote] && parseGithubRemote(remotes[remote]);
+    if (repo) return { ...repo, remote };
+  }
+  return null;
+}
+
+// The GitHub repos of a Site's directory: [{ repoRoot, owner, name, remote }].
+async function githubReposFor(sitePath) {
+  const roots = discoverRepos(sitePath);
+  const found = await Promise.all(
+    roots.map(async (repoRoot) => {
+      const repo = pickGithubRemote(parseRemotes(await run(repoRoot, ['remote', '-v'])));
+      return repo ? { repoRoot, ...repo } : null;
+    })
+  );
+  return found.filter(Boolean);
+}
+
 module.exports = {
   gitStatus,
+  currentBranch,
   discoverRepos,
+  parseGithubRemote,
+  parseRemotes,
+  pickGithubRemote,
+  githubReposFor,
   parseStatus,
   parseNumstat,
   fileAt,

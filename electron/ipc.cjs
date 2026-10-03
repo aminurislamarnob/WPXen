@@ -8,6 +8,8 @@ const {
   BrowserWindow,
   nativeTheme,
   session,
+  Notification,
+  powerMonitor,
 } = require('electron');
 const crypto = require('crypto');
 const path = require('path');
@@ -35,12 +37,18 @@ const setup = require('./services/setup.cjs');
 const logs = require('./services/logs.cjs');
 const validation = require('./services/validation.cjs');
 const agents = require('./services/agents.cjs');
+const notes = require('./services/notes.cjs');
+const github = require('./services/github.cjs');
+const taskStart = require('./services/taskStart.cjs');
+const projectIcon = require('./services/projectIcon.cjs');
+const agentProjects = require('./services/agentProjects.cjs');
 const files = require('./services/files.cjs');
 const git = require('./services/git.cjs');
 const browser = require('./services/browser.cjs');
 const browserHistory = require('./services/browserHistory.cjs');
 const settingsService = require('./services/settings.cjs');
 const externalTools = require('./services/externalTools.cjs');
+const keepAwake = require('./services/keepAwake.cjs');
 const { humanize } = require('./services/errors.cjs');
 
 let store;
@@ -98,6 +106,17 @@ function applyAgentConfig(all) {
     enabled: enabled && enabled.length ? enabled : null,
     commands: all['agents.commands'],
     custom: all['agents.custom']?.list || [],
+  });
+}
+
+// Hands the session manager the notification switches it gates alerts on.
+function applyNotificationConfig(all) {
+  agents.setNotificationSettings({
+    enabled: all['agents.notifications.enabled'],
+    onDone: all['agents.notifications.onDone'],
+    onNeedsInput: all['agents.notifications.onNeedsInput'],
+    onBell: all['agents.notifications.onBell'],
+    suppressWhenFocused: all['agents.notifications.suppressWhenFocused'],
   });
 }
 
@@ -226,6 +245,13 @@ function registerHandlers(win, storeInstance) {
       'agents.enabled': (_v, all) => applyAgentConfig(all),
       'agents.commands': (_v, all) => applyAgentConfig(all),
       'agents.custom': (_v, all) => applyAgentConfig(all),
+      'agents.notifications.enabled': (_v, all) => applyNotificationConfig(all),
+      'agents.notifications.onDone': (_v, all) => applyNotificationConfig(all),
+      'agents.notifications.onNeedsInput': (_v, all) => applyNotificationConfig(all),
+      'agents.notifications.onBell': (_v, all) => applyNotificationConfig(all),
+      'agents.notifications.suppressWhenFocused': (_v, all) =>
+        applyNotificationConfig(all),
+      'agents.keepAwake': (value) => keepAwake.setMode(value),
     },
   });
   settings.migrateLegacy();
@@ -234,6 +260,23 @@ function registerHandlers(win, storeInstance) {
   procman.setMaxLogSizeMb(settings.get('services.logMaxSizeMb'));
   nativeTheme.themeSource = settings.get('appearance.themeMode');
   applyAgentConfig(settings.read());
+  applyNotificationConfig(settings.read());
+
+  // Keep computer awake. Subscribe before applying the stored mode so the
+  // first status reaches the renderer; re-check after a wake from sleep.
+  keepAwake.onStatusChange((status) => {
+    for (const w of BrowserWindow.getAllWindows()) {
+      if (!w.isDestroyed() && w.webContents) {
+        w.webContents.send('keep-awake-status-update', status);
+      }
+    }
+  });
+  keepAwake.setMode(settings.get('agents.keepAwake'));
+  keepAwake.watchSessions({
+    list: agents.listAllSessions,
+    subscribe: agents.onSessionsChanged,
+  });
+  powerMonitor.on('resume', () => keepAwake.handleResume());
 
   // Apply persisted DB credentials so MySQL operations authenticate correctly.
   mysql.setCredentials({
@@ -288,6 +331,376 @@ function registerHandlers(win, storeInstance) {
   // The live Sessions for a Site — the renderer restores its terminal tabs.
   ipcMain.handle('agent-sessions', (_e, siteId) => agents.listSessions(siteId));
 
+  // ── Agents working set ("Projects") & session rows ─────────────────────────
+  // The sidebar lists working-set Sites with every Session under them, live or
+  // exited. Both lists are pushed on change so it never polls.
+  const getProjectIds = () => {
+    const sites = store.get('sites', []);
+    const list = store.get(agentProjects.STORE_KEY, []);
+    const pruned = agentProjects.pruneProjects(list, sites);
+    if (pruned !== list) store.set(agentProjects.STORE_KEY, pruned);
+    return pruned;
+  };
+  const sendProjects = () => {
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('agent-projects-update', getProjectIds());
+    }
+  };
+  const addToProjects = (siteId) => {
+    const list = getProjectIds();
+    const next = agentProjects.addProject(list, siteId);
+    if (next !== list) {
+      store.set(agentProjects.STORE_KEY, next);
+      sendProjects();
+    }
+  };
+
+  agents.onSessionsChanged((list) => {
+    if (win && !win.isDestroyed()) win.webContents.send('agent-sessions-update', list);
+  });
+
+  ipcMain.handle('agent-projects-get', () => getProjectIds());
+
+  // A project's sidebar icon (services/projectIcon.cjs): its WordPress Site
+  // Icon, Orca's repo icon when the Site's folder is a GitHub repo, else the
+  // WordPress logo.
+  const projectIconDir = () => path.join(app.getPath('userData'), 'project-icons');
+  ipcMain.handle('project-icon', (_e, siteId, opts) => {
+    const site = findSite(siteId);
+    return projectIcon.projectIcon(site, {
+      force: !!opts?.force,
+      iconDir: projectIconDir(),
+    });
+  });
+
+  // Change Project Icon: `choice` is { type: 'auto' } (back to detection),
+  // { type: 'emoji', emoji } or { type: 'image', data } (the file's bytes,
+  // base64). The Site record keeps only the choice; an image lives in
+  // userData/project-icons. Every window hears about it to redraw.
+  ipcMain.handle('project-icon-set', (_e, siteId, choice) => {
+    const sites = store.get('sites', []);
+    const site = sites.find((x) => x.id === siteId);
+    if (!site) return { error: 'Site not found' };
+    const dir = projectIconDir();
+    let icon = null;
+    if (choice?.type === 'emoji') {
+      icon = projectIcon.sanitizeCustomIcon({ type: 'emoji', emoji: choice.emoji });
+      if (!icon) return { error: 'Pick a single emoji.' };
+      projectIcon.removeIconImages(dir, siteId);
+    } else if (choice?.type === 'image') {
+      const res = projectIcon.writeIconImage(dir, siteId, choice.data);
+      if (res.error) return res;
+      icon = { type: 'image', file: res.file };
+    } else {
+      projectIcon.removeIconImages(dir, siteId);
+    }
+    if (icon) site.icon = icon;
+    else delete site.icon;
+    store.set('sites', sites);
+    projectIcon.invalidate(siteId);
+    for (const w of BrowserWindow.getAllWindows()) {
+      if (!w.isDestroyed()) w.webContents.send('project-icon-changed', { siteId });
+    }
+    return { ok: true };
+  });
+  ipcMain.handle('agent-project-add', (_e, siteId) => {
+    if (!findSite(siteId)) return { error: 'Site not found' };
+    addToProjects(siteId);
+    return { ok: true };
+  });
+  // Removing a Project ends its Sessions first (the renderer confirms) — a
+  // Session with no row would be an agent running where nothing shows it.
+  ipcMain.handle('agent-project-remove', (_e, siteId) => {
+    for (const s of agents.listAllSessions()) {
+      if (s.siteId === siteId) agents.stop(s.sessionId);
+    }
+    store.set(
+      agentProjects.STORE_KEY,
+      agentProjects.removeProject(getProjectIds(), siteId)
+    );
+    sendProjects();
+    return { ok: true };
+  });
+  ipcMain.handle('agent-projects-reorder', (_e, order) => {
+    const next = agentProjects.reorderProjects(getProjectIds(), order);
+    store.set(agentProjects.STORE_KEY, next);
+    sendProjects();
+    return next;
+  });
+  ipcMain.handle('agent-sessions-all', () => agents.listAllSessions());
+
+  // Floating Workspace terminals: plain shells owned by no Site, on their own
+  // feed so the Projects list, keep-awake and the tray never see them.
+  agents.onFloatingSessionsChanged((list) => {
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('agent-floating-sessions-update', list);
+    }
+  });
+  ipcMain.handle('agent-floating-sessions', () => agents.listFloatingSessions());
+  ipcMain.handle('agent-launch-floating', (_e, cwd, command) =>
+    agents.launchFloating({ cwd, command })
+  );
+
+  // Floating Workspace notes (services/notes.cjs). Reads and writes are
+  // confined to the notes folder plus files the user picked below.
+  notes.restorePicked(store.get('floatingNotesPicked', []));
+  notes.onPickedChange((list) => store.set('floatingNotesPicked', list));
+  ipcMain.handle('notes-create', () => notes.createNote());
+  ipcMain.handle('notes-read', (_e, file) => notes.readNote(file));
+  ipcMain.handle('notes-save', (_e, file, content, mtimeMs, opts) =>
+    notes.saveNote(file, content, mtimeMs, { force: !!opts?.force })
+  );
+  ipcMain.handle('notes-discard', (_e, file, edited) =>
+    notes.discardIfUntouched(file, { edited: !!edited })
+  );
+  ipcMain.handle('notes-open-dialog', async () => {
+    const result = await dialog.showOpenDialog(win, {
+      defaultPath: notes.notesDir(),
+      properties: ['openFile'],
+      filters: [{ name: 'Markdown', extensions: ['md', 'markdown'] }],
+    });
+    if (result.canceled || !result.filePaths[0]) return null;
+    const file = result.filePaths[0];
+    return notes.allow(file) ? file : null;
+  });
+
+  // Tasks (services/github.cjs) — GitHub through the `gh` CLI, for every Site
+  // with a GitHub repo.
+  ipcMain.handle('tasks-preflight', () => github.preflight());
+  ipcMain.handle('tasks-install-gh', async (event) => {
+    try {
+      const progress = (line) => {
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('tasks-gh-install-progress', { line });
+        }
+      };
+      return { success: true, status: await github.installGh(progress) };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+  ipcMain.handle('tasks-repos', (_e, opts) =>
+    github.sitesWithRepos(store.get('sites', []), { force: !!opts?.force })
+  );
+  ipcMain.handle('tasks-issue', (_e, opts) =>
+    github.getIssue({ repo: opts?.repo, number: opts?.number, force: !!opts?.force })
+  );
+  // Issue writes and the pickers' lookups; each takes one options object and
+  // answers { issue | comment | items } or { error }.
+  for (const [channel, fn] of [
+    ['tasks-issue-comment', github.addComment],
+    ['tasks-issue-state', github.setIssueState],
+    ['tasks-issue-edit', github.editIssue],
+    ['tasks-issue-assignees', github.setAssignees],
+    ['tasks-issue-labels', github.setLabels],
+    ['tasks-issue-create', github.createIssue],
+    ['tasks-repo-assignees', github.repoAssignees],
+    ['tasks-repo-labels', github.repoLabels],
+  ]) {
+    ipcMain.handle(channel, (_e, opts) => fn(opts || {}));
+  }
+  // ── Start → ──────────────────────────────────────────────────────────────
+  // The checkouts an issue's repo lives in: every Site whose discovered repos
+  // include it (usually one).
+  const checkoutsFor = async (repo) => {
+    const tree = await github.sitesWithRepos(store.get('sites', []));
+    const out = [];
+    for (const site of tree) {
+      for (const r of site.repos) {
+        if (r.repo.toLowerCase() === String(repo || '').toLowerCase()) {
+          out.push({
+            siteId: site.siteId,
+            siteName: site.siteName,
+            repoRoot: r.repoRoot,
+          });
+        }
+      }
+    }
+    return out;
+  };
+
+  // What the Start dialog opens with: the checkouts, the rendered prompt and
+  // branch, the default mode, and the chosen checkout's git state.
+  ipcMain.handle('tasks-start-inspect', async (_e, opts) => {
+    const issue = opts?.issue;
+    if (!issue?.repo || !issue?.number) return { error: 'Not an issue' };
+    const checkouts = await checkoutsFor(issue.repo);
+    if (checkouts.length === 0)
+      return { error: `No Site has a checkout of ${issue.repo}` };
+    const checkout = checkouts.find((c) => c.repoRoot === opts?.repoRoot) || checkouts[0];
+    // A PR's branch is its head ref, checked out by gh; an issue's is the
+    // rendered template.
+    const isPr = issue.kind === 'pr';
+    const branch = isPr
+      ? String(issue.headRef || '')
+      : taskStart.branchName(settings.get('tasks.branchTemplate'), issue);
+    const git = await taskStart.inspect({ repoRoot: checkout.repoRoot, branch });
+    return {
+      checkouts,
+      checkout,
+      branch,
+      prompt: taskStart.renderTemplate(settings.get('tasks.startPrompt'), issue),
+      mode: isPr ? 'pr' : settings.get('tasks.startMode'),
+      git,
+    };
+  });
+
+  // Run the git plan, then launch the agent there with the prompt and the
+  // issue link. A worktree is saved as a Launch Target on the Site so it can
+  // be launched again from Agents.
+  ipcMain.handle('tasks-start', async (_e, opts) => {
+    const { issue, agentId, prompt, mode, branch, repoRoot } = opts || {};
+    if (!issue?.repo || !issue?.number) return { error: 'Not an issue' };
+    const checkout = (await checkoutsFor(issue.repo)).find(
+      (c) => c.repoRoot === repoRoot
+    );
+    if (!checkout) return { error: 'That checkout is no longer a Site’s repo' };
+    const site = findSite(checkout.siteId);
+    if (!site) return { error: 'Site not found' };
+
+    const plan =
+      issue.kind === 'pr'
+        ? await taskStart.applyPullCheckout({
+            repoRoot: checkout.repoRoot,
+            repo: issue.repo,
+            number: issue.number,
+          })
+        : await taskStart.applyPlan({ mode, repoRoot: checkout.repoRoot, branch });
+    if (plan.error) return { error: plan.error };
+
+    let target = null;
+    if (plan.worktree) {
+      const sites = store.get('sites', []);
+      const s = sites.find((x) => x.id === site.id);
+      target = {
+        id: crypto.randomUUID(),
+        agentId,
+        label: `#${issue.number} ${branch}`,
+        cwd: plan.worktree,
+        args: null,
+      };
+      s.launchTargets = [...(s.launchTargets || []), target];
+      store.set('sites', sites);
+    }
+
+    const globalArgs = store.get('agentPresets', {})[agentId]?.args || '';
+    const res = agents.launch({
+      site,
+      agentId,
+      target,
+      globalArgs,
+      cwd: plan.cwd,
+      prompt,
+      issue,
+    });
+    if (res?.error) return res;
+    addToProjects(site.id);
+    return { ok: true, siteId: site.id, sessionId: res.sessionId };
+  });
+
+  ipcMain.handle('tasks-pull', (_e, opts) => github.getPull(opts || {}));
+  ipcMain.handle('tasks-projects', (_e, opts) => github.listProjects(opts || {}));
+  ipcMain.handle('tasks-project', (_e, opts) => github.getProject(opts || {}));
+  ipcMain.handle('tasks-project-move', (_e, opts) =>
+    github.setProjectItemOption(opts || {})
+  );
+  ipcMain.handle('tasks-pull-files', (_e, opts) => github.getPullFiles(opts || {}));
+  ipcMain.handle('tasks-pull-checks', (_e, opts) => github.getPullChecks(opts || {}));
+  ipcMain.handle('tasks-search-pulls', (_e, opts) =>
+    github.searchPulls({
+      repos: opts?.repos,
+      query: opts?.query,
+      force: !!opts?.force,
+    })
+  );
+  ipcMain.handle('tasks-search-issues', (_e, opts) =>
+    github.searchIssues({
+      repos: opts?.repos,
+      query: opts?.query,
+      force: !!opts?.force,
+    })
+  );
+  // Dismissing a row is the same teardown as closing its tab.
+  ipcMain.handle('agent-session-dismiss', (_e, sessionId) => {
+    agents.stop(sessionId);
+    return { ok: true };
+  });
+  ipcMain.handle('git-branch', (_e, rootPath) => git.currentBranch(rootPath));
+
+  // Native notifications for agent alerts (gated in agents.cjs). Clicking one
+  // brings the window up on that session; the renderer navigates.
+  const liveNotifications = new Set(); // keep a ref, or GC can drop the click
+  agents.onAlert((alert) => {
+    if (!Notification.isSupported()) return;
+    const site = findSite(alert.siteId);
+    const where = site ? ` · ${site.name}` : '';
+    const body = {
+      done: alert.title,
+      error: `Exited with an error — ${alert.title}`,
+      'needs-input': `Needs your input — ${alert.title}`,
+      bell: alert.title,
+    }[alert.kind];
+    const n = new Notification({
+      title: `${alert.agentName}${where}`,
+      body,
+      silent: settings.get('agents.notifications.sound') === 'none',
+    });
+    liveNotifications.add(n);
+    const drop = () => liveNotifications.delete(n);
+    n.on('close', drop);
+    n.on('click', () => {
+      drop();
+      if (win && !win.isDestroyed()) {
+        win.show();
+        win.focus();
+        win.webContents.send('agent-open-session', {
+          siteId: alert.siteId,
+          sessionId: alert.sessionId,
+        });
+      }
+    });
+    n.show();
+  });
+
+  // Unread bookkeeping needs to know what's actually on screen: the Session
+  // the Agents pane shows (renderer-reported) and whether the window is
+  // focused (observed here).
+  ipcMain.on('agent-view', (_e, sessionId) =>
+    agents.setView({ selected: sessionId || null })
+  );
+  // The Floating Workspace's active terminal while the panel is open.
+  ipcMain.on('agent-floating-view', (_e, sessionId) =>
+    agents.setView({ floating: sessionId || null })
+  );
+
+  // ⌘W inside the Floating Workspace closes its active tab, not the window.
+  // The default app menu owns ⌘W (Close Window → hide to tray) and a renderer
+  // keydown can't cancel a menu accelerator, so the chord is taken here,
+  // ahead of both — but only while the renderer reports focus in the panel.
+  let floatingFocused = false;
+  ipcMain.on('floating-focus', (_e, focused) => {
+    floatingFocused = !!focused;
+  });
+  if (win) {
+    win.webContents.on('before-input-event', (event, input) => {
+      if (!floatingFocused || input.type !== 'keyDown') return;
+      if (!input.meta || input.control || input.alt || input.shift) return;
+      if (String(input.key || '').toLowerCase() !== 'w') return;
+      event.preventDefault();
+      win.webContents.send('floating-shortcut', { key: 'w' });
+    });
+  }
+  ipcMain.handle('agent-session-mark', (_e, sessionId, read) => {
+    agents.markRead(sessionId, !!read);
+    return { ok: true };
+  });
+  if (win) {
+    agents.setView({ focused: win.isFocused() });
+    win.on('focus', () => agents.setView({ focused: true }));
+    win.on('blur', () => agents.setView({ focused: false }));
+    win.on('hide', () => agents.setView({ focused: false }));
+  }
+
   // Launch an Agent for a Site. Always spawns a NEW Session (many per Site are
   // allowed), returning its sessionId for the renderer to attach a terminal to.
   // `targetId` (optional) selects a saved Launch Target on the Site; without it
@@ -301,7 +714,10 @@ function registerHandlers(win, storeInstance) {
       target = (site.launchTargets || []).find((t) => t.id === targetId) || null;
       if (!target) return { error: 'Launch target not found' };
     }
-    return agents.launch({ site, agentId, target, globalArgs });
+    const res = agents.launch({ site, agentId, target, globalArgs });
+    // Launching is the common way a Site joins the working set.
+    if (res?.ok) addToProjects(siteId);
+    return res;
   });
 
   // ── Launch Presets (global, per-Agent) & Launch Targets (per-Site) ─────────
@@ -750,6 +1166,11 @@ function registerHandlers(win, storeInstance) {
 
       // Tear down any live share tunnel before removing the vhost/files.
       cloudflared.stopTunnel(id);
+      // A custom project icon lives outside the Site record; it goes too.
+      projectIcon.removeIconImages(
+        path.join(app.getPath('userData'), 'project-icons'),
+        id
+      );
 
       wordpress.removeWordPressSite(site, opts);
 
@@ -757,6 +1178,16 @@ function registerHandlers(win, storeInstance) {
         'sites',
         sites.filter((s) => s.id !== id)
       );
+      store.set(
+        agentProjects.STORE_KEY,
+        agentProjects.removeProject(store.get(agentProjects.STORE_KEY, []), id)
+      );
+      if (win && !win.isDestroyed()) {
+        win.webContents.send(
+          'agent-projects-update',
+          store.get(agentProjects.STORE_KEY, [])
+        );
+      }
       return { success: true };
     } catch (err) {
       return { success: false, error: humanize(err) };
@@ -2075,6 +2506,10 @@ function registerHandlers(win, storeInstance) {
   // holds this and re-reads it on 'settings-updated'.
   ipcMain.handle('settings-get-all', () => settings.read());
 
+  // { mode, active, workingCount } — the mode lives in settings; this adds
+  // whether a sleep assertion is actually held right now.
+  ipcMain.handle('keep-awake-status', () => keepAwake.getStatus());
+
   // Validated shallow patch. Always resolves — rejections come back on the
   // result so the UI can roll the control back and say why.
   ipcMain.handle('settings-set', (_e, patch) => {
@@ -2173,4 +2608,20 @@ function getSetting(key) {
   return settings ? settings.get(key) : undefined;
 }
 
-module.exports = { registerHandlers, startStatusPoller, getServiceStatus, getSetting };
+// Write a setting from the main process (the tray) through the same validated
+// path as the renderer's settings-set, so effects run and every open window
+// hears about it.
+function setSetting(key, value) {
+  if (!settings) return { ok: false };
+  const result = settings.write({ [key]: value });
+  broadcastSettings(result.settings);
+  return result;
+}
+
+module.exports = {
+  registerHandlers,
+  startStatusPoller,
+  getServiceStatus,
+  getSetting,
+  setSetting,
+};
