@@ -8,6 +8,7 @@ export default function MailSection() {
   const { settings } = useSettings();
   const { visible } = useSettingsContext();
   const [status, setStatus] = useState(null);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     window.electronAPI
@@ -18,8 +19,12 @@ export default function MailSection() {
 
   // Catching goes through the dedicated handler rather than a plain setting
   // write: it also has to bring Mailpit up so mail isn't black-holed.
+  // A failure leaves the setting as it was, so say why rather than have the
+  // toggle silently not move.
   async function toggleCatch(enabled) {
-    await window.electronAPI.setMailCatching(enabled);
+    setError(null);
+    const result = await window.electronAPI.setMailCatching(enabled);
+    if (!result?.success) setError(result?.error || 'Could not change mail catching.');
   }
 
   return (
@@ -41,6 +46,7 @@ export default function MailSection() {
           />
         </SettingsRow>
       </Card>
+      {error && <p className="text-[11px] text-destructive mt-1.5 px-1">{error}</p>}
       {status?.installed === false && (
         <p className="text-[11px] text-muted-foreground mt-1.5 px-1">
           Mailpit isn’t installed yet — install it from the Mail page to enable catching.

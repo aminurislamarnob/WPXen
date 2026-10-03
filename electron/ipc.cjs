@@ -2090,19 +2090,20 @@ function registerHandlers(win, storeInstance) {
 
   ipcMain.handle('set-mail-catching', async (_, enabled) => {
     try {
+      // Catching routes PHP mail() into Mailpit, so with the sink down mail
+      // would be black-holed: bring it up first, and if it won't come up (not
+      // installed, won't start) catching is never turned on.
+      if (enabled && !(await mailpit.isRunningAsync())) {
+        await mailpit.start();
+      }
       // Through the schema, not the store directly, so the Settings page and
       // the Mail page never disagree. The 'mail.catch' effect is what writes
-      // the sendmail_path override into each PHP version's conf.d.
+      // the sendmail_path override into each PHP version's conf.d; if it fails,
+      // the write is rolled back.
       const result = settings.write({ 'mail.catch': !!enabled });
+      broadcastSettings(result.settings);
       if (!result.ok) {
         return { success: false, error: result.rejected.map((r) => r.reason).join(', ') };
-      }
-      broadcastSettings(result.settings);
-      // Catching without the sink running would black-hole mail — bring it up.
-      if (enabled && !(await mailpit.isRunningAsync())) {
-        try {
-          await mailpit.start();
-        } catch {}
       }
       return { success: true };
     } catch (err) {
