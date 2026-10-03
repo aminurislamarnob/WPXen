@@ -1,6 +1,6 @@
 'use strict';
 
-const { execSync } = require('child_process');
+const { execSync, execFile, execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const brew = require('./brew.cjs');
@@ -29,26 +29,38 @@ function getNginxLogDir() {
   return logDir;
 }
 
+// Matches an nginx process's command line, and nothing that merely mentions
+// nginx. Once started, nginx retitles itself "nginx: master process …" /
+// "nginx: worker process" (on macOS the process *name* too, which is why a
+// plain `pgrep -x nginx` never matches); for the instant before that, argv[0]
+// is the nginx binary itself. Anchored at the start, so `tail -f
+// …/nginx/error.log`, `vim …/nginx.conf` or a shell whose command line
+// contains the word never count — they used to, and made WPXen refuse to
+// start nginx as "already running outside WPXen".
+const NGINX_PROCESS_RE = '^(nginx: (master|worker) process|([^ ]*/)?nginx( |$))';
+
+function isNginxCommand(commandLine) {
+  return new RegExp(NGINX_PROCESS_RE).test(String(commandLine || ''));
+}
+
+// pgrep is run directly, not through a shell: a `sh -c "pgrep …"` wrapper's
+// own command line would otherwise be there to match. pgrep skips itself.
 function isRunning() {
   try {
-    // `pgrep -x nginx` only matches when started by bare name; launchd /
-    // `brew services` launch nginx via absolute path, so fall back to a
-    // full-args match on the binary path or its rewritten master title.
-    execSync("pgrep -x nginx || pgrep -f '[/ ]nginx'", { stdio: 'pipe' });
+    execFileSync('pgrep', ['-f', NGINX_PROCESS_RE], { stdio: 'pipe' });
     return true;
   } catch {
     return false;
   }
 }
 
-// Non-blocking variant used by the status poller (see asyncExec.cjs).
-async function isRunningAsync() {
-  try {
-    await execAsync("pgrep -x nginx || pgrep -f '[/ ]nginx'", { timeout: 4000 });
-    return true;
-  } catch {
-    return false;
-  }
+// Non-blocking variant used by the status poller.
+function isRunningAsync() {
+  return new Promise((resolve) => {
+    execFile('pgrep', ['-f', NGINX_PROCESS_RE], { timeout: 4000 }, (err) =>
+      resolve(!err)
+    );
+  });
 }
 
 function getNginxBinPath() {
@@ -390,6 +402,7 @@ module.exports = {
   getServersDir,
   isRunning,
   isRunningAsync,
+  isNginxCommand,
   start,
   stop,
   restart,
