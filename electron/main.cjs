@@ -193,7 +193,6 @@ app.whenReady().then(() => {
   (async () => {
     const procman = require('./services/procman.cjs');
     const migration = require('./services/migration.cjs');
-    const brew = require('./services/brew.cjs');
     const nginx = require('./services/nginx.cjs');
     const phpService = require('./services/php.cjs');
     const mysql = require('./services/mysql.cjs');
@@ -217,13 +216,8 @@ app.whenReady().then(() => {
     ];
     const starters = [
       ['nginx', () => nginx.start()],
-      [
-        'php',
-        () => {
-          const activePhp = brew.getActivePhpVersion();
-          return activePhp ? phpService.startPhpFpm(activePhp) : null;
-        },
-      ],
+      // Every PHP version a Site uses (plus the active one), each its own FPM.
+      ['php', () => phpService.reconcilePhpFpm()],
       ['mysql', () => mysql.start()],
       ['mailpit', () => (mailpit.isInstalled() ? mailpit.start() : null)],
     ];
@@ -236,6 +230,14 @@ app.whenReady().then(() => {
         // others; procman surfaces the failure in the UI.
         console.error('auto-start:', err.message);
       }
+    }
+
+    // One-time: vhosts from the single-FPM era point PHP at 127.0.0.1:9000,
+    // which nothing serves any more — repoint each at its version's socket.
+    try {
+      await migration.migrateToPerSitePhp(store);
+    } catch (err) {
+      console.error('per-site PHP migration:', err.message);
     }
   })();
 

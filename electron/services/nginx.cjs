@@ -237,12 +237,15 @@ function generateSiteConfig(site) {
     throw new Error('Unsafe certificate path for nginx config');
   }
 
-  // Homebrew's php-fpm listens on TCP 127.0.0.1:9000 by default and does not
-  // create a unix socket. Use a per-version socket only when one actually
-  // exists; otherwise fall back to the TCP address so PHP requests resolve.
-  const socketPath = brew.getPhpFpmSocketPath(phpVersion);
-  const fastcgiPass =
-    socketPath && fs.existsSync(socketPath) ? `unix:${socketPath}` : '127.0.0.1:9000';
+  // Each PHP version has its own WPXen-run FPM on its own socket (php.cjs), so
+  // the vhost pins the Site to its version. The path is deterministic, so this
+  // is right even before that FPM has started. A Site with no recorded version
+  // predates per-site PHP and runs on the active one.
+  const fpmVersion = phpVersion || brew.getActivePhpVersion();
+  const socketPath = fpmVersion && phpService.fpmSocketPath(fpmVersion);
+  if (!socketPath) throw new Error('No PHP version to serve this site with');
+  if (/[\n\r\0;{}\s]/.test(socketPath)) throw new Error('Unsafe PHP-FPM socket path');
+  const fastcgiPass = `unix:${socketPath}`;
   const logDir = getNginxLogDir();
 
   // nginx rejects request bodies larger than client_max_body_size (default

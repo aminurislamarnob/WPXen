@@ -2,6 +2,7 @@
 
 const { execSync, execFileSync } = require('child_process');
 const fs = require('fs');
+const net = require('net');
 const brew = require('./brew.cjs');
 const execAsync = require('./asyncExec.cjs');
 const procman = require('./procman.cjs');
@@ -23,26 +24,26 @@ function installFormulaFor(version) {
     : `php@${version}`;
 }
 
-function getPhpBinPath(version) {
+// The keg that really is `version` — php@X, or the unversioned `php` formula
+// when that's the version it currently tracks. Never the linked `{prefix}/bin`
+// copy: that's whichever version is active, and with one FPM per version a
+// fallback to it would silently serve a site on the wrong PHP.
+function phpKegDir(version) {
   const prefix = brew.getBrewPrefix();
-  if (!prefix) return null;
-  // Specific version
-  const versionedPath = `${prefix}/opt/php@${version}/bin/php`;
-  if (fs.existsSync(versionedPath)) return versionedPath;
-  // Default (might match active version)
-  const defaultPath = `${prefix}/bin/php`;
-  if (fs.existsSync(defaultPath)) return defaultPath;
-  return null;
+  const formula = prefix && brew.phpFormulaForVersion(version);
+  return formula ? `${prefix}/opt/${formula}` : null;
+}
+
+function getPhpBinPath(version) {
+  const keg = phpKegDir(version);
+  const bin = keg && `${keg}/bin/php`;
+  return bin && fs.existsSync(bin) ? bin : null;
 }
 
 function getPhpFpmBinPath(version) {
-  const prefix = brew.getBrewPrefix();
-  if (!prefix) return null;
-  const versionedPath = `${prefix}/opt/php@${version}/sbin/php-fpm`;
-  if (fs.existsSync(versionedPath)) return versionedPath;
-  const defaultPath = `${prefix}/sbin/php-fpm`;
-  if (fs.existsSync(defaultPath)) return defaultPath;
-  return null;
+  const keg = phpKegDir(version);
+  const bin = keg && `${keg}/sbin/php-fpm`;
+  return bin && fs.existsSync(bin) ? bin : null;
 }
 
 function getBrewServiceName(version) {
@@ -53,32 +54,100 @@ function getBrewServiceName(version) {
   return brew.phpFormulaForVersion(version) || 'php';
 }
 
-// Match only the php-fpm master that WPXen manages — its config lives under
-// the Homebrew prefix ({prefix}/etc/php/...). This deliberately excludes other
-// php-fpm processes on the machine (e.g. Laravel Herd's, whose config is under
-// ~/Library/Application Support/Herd), so the status and Stop button reflect
-// what WPXen actually controls.
-function phpFpmPgrepPattern() {
-  const prefix = brew.getBrewPrefix();
-  return prefix ? `php-fpm: master.*${prefix}/etc/php` : null;
+// ─── PHP-FPM: one supervised child per version ─────────────────────────────
+//
+// Each PHP version a Site uses runs its own php-fpm, supervised by procman in
+// slot `php@<version>`, listening on its own unix socket that the Site's vhost
+// points at. WPXen writes its own FPM config per version rather than using
+// Homebrew's php-fpm.conf, whose www pool binds 127.0.0.1:9000 for *every*
+// version — that shared port is why per-site PHP used to have no effect, and
+// why a user's own `brew services start php` used to collide with ours.
+//
+// php.ini and conf.d still load (they're per-keg, not per-FPM-config), so
+// zz-wpxen.ini and the Mailpit sendmail_path override keep applying.
+
+// Names that carry the app's name outside its bundle (see CLAUDE.md, "Legacy
+// names") — a future rename has to find and migrate these.
+const FPM_CONFIG_NAME = 'wpxen-fpm.conf'; // {prefix}/etc/php/<version>/
+const FPM_RUN_DIR = 'wpxen'; // {prefix}/var/run/<dir>/ — sockets
+const FPM_POOL_PREFIX = 'wpxen'; // [wpxen-<version>] pool name
+
+// The procman slot of the single-FPM era. Only ever stopped now.
+const LEGACY_FPM_SLOT = 'php';
+
+function fpmSlot(version) {
+  return `php@${version}`;
 }
 
-function isPhpFpmRunning(_version) {
-  const pattern = phpFpmPgrepPattern();
+function fpmConfigPath(version, prefix = brew.getBrewPrefix()) {
+  return prefix ? `${prefix}/etc/php/${version}/${FPM_CONFIG_NAME}` : null;
+}
+
+// Where `version`'s FPM listens — deterministic, so nginx can point a vhost at
+// it before the FPM is up. Under the Homebrew prefix, not userData:
+// "Application Support" has a space, which `fastcgi_pass unix:…` can't take.
+function fpmSocketPath(version, prefix = brew.getBrewPrefix()) {
+  return prefix ? `${prefix}/var/run/${FPM_RUN_DIR}/php${version}.sock` : null;
+}
+
+// The FPM config WPXen runs `version` with. Pure, so it's testable. Pool
+// sizing matches Homebrew's www.conf; the log stays where FPM writes it by
+// default, which is what the Logs page reads.
+function buildFpmConfig({ version, prefix }) {
+  return [
+    '; Managed by WPXen — rewritten every time this PHP version starts.',
+    '; Edit PHP settings from the app; changes here are overwritten.',
+    '',
+    '[global]',
+    `pid = ${prefix}/var/run/${FPM_RUN_DIR}/php${version}-fpm.pid`,
+    `error_log = ${prefix}/var/log/php-fpm.log`,
+    'daemonize = no',
+    '',
+    `[${FPM_POOL_PREFIX}-${version}]`,
+    `listen = ${fpmSocketPath(version, prefix)}`,
+    'listen.mode = 0660',
+    'pm = dynamic',
+    'pm.max_children = 5',
+    'pm.start_servers = 2',
+    'pm.min_spare_servers = 1',
+    'pm.max_spare_servers = 3',
+    '',
+  ].join('\n');
+}
+
+function writeFpmConfig(version) {
+  const prefix = brew.getBrewPrefix();
+  if (!prefix) throw new Error('Homebrew not found');
+  fs.mkdirSync(`${prefix}/var/run/${FPM_RUN_DIR}`, { recursive: true });
+  fs.writeFileSync(fpmConfigPath(version, prefix), buildFpmConfig({ version, prefix }));
+}
+
+// Matches WPXen's php-fpm master for one version (or any version), by the
+// config path it was started with — so Herd's or a user's own brew-services
+// php-fpm never reads as ours.
+function fpmMasterPattern(version) {
+  const prefix = brew.getBrewPrefix();
+  if (!prefix) return null;
+  const v = version ? version.replace('.', '\\.') : '[0-9.]+';
+  return `php-fpm: master.*${prefix}/etc/php/${v}/${FPM_CONFIG_NAME}`;
+}
+
+function isPhpFpmRunning(version) {
+  const pattern = fpmMasterPattern(version);
   if (!pattern) return false;
   try {
-    const out = execFileSync('pgrep', ['-f', pattern], { stdio: 'pipe' })
-      .toString()
-      .trim();
-    return out.length > 0;
+    return (
+      execFileSync('pgrep', ['-f', pattern], { stdio: 'pipe' }).toString().trim() !== ''
+    );
   } catch {
     return false;
   }
 }
 
-// Non-blocking variant used by the status poller (see asyncExec.cjs).
-async function isPhpFpmRunningAsync(_version) {
-  const pattern = phpFpmPgrepPattern();
+// Non-blocking variant used by the status poller (see asyncExec.cjs). With no
+// version: is any of WPXen's FPMs up.
+async function isPhpFpmRunningAsync(version) {
+  const pattern = fpmMasterPattern(version);
   if (!pattern) return false;
   try {
     await execAsync(`pgrep -f ${JSON.stringify(pattern)}`, { timeout: 4000 });
@@ -88,79 +157,58 @@ async function isPhpFpmRunningAsync(_version) {
   }
 }
 
-// The php-fpm masters in `psOutput` (`ps -axo pid=,ppid=,command=`) that run
-// under the Homebrew prefix and are NOT children of `ownPid`. Our own child is
-// never "outside WPXen" — counting it as a conflict refuses to start PHP at all.
-function foreignFpmMasters(psOutput, ownPid, prefix) {
-  const needle = `${prefix}/etc/php`;
-  return psOutput
-    .split('\n')
-    .map((line) => line.trim().match(/^(\d+)\s+(\d+)\s+(.*)$/))
-    .filter(
-      (m) =>
-        m &&
-        Number(m[2]) !== ownPid &&
-        m[3].startsWith('php-fpm: master') &&
-        m[3].includes(needle)
-    )
-    .map((m) => Number(m[1]));
+// Ready once the socket accepts a connection — the thing nginx needs.
+function socketAccepts(socketPath) {
+  return new Promise((resolve) => {
+    const conn = net.connect(socketPath);
+    const done = (ok) => {
+      conn.destroy();
+      resolve(ok);
+    };
+    conn.once('connect', () => done(true));
+    conn.once('error', () => done(false));
+    conn.setTimeout(1000, () => done(false));
+  });
 }
 
-async function isForeignPhpFpmRunningAsync() {
-  const prefix = brew.getBrewPrefix();
-  if (!prefix) return false;
-  try {
-    const { stdout } = await execAsync('ps -axo pid=,ppid=,command=', { timeout: 4000 });
-    return foreignFpmMasters(stdout, process.pid, prefix).length > 0;
-  } catch {
-    return false;
-  }
-}
-
-// php-fpm runs as a single supervised child of WPXen (registry slot 'php',
-// see procman.cjs) — one version at a time, matching today's behavior: every
-// version's pool listens on 127.0.0.1:9000, so two can't coexist anyway.
 function buildFpmSpec(version) {
   const bin = getPhpFpmBinPath(version);
   if (!bin) throw new Error(`PHP ${version} is not installed`);
   const prefix = brew.getBrewPrefix();
+  const socket = fpmSocketPath(version, prefix);
   return {
-    name: 'php',
+    name: fpmSlot(version),
     bin,
-    // Explicit --fpm-config: the unversioned `php` keg's compiled-in default
-    // doesn't always match the etc/php/<version> layout brew services used.
-    args: ['--nodaemonize', '--fpm-config', `${prefix}/etc/php/${version}/php-fpm.conf`],
+    args: ['--nodaemonize', '--fpm-config', fpmConfigPath(version, prefix)],
     cwd: `${prefix}/var`,
     stopSignal: 'SIGQUIT', // graceful: workers finish in-flight requests
     stopTimeoutMs: 10_000,
     meta: { version },
-    // A SIGKILLed master orphans its pool workers (reparented to launchd),
-    // which keep 127.0.0.1:9000 bound — sweep them before every (re)spawn.
     preSpawn: async () => {
+      // Our config, current every start (it carries the socket path).
+      writeFpmConfig(version);
+      // A SIGKILLed master orphans its pool workers (reparented to launchd);
+      // sweep this version's, then drop a stale socket so the bind succeeds.
+      const pool = `php-fpm: pool ${FPM_POOL_PREFIX}-${version}`;
       try {
         await execAsync(
-          `ps -axo pid=,ppid=,command= | awk '$2==1 && $0 ~ /php-fpm: pool/ {print $1}' | xargs kill -9`,
+          `ps -axo pid=,ppid=,command= | awk '$2==1 && index($0, ${JSON.stringify(pool)}) {print $1}' | xargs kill -9`,
           { timeout: 4000 }
         );
       } catch {}
+      try {
+        fs.rmSync(socket, { force: true });
+      } catch {}
     },
-    readyProbe: () => isPhpFpmRunningAsync(),
+    readyProbe: () => socketAccepts(socket),
     readyTimeoutMs: 10_000,
-    // A pre-migration launchd instance may still hold :9000 — clear it. Only
-    // masters we didn't spawn count; the ready probe above must see ours.
-    conflictProbe: () => isForeignPhpFpmRunningAsync(),
-    takeover: async () => {
-      for (const v of brew.getInstalledPhpVersions()) {
-        try {
-          brew.stopBrewService(getBrewServiceName(v));
-        } catch {}
-      }
-    },
   };
 }
 
 // Seams for tests — vi.mock can't reach CJS modules (see browser.cjs).
 let overrides = {};
+// Sites, for reconcile. ipc.cjs registers the store; php.cjs stays store-free.
+let sitesProvider = () => [];
 
 const deps = {
   get procman() {
@@ -177,53 +225,131 @@ const deps = {
       ? overrides.activePhpVersion
       : () => brew.getActivePhpVersion();
   },
+  get installedVersions() {
+    return 'installedVersions' in overrides
+      ? overrides.installedVersions
+      : () => brew.getInstalledPhpVersions();
+  },
+  get sites() {
+    return 'sites' in overrides ? overrides.sites : sitesProvider;
+  },
 };
 
 function __setDeps(next) {
   overrides = { ...overrides, ...next };
 }
 
-// The version the supervised FPM child is currently running, or null.
-function getRunningFpmVersion() {
-  const st = deps.procman.status('php');
-  if (st.state === 'running' || st.state === 'starting') {
-    return st.meta?.version ?? null;
-  }
-  return null;
+function setSitesProvider(fn) {
+  sitesProvider = typeof fn === 'function' ? fn : () => [];
 }
 
-// Swaps the FPM child to `version`. If the new version won't start, the one
-// that was serving is put back before the error propagates — a failed swap
-// must never leave every site on a 502.
-async function startPhpFpm(version) {
-  const previous = getRunningFpmVersion();
-  if (!previous || previous === version) {
-    return deps.procman.start(deps.fpmSpec(version));
-  }
-  await deps.procman.stop('php');
-  try {
-    return await deps.procman.start(deps.fpmSpec(version));
-  } catch (err) {
-    // `previous` was serving sites a moment ago next to whatever else is
-    // running, so the foreign-FPM check that may have refused `version` must
-    // not refuse the rollback too — that is exactly how sites end up down.
-    try {
-      await deps.procman.start({ ...deps.fpmSpec(previous), conflictProbe: undefined });
-    } catch {}
-    throw err;
-  }
+function isUp(version) {
+  const { state } = deps.procman.status(fpmSlot(version));
+  return state === 'running' || state === 'starting';
 }
 
-// Makes `version` the active PHP: the CLI link, and FPM if it's running.
-// All-or-nothing — if FPM can't move, the CLI link goes back too, so the
-// version the app reports as active is always the one serving sites.
+// The versions whose FPM is up (or coming up), in installed order.
+function getRunningFpmVersions() {
+  return deps.installedVersions().filter(isUp);
+}
+
+// The PHP-FPM service as the UI sees it: one logical service made of a
+// supervised child per version. `state` is the most urgent of the versions'
+// (a failed one first, so its error surfaces), and `versions` lists the ones
+// up or coming up. Versions never started this session are left out.
+function getFpmStatus() {
+  const entries = deps.installedVersions().map((version) => {
+    const st = deps.procman.status(fpmSlot(version));
+    return { version, state: st.state, error: st.error || null };
+  });
+  const by = (state) => entries.filter((e) => e.state === state);
+  const failed = by('failed');
+  const state = failed.length
+    ? 'failed'
+    : by('running').length
+      ? 'running'
+      : by('starting').length
+        ? 'starting'
+        : 'stopped';
+  return {
+    state,
+    error: failed.length ? `PHP ${failed[0].version}: ${failed[0].error}` : null,
+    managed: entries.some((e) => deps.procman.isSupervised(fpmSlot(e.version))),
+    versions: entries
+      .filter((e) => e.state === 'running' || e.state === 'starting')
+      .map((e) => e.version),
+  };
+}
+
+// Which versions should be running: every installed version a Site uses, plus
+// the active one (phpMyAdmin runs on it). Pure.
+function neededPhpVersions(sites, activeVersion, installed) {
+  const have = new Set(installed);
+  const wanted = new Set(
+    (sites || []).map((s) => s && s.phpVersion).filter((v) => v && have.has(v))
+  );
+  if (activeVersion && have.has(activeVersion)) wanted.add(activeVersion);
+  return installed.filter((v) => wanted.has(v));
+}
+
+function startPhpFpm(version) {
+  return deps.procman.start(deps.fpmSpec(version));
+}
+
+// Starts `version`'s FPM unless it's already up — for flows that point a vhost
+// at a version and need it serving now, not after the next reconcile.
+async function ensurePhpFpm(version) {
+  if (version && !isUp(version)) await startPhpFpm(version);
+}
+
+function stopPhpFpm(version) {
+  return deps.procman.stop(fpmSlot(version));
+}
+
+async function stopAllPhpFpm() {
+  await Promise.all([
+    ...deps.installedVersions().map(stopPhpFpm),
+    deps.procman.stop(LEGACY_FPM_SLOT),
+  ]);
+}
+
+// Brings the running set in line with neededPhpVersions: starts what's
+// missing, stops what no Site (and not phpMyAdmin) uses. A version that fails
+// to start doesn't stop the others; its error is collected and returned.
+// Serialized — two overlapping reconciles would race on the same slots.
+let reconcileChain = Promise.resolve();
+function reconcilePhpFpm() {
+  const run = async () => {
+    const installed = deps.installedVersions();
+    const needed = neededPhpVersions(deps.sites(), deps.activePhpVersion(), installed);
+    const errors = [];
+    for (const v of needed) {
+      if (isUp(v)) continue;
+      try {
+        await startPhpFpm(v);
+      } catch (err) {
+        errors.push({ version: v, error: err.message });
+      }
+    }
+    for (const v of installed) {
+      if (!needed.includes(v) && isUp(v)) await stopPhpFpm(v);
+    }
+    return { needed, errors };
+  };
+  const result = reconcileChain.then(run, run);
+  reconcileChain = result.catch(() => {});
+  return result;
+}
+
+// Makes `version` the active PHP: the CLI `php` link and the FPM phpMyAdmin
+// runs on. It never moves a Site — each keeps its own version — and nothing
+// is stopped first, so sites stay up whatever happens. If the new version's
+// FPM won't start, the CLI link goes back so "active" stays truthful.
 async function switchPhpVersion(version) {
   const previousLink = deps.activePhpVersion();
   deps.linkPhp(version);
-  const running = getRunningFpmVersion();
-  if (!running || running === version) return;
   try {
-    await startPhpFpm(version);
+    if (!isUp(version)) await startPhpFpm(version);
   } catch (err) {
     if (previousLink && previousLink !== version) {
       try {
@@ -232,15 +358,8 @@ async function switchPhpVersion(version) {
     }
     throw err;
   }
-}
-
-// Version argument kept for API compatibility; only one FPM child exists.
-function stopPhpFpm(_version) {
-  return procman.stop('php');
-}
-
-function stopAllPhpFpm() {
-  return procman.stop('php');
+  // The old active version may no longer be needed by any Site.
+  await reconcilePhpFpm();
 }
 
 function getPhpVersion(version) {
@@ -273,17 +392,13 @@ function getInstalledPhpVersionsWithDetails() {
   const versions = brew.getInstalledPhpVersions();
   const activeVersion = brew.getActivePhpVersion();
 
-  return versions.map((v) => {
-    const fullVersion = getPhpVersion(v);
-    const running = isPhpFpmRunning(v);
-    return {
-      version: v,
-      fullVersion: fullVersion || v,
-      active: v === activeVersion,
-      running,
-      socketPath: brew.getPhpFpmSocketPath(v),
-    };
-  });
+  return versions.map((v) => ({
+    version: v,
+    fullVersion: getPhpVersion(v) || v,
+    active: v === activeVersion,
+    running: isUp(v),
+    socketPath: fpmSocketPath(v),
+  }));
 }
 
 // Non-blocking variant used by the get-php-versions IPC handler. Probes every
@@ -292,9 +407,8 @@ function getInstalledPhpVersionsWithDetails() {
 async function getInstalledPhpVersionsWithDetailsAsync() {
   const prefix = brew.getBrewPrefix();
   const versions = brew.getInstalledPhpVersions();
-  const [activeVersion, running, outdated] = await Promise.all([
+  const [activeVersion, outdated] = await Promise.all([
     brew.getActivePhpVersionAsync(),
-    isPhpFpmRunningAsync(),
     brew.getOutdatedFormulae(),
   ]);
 
@@ -308,11 +422,10 @@ async function getInstalledPhpVersionsWithDetailsAsync() {
       version: v,
       fullVersion: fullVersions[i] || v,
       active: v === activeVersion,
-      // isPhpFpmRunning isn't version-specific (matches any "php-fpm: master"),
-      // so the single probe result applies to whichever version is active.
-      running,
+      // Each version has its own supervised FPM, so this is per version.
+      running: isUp(v),
       outdated: outdated.has(formula),
-      socketPath: brew.getPhpFpmSocketPath(v),
+      socketPath: fpmSocketPath(v),
     };
   });
 }
@@ -711,14 +824,14 @@ function writeManagedIni(version, values) {
   removeLegacyManagedIni(version);
 }
 
-// Reloads the supervised FPM child only if it's currently running *this*
-// version, so a config change takes effect without spuriously starting a
-// stopped service. SIGUSR2 is php-fpm's graceful reload: workers respawn and
-// re-read php.ini/conf.d with zero dropped requests.
+// Reloads `version`'s FPM only if it's running, so a config change takes
+// effect without spuriously starting a stopped service. SIGUSR2 is php-fpm's
+// graceful reload: workers respawn and re-read php.ini/conf.d with zero
+// dropped requests.
 function reloadPhpFpmIfRunning(version) {
   try {
-    if (getRunningFpmVersion() === version && procman.isSupervised('php')) {
-      procman.signal('php', 'SIGUSR2');
+    if (isUp(version) && procman.isSupervised(fpmSlot(version))) {
+      procman.signal(fpmSlot(version), 'SIGUSR2');
     }
   } catch {}
 }
@@ -769,7 +882,15 @@ module.exports = {
   startPhpFpm,
   stopPhpFpm,
   stopAllPhpFpm,
-  getRunningFpmVersion,
+  getRunningFpmVersions,
+  getFpmStatus,
+  reconcilePhpFpm,
+  ensurePhpFpm,
+  neededPhpVersions,
+  setSitesProvider,
+  fpmSocketPath,
+  buildFpmConfig,
+  phpKegDir,
   getInstalledPhpVersionsWithDetails,
   getInstalledPhpVersionsWithDetailsAsync,
   getInstallablePhpVersions,
@@ -777,7 +898,6 @@ module.exports = {
   updatePhpVersion,
   switchActivePhpVersion,
   switchPhpVersion,
-  foreignFpmMasters,
   getBrewServiceName,
   getPhpIniSettings,
   reloadPhpFpmIfRunning,

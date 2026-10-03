@@ -293,6 +293,11 @@ export default function PHPVersions() {
               />
             ))}
           </Card>
+          <p className="text-[11px] text-muted-foreground mt-1.5 px-1">
+            Each site runs on its own PHP version (Sites → PHP). The active version is the
+            CLI <span className="font-mono">php</span> and what phpMyAdmin runs on;
+            switching it never changes a site.
+          </p>
         </>
       )}
 

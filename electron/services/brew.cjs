@@ -218,21 +218,6 @@ async function getOutdatedFormulae() {
   }
 }
 
-function getPhpFpmSocketPath(version) {
-  const prefix = getBrewPrefix();
-  if (!prefix) return null;
-  // Homebrew PHP-FPM sockets
-  const candidates = [
-    `${prefix}/var/run/php/php${version}-fpm.sock`,
-    `/tmp/php${version}-fpm.sock`,
-  ];
-  for (const p of candidates) {
-    if (fs.existsSync(p)) return p;
-  }
-  // Return the expected path even if not running yet
-  return `${prefix}/var/run/php/php${version}-fpm.sock`;
-}
-
 function isNginxInstalled() {
   return isPackageInstalled('nginx');
 }
@@ -459,7 +444,6 @@ module.exports = {
   getOutdatedFormulae,
   getActivePhpVersion,
   getActivePhpVersionAsync,
-  getPhpFpmSocketPath,
   isNginxInstalled,
   isMysqlInstalled,
   isDnsmasqInstalled,
