@@ -540,3 +540,37 @@ browser-tab switch is the case that matters. File separately.
   `page.emulateMedia({ colorScheme: null })` or every screenshot is wrong-themed.
 - Playwright's `page.screenshot` can omit a `<webview>` guest that is visibly
   painted on screen; use `webContents.capturePage()` on the guest instead.
+
+---
+
+## I. Run 4 — PHP switching and Mailpit (2026-10-03, `chore/electron-43-upgrade` @ `36173ff`)
+
+Mailpit and PHP 8.4 were installed **through the app's own installers** to
+unblock C5 and C8, which also exercised both install flows on Electron 43.
+
+| ID       |       | Note                                                                                                                                                                                                                                                                          |
+| -------- | ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| installs | ✅    | `installMailpit` (9 s) and `installPhpVersion('8.4')` (26 s, 8.4.26) succeed with progress streamed on `mailpit-install-progress` / `php-install-progress`                                                                                                                    |
+| C5       | ⚠️ ✅ | Global switch 8.5 ⇄ 8.4: FPM restarts on the new version, sites answer `X-Powered-By: PHP/8.4.26` / `8.5.11`; 7 of 7 repeat switches clean (3.5 s). **One earlier failure — see below**                                                                                       |
+| C8       | ✅    | Catching on → Mailpit runs as an app child, `sendmail_path` override written to **both** versions' conf.d; raw `mail()`, CLI `wp_mail` and an FPM-served lost-password mail all captured; Mail page lists and reads them; catching off → overrides removed from every version |
+
+### The one failed switch (not attributed to the upgrade)
+
+The **first** global switch after `brew install php@8.4` failed with
+`php is already running outside WPXen`, and left **no** FPM running — every
+site 502 until PHP was started from Services. `switch-php-version` stops the
+8.5 child, then `procman.start` runs the `conflictProbe` (`pgrep` for any
+`php-fpm: master`) and, after a no-op `takeover` and 2 s, gives up. It did not
+reproduce in 8 further switches, and the code path is `procman` + `pgrep` with
+no Electron API, so it isn't attributed to the upgrade — but its failure mode
+(PHP left stopped rather than left on the old version) is worth fixing
+separately.
+
+### Also seen, not upgrade-related
+
+- **Per-site PHP version has no effect here.** The vhost uses a per-version
+  unix socket only if one exists; brew's pools all `listen = 127.0.0.1:9000`, so
+  every site is served by whichever FPM holds :9000 — i.e. the global version.
+  `getPhpVersions` also reports every installed version as `running`.
+- kawaii's active Brevo plugin (`mailin`) replaces `wp_mail`, so its mail never
+  reaches `mail()` or Mailpit — expected, but surprising when testing there.
