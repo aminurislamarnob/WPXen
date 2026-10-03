@@ -1,14 +1,20 @@
 import { sanitizeUrl } from './sanitizeUrl';
 
-// Renderer-side <webview> cache — the same "hide, don't destroy" pattern as
+// Renderer-side <webview> cache — the same "hide, don't destroy" idea as
 // src/lib/terminal/sessionCache.js. Each browser tab's <webview> is created
-// once and re-parented across React mount/unmount instead of being torn down,
-// so switching to a file tab and back keeps the page, its scroll position, its
-// JS state and its login session rather than reloading from scratch.
+// once and kept alive across React mount/unmount, so switching to a file tab
+// and back keeps the page, its scroll position, its JS state and its login
+// session rather than reloading from scratch.
+//
+// The element is inserted into the document exactly once, into a fixed layer
+// at the end of <body>, and never moved: re-parenting a <webview> — moving it
+// to another parent in the DOM — tears its guest down and loads the page
+// again (verified on Electron 28 and 43), which is what this cache exists to
+// avoid. Instead the pane gives us a placeholder element, and the webview is
+// positioned over it with CSS; leaving a tab only hides it.
 //
 // The main process (electron/services/browser.cjs) never owns the element; it
-// only holds the guest's webContentsId, which the renderer re-registers on
-// every dom-ready because reparenting mints a new one.
+// only holds the guest's webContentsId, registered on dom-ready.
 
 const cache = new Map(); // tabKey -> entry
 
@@ -18,25 +24,77 @@ const cache = new Map(); // tabKey -> entry
 // electron/services/browser.cjs, which is what "clear browsing data" wipes.
 export const PARTITION = 'persist:wpxen-browser';
 
-let hiddenContainer = null;
-
-// Parked webviews live here: off-screen but still in the document, because
-// detaching from the DOM entirely destroys the guest.
-function getHiddenContainer() {
-  if (!hiddenContainer) {
-    hiddenContainer = document.createElement('div');
-    Object.assign(hiddenContainer.style, {
+// Holds every webview. z-index 0 at the end of <body>: above the page content
+// it sits over, below every menu, popover, tooltip and dialog (all z-50 and
+// up). Pointer events pass through the layer itself; each visible webview
+// takes them back.
+let layer = null;
+function getLayer() {
+  if (!layer) {
+    layer = document.createElement('div');
+    Object.assign(layer.style, {
       position: 'fixed',
-      left: '-10000px',
-      top: '-10000px',
-      width: '1024px',
-      height: '768px',
+      inset: '0',
+      zIndex: '0',
       overflow: 'hidden',
       pointerEvents: 'none',
     });
-    document.body.appendChild(hiddenContainer);
+    document.body.appendChild(layer);
   }
-  return hiddenContainer;
+  return layer;
+}
+
+// While a panel divider is being dragged, every webview lets the pointer
+// through (see setDragPassthrough).
+let dragPassthrough = false;
+
+// Show `entry` only while it has a live, sized placeholder and nothing in the
+// pane (error / blank overlay) is covering it.
+function applyVisibility(entry) {
+  const shown = !!entry.placeholder && !entry.covered && entry.hasArea;
+  entry.webview.style.visibility = shown ? 'visible' : 'hidden';
+  entry.webview.style.pointerEvents = shown && !dragPassthrough ? 'auto' : 'none';
+}
+
+// Keeps each attached webview on top of its placeholder. One rAF loop for all
+// of them, running only while something is attached: layout can move a pane
+// without resizing it (a sidebar collapsing), so a ResizeObserver alone
+// wouldn't see every change.
+let frame = null;
+function track() {
+  frame = null;
+  let attached = 0;
+  for (const entry of cache.values()) {
+    if (!entry.placeholder) continue;
+    attached++;
+    const el = entry.placeholder;
+    const r = el.isConnected ? el.getBoundingClientRect() : null;
+    const hasArea = !!r && r.width > 0 && r.height > 0;
+    if (
+      r &&
+      (r.left !== entry.rect?.left ||
+        r.top !== entry.rect?.top ||
+        r.width !== entry.rect?.width ||
+        r.height !== entry.rect?.height)
+    ) {
+      entry.rect = { left: r.left, top: r.top, width: r.width, height: r.height };
+      Object.assign(entry.webview.style, {
+        left: `${r.left}px`,
+        top: `${r.top}px`,
+        width: `${r.width}px`,
+        height: `${r.height}px`,
+      });
+    }
+    if (hasArea !== entry.hasArea) {
+      entry.hasArea = hasArea;
+      applyVisibility(entry);
+    }
+  }
+  if (attached > 0) frame = requestAnimationFrame(track);
+}
+
+function startTracking() {
+  if (frame === null) frame = requestAnimationFrame(track);
 }
 
 // handlers = { onState, onNewTab } — replaced on every mount so the cached
@@ -72,18 +130,28 @@ function createEntry(tabKey, initialUrl, handlers) {
   // attribute is still needed for setWindowOpenHandler to see them at all.
   webview.setAttribute('allowpopups', '');
   Object.assign(webview.style, {
+    position: 'absolute',
+    left: '0px',
+    top: '0px',
+    width: '1024px',
+    height: '768px',
     display: 'flex',
-    flex: '1',
-    width: '100%',
-    height: '100%',
     border: 'none',
+    visibility: 'hidden',
+    pointerEvents: 'none',
   });
   entry.webview = webview;
+  entry.placeholder = null;
+  entry.covered = false;
+  entry.hasArea = false;
+  entry.rect = null;
+  // Into the document once, for good — never moved again (see top of file).
+  getLayer().appendChild(webview);
 
   const state = (patch) => entry.handlers.onState?.(patch);
 
-  // The guest's webContentsId changes when the element is reparented, so
-  // re-register whenever it differs from what the main process last saw.
+  // Register the guest with the main process. dom-ready fires again on every
+  // navigation; only a different webContentsId needs re-registering.
   const onDomReady = () => {
     const id = webview.getWebContentsId();
     if (entry.registeredId === id) return;
@@ -174,28 +242,42 @@ function createEntry(tabKey, initialUrl, handlers) {
 // would otherwise stick the moment the pointer crossed onto a loaded page.
 // Called from ResizeHandle's onDragging.
 export function setDragPassthrough(passthrough) {
-  for (const entry of cache.values()) {
-    entry.webview.style.pointerEvents = passthrough ? 'none' : '';
-  }
+  dragPassthrough = passthrough;
+  for (const entry of cache.values()) applyVisibility(entry);
 }
 
-// Move the cached webview into a live container, starting its first load if it
-// hasn't run yet. The element has to be in the document before `src` is
-// assigned, so this is the earliest the load can begin.
-export function attach(tabKey, container) {
+// Show the cached webview over `placeholder` (the pane's viewport element),
+// starting its first load if it hasn't run yet. The webview is already in the
+// document, so `src` can be assigned now.
+export function attach(tabKey, placeholder) {
   const entry = cache.get(tabKey);
-  if (!entry || !container) return;
-  container.appendChild(entry.webview);
+  if (!entry || !placeholder) return;
+  entry.placeholder = placeholder;
+  entry.rect = null; // force a reposition on the next frame
+  entry.hasArea = false;
+  applyVisibility(entry);
+  startTracking();
   if (!entry.started) {
     entry.started = true;
     entry.webview.src = entry.pendingUrl;
   }
 }
 
-// Park on tab switch — the guest and its page stay alive in the cache.
+// Hide on tab switch — the guest and its page stay alive, in place.
 export function detach(tabKey) {
   const entry = cache.get(tabKey);
-  if (entry) getHiddenContainer().appendChild(entry.webview);
+  if (!entry) return;
+  entry.placeholder = null;
+  applyVisibility(entry);
+}
+
+// The pane draws its own overlay (load error, blank tab) over the page area;
+// the webview sits on a layer above the pane, so it steps aside meanwhile.
+export function setCovered(tabKey, covered) {
+  const entry = cache.get(tabKey);
+  if (!entry || entry.covered === !!covered) return;
+  entry.covered = !!covered;
+  applyVisibility(entry);
 }
 
 export function navigate(tabKey, url) {

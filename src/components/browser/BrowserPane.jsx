@@ -6,10 +6,11 @@ import BrowserToolbar from './BrowserToolbar';
 import BrowserErrorOverlay from './BrowserErrorOverlay';
 
 // One browser tab's chrome + viewport. The <webview> itself is not rendered by
-// React: webviewCache owns it and re-parents it into `containerRef` on mount,
-// parking it off-screen on unmount so the page survives a tab switch. That's
-// why this component can be unmounted freely whenever another editor tab is
-// active — see src/lib/browser/webviewCache.js.
+// React: webviewCache owns it, keeps it in one place in the document, and
+// positions it over `containerRef` while this pane is mounted, hiding it on
+// unmount — so the page survives a tab switch. That's why this component can
+// be unmounted freely whenever another editor tab is active — see
+// src/lib/browser/webviewCache.js.
 export default function BrowserPane({
   tabKey,
   initialUrl,
@@ -50,6 +51,14 @@ export default function BrowserPane({
   const goForward = useCallback(() => webviewCache.goForward(tabKey), [tabKey]);
 
   const isBlank = !state.url || state.url === 'about:blank';
+  const showError = !!state.error && !state.loading;
+  const showBlank = isBlank && !state.loading && !state.error;
+
+  // The webview sits on a layer above this pane, so it steps aside while one
+  // of the overlays below covers the page area.
+  useEffect(() => {
+    webviewCache.setCovered(tabKey, showError || showBlank);
+  }, [tabKey, showError, showBlank]);
 
   return (
     <>
@@ -91,10 +100,8 @@ export default function BrowserPane({
 
       <div className="relative flex-1 min-h-0 flex bg-background">
         <div ref={containerRef} className="flex-1 flex min-w-0" />
-        {state.error && !state.loading && (
-          <BrowserErrorOverlay error={state.error} onRetry={reload} />
-        )}
-        {isBlank && !state.loading && !state.error && (
+        {showError && <BrowserErrorOverlay error={state.error} onRetry={reload} />}
+        {showBlank && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-background pointer-events-none">
             <Globe size={36} className="text-muted-foreground/40" strokeWidth={1.5} />
             <div className="text-center">
