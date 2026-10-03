@@ -217,14 +217,21 @@ the main process (`services/browser.cjs`) only holds the guest's
 `webContentsId` and attaches what a renderer can't — window-open policy,
 DevTools, native context menus, key interception.
 
-- **Hide, don't destroy.** Each tab's `<webview>` is created once and
-  re-parented across React mount/unmount into an off-screen container, so
-  switching away and back keeps the page, scroll position, JS state and login.
-  Detaching from the DOM entirely would destroy the guest. Same pattern as
-  `src/lib/terminal/sessionCache.js`.
-- Re-parenting **mints a new `webContentsId`**, so the renderer re-registers on
-  every `dom-ready` and `register()` is deliberately idempotent — it tears the
-  previous guest's listeners down rather than stacking a second set.
+- **Hide, don't destroy — and never move.** Each tab's `<webview>` is inserted
+  into the document **once**, into a fixed layer at the end of `<body>`, and
+  stays there. The pane renders a placeholder; the cache positions the webview
+  over it with CSS (one rAF loop tracks the placeholder's rect) and hides it
+  on unmount, so switching away and back keeps the page, scroll position, JS
+  state and login. ⚠️ **Re-parenting a `<webview>` (moving it to another
+  parent) reloads the guest** — verified on Electron 28 and 43 — so never
+  `appendChild` it anywhere else; removing it destroys it.
+- The layer is `z-index: 0`, so every menu, popover, tooltip and dialog
+  (`z-50` and up) paints above a page. Something the pane draws _over_ the page
+  area (the error / blank-tab overlays) must call `setCovered` so the webview
+  steps aside.
+- `register()` is idempotent — it tears a previous guest's listeners down
+  rather than stacking a second set — and the renderer re-registers whenever
+  `dom-ready` reports a different `webContentsId`.
 - `PARTITION` (`persist:wpxen-browser`) is duplicated in `webviewCache.js` and
   `browser.cjs` and **must stay in sync** — the renderer sets it on the element,
   the main process is what "clear browsing data" wipes. Asserted in the tests.
