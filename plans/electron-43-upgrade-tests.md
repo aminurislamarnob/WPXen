@@ -458,3 +458,85 @@ actually show.
   coincidental.
 - The `assets/bin` warning and the unsigned-build warning both reproduced
   exactly as in Run 1. Still pre-existing, still not upgrade-related.
+
+---
+
+## H. Run 3 — the GUI matrix, after merging `develop` again (2026-10-03, `chore/electron-43-upgrade` @ `0582969` + drop fix)
+
+`develop` had moved 74 commits ahead (notes, project icons, keep-awake, the
+right-hand explorer, Tasks/GitHub, a new `afterPack` hook) — none of it ever
+run on Electron 43. This run drove the **real app** for the first time: a
+Playwright `_electron` driver against `npm run dev` and then the packaged
+`release/mac-arm64/WPXen.app`, clicking through the UI and reading the main
+process directly. Machine: macOS 25.6.0, arm64.
+
+**One upgrade regression found and fixed.** Electron 32 removed `File.path`,
+so dropping Finder files onto the **File Explorer** (import) or an **agent
+terminal** (paste path) silently did nothing — the `.filter(Boolean)` swallowed
+the `undefined`s. `preload.cjs` now bridges `webUtils.getPathForFile` as
+`electronAPI.pathForFile`, and both drop handlers use it. Verified with real
+disk-backed Files in dev and packaged: `f.path` → `undefined`, bridged path
+correct, a renderer-built `File` → `''`. The icon picker reads bytes, not
+paths, and was unaffected.
+
+| ID       |       | Note                                                                                                                                                           |
+| -------- | ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A1       | ✅    | Gate green after merge and after the fix: 833 tests                                                                                                            |
+| B1       | ✅    | 1200×800, traffic lights (16,18), `#151110` backdrop, tray icon present, dock hidden while hidden / shown while visible                                        |
+| B2       | ✅    | `themeSource` light→dark→system: window backdrop and renderer tokens flip together                                                                             |
+| B3       | ✅    | pty rooted at webroot, echo round-trips, resize reflows (48×76 → 41×54)                                                                                        |
+| B4       | ✅    | Output kept arriving while hidden; scrollback intact on reopen                                                                                                 |
+| B5       | ✅    | `https://kawaii.test` (mkcert) and `example.com` render; guest `sandbox`, no preload, no nodeIntegration, persistent partition; Inspect Element opens DevTools |
+| B6       | ✅    | Real context menu captured from `browser.cjs`: Back on/Forward off at B; real Back item → A; flags flip                                                        |
+| B7       | ✅    | `file:` typed → searched, not loaded; `javascript:` never ran; guest-initiated `file:` and meta-refresh blocked; `_blank` → new in-app tab, still one window   |
+| B8       | ⚠️    | **Pre-existing, not a regression** — see below                                                                                                                 |
+| B9       | ✅    | ⌘R reloads the guest only; ⌘W closes the browser tab, window stays (by design, `browser.cjs`)                                                                  |
+| B10      | ✅    | Agent-running dialog → Cancel keeps the app; Quit Anyway stops nginx/PHP-FPM/MySQL, Electron gone in ~2 s, no orphans; dnsmasq (root, not ours) untouched      |
+| B11      | ✅    | Second launch exits at once and re-shows the hidden window                                                                                                     |
+| B12      | ✅    | Builder 26 + `afterPack`: ad-hoc signature verifies; packaged app loads from asar, **pty spawns**, guest paints, drop fix works; clean quit                    |
+| B13      | ✅    | `LSMinimumSystemVersion` 12.0                                                                                                                                  |
+| C3       | ✅    | Add Site wizard → 9 progress steps in 8 s; serves 200, DNS, vhost, DB                                                                                          |
+| C4       | ✅    | `kill -9` nginx → procman restarts in 2 s; UI Stop/Start MySQL tracks 4→3→4                                                                                    |
+| C6       | ✅    | Clone, export (37 MB, valid manifest), inspect-for-import, blueprint save + create-from: all serve with URLs rewritten                                         |
+| C7       | ✅    | Three test sites removed: no dirs, vhosts or DBs left; blueprint deleted                                                                                       |
+| C9       | ✅    | phpMyAdmin serves the DB structure page with no login form                                                                                                     |
+| C10      | ⚠️ ✅ | HTTPS half (mkcert, in-app guest trusts it). Tunnel not run — it publishes a local site                                                                        |
+| C11, C12 | ✅    | create/write/read/rename/import/trash through IPC; Changes pane lists nested-repo files; diff renders                                                          |
+| C13      | ✅    | `startAtLogin` really registers/deregisters the OS login item (restored); bad key/type rejected; `settings-updated` pushed                                     |
+| C14      | ✅    | "login" narrows to General/Sites/Database                                                                                                                      |
+| C15      | ✅    | Cookie planted in `persist:wpxen-browser` gone after Clear                                                                                                     |
+| C16      | ✅    | `file:`/`javascript:` refused; only https reached `shell.openExternal`                                                                                         |
+| C18      | ✅    | nginx access/error and php-fpm logs read                                                                                                                       |
+| D1       | ✅    | xterm canvas holds a live WebGL2 context; GPU compositing enabled                                                                                              |
+| D3       | ✅    | CodeMirror highlighting and diff render                                                                                                                        |
+| D7       | ✅    | Every top-level page visited: **zero** Electron deprecation lines, no main-process errors from app code                                                        |
+| C1, C2   | ⏭     | Need a fresh profile; C2 is covered by `test/rebrand.test.js`                                                                                                  |
+| C5       | ⏭     | Only PHP 8.5 installed                                                                                                                                         |
+| C8       | ⏭     | Mailpit not installed                                                                                                                                          |
+| C17      | ⏭     | Resolver already configured; would raise an admin prompt                                                                                                       |
+
+### B8 is pre-existing
+
+Re-parenting a `<webview>` mints a new guest that **reloads** — scroll, JS
+state and back-history are lost. A minimal standalone repro (one webview, set a
+marker, move it to another container) behaves **identically on Electron
+28.3.3 and 43.4.1**, so this predates the upgrade; `webviewCache.js`'s comment
+claiming the page "keeps its scroll position and JS state" has never held. Also
+note `AgentsPane` deliberately disposes its browser tabs on unmount, so the
+plan's "switch app section" step no longer applies — the in-pane file-tab ↔
+browser-tab switch is the case that matters. File separately.
+
+### Also seen, not upgrade-related
+
+- `set-mail-catching` persists `mail.catch: true` even when it then fails with
+  "Mailpit is not installed" (no override is written, so `mail()` is fine).
+- The host CSP's `img-src` blocks `https://*.test` favicons in browser tabs.
+- A URL the guest can't parse (`https://javascript:…`) surfaces as an unhandled
+  `loadURL` rejection in the renderer console.
+
+### Methodology notes
+
+- Playwright emulates `prefers-color-scheme: light` by default — call
+  `page.emulateMedia({ colorScheme: null })` or every screenshot is wrong-themed.
+- Playwright's `page.screenshot` can omit a `<webview>` guest that is visibly
+  painted on screen; use `webContents.capturePage()` on the guest instead.
