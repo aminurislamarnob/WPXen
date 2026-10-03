@@ -113,12 +113,12 @@ export default function Terminal({
 
   const onDrop = (e) => {
     e.preventDefault();
-    // Finder drops carry native files (Electron 28 still exposes File.path);
+    // Finder drops carry native files, resolved to paths through preload;
     // internal Files-tree drags carry the path in text/plain.
     const files = [...e.dataTransfer.files];
     let paths;
     if (files.length > 0) {
-      paths = files.map((f) => f.path).filter(Boolean);
+      paths = files.map((f) => window.electronAPI.pathForFile(f)).filter(Boolean);
     } else {
       const plain = e.dataTransfer.getData('text/plain');
       if (!plain) return;

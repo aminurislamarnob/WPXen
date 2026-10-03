@@ -30,9 +30,14 @@ function fakeGuest(over = {}) {
     reload: vi.fn(),
     reloadIgnoringCache: vi.fn(),
     openDevTools: vi.fn(),
-    canGoBack: () => false,
-    canGoForward: () => false,
     ...over,
+    navigationHistory: {
+      canGoBack: () => false,
+      canGoForward: () => false,
+      goBack: vi.fn(),
+      goForward: vi.fn(),
+      ...(over.navigationHistory || {}),
+    },
   };
 }
 
@@ -375,7 +380,9 @@ describe('context menu', () => {
   });
 
   it('mirrors the real back/forward availability of the guest', () => {
-    const guest = fakeGuest({ canGoBack: () => true, canGoForward: () => false });
+    const guest = fakeGuest({
+      navigationHistory: { canGoBack: () => true, canGoForward: () => false },
+    });
     registered('browser:1', 1, guest);
     guest.emit(
       'context-menu',

@@ -20,7 +20,7 @@
     "postinstall": "node scripts/fix-pty-permissions.cjs"
   },
   "engines": {
-    "node": ">=18.0.0",
+    "node": ">=20.0.0",
     "npm": ">=9.0.0"
   },
   "keywords": [
@@ -73,13 +73,13 @@
     "react-router-dom": "^6.21.3"
   },
   "devDependencies": {
-    "@electron/rebuild": "^3.7.2",
+    "@electron/rebuild": "^4.2.0",
     "@eslint/js": "^9.9.0",
     "@vitejs/plugin-react": "^4.2.1",
     "autoprefixer": "^10.4.17",
     "concurrently": "^8.2.2",
-    "electron": "^28.2.10",
-    "electron-builder": "^24.13.3",
+    "electron": "^43.4.1",
+    "electron-builder": "^26.15.3",
     "eslint": "^9.9.0",
     "eslint-config-prettier": "^9.1.0",
     "eslint-plugin-react": "^7.35.0",
@@ -99,6 +99,7 @@
     "mac": {
       "category": "public.app-category.developer-tools",
       "icon": "assets/icon.icns",
+      "minimumSystemVersion": "12.0",
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
       "target": [
@@ -133,7 +134,7 @@
     "afterPack": "scripts/after-pack.cjs"
   },
   "allowScripts": {
-    "electron@28.3.3": true,
+    "electron@43.4.1": true,
     "node-pty@1.1.0": true,
     "esbuild@0.21.5": true,
     "fsevents@2.3.3": true
