@@ -8,6 +8,25 @@ class JsonStore {
   constructor(name = 'config') {
     this.filePath = path.join(app.getPath('userData'), `${name}.json`);
     this.data = this._load();
+    this.listeners = [];
+  }
+
+  // Called with the top-level key after every set/delete, so a module can
+  // react to a kind of data changing (e.g. PHP-FPM reconciling on 'sites')
+  // without every writer having to remember to tell it.
+  onChange(listener) {
+    this.listeners.push(listener);
+  }
+
+  _emit(key) {
+    const top = key.split('.')[0];
+    for (const listener of this.listeners) {
+      try {
+        listener(top);
+      } catch (err) {
+        console.error('Store listener error:', err);
+      }
+    }
   }
 
   _load() {
@@ -57,6 +76,7 @@ class JsonStore {
     }
     obj[keys[keys.length - 1]] = value;
     this._save();
+    this._emit(key);
   }
 
   delete(key) {
@@ -68,6 +88,7 @@ class JsonStore {
     }
     delete obj[keys[keys.length - 1]];
     this._save();
+    this._emit(key);
   }
 
   has(key) {

@@ -166,12 +166,13 @@ async function computeServiceStatus() {
 
   serviceStatusCache = {
     nginx: { running: nginxRunning, name: 'nginx', ...procInfo('nginx') },
+    // One logical service made of an FPM per PHP version Sites use; `versions`
+    // lists the ones up, `version` is the active (CLI / phpMyAdmin) one.
     php: {
       running: phpRunning,
       name: 'PHP-FPM',
       version: activePhp,
-      fpmVersion: phpService.getRunningFpmVersion(),
-      ...procInfo('php'),
+      ...phpService.getFpmStatus(),
     },
     mysql: { running: mysqlRunning, name: 'MySQL', ...procInfo('mysql') },
     dnsmasq: { running: dnsmasqRunning, name: 'dnsmasq' },
@@ -211,6 +212,37 @@ async function refreshDependencies(win, { minIntervalMs = 3000 } = {}) {
       win.webContents.send('dependencies-update', deps);
     }
   } catch {}
+}
+
+// The Site whose directory is `dir` or contains it.
+function siteForPath(dir) {
+  const target = path.resolve(dir);
+  return store.get('sites', []).find((s) => {
+    if (!s.path) return false;
+    const root = path.resolve(s.path);
+    return target === root || target.startsWith(root + path.sep);
+  });
+}
+
+// Debounced so a flow that writes the Sites several times reconciles once.
+// Skipped while PHP-FPM is stopped from Services — a site edit shouldn't
+// quietly start it again (flows that need a version up ensure it themselves).
+let phpReconcileTimer = null;
+function schedulePhpReconcile() {
+  clearTimeout(phpReconcileTimer);
+  phpReconcileTimer = setTimeout(() => {
+    if (phpService.getRunningFpmVersions().length === 0) return;
+    phpService.reconcilePhpFpm().catch((err) => console.error('php reconcile:', err));
+  }, 500);
+}
+
+// "Start PHP-FPM": every version the Sites need. One failing version doesn't
+// hold the others back, but it does fail the action so the UI says which.
+async function startPhpService() {
+  const { errors } = await phpService.reconcilePhpFpm();
+  if (errors.length) {
+    throw new Error(errors.map((e) => `PHP ${e.version}: ${e.error}`).join(' · '));
+  }
 }
 
 function registerHandlers(win, storeInstance) {
@@ -255,6 +287,16 @@ function registerHandlers(win, storeInstance) {
     },
   });
   settings.migrateLegacy();
+
+  // Per-site PHP (see php.cjs): one FPM per version the Sites use. Whenever
+  // the Sites change — created, imported, cloned, deleted, moved to another
+  // version — bring the running FPMs back in line, and let WP-CLI find a
+  // Site's version by its path.
+  phpService.setSitesProvider(() => store.get('sites', []));
+  wordpress.setSitePhpLookup((dir) => siteForPath(dir)?.phpVersion || null);
+  store.onChange((key) => {
+    if (key === 'sites') schedulePhpReconcile();
+  });
 
   // Apply settings that configure a module at startup rather than on change.
   procman.setMaxLogSizeMb(settings.get('services.logMaxSizeMb'));
@@ -1977,6 +2019,10 @@ function registerHandlers(win, storeInstance) {
 
       const updated = { ...site, phpVersion, phpSettings };
       nginx.createSiteConfig(updated);
+      // The vhost now points at this version's socket — have it serving before
+      // nginx switches over. The old version stops on the reconcile that the
+      // store write below triggers, if no other Site still uses it.
+      await phpService.ensurePhpFpm(phpVersion);
       nginx.reload();
 
       sites[idx] = updated;
@@ -2195,9 +2241,8 @@ function registerHandlers(win, storeInstance) {
 
   ipcMain.handle('start-services', async () => {
     try {
-      const activePhp = brew.getActivePhpVersion();
       await nginx.start();
-      if (activePhp) await phpService.startPhpFpm(activePhp);
+      await startPhpService();
       await mysql.start();
       dnsmasq.start();
       // Optional service — start it only when installed, and never let a
@@ -2236,11 +2281,9 @@ function registerHandlers(win, storeInstance) {
         case 'nginx':
           await nginx.start();
           break;
-        case 'php': {
-          const activePhp = brew.getActivePhpVersion();
-          if (activePhp) await phpService.startPhpFpm(activePhp);
+        case 'php':
+          await startPhpService();
           break;
-        }
         case 'mysql':
           await mysql.start();
           break;
@@ -2293,7 +2336,14 @@ function registerHandlers(win, storeInstance) {
       if (!['nginx', 'php', 'mysql', 'mailpit'].includes(name)) {
         return { success: false, error: `Unknown service: ${name}` };
       }
-      const logPath = procman.getLogPath(name);
+      // PHP-FPM logs per version: open the failing one, else the active one.
+      let slot = name;
+      if (name === 'php') {
+        const fpm = phpService.getFpmStatus();
+        const failed = fpm.error && fpm.error.match(/^PHP (\d+\.\d+):/)?.[1];
+        slot = `php@${failed || brew.getActivePhpVersion()}`;
+      }
+      const logPath = procman.getLogPath(slot);
       if (!fs.existsSync(logPath)) {
         return { success: false, error: 'No log has been written yet.' };
       }
@@ -2310,14 +2360,10 @@ function registerHandlers(win, storeInstance) {
         case 'nginx':
           await nginx.restart();
           break;
-        case 'php': {
-          const activePhp = brew.getActivePhpVersion();
-          if (activePhp) {
-            await phpService.stopPhpFpm(activePhp);
-            await phpService.startPhpFpm(activePhp);
-          }
+        case 'php':
+          await phpService.stopAllPhpFpm();
+          await startPhpService();
           break;
-        }
         case 'mysql':
           await mysql.restart();
           break;
@@ -2348,6 +2394,10 @@ function registerHandlers(win, storeInstance) {
       // otherwise silently keep executing on the old one. Rolls both back if
       // the new FPM won't start, so a failed switch never takes sites down.
       await phpService.switchPhpVersion(version);
+      // phpMyAdmin follows the active version.
+      try {
+        if (phpmyadmin.hasVhost()) phpmyadmin.ensureVhost();
+      } catch {}
       return { success: true };
     } catch (err) {
       return { success: false, error: humanize(err) };

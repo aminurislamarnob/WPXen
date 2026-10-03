@@ -13,6 +13,7 @@ const path = require('path');
 const { execFileSync } = require('child_process');
 const pty = require('node-pty');
 const { createTracker, createNotifier, isTerminalReply } = require('./agentStatus.cjs');
+const shellIntegration = require('./shellIntegration.cjs');
 
 // ── Registry ────────────────────────────────────────────────────────────────
 // Curated, data-shaped so user-defined Agents can drop in later (Q5). `cmd` is
@@ -189,7 +190,8 @@ function effectiveRegistry() {
 // Electron launches from launchd with a stripped PATH, so agent binaries (npm
 // globals, Homebrew, pipx) aren't visible. Resolve the user's real login-shell
 // environment once and cache it — the approach borrowed from Superset's
-// host-service terminal env. cwd is the only project scoping; no PHP injection.
+// host-service terminal env. Project scoping is the cwd plus, for a Site's
+// Sessions, its PHP version first on PATH (startSession, shellIntegration.cjs).
 let cachedEnv = null;
 
 // Prefer the OS account shell over the inherited $SHELL: a GUI-launched helper
@@ -373,6 +375,12 @@ const deps = {
   shellEnv: () => resolveShellEnv(),
   userShell: () => getUserShell(),
   homedir: () => os.homedir(),
+  // The bin dir of a Site's PHP version, or null. php.cjs required lazily
+  // like brew.cjs above.
+  sitePhpBin: (site) => {
+    const keg = site?.phpVersion && require('./php.cjs').phpKegDir(site.phpVersion);
+    return keg ? `${keg}/bin` : null;
+  },
 };
 
 function __setDeps(next) {
@@ -843,11 +851,20 @@ function launch({
   const line = String(prompt || '')
     .replace(/\s*[\r\n]+\s*/g, ' ')
     .trim();
-  const command = line ? `${resolved.command} ${shellQuote(line)}` : resolved.command;
+  // The Site's PHP first on PATH: a zsh wrapper for the whole shell (see
+  // shellIntegration.cjs), or for other shells, on the agent's command line.
+  const phpBinDir = deps.sitePhpBin(site);
+  const typed = line ? `${resolved.command} ${shellQuote(line)}` : resolved.command;
+  const command = shellIntegration.prefixCommandWithPhp(
+    typed,
+    deps.userShell(),
+    phpBinDir
+  );
 
   return startSession({
     cwd,
     command,
+    phpBinDir,
     meta: {
       scope: 'site',
       siteId: site.id,
@@ -896,7 +913,7 @@ function launchFloating({ cwd, command = '' } = {}) {
 // Spawn the pty for a resolved launch and register its Session. `meta` carries
 // who owns it (a Site's agent, or the Floating Workspace); `command` is typed
 // into the shell once it settles, or nothing for a plain shell.
-function startSession({ cwd, command, meta, failLabel }) {
+function startSession({ cwd, command, meta, failLabel, phpBinDir = null }) {
   // A Target's directory can go stale (a deleted worktree, a moved plugin).
   // Fail loudly before spawning a shell in a bad cwd rather than dropping the
   // user into their home dir with no explanation.
@@ -908,6 +925,12 @@ function startSession({ cwd, command, meta, failLabel }) {
 
   const sessionId = randomUUID();
   const env = deps.shellEnv();
+  let phpEnv = {};
+  try {
+    phpEnv = shellIntegration.sitePhpEnv({ env, shell: deps.userShell(), phpBinDir });
+  } catch {
+    // A terminal on the global PHP beats no terminal.
+  }
   // Spawn the user's interactive login SHELL — not the agent binary directly —
   // and type the agent command into it. Exiting the agent CLI then drops back to
   // a normal shell prompt (like Superset), and the Session only ends when the
@@ -922,6 +945,7 @@ function startSession({ cwd, command, meta, failLabel }) {
       cwd,
       env: {
         ...env,
+        ...phpEnv,
         TERM: 'xterm-256color',
         TERM_PROGRAM: 'WPXen',
         // Suppress oh-my-zsh's auto-update check. It fires during rc sourcing and

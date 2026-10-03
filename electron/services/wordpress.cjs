@@ -7,6 +7,7 @@ const os = require('os');
 const brew = require('./brew.cjs');
 const mysql = require('./mysql.cjs');
 const nginx = require('./nginx.cjs');
+const phpService = require('./php.cjs');
 const { validateSiteInput } = require('./validation.cjs');
 
 const DEFAULT_SITES_DIR = path.join(os.homedir(), 'Sites');
@@ -33,6 +34,62 @@ function getWpCliBin() {
   }
 }
 
+// WP-CLI runs on the Site's own PHP, so `wp` sees the same PHP the Site is
+// served by. ipc.cjs registers a lookup from a path to its Site's version.
+// Flows that run WP-CLI before the Site is saved (create, import, clone) pin
+// the target path for their duration instead — that covers every WP-CLI call
+// under it, including ones made by helpers deep inside the flow. Anything
+// else falls back to the active `php`.
+let sitePhpLookup = () => null;
+function setSitePhpLookup(fn) {
+  sitePhpLookup = typeof fn === 'function' ? fn : () => null;
+}
+
+const pinnedSitePhp = new Map(); // resolved site path -> version
+
+// Returns the unpin function; call it in a finally.
+function pinSitePhp(sitePath, version) {
+  if (!sitePath || !version) return () => {};
+  const key = path.resolve(sitePath);
+  pinnedSitePhp.set(key, version);
+  return () => {
+    if (pinnedSitePhp.get(key) === version) pinnedSitePhp.delete(key);
+  };
+}
+
+function sitePhpFor(cwd) {
+  if (!cwd) return null;
+  const dir = path.resolve(cwd);
+  for (const [root, version] of pinnedSitePhp) {
+    if (dir === root || dir.startsWith(root + path.sep)) return version;
+  }
+  return sitePhpLookup(dir) || null;
+}
+
+// { phpBin, env } for running WP-CLI in `cwd`.
+function wpRuntime(cwd, extraEnv = {}) {
+  const prefix = brew.getBrewPrefix();
+  const version = sitePhpFor(cwd);
+  const keg = version ? phpService.phpKegDir(version) : null;
+  const versioned = keg ? phpService.getPhpBinPath(version) : null;
+  const phpBin = versioned || (prefix ? `${prefix}/bin/php` : 'php');
+  // The keg's bin first, so anything WP-CLI spawns (`php`, composer) matches.
+  const pathDirs = [
+    versioned && `${keg}/bin`,
+    prefix && `${prefix}/bin`,
+    process.env.PATH,
+  ];
+  return {
+    phpBin,
+    env: {
+      ...process.env,
+      PATH: pathDirs.filter(Boolean).join(':'),
+      HOME: os.homedir(),
+      ...extraEnv,
+    },
+  };
+}
+
 // Runs WP-CLI. `args` is an ARRAY of arguments — passed via execFileSync with
 // no shell, so values like the site title or admin password can't be
 // interpreted as shell metacharacters (command injection). Never build this
@@ -43,15 +100,7 @@ function wp(args, cwd, extraEnv = {}) {
   }
   const wpBin = getWpCliBin();
   if (!wpBin) throw new Error('WP-CLI not found. Install with: brew install wp-cli');
-  const prefix = brew.getBrewPrefix();
-  const phpBin = prefix ? `${prefix}/bin/php` : 'php';
-
-  const env = {
-    ...process.env,
-    PATH: `${prefix}/bin:${process.env.PATH}`,
-    HOME: os.homedir(),
-    ...extraEnv,
-  };
+  const { phpBin, env } = wpRuntime(cwd, extraEnv);
 
   // Newer PHP (8.4/8.5) makes WP-CLI's bundled deps emit deprecation notices.
   // Route all PHP diagnostics to stderr and silence deprecations so they never
@@ -87,13 +136,7 @@ function wpAsync(args, cwd, { timeout = 120000 } = {}) {
       reject(new Error('WP-CLI not found. Install with: brew install wp-cli'));
       return;
     }
-    const prefix = brew.getBrewPrefix();
-    const phpBin = prefix ? `${prefix}/bin/php` : 'php';
-    const env = {
-      ...process.env,
-      PATH: `${prefix}/bin:${process.env.PATH}`,
-      HOME: os.homedir(),
-    };
+    const { phpBin, env } = wpRuntime(cwd);
     const phpArgs = [
       '-d',
       'error_reporting=E_ALL & ~E_DEPRECATED & ~E_STRICT',
@@ -124,7 +167,18 @@ function sanitizeWpVersion(raw) {
   return m;
 }
 
+// The Site isn't saved until this returns, so pin its PHP version for every
+// WP-CLI call made against its path in between.
 async function createWordPressSite(siteData, progressCallback) {
+  const unpin = pinSitePhp(siteData?.path, siteData?.phpVersion);
+  try {
+    return await runCreate(siteData, progressCallback);
+  } finally {
+    unpin();
+  }
+}
+
+async function runCreate(siteData, progressCallback) {
   const {
     name,
     domain,
@@ -225,6 +279,12 @@ async function createWordPressSite(siteData, progressCallback) {
   // 7. Create nginx config
   progress({ step: 'nginx', message: 'Configuring nginx...' });
   nginx.createSiteConfig({ name, domain, path: sitePath, phpVersion });
+  // The vhost points at this version's FPM socket — make sure it's serving.
+  try {
+    await phpService.ensurePhpFpm(phpVersion);
+  } catch {
+    // Surfaced by the Services panel; the site itself was created fine.
+  }
 
   // 8. Reload nginx
   progress({ step: 'reload', message: 'Reloading nginx...' });
@@ -1002,6 +1062,9 @@ module.exports = {
   getWpCliBin,
   wp,
   wpAsync,
+  wpRuntime,
+  setSitePhpLookup,
+  pinSitePhp,
   createWordPressSite,
   removeWordPressSite,
   setSiteUrl,

@@ -71,6 +71,11 @@ function writeConfig() {
   );
 }
 
+// Whether phpmyadmin.test has a vhost yet (it's written on first open).
+function hasVhost() {
+  return nginx.siteConfigExists(DOMAIN);
+}
+
 // Writes/refreshes the nginx vhost for phpmyadmin.test and reloads nginx.
 function ensureVhost() {
   const dir = getInstallDir();
@@ -89,12 +94,10 @@ function ensureVhost() {
 
 // Makes sure the services phpMyAdmin depends on are up.
 async function ensureServices() {
-  const active = brew.getActivePhpVersion();
-  if (active && !php.isPhpFpmRunning(active)) {
-    try {
-      await php.startPhpFpm(active);
-    } catch {}
-  }
+  // phpMyAdmin runs on the active PHP version's FPM (see php.cjs).
+  try {
+    await php.ensurePhpFpm(brew.getActivePhpVersion());
+  } catch {}
   if (!nginx.isRunning()) {
     try {
       await nginx.start();
@@ -122,6 +125,7 @@ module.exports = {
   ensureInstalled,
   writeConfig,
   ensureVhost,
+  hasVhost,
   ensureReady,
   getUrl,
 };

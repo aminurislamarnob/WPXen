@@ -6,6 +6,7 @@ const path = require('path');
 const mysql = require('./mysql.cjs');
 const nginx = require('./nginx.cjs');
 const wordpress = require('./wordpress.cjs');
+const phpService = require('./php.cjs');
 const archive = require('./archive.cjs');
 const wpress = require('./wpress.cjs');
 const mkcert = require('./mkcert.cjs');
@@ -305,7 +306,18 @@ function moveDir(src, dest) {
 // Imports an archive as a brand-new site. `target` is pre-validated by the
 // IPC handler ({name, domain, path, phpVersion, dbName} — unique domain/db,
 // safe path). Cleans up everything it created if any step fails.
+// The target isn't a saved Site until this returns, so pin its PHP version
+// for every WP-CLI call made against its path in between (see wordpress.cjs).
 async function importSite(archivePath, target, onProgress) {
+  const unpin = wordpress.pinSitePhp(target.path, target.phpVersion);
+  try {
+    return await runImport(archivePath, target, onProgress);
+  } finally {
+    unpin();
+  }
+}
+
+async function runImport(archivePath, target, onProgress) {
   const progress = onProgress || (() => {});
   const ledger = { dirCreated: false, dbCreated: false, vhostWritten: false };
   const tmp = makeTmpDir();
@@ -496,6 +508,10 @@ async function importSite(archivePath, target, onProgress) {
       phpVersion: target.phpVersion,
     });
     ledger.vhostWritten = true;
+    // The vhost points at this version's FPM socket — make sure it's serving.
+    try {
+      await phpService.ensurePhpFpm(target.phpVersion);
+    } catch {}
     try {
       nginx.reload();
     } catch {}
@@ -584,6 +600,15 @@ function mintCert(domain) {
 // one-click-admin / alias settings (those are per-site). Rolls back anything
 // it created on failure.
 async function cloneSite(source, target, onProgress) {
+  const unpin = wordpress.pinSitePhp(target.path, target.phpVersion);
+  try {
+    return await runClone(source, target, onProgress);
+  } finally {
+    unpin();
+  }
+}
+
+async function runClone(source, target, onProgress) {
   const progress = onProgress || (() => {});
   if (!fs.existsSync(source.path)) {
     throw new Error(`Source site directory not found: ${source.path}`);
@@ -641,6 +666,10 @@ async function cloneSite(source, target, onProgress) {
     };
     nginx.createSiteConfig(site);
     ledger.vhostWritten = true;
+    // The vhost points at this version's FPM socket — make sure it's serving.
+    try {
+      await phpService.ensurePhpFpm(target.phpVersion);
+    } catch {}
     try {
       nginx.reload();
     } catch {}

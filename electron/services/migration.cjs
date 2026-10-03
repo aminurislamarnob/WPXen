@@ -42,4 +42,46 @@ async function migrateToChildProcs(store) {
   store.set(STORE_FLAG, true);
 }
 
-module.exports = { migrateToChildProcs, STORE_FLAG };
+// One-time move from the single shared PHP-FPM to one FPM per version on its
+// own socket (see php.cjs). Every vhost written before points PHP at
+// 127.0.0.1:9000, where nothing of ours listens any more, so all of them are
+// rewritten; the FPMs themselves come up through the normal reconcile.
+// Collaborators are injectable so this is testable without nginx.
+const PER_SITE_PHP_FLAG = 'migratedToPerSitePhp';
+
+async function migrateToPerSitePhp(store, deps = {}) {
+  if (store.get(PER_SITE_PHP_FLAG, false)) return { migrated: false };
+  const nginx = deps.nginx || require('./nginx.cjs');
+  const procman = deps.procman || require('./procman.cjs');
+  const phpmyadmin = deps.phpmyadmin || require('./phpmyadmin.cjs');
+
+  // The single-FPM era's slot, in case it's somehow live in this session.
+  try {
+    await procman.stop('php');
+  } catch {}
+
+  const failed = [];
+  for (const site of store.get('sites', [])) {
+    try {
+      nginx.createSiteConfig(site);
+    } catch (err) {
+      failed.push({ domain: site.domain, error: err.message });
+    }
+  }
+  try {
+    if (phpmyadmin.hasVhost()) phpmyadmin.ensureVhost();
+  } catch {}
+  try {
+    nginx.reload();
+  } catch {}
+
+  store.set(PER_SITE_PHP_FLAG, true);
+  return { migrated: true, failed };
+}
+
+module.exports = {
+  migrateToChildProcs,
+  STORE_FLAG,
+  migrateToPerSitePhp,
+  PER_SITE_PHP_FLAG,
+};

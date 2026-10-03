@@ -73,6 +73,10 @@ function ServiceRow({ config, status, onAction, loadingAction }) {
             className={`text-xs font-normal ${running ? 'text-status-running' : 'text-muted-foreground'}`}
           >
             {running ? 'Running' : 'Stopped'}
+            {/* PHP-FPM runs one process per version the Sites use. */}
+            {running &&
+              status?.versions?.length > 0 &&
+              ` · ${status.versions.join(', ')}`}
           </span>
         </span>
       }
