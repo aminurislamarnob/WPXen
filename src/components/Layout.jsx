@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Search, ArrowLeft, ArrowRight, PanelLeft } from 'lucide-react';
 import BrandLogo from './BrandLogo';
@@ -10,6 +10,13 @@ import { Tooltip } from './ui';
 import { NAV_GROUPS } from '../lib/navItems';
 import { ACTIVITY_BAR_WIDTH, WINDOW_CONTROLS_END, agentsLabel } from '../lib/activityBar';
 import { useAgentSessions } from '../lib/useAgentSessions';
+import { setDragPassthrough } from '../lib/browser/webviewCache';
+import {
+  AGENTS_SIDEBAR_DEFAULT,
+  clampSidebarWidth,
+  readSidebarWidth,
+  saveSidebarWidth,
+} from '../lib/sidebarWidth';
 
 // System Settings-style nav (NAV_GROUPS): grouped items, each with its own
 // colored tile.
@@ -28,6 +35,10 @@ const TILE_COLORS = {
 export default function Layout({ serviceStatus }) {
   const [filter, setFilter] = useState('');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  // The Agents sidebar is resizable (see SidebarResizeHandle); while it's
+  // being dragged the width transition is off so it tracks the pointer.
+  const [agentsWidth, setAgentsWidth] = useState(readSidebarWidth);
+  const [resizing, setResizing] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -107,9 +118,10 @@ export default function Layout({ serviceStatus }) {
       {/* Sidebar — opaque, one shade off the content pane. Collapsible from the
           top bar. */}
       <aside
-        className={`flex flex-col flex-shrink-0 overflow-hidden bg-sidebar text-sidebar-foreground border-r border-sidebar-border transition-[width] duration-200 ease-out ${
-          sidebarCollapsed ? 'w-0 border-r-0' : agentsMode ? 'w-64' : 'w-56'
-        }`}
+        className={`flex flex-col flex-shrink-0 overflow-hidden bg-sidebar text-sidebar-foreground border-r border-sidebar-border ${
+          resizing ? '' : 'transition-[width] duration-200 ease-out'
+        } ${sidebarCollapsed ? 'w-0 border-r-0' : agentsMode ? '' : 'w-56'}`}
+        style={agentsMode && !sidebarCollapsed ? { width: agentsWidth } : undefined}
       >
         {/* Title bar drag region (hosts the traffic lights) */}
         <div className="drag-region h-12 flex-shrink-0" />
@@ -187,6 +199,14 @@ export default function Layout({ serviceStatus }) {
         </div>
       </aside>
 
+      {agentsMode && !sidebarCollapsed && (
+        <SidebarResizeHandle
+          width={agentsWidth}
+          onWidth={setAgentsWidth}
+          onResizing={setResizing}
+        />
+      )}
+
       {/* Main content — the app background, a shade lighter than the sidebar */}
       <main className="flex-1 flex flex-col overflow-hidden bg-background">
         {/* Slim drag region so the window stays movable and content clears the
@@ -252,6 +272,61 @@ export default function Layout({ serviceStatus }) {
             </button>
           </Tooltip>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// The Agents sidebar's right edge: drag to resize, double-click to reset.
+// A zero-width flex item between the sidebar and <main>, so it takes no
+// space; its hit area straddles the border. `no-drag` because it runs up
+// through the title-bar strip, which macOS would otherwise treat as a window
+// drag. Like ResizeHandle, it lets the pointer through any in-app browser
+// page while dragging, or the drag would stall over the <webview>.
+function SidebarResizeHandle({ width, onWidth, onResizing }) {
+  const drag = useRef(null);
+
+  const end = (e) => {
+    if (!drag.current) return;
+    e.currentTarget.releasePointerCapture?.(e.pointerId);
+    saveSidebarWidth(drag.current.last);
+    drag.current = null;
+    setDragPassthrough(false);
+    document.body.style.cursor = '';
+    onResizing(false);
+  };
+
+  return (
+    <div className="no-drag relative w-0 flex-shrink-0 z-20">
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize sidebar"
+        title="Drag to resize · double-click to reset"
+        className="group absolute inset-y-0 -left-[3px] w-[6px] cursor-col-resize"
+        onPointerDown={(e) => {
+          if (e.button !== 0) return;
+          e.preventDefault();
+          e.currentTarget.setPointerCapture(e.pointerId);
+          drag.current = { x: e.clientX, start: width, last: width };
+          setDragPassthrough(true);
+          document.body.style.cursor = 'col-resize';
+          onResizing(true);
+        }}
+        onPointerMove={(e) => {
+          if (!drag.current) return;
+          const next = clampSidebarWidth(drag.current.start + e.clientX - drag.current.x);
+          drag.current.last = next;
+          onWidth(next);
+        }}
+        onPointerUp={end}
+        onPointerCancel={end}
+        onDoubleClick={() => {
+          onWidth(AGENTS_SIDEBAR_DEFAULT);
+          saveSidebarWidth(AGENTS_SIDEBAR_DEFAULT);
+        }}
+      >
+        <div className="absolute inset-y-0 left-[2.5px] w-px bg-highlight/40 opacity-0 transition-opacity group-hover:opacity-100 group-active:opacity-100" />
       </div>
     </div>
   );
