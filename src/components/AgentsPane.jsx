@@ -11,6 +11,7 @@ import {
   Mail,
   Loader2,
   PanelRight,
+  GitCompare,
 } from 'lucide-react';
 import { ProviderIcon } from './providerIcons';
 import { Panel, PanelGroup } from 'react-resizable-panels';
@@ -21,6 +22,8 @@ import ResizeHandle from './ResizeHandle';
 import LaunchTargetsDialog from './LaunchTargetsDialog';
 import LaunchMenu from './LaunchMenu';
 import { ConfirmDialog, Tooltip } from './ui';
+import { FileGlyph } from '../lib/fileIcons';
+import { Favicon } from './browser/BrowserToolbar';
 import * as sessionCache from '../lib/terminal/sessionCache';
 import * as webviewCache from '../lib/browser/webviewCache';
 import { useSettings } from '../lib/useSettings';
@@ -116,6 +119,12 @@ export default function AgentsPane() {
 
   const [openFiles, setOpenFiles] = useState([]); // editor tabs [{ key, kind, ... }]
   const [activeKey, setActiveKey] = useState(null);
+  // Files and browsers open in the same strip and the same area as the
+  // terminals, after Orca, rather than in a split beside them. `view` says
+  // which of the two kinds is on screen; activeTab / activeKey each remember
+  // their own last pick so switching back lands where it was.
+  const [view, setView] = useState('session'); // 'session' | 'file'
+  const [dirtyKeys, setDirtyKeys] = useState([]); // file tabs with unsaved edits
   // Per-browser-tab chrome state, fed by the webview's own events. The pages
   // themselves live in webviewCache, not here.
   const [browserState, setBrowserState] = useState({}); // key -> {url,title,loading,error}
@@ -184,16 +193,14 @@ export default function AgentsPane() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [toggleExplorer]);
-  // Hold the Explorer's pixel width as the window resizes and as the editor
-  // column comes and goes (each restores its own saved percentages).
-  const editorShown = openFiles.length > 0;
+  // Hold the Explorer's pixel width as the window resizes.
   useEffect(() => {
     const panel = explorerRef.current;
     if (!panel || !groupWidth || panel.isCollapsed()) return;
     panel.resize(
       (clampExplorerWidth(explorerWidth.current, groupWidth) / groupWidth) * 100
     );
-  }, [groupWidth, editorShown]);
+  }, [groupWidth]);
 
   // Open a browser tab in the editor column. Keys are sequential rather than
   // URL-derived so the same URL can be open twice, and so navigating away from
@@ -210,6 +217,7 @@ export default function AgentsPane() {
     }));
     setOpenFiles((prev) => [...prev, { key, kind: 'browser', name: 'Browser', url }]);
     setActiveKey(key);
+    setView('file');
   }, []);
 
   // Load the Site, its live Sessions (restore tabs), and honour a pending spawn
@@ -262,8 +270,10 @@ export default function AgentsPane() {
         else preferActive = res?.sessionId || null;
       }
 
-      if (preferActive) setActiveTab(preferActive);
-      else {
+      if (preferActive) {
+        setActiveTab(preferActive);
+        setView('session');
+      } else {
         const all = await window.electronAPI.listAllSessions();
         if (cancelled) return;
         const first = (all || [])
@@ -286,6 +296,7 @@ export default function AgentsPane() {
     setBrowserState({});
     setOpenFiles([]);
     setActiveKey(null);
+    setView('session');
   }, [siteId]);
 
   // Same on unmount — leaving the Agents screen must not leak live pages.
@@ -324,7 +335,17 @@ export default function AgentsPane() {
     setAddMenu(null);
     const res = await window.electronAPI.launchAgent(siteId, agentId, targetId);
     if (res?.error) return setError(res.error);
-    if (res?.sessionId) setActiveTab(res.sessionId);
+    if (res?.sessionId) selectSession(res.sessionId);
+  };
+
+  const selectSession = (sessionId) => {
+    setActiveTab(sessionId);
+    setView('session');
+  };
+
+  const selectFile = (key) => {
+    setActiveKey(key);
+    setView('file');
   };
 
   // Actually tear the Session down: stop the pty (which drops it from the
@@ -354,10 +375,12 @@ export default function AgentsPane() {
     prevTabsRef.current = tabs;
   }, [allSessions, tabs, activeTab]);
 
-  // Tell the sidebar which Session is on screen.
+  // Tell the sidebar which Session is on screen — none while a file or
+  // browser tab covers the terminal, so its output still counts as unread.
+  const showingFile = view === 'file' && openFiles.some((f) => f.key === activeKey);
   useEffect(() => {
-    setSelectedSession(siteId ? activeTab : null);
-  }, [siteId, activeTab]);
+    setSelectedSession(siteId && !showingFile ? activeTab : null);
+  }, [siteId, activeTab, showingFile]);
   useEffect(() => () => setSelectedSession(null), []);
 
   // Close request from the tab's X: confirm first if the session is still
@@ -389,7 +412,7 @@ export default function AgentsPane() {
     const res = await window.electronAPI.launchAgent(siteId, tab.agentId, tab.targetId);
     if (res?.error) return setError(res.error);
     if (!res?.sessionId) return;
-    setActiveTab(res.sessionId);
+    selectSession(res.sessionId);
     window.electronAPI.terminalStop(sessionId);
     sessionCache.dispose(sessionId);
   };
@@ -407,6 +430,7 @@ export default function AgentsPane() {
       return [...prev, { key: resolved, kind: 'file', path: resolved, name, line }];
     });
     setActiveKey(resolved);
+    setView('file');
   }, []);
 
   // Open a plain (editable) file tab, keyed by its absolute path.
@@ -417,7 +441,7 @@ export default function AgentsPane() {
         ? prev
         : [...prev, { key, kind: 'file', path: entry.path, name: entry.name }]
     );
-    setActiveKey(key);
+    selectFile(key);
   };
 
   // Open a read-only diff tab for a changed file, keyed so it can coexist with
@@ -442,7 +466,7 @@ export default function AgentsPane() {
             },
           ]
     );
-    setActiveKey(key);
+    selectFile(key);
   };
 
   // Resolve one of the site's well-known targets and open it in a browser tab.
@@ -515,10 +539,19 @@ export default function AgentsPane() {
       const idx = prev.findIndex((f) => f.key === key);
       const next = prev.filter((f) => f.key !== key);
       if (activeKey === key) {
-        setActiveKey((next[idx] || next[idx - 1])?.key || null);
+        const neighbour = (next[idx] || next[idx - 1])?.key || null;
+        setActiveKey(neighbour);
+        // Last file closed — the terminal is what's left to show.
+        if (!neighbour) setView('session');
       }
       return next;
     });
+  };
+
+  // Closing from the strip; the editor's own close button asks the same.
+  const requestCloseFile = (key) => {
+    if (dirtyKeys.includes(key) && !window.confirm('Discard unsaved changes?')) return;
+    closeFile(key);
   };
 
   // Remember the open Site, so coming back to a bare /agents — from the
@@ -571,13 +604,13 @@ export default function AgentsPane() {
     );
   }
 
-  const editorOpen = openFiles.length > 0;
   const explorerDefault = explorerPercent(explorerWidth.current);
   const detected = agents.filter((a) => a.detected);
   // The active editor tab, when it's a real file (not a diff) — drives the
   // "reveal in tree" behavior in the explorer.
   const activeTabEntry = openFiles.find((f) => f.key === activeKey) || null;
-  const activeFileTab = activeTabEntry?.kind === 'file' ? activeTabEntry : null;
+  const activeFileTab =
+    showingFile && activeTabEntry?.kind === 'file' ? activeTabEntry : null;
 
   return (
     <>
@@ -585,19 +618,16 @@ export default function AgentsPane() {
         {groupWidth > 0 && (
           <PanelGroup
             direction="horizontal"
-            autoSaveId={editorOpen ? 'agents-3pane-right' : 'agents-2pane-right'}
+            autoSaveId="agents-2pane-right"
             className="h-full"
           >
-            {/* Terminal column: tab strip + active Session */}
+            {/* Main column: one tab strip for Sessions, files and browsers,
+                and the active one beneath it */}
             <Panel
               id="terminal"
               order={1}
               minSize={20}
-              defaultSize={
-                100 -
-                (editorOpen ? 30 : 0) -
-                (sitePath && !explorerCollapsed ? explorerDefault : 0)
-              }
+              defaultSize={100 - (sitePath && !explorerCollapsed ? explorerDefault : 0)}
             >
               <div className="h-full min-w-0 flex flex-col">
                 {/* Tab strip */}
@@ -606,11 +636,11 @@ export default function AgentsPane() {
                   style={controlsInset ? { paddingLeft: controlsInset } : undefined}
                 >
                   {tabs.map((tab) => {
-                    const isActive = tab.sessionId === activeTab;
+                    const isActive = !showingFile && tab.sessionId === activeTab;
                     return (
                       <div
                         key={tab.sessionId}
-                        onClick={() => setActiveTab(tab.sessionId)}
+                        onClick={() => selectSession(tab.sessionId)}
                         className={`group flex items-center gap-1.5 pl-2.5 pr-1.5 h-7 rounded-lg text-[12.5px] cursor-pointer whitespace-nowrap ${
                           isActive
                             ? 'bg-muted text-foreground font-medium'
@@ -634,6 +664,66 @@ export default function AgentsPane() {
                             }}
                             aria-label="Close session"
                             className="p-0.5 rounded hover:bg-accent text-muted-foreground hover:text-foreground"
+                          >
+                            <X size={12} />
+                          </button>
+                        </Tooltip>
+                      </div>
+                    );
+                  })}
+
+                  {openFiles.map((f) => {
+                    const isActive = showingFile && f.key === activeKey;
+                    const isBrowser = f.kind === 'browser';
+                    const isDiff = f.kind === 'diff';
+                    const isDirty = dirtyKeys.includes(f.key);
+                    return (
+                      <div
+                        key={f.key}
+                        onClick={() => selectFile(f.key)}
+                        title={
+                          isBrowser
+                            ? browserState[f.key]?.url || 'Browser'
+                            : isDiff
+                              ? `${f.rel} — diff (${f.source})`
+                              : f.path
+                        }
+                        className={`group flex items-center gap-1.5 pl-2.5 pr-1.5 h-7 rounded-lg text-[12.5px] cursor-pointer whitespace-nowrap ${
+                          isActive
+                            ? 'bg-muted text-foreground font-medium'
+                            : 'text-muted-foreground hover:bg-accent'
+                        }`}
+                      >
+                        {isBrowser ? (
+                          <Favicon src={browserState[f.key]?.favicon} />
+                        ) : (
+                          <FileGlyph name={f.name} size={13} className="flex-shrink-0" />
+                        )}
+                        <span className="truncate max-w-[140px]">
+                          {isBrowser ? browserState[f.key]?.title || f.name : f.name}
+                        </span>
+                        {isDiff && (
+                          <GitCompare
+                            size={11}
+                            className="flex-shrink-0 text-muted-foreground"
+                          />
+                        )}
+                        {isDirty && (
+                          <span
+                            className="w-1.5 h-1.5 rounded-full bg-highlight group-hover:hidden flex-shrink-0"
+                            title="Unsaved changes"
+                          />
+                        )}
+                        <Tooltip label="Close tab">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              requestCloseFile(f.key);
+                            }}
+                            aria-label="Close tab"
+                            className={`p-0.5 rounded hover:bg-accent text-muted-foreground hover:text-foreground ${
+                              isDirty ? 'hidden group-hover:block' : ''
+                            }`}
                           >
                             <X size={12} />
                           </button>
@@ -759,8 +849,27 @@ export default function AgentsPane() {
               lives in sessionCache and is re-parented on mount — so switching
               tabs keeps scroll, selection and background output instead of
               replaying the ring buffer. */}
-                <div className="flex-1 min-h-0 px-4 pb-4">
-                  {activeTab ? (
+                {/* The editor stays mounted while a terminal is shown, so unsaved
+              edits survive the switch; with no active key it renders no page,
+              which also parks any browser tab's webview. */}
+                <div
+                  className={
+                    showingFile ? 'flex-1 min-h-0 border-t border-border' : 'hidden'
+                  }
+                >
+                  <CodeEditor
+                    rootPath={sitePath}
+                    files={openFiles}
+                    activeKey={showingFile ? activeKey : null}
+                    onClose={closeFile}
+                    onDirtyChange={setDirtyKeys}
+                    browserState={browserState}
+                    onBrowserStateChange={onBrowserStateChange}
+                  />
+                </div>
+
+                <div className={showingFile ? 'hidden' : 'flex-1 min-h-0 px-4 pb-4'}>
+                  {showingFile ? null : activeTab ? (
                     <Terminal
                       key={activeTab}
                       sessionId={activeTab}
@@ -794,26 +903,6 @@ export default function AgentsPane() {
                 </div>
               </div>
             </Panel>
-
-            {/* Code editor column */}
-            {editorOpen && (
-              <>
-                <ResizeHandle />
-                <Panel id="editor" order={2} minSize={20} defaultSize={30}>
-                  <div className="h-full min-w-0 border-l border-border">
-                    <CodeEditor
-                      rootPath={sitePath}
-                      files={openFiles}
-                      activeKey={activeKey}
-                      onSelect={setActiveKey}
-                      onClose={closeFile}
-                      browserState={browserState}
-                      onBrowserStateChange={onBrowserStateChange}
-                    />
-                  </div>
-                </Panel>
-              </>
-            )}
 
             {/* Project explorer — a collapsible right sidebar, after Orca's */}
             {sitePath && (
