@@ -214,6 +214,28 @@ describe('navigation', () => {
     expect(browser.openDevTools('browser:gone')).toBe(false);
   });
 
+  // A load that can't start rejects loadURL's promise; navigate must handle it
+  // rather than leave an unhandled rejection in the main process.
+  it('does not leave a rejected load unhandled', async () => {
+    const unhandled = [];
+    const onRejection = (err) => unhandled.push(err);
+    process.on('unhandledRejection', onRejection);
+    try {
+      // A plain function, not vi.fn: a spy chains .then onto the promise it
+      // returns to record the result, which would count as handling it.
+      const guest = fakeGuest({
+        loadURL: () => Promise.reject(new Error("ERR_INVALID_URL (-300) loading 'x'")),
+      });
+      registry.set(99, guest);
+      browser.register('browser:bad', 99);
+      expect(browser.navigate('browser:bad', 'wpxen.test')).toBe(true);
+      await new Promise((r) => setTimeout(r, 20));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onRejection);
+    }
+  });
+
   it('hard reload ignores the cache', () => {
     const guest = fakeGuest();
     registry.set(1, guest);

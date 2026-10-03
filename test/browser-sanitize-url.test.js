@@ -24,6 +24,19 @@ const cases = [
   ],
   ['', 'about:blank'],
   ['   ', 'about:blank'],
+  // host:port is still a host…
+  ['wpxen.test:8443', 'https://wpxen.test:8443'],
+  ['wpxen.test:8443/wp-admin', 'https://wpxen.test:8443/wp-admin'],
+  // …but any other scheme never is: prefixing https:// would make a URL that
+  // can't load, or (mailto) credentials for a different host.
+  [
+    'javascript:void(document.title="x")',
+    'https://www.google.com/search?q=javascript%3Avoid(document.title%3D%22x%22)',
+  ],
+  ['mailto:a@b.c', 'https://www.google.com/search?q=mailto%3Aa%40b.c'],
+  ['file:///etc/hosts', 'https://www.google.com/search?q=file%3A%2F%2F%2Fetc%2Fhosts'],
+  // A "host" that can't parse as one is a search too.
+  ['wpxen.test:99999999', 'https://www.google.com/search?q=wpxen.test%3A99999999'],
 ];
 
 describe('sanitizeUrl', () => {
