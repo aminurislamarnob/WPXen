@@ -395,6 +395,10 @@ function createSettings({ store, effects = {}, defaults = {}, schema = SETTINGS 
       };
     }
 
+    // What each applied key held before this write (undefined = unset, i.e. on
+    // its default), so a key whose side effect fails can be put back.
+    const before = new Map();
+
     for (const [key, value] of Object.entries(patch)) {
       const spec = specFor(key);
       if (!spec) {
@@ -416,6 +420,7 @@ function createSettings({ store, effects = {}, defaults = {}, schema = SETTINGS 
           continue;
         }
       }
+      before.set(key, store.get(`settings.${key}`, undefined));
       store.set(`settings.${key}`, checked.value);
       applied.push(key);
     }
@@ -423,23 +428,33 @@ function createSettings({ store, effects = {}, defaults = {}, schema = SETTINGS 
     // Effects run after every value in the patch is persisted, so a handler
     // that reads a sibling key (db.user reading db.password) sees the new
     // state, not a half-applied one.
-    const all = read();
+    const staged = read();
     const failed = [];
     for (const key of applied) {
       const effect = effects[key];
       if (!effect) continue;
       try {
-        effect(all[key], all);
+        effect(staged[key], staged);
       } catch (err) {
         failed.push({ key, reason: err?.message || String(err) });
       }
     }
 
+    // A value whose side effect failed is put back, so the store never claims
+    // what isn't true (catching mail with no Mailpit, a login item that was
+    // never registered, MySQL credentials MySQL rejected) — and it matches the
+    // renderer, which rolls the control back on any rejection.
+    for (const { key } of failed) {
+      const previous = before.get(key);
+      if (previous === undefined) store.delete(`settings.${key}`);
+      else store.set(`settings.${key}`, previous);
+    }
+
     return {
       ok: rejected.length === 0 && failed.length === 0,
-      applied,
+      applied: applied.filter((key) => !failed.some((f) => f.key === key)),
       rejected: [...rejected, ...failed],
-      settings: all,
+      settings: failed.length ? read() : staged,
     };
   }
 

@@ -22,6 +22,11 @@ function fakeStore(initial = {}) {
       }
       obj[keys[keys.length - 1]] = value;
     },
+    delete(key) {
+      const keys = key.split('.');
+      const parent = keys.slice(0, -1).reduce((obj, k) => obj?.[k], data);
+      if (parent) delete parent[keys[keys.length - 1]];
+    },
   };
 }
 
@@ -201,20 +206,48 @@ describe('write', () => {
     expect(seen).toEqual(['b']);
   });
 
-  it('reports a throwing effect without unwinding the value', () => {
-    const boom = createSettings({
-      store,
-      schema,
-      effects: {
-        'app.flag': () => {
-          throw new Error('login item failed');
+  // A failed side effect means the setting didn't take: the store must not
+  // claim it did (the renderer already rolls the control back on rejection).
+  describe('when an effect throws', () => {
+    const failing = (st, extra = {}) =>
+      createSettings({
+        store: st,
+        schema,
+        effects: {
+          'app.flag': () => {
+            throw new Error('login item failed');
+          },
+          ...extra,
         },
-      },
+      });
+
+    it('reports it and puts the previous value back', () => {
+      store.set('settings.app.flag', true);
+      const result = failing(store).write({ 'app.flag': false });
+      expect(result.ok).toBe(false);
+      expect(result.rejected).toEqual([{ key: 'app.flag', reason: 'login item failed' }]);
+      expect(result.applied).toEqual([]);
+      expect(store.get('settings.app.flag')).toBe(true);
+      expect(result.settings['app.flag']).toBe(true);
     });
-    const result = boom.write({ 'app.flag': false });
-    expect(result.ok).toBe(false);
-    expect(result.rejected).toEqual([{ key: 'app.flag', reason: 'login item failed' }]);
-    expect(store.get('settings.app.flag')).toBe(false);
+
+    it('leaves a never-set key unset, so it stays on its default', () => {
+      const result = failing(store).write({ 'app.flag': false });
+      expect(store.get('settings.app.flag')).toBeUndefined();
+      expect(result.settings['app.flag']).toBe(true);
+    });
+
+    it('keeps the other keys of the same patch whose effects succeeded', () => {
+      const ok = vi.fn();
+      const result = failing(store, { 'app.mode': ok }).write({
+        'app.flag': false,
+        'app.mode': 'b',
+      });
+      expect(ok).toHaveBeenCalled();
+      expect(result.applied).toEqual(['app.mode']);
+      expect(store.get('settings.app.mode')).toBe('b');
+      expect(store.get('settings.app.flag')).toBeUndefined();
+    });
   });
 
   it('rejects a non-object patch', () => {
