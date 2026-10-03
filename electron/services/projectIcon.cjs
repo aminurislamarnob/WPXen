@@ -17,6 +17,9 @@
 //   3. Otherwise the WordPress logo — `{ type: 'wordpress' }`, drawn by the
 //      renderer.
 //
+// A folder project (`kind: 'folder'`, see agentProjects.cjs) has no WordPress
+// behind it: it skips step 1 and falls back to `{ type: 'folder' }`.
+//
 // Icons from disk become data URIs, so the renderer never needs file access
 // and the CSP only has to allow GitHub's and Google's favicon hosts.
 //
@@ -300,6 +303,7 @@ async function detectRepoIcon(repoRoot) {
 // ── The project's icon ───────────────────────────────────────────────────────
 
 const WORDPRESS = { type: 'wordpress' };
+const FOLDER = { type: 'folder' };
 const cache = new Map(); // site.id → { at, ttl, key, icon }
 
 // ── 0. A custom icon ─────────────────────────────────────────────────────────
@@ -381,6 +385,12 @@ async function projectIcon(site, { force = false, iconDir = null } = {}) {
   const key = site.path;
   const hit = cache.get(site.id);
   if (!force && hit && hit.key === key && deps.now() - hit.at < hit.ttl) return hit.icon;
+
+  if (site.kind === 'folder') {
+    const icon = (await detectRepoIcon(site.path)) || FOLDER;
+    cache.set(site.id, { at: deps.now(), ttl: CACHE_MS, key, icon });
+    return icon;
+  }
 
   const wp = await detectSiteIcon(site.path);
   let icon = wp.icon || (await detectRepoIcon(site.path)) || WORDPRESS;

@@ -74,11 +74,12 @@ function readExplorerCollapsed() {
 const BROWSER_KEY_PREFIX = 'browser:';
 
 // The places you actually want to look at while an agent works on a site.
-// Order is by how often they're reached for, not alphabetical.
+// Order is by how often they're reached for, not alphabetical. `wp` ones need
+// a WordPress Site behind the project, so a folder project leaves them out.
 const BROWSER_TARGETS = [
-  { id: 'site', label: 'Site', icon: Globe },
-  { id: 'wp-admin', label: 'WP Admin', icon: Gauge },
-  { id: 'phpmyadmin', label: 'phpMyAdmin', icon: Database },
+  { id: 'site', label: 'Site', icon: Globe, wp: true },
+  { id: 'wp-admin', label: 'WP Admin', icon: Gauge, wp: true },
+  { id: 'phpmyadmin', label: 'phpMyAdmin', icon: Database, wp: true },
   { id: 'mailpit', label: 'Mail inbox', icon: Mail },
 ];
 
@@ -235,7 +236,8 @@ export default function AgentsPane() {
 
     (async () => {
       const [sites, agentList, targetList] = await Promise.all([
-        window.electronAPI.getSites(),
+        // Sites and folder projects alike — a project id may name either.
+        window.electronAPI.getAgentProjectRecords(),
         window.electronAPI.listAgents(),
         window.electronAPI.listLaunchTargets(siteId),
       ]);
@@ -244,6 +246,7 @@ export default function AgentsPane() {
       // url/dbName feed the browser target menu; keep them alongside the name.
       setMeta({
         siteName: site?.name || siteId,
+        kind: site?.kind || 'site',
         url: site?.url || null,
         dbName: site?.dbName || null,
       });
@@ -568,7 +571,7 @@ export default function AgentsPane() {
     const last = localStorage.getItem(LAST_AGENTS_SITE_KEY);
     if (!last) return;
     let cancelled = false;
-    window.electronAPI.getSites().then((sites) => {
+    window.electronAPI.getAgentProjectRecords().then((sites) => {
       if (cancelled) return;
       const id = resolveLastSite(last, sites);
       if (id) navigate(`/agents/${encodeURIComponent(id)}`, { replace: true });
@@ -597,8 +600,8 @@ export default function AgentsPane() {
         </div>
         <p className="text-[15px] font-semibold text-foreground">Agents</p>
         <p className="mt-1 max-w-sm text-[13px] text-muted-foreground">
-          Add a project in the sidebar, then start an AI agent session in that
-          site&rsquo;s directory.
+          Add a site or any folder as a project in the sidebar, then start an AI agent
+          session in it.
         </p>
       </div>
     );
@@ -795,24 +798,26 @@ export default function AgentsPane() {
                       className="panel fixed z-50 min-w-[220px] py-1"
                       style={{ left: browserMenu.x, top: browserMenu.y }}
                     >
-                      {BROWSER_TARGETS.map((t) => (
-                        <button
-                          key={t.id}
-                          onClick={() => openBrowserTarget(t.id)}
-                          disabled={browserBusy != null}
-                          className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[13px] text-foreground hover:bg-accent disabled:opacity-50"
-                        >
-                          {browserBusy === t.id ? (
-                            <Loader2 size={14} className="animate-spin flex-shrink-0" />
-                          ) : (
-                            <t.icon
-                              size={14}
-                              className="flex-shrink-0 text-muted-foreground"
-                            />
-                          )}
-                          {t.label}
-                        </button>
-                      ))}
+                      {BROWSER_TARGETS.filter((t) => !t.wp || meta.kind !== 'folder').map(
+                        (t) => (
+                          <button
+                            key={t.id}
+                            onClick={() => openBrowserTarget(t.id)}
+                            disabled={browserBusy != null}
+                            className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[13px] text-foreground hover:bg-accent disabled:opacity-50"
+                          >
+                            {browserBusy === t.id ? (
+                              <Loader2 size={14} className="animate-spin flex-shrink-0" />
+                            ) : (
+                              <t.icon
+                                size={14}
+                                className="flex-shrink-0 text-muted-foreground"
+                              />
+                            )}
+                            {t.label}
+                          </button>
+                        )
+                      )}
                       <div className="my-1 h-px bg-border" />
                       <button
                         onClick={() => openBrowserTarget('blank')}

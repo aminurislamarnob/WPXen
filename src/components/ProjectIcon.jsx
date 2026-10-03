@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react';
+import { Folder } from 'lucide-react';
+import { isFolderProject } from '../lib/agentsList';
 
 // A project's icon in the Agents sidebar, after Orca's repo icons: the Site's
 // own WordPress Site Icon, the repo's icon or GitHub owner avatar when the
-// Site's folder is a GitHub repo, else the WordPress logo. Resolved by the
+// Site's folder is a GitHub repo, else the WordPress logo — or, for a folder
+// project, a folder glyph. Resolved by the
 // main process (services/projectIcon.cjs) and shared across every row that
 // shows the same Site.
 
@@ -97,6 +100,16 @@ export default function ProjectIcon({ siteId, size = 14, className = '' }) {
       />
     );
   }
-  // Until it resolves, and when an image won't load: the WordPress mark.
+  // Until it resolves, and when an image won't load: the folder glyph for a
+  // folder project, else the WordPress mark.
+  if (icon?.type === 'folder' || isFolderProject(siteId)) {
+    return (
+      <Folder
+        size={size}
+        aria-hidden="true"
+        className={`flex-shrink-0 text-muted-foreground ${className}`}
+      />
+    );
+  }
   return <WordPressLogo size={size} className={className} />;
 }

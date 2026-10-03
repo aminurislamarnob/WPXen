@@ -52,6 +52,17 @@ describe('projectIcon', () => {
     expect(await projectIcon.projectIcon(site())).toEqual({ type: 'wordpress' });
   });
 
+  it('gives a folder project a folder glyph, without asking WordPress', async () => {
+    let asked = false;
+    wpAnswer = async () => {
+      asked = true;
+      return '';
+    };
+    const folder = { id: 'folder-1', kind: 'folder', path: dir };
+    expect(await projectIcon.projectIcon(folder)).toEqual({ type: 'folder' });
+    expect(asked).toBe(false);
+  });
+
   it("uses Orca's order for a Site that is itself a GitHub repo", async () => {
     gitRepo({ origin: 'git@github.com:acme/shop.git' });
     // 1. a conventional icon file

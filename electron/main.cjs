@@ -6,6 +6,7 @@ const path = require('path');
 const JsonStore = require('./store.cjs');
 const { migrateLegacyUserData } = require('./services/rebrand.cjs');
 const { isAllowedBrowserUrl } = require('./services/browser.cjs');
+const agentProjects = require('./services/agentProjects.cjs');
 const { createTray } = require('./tray.cjs');
 const {
   registerHandlers,
@@ -160,6 +161,8 @@ app.whenReady().then(() => {
     () => store.get('sites', []),
     {
       getAttention: () => attention,
+      // Folder projects too, so their Sessions' rows can name them.
+      getFolders: () => store.get(agentProjects.FOLDERS_KEY, []),
       onOpenSession: openSession,
       keepAwake: {
         getStatus: () => keepAwake.getStatus(),

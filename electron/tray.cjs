@@ -21,7 +21,8 @@ function createTrayIcon() {
 }
 
 // Agent Sessions that want the user (unread), as menu items that open them.
-// Empty when there are none, so the section disappears entirely.
+// Empty when there are none, so the section disappears entirely. `sites` is
+// every project a Session can belong to — Sites and folder projects.
 function attentionItems(attention, sites, onOpenSession) {
   if (!attention || attention.length === 0) return [];
   const siteName = (id) => (sites || []).find((s) => s.id === id)?.name || '';
@@ -75,7 +76,8 @@ function buildContextMenu(
   sites,
   attention,
   onOpenSession,
-  keepAwake
+  keepAwake,
+  folders = []
 ) {
   const { nginx, php, mysql } = serviceStatus || {};
 
@@ -144,7 +146,7 @@ function buildContextMenu(
       },
     },
     ...keepAwakeItems(keepAwake),
-    ...attentionItems(attention, sites, onOpenSession),
+    ...attentionItems(attention, [...(sites || []), ...folders], onOpenSession),
     ...siteItems,
     { type: 'separator' },
     {
@@ -165,7 +167,7 @@ function createTray(
   mainWindow,
   getStatus,
   getSites,
-  { getAttention, onOpenSession, keepAwake } = {}
+  { getAttention, getFolders, onOpenSession, keepAwake } = {}
 ) {
   tray = new Tray(createTrayIcon());
   tray.setToolTip('WPXen — Local WordPress Development');
@@ -182,8 +184,17 @@ function createTray(
     const status = getStatus ? getStatus() : {};
     const sites = getSites ? getSites() : [];
     const attention = getAttention ? getAttention() : [];
+    const folders = getFolders ? getFolders() : [];
     tray.setContextMenu(
-      buildContextMenu(mainWindow, status, sites, attention, onOpenSession, keepAwake)
+      buildContextMenu(
+        mainWindow,
+        status,
+        sites,
+        attention,
+        onOpenSession,
+        keepAwake,
+        folders
+      )
     );
   }
 

@@ -6,8 +6,9 @@ import { useOpenLink } from '../lib/useOpenLink';
 
 // A project's ⋯ menu in the Agents sidebar, after Orca's project actions:
 // settings and icon first, the Site's own places in the middle, Remove at the
-// bottom in red. Remove only takes the Site out of the Agents working set —
-// the Site itself stays.
+// bottom in red. Remove only takes the project out of the Agents working set —
+// the Site (or folder) itself stays. A folder project has no Site behind it,
+// so the WordPress entries are left out.
 
 function Item({ icon: Icon, danger = false, children, onClick }) {
   return (
@@ -52,11 +53,15 @@ export default function ProjectMenu({
     }
   };
 
+  const isSite = site.kind !== 'folder';
+
   return (
     <Popover anchor={anchor} onClose={onClose} width={220}>
-      <Item icon={SlidersHorizontal} onClick={run(onSettings)}>
-        Project Settings
-      </Item>
+      {isSite && (
+        <Item icon={SlidersHorizontal} onClick={run(onSettings)}>
+          Project Settings
+        </Item>
+      )}
       <Item
         icon={Shapes}
         onClick={() => {
@@ -68,12 +73,16 @@ export default function ProjectMenu({
         Change Project Icon
       </Item>
       <Divider />
-      <Item icon={Globe} onClick={run(onOpenSite)}>
-        Open Site
-      </Item>
-      <Item icon={WordPressIcon} onClick={openAdmin}>
-        Open WP Admin
-      </Item>
+      {isSite && (
+        <>
+          <Item icon={Globe} onClick={run(onOpenSite)}>
+            Open Site
+          </Item>
+          <Item icon={WordPressIcon} onClick={openAdmin}>
+            Open WP Admin
+          </Item>
+        </>
+      )}
       <Item
         icon={FolderOpen}
         onClick={run(() => window.electronAPI.openSiteInFinder(site.path))}

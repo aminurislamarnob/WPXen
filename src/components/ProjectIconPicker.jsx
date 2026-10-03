@@ -152,8 +152,9 @@ export default function ProjectIconPicker({ site, anchor, onClose }) {
         {tab === 'auto' && (
           <div className="space-y-2">
             <p className="text-[12px] leading-snug text-muted-foreground">
-              The Site’s WordPress Site Icon; if its folder is a GitHub repo, the repo’s
-              icon or owner avatar; otherwise the WordPress logo.
+              {site.kind === 'folder'
+                ? 'If the folder is a GitHub repo, the repo’s icon or owner avatar; otherwise a folder.'
+                : 'The Site’s WordPress Site Icon; if its folder is a GitHub repo, the repo’s icon or owner avatar; otherwise the WordPress logo.'}
             </p>
             <button
               className="btn btn-secondary w-full"

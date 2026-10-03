@@ -1,6 +1,14 @@
 // Pure row model behind the Agents "Projects" sidebar (AgentsSidebar.jsx): the
-// working set of Sites, each with its agent Sessions. Kept out of the component
-// so it's testable without a DOM.
+// working set of projects — Sites and plain folders — each with its agent
+// Sessions. Kept out of the component so it's testable without a DOM.
+
+// Folder projects (any folder on disk, not a WordPress Site) have ids with
+// this prefix. Mirrors FOLDER_ID_PREFIX in electron/services/agentProjects.cjs
+// — keep the two in sync (asserted in test/agent-projects.test.js).
+export const FOLDER_ID_PREFIX = 'folder-';
+
+export const isFolderProject = (id) =>
+  typeof id === 'string' && id.startsWith(FOLDER_ID_PREFIX);
 
 // What a Session row (and its terminal tab) is called: the agent's own
 // terminal title when it has set one, else the saved Launch Target's label,

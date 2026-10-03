@@ -340,7 +340,8 @@ function registerHandlers(win, storeInstance) {
   });
 
   // ── Agent Launcher (see services/agents.cjs) ──────────────────────────────
-  // (findSite is declared below in this same function scope — hoisted.)
+  // (findSite, findProject, updateProject and getProjectRecords are declared
+  // below in this same function scope — hoisted.)
   ipcMain.handle('agent-list', () => agents.listAgents());
 
   // Every agent including hidden ones — the Agents settings section needs the
@@ -377,9 +378,8 @@ function registerHandlers(win, storeInstance) {
   // The sidebar lists working-set Sites with every Session under them, live or
   // exited. Both lists are pushed on change so it never polls.
   const getProjectIds = () => {
-    const sites = store.get('sites', []);
     const list = store.get(agentProjects.STORE_KEY, []);
-    const pruned = agentProjects.pruneProjects(list, sites);
+    const pruned = agentProjects.pruneProjects(list, getProjectRecords());
     if (pruned !== list) store.set(agentProjects.STORE_KEY, pruned);
     return pruned;
   };
@@ -402,13 +402,38 @@ function registerHandlers(win, storeInstance) {
   });
 
   ipcMain.handle('agent-projects-get', () => getProjectIds());
+  // Every Site and folder project, tagged with its `kind` — what the Agents
+  // screens look a project id up in.
+  ipcMain.handle('agent-project-records', () => getProjectRecords());
+
+  // Add project → Add folder…: pick any folder and make it a project. A Site's
+  // own folder, or one that's already a project, just (re)joins the working
+  // set rather than making a duplicate.
+  ipcMain.handle('agent-folder-add', async () => {
+    const res = await dialog.showOpenDialog(win, {
+      title: 'Add Project Folder',
+      buttonLabel: 'Add Project',
+      properties: ['openDirectory', 'createDirectory'],
+    });
+    if (res.canceled || !res.filePaths?.[0]) return { canceled: true };
+    const dir = res.filePaths[0];
+    const folders = store.get(agentProjects.FOLDERS_KEY, []);
+    let id = agentProjects.projectIdForPath(dir, store.get('sites', []), folders);
+    if (!id) {
+      const folder = agentProjects.folderProject(dir, crypto.randomUUID());
+      store.set(agentProjects.FOLDERS_KEY, [...folders, folder]);
+      id = folder.id;
+    }
+    addToProjects(id);
+    return { ok: true, id };
+  });
 
   // A project's sidebar icon (services/projectIcon.cjs): its WordPress Site
   // Icon, Orca's repo icon when the Site's folder is a GitHub repo, else the
   // WordPress logo.
   const projectIconDir = () => path.join(app.getPath('userData'), 'project-icons');
   ipcMain.handle('project-icon', (_e, siteId, opts) => {
-    const site = findSite(siteId);
+    const site = findProject(siteId);
     return projectIcon.projectIcon(site, {
       force: !!opts?.force,
       iconDir: projectIconDir(),
@@ -420,9 +445,7 @@ function registerHandlers(win, storeInstance) {
   // base64). The Site record keeps only the choice; an image lives in
   // userData/project-icons. Every window hears about it to redraw.
   ipcMain.handle('project-icon-set', (_e, siteId, choice) => {
-    const sites = store.get('sites', []);
-    const site = sites.find((x) => x.id === siteId);
-    if (!site) return { error: 'Site not found' };
+    if (!findProject(siteId)) return { error: 'Project not found' };
     const dir = projectIconDir();
     let icon = null;
     if (choice?.type === 'emoji') {
@@ -436,9 +459,10 @@ function registerHandlers(win, storeInstance) {
     } else {
       projectIcon.removeIconImages(dir, siteId);
     }
-    if (icon) site.icon = icon;
-    else delete site.icon;
-    store.set('sites', sites);
+    updateProject(siteId, (site) => {
+      if (icon) site.icon = icon;
+      else delete site.icon;
+    });
     projectIcon.invalidate(siteId);
     for (const w of BrowserWindow.getAllWindows()) {
       if (!w.isDestroyed()) w.webContents.send('project-icon-changed', { siteId });
@@ -446,7 +470,7 @@ function registerHandlers(win, storeInstance) {
     return { ok: true };
   });
   ipcMain.handle('agent-project-add', (_e, siteId) => {
-    if (!findSite(siteId)) return { error: 'Site not found' };
+    if (!findProject(siteId)) return { error: 'Project not found' };
     addToProjects(siteId);
     return { ok: true };
   });
@@ -460,6 +484,16 @@ function registerHandlers(win, storeInstance) {
       agentProjects.STORE_KEY,
       agentProjects.removeProject(getProjectIds(), siteId)
     );
+    // A folder project exists only as a project: its record (and any custom
+    // icon) goes with it. The folder on disk is untouched.
+    if (agentProjects.isFolderId(siteId)) {
+      store.set(
+        agentProjects.FOLDERS_KEY,
+        store.get(agentProjects.FOLDERS_KEY, []).filter((f) => f.id !== siteId)
+      );
+      projectIcon.removeIconImages(projectIconDir(), siteId);
+      projectIcon.invalidate(siteId);
+    }
     sendProjects();
     return { ok: true };
   });
@@ -674,7 +708,7 @@ function registerHandlers(win, storeInstance) {
   const liveNotifications = new Set(); // keep a ref, or GC can drop the click
   agents.onAlert((alert) => {
     if (!Notification.isSupported()) return;
-    const site = findSite(alert.siteId);
+    const site = findProject(alert.siteId);
     const where = site ? ` · ${site.name}` : '';
     const body = {
       done: alert.title,
@@ -748,8 +782,8 @@ function registerHandlers(win, storeInstance) {
   // `targetId` (optional) selects a saved Launch Target on the Site; without it
   // the Agent runs at the webroot with its global default flags applied.
   ipcMain.handle('agent-launch', (_e, siteId, agentId, targetId) => {
-    const site = findSite(siteId);
-    if (!site) return { error: 'Site not found' };
+    const site = findProject(siteId);
+    if (!site) return { error: 'Project not found' };
     const globalArgs = store.get('agentPresets', {})[agentId]?.args || '';
     let target = null;
     if (targetId) {
@@ -783,14 +817,12 @@ function registerHandlers(win, storeInstance) {
   // args }. `cwd` may be webroot-relative or absolute; `args: null` inherits the
   // Agent's global default.
   ipcMain.handle('agent-targets-list', (_e, siteId) => {
-    const site = findSite(siteId);
+    const site = findProject(siteId);
     return site?.launchTargets || [];
   });
 
   ipcMain.handle('agent-target-save', (_e, siteId, target) => {
-    const sites = store.get('sites', []);
-    const site = sites.find((s) => s.id === siteId);
-    if (!site) return { error: 'Site not found' };
+    if (!findProject(siteId)) return { error: 'Project not found' };
     if (!target?.agentId) return { error: 'An agent is required' };
     const cwd = String(target.cwd || '').trim();
     if (!cwd) return { error: 'A directory is required' };
@@ -804,20 +836,20 @@ function registerHandlers(win, storeInstance) {
       args: String(target.args || '').trim() || null,
     };
 
-    const list = site.launchTargets || [];
-    const idx = list.findIndex((t) => t.id === clean.id);
-    site.launchTargets =
-      idx >= 0 ? list.map((t) => (t.id === clean.id ? clean : t)) : [...list, clean];
-    store.set('sites', sites);
+    const site = updateProject(siteId, (site) => {
+      const list = site.launchTargets || [];
+      const idx = list.findIndex((t) => t.id === clean.id);
+      site.launchTargets =
+        idx >= 0 ? list.map((t) => (t.id === clean.id ? clean : t)) : [...list, clean];
+    });
     return { ok: true, target: clean, targets: site.launchTargets };
   });
 
   ipcMain.handle('agent-target-delete', (_e, siteId, targetId) => {
-    const sites = store.get('sites', []);
-    const site = sites.find((s) => s.id === siteId);
-    if (!site) return { error: 'Site not found' };
-    site.launchTargets = (site.launchTargets || []).filter((t) => t.id !== targetId);
-    store.set('sites', sites);
+    const site = updateProject(siteId, (site) => {
+      site.launchTargets = (site.launchTargets || []).filter((t) => t.id !== targetId);
+    });
+    if (!site) return { error: 'Project not found' };
     return { ok: true, targets: site.launchTargets };
   });
 
@@ -1699,6 +1731,32 @@ function registerHandlers(win, storeInstance) {
 
   function findSite(id) {
     return store.get('sites', []).find((s) => s.id === id) || null;
+  }
+
+  // An Agents project by id: a Site, or a folder project
+  // (services/agentProjects.cjs).
+  function findProject(id) {
+    if (!agentProjects.isFolderId(id)) return findSite(id);
+    return store.get(agentProjects.FOLDERS_KEY, []).find((f) => f.id === id) || null;
+  }
+
+  function getProjectRecords() {
+    return agentProjects.projectRecords(
+      store.get('sites', []),
+      store.get(agentProjects.FOLDERS_KEY, [])
+    );
+  }
+
+  // Edit a project's stored record in place — whichever list holds it — and
+  // return it, or null when there's no such project.
+  function updateProject(id, mutate) {
+    const key = agentProjects.isFolderId(id) ? agentProjects.FOLDERS_KEY : 'sites';
+    const list = store.get(key, []);
+    const record = list.find((x) => x.id === id);
+    if (!record) return null;
+    mutate(record);
+    store.set(key, list);
+    return record;
   }
 
   ipcMain.handle('get-wp-config', async (_, id) => {

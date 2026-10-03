@@ -9,6 +9,7 @@ import {
   Plus,
   X,
   FolderPlus,
+  FolderOpen,
   SlidersHorizontal,
   Check,
   Bell,
@@ -37,12 +38,13 @@ import {
   useSelectedSession,
 } from '../lib/useAgentSessions';
 
-// The Agents-mode sidebar: the "Projects" list. A Project is a Site in the
-// Agents working set; under it, one row per agent Session (a "workspace") —
-// live or exited. A Site joins the working set when a Session is launched in
-// it. Clicking a Session row opens it in the Agents pane; the hover "+" on a
-// Project starts a new one there. The toolbar adds a Site to the working set
-// (Add project) or starts a Session in the current one (New workspace).
+// The Agents-mode sidebar: the "Projects" list. A Project is a Site — or any
+// folder added with Add project → Add folder… — in the Agents working set;
+// under it, one row per agent Session (a "workspace") — live or exited. A
+// Site joins the working set when a Session is launched in it. Clicking a
+// Session row opens it in the Agents pane; the hover "+" on a Project starts
+// a new one there. The toolbar adds a Site or folder to the working set (Add
+// project) or starts a Session in the current one (New workspace).
 // Leaving Agents mode goes through the activity bar to its left
 // (ActivityBar.jsx) or the back arrow (⌘[).
 // Whether the sidebar shows the flat Activity list instead of the project
@@ -251,12 +253,13 @@ export default function AgentsSidebar() {
     writeListOptions(next);
   };
   const [launchMenu, setLaunchMenu] = useState(null); // { siteId, x, y }
-  // A changed icon is written to the Site record; reload so the picker shows
-  // what's current.
+  // A changed icon is written to the project's record; reload so the picker
+  // shows what's current. `sites` holds every project record — Sites and
+  // folder projects, each tagged with its `kind`.
   useEffect(
     () =>
       window.electronAPI.on('project-icon-changed', () =>
-        window.electronAPI.getSites().then((list) => setSites(list || []))
+        window.electronAPI.getAgentProjectRecords().then((list) => setSites(list || []))
       ),
     []
   );
@@ -273,7 +276,7 @@ export default function AgentsSidebar() {
   const projectKey = projectIds.join('|');
   useEffect(() => {
     let cancelled = false;
-    window.electronAPI.getSites().then((s) => {
+    window.electronAPI.getAgentProjectRecords().then((s) => {
       if (!cancelled) setSites(s || []);
     });
     return () => {
@@ -336,6 +339,14 @@ export default function AgentsSidebar() {
     navigate(`/agents/${encodeURIComponent(siteId)}`);
   };
 
+  // Any folder, from the native picker. Picking a Site's folder, or one that's
+  // already a project, just opens that project.
+  const addFolder = async () => {
+    setAddMenu(null);
+    const res = await window.electronAPI.addAgentFolder();
+    if (res?.id) navigate(`/agents/${encodeURIComponent(res.id)}`);
+  };
+
   // Ask before ending running Sessions; a Project with none just goes.
   const requestRemove = (site, rows) => {
     const live = rows.filter((s) => !s.exited).length;
@@ -366,7 +377,9 @@ export default function AgentsSidebar() {
     });
   };
 
-  const outside = sites.filter((s) => !projectIds.includes(s.id));
+  // Sites not yet in the working set. A folder project only exists while it's
+  // in it, so there are never any of those to offer.
+  const outside = sites.filter((s) => s.kind === 'site' && !projectIds.includes(s.id));
   // The "current" project for New workspace: the open Site, if it's one.
   const current = activeSite && projectIds.includes(activeSite) ? activeSite : null;
 
@@ -423,7 +436,9 @@ export default function AgentsSidebar() {
             <button
               onClick={(e) => {
                 // Refresh first: the picker must offer sites created since mount.
-                window.electronAPI.getSites().then((s) => setSites(s || []));
+                window.electronAPI
+                  .getAgentProjectRecords()
+                  .then((s) => setSites(s || []));
                 const pos = menuBelow(e);
                 setAddMenu((m) => (m ? null : pos));
               }}
@@ -599,7 +614,8 @@ export default function AgentsSidebar() {
         })}
         {projects.length === 0 && (
           <p className="px-2 py-1 text-xs text-muted-foreground leading-relaxed">
-            No projects yet. Use Add project to pick a site to work on with agents.
+            No projects yet. Use Add project to pick a site or any folder to work on with
+            agents.
           </p>
         )}
         {projects.length > 0 && shown.length === 0 && (
@@ -670,6 +686,13 @@ export default function AgentsSidebar() {
               </p>
             )}
             <div className="my-1 h-px bg-border" />
+            <button
+              onClick={addFolder}
+              className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[13px] text-foreground hover:bg-accent"
+            >
+              <FolderOpen size={14} className="text-muted-foreground" />
+              Add folder…
+            </button>
             <button
               onClick={() => {
                 setAddMenu(null);
@@ -759,7 +782,9 @@ export default function AgentsSidebar() {
           removing
             ? `End ${removing.live} running session${removing.live === 1 ? '' : 's'} in ${
                 removing.site.name
-              } and remove it from Projects? The site itself is not deleted.`
+              } and remove it from Projects? The ${
+                removing.site.kind === 'folder' ? 'folder' : 'site'
+              } itself is not deleted.`
             : ''
         }
         confirmLabel="End & Remove"

@@ -191,6 +191,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getAgentProjects: () => ipcRenderer.invoke('agent-projects-get'),
   reorderAgentProjects: (order) => ipcRenderer.invoke('agent-projects-reorder', order),
   addAgentProject: (siteId) => ipcRenderer.invoke('agent-project-add', siteId),
+  // Every Site and folder project, each tagged `kind: 'site' | 'folder'`.
+  getAgentProjectRecords: () => ipcRenderer.invoke('agent-project-records'),
+  // Pick any folder and add it as a project → { ok, id } | { canceled }.
+  addAgentFolder: () => ipcRenderer.invoke('agent-folder-add'),
   removeAgentProject: (siteId) => ipcRenderer.invoke('agent-project-remove', siteId),
   getGitBranch: (rootPath) => ipcRenderer.invoke('git-branch', rootPath),
   setAgentView: (sessionId) => ipcRenderer.send('agent-view', sessionId),
