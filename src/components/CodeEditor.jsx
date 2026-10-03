@@ -4,10 +4,11 @@ import { keymap, EditorView } from '@codemirror/view';
 import { buildEditorMetrics, editorThemes } from '../lib/editorTheme';
 import { editorTypography, onTypographyChange } from '../lib/typography';
 import { onThemeChange, themeName } from '../lib/theme';
-import { Copy, ExternalLink, Save, X, GitCompare, RefreshCw, Globe } from 'lucide-react';
+import { Copy, ExternalLink, Save, X, GitCompare, RefreshCw } from 'lucide-react';
 import { FileGlyph } from '../lib/fileIcons';
 import { Tooltip } from './ui';
 import BrowserPane from './browser/BrowserPane';
+import { Favicon } from './browser/BrowserToolbar';
 import DiffView from './DiffView';
 import { languageFor } from '../lib/editorLanguage';
 
@@ -217,17 +218,7 @@ export default function CodeEditor({
               }`}
             >
               {tabIsBrowser ? (
-                browserState?.[f.key]?.favicon ? (
-                  <img
-                    src={browserState[f.key].favicon}
-                    alt=""
-                    width={13}
-                    height={13}
-                    className="flex-shrink-0 rounded-sm"
-                  />
-                ) : (
-                  <Globe size={13} className="flex-shrink-0 text-muted-foreground" />
-                )
+                <Favicon src={browserState?.[f.key]?.favicon} />
               ) : (
                 <FileGlyph name={f.name} size={13} className="flex-shrink-0" />
               )}

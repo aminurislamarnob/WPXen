@@ -276,6 +276,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('browser-history-search', query, limit),
   browserHistoryClear: () => ipcRenderer.invoke('browser-history-clear'),
   browserClearData: () => ipcRenderer.invoke('browser-clear-data'),
+  // A favicon as a data: URL, or null — see browser.fetchFavicon.
+  browserFavicon: (url) => ipcRenderer.invoke('browser-favicon', url),
 
   listDirectory: (rootPath, dirPath) =>
     ipcRenderer.invoke('list-directory', rootPath, dirPath),

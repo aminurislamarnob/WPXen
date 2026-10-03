@@ -3,19 +3,48 @@ import { ArrowLeft, ArrowRight, Globe, Loader2, RotateCw } from 'lucide-react';
 import { displayUrl } from '../../lib/browser/sanitizeUrl';
 import { Tooltip } from '../ui';
 
-// A history entry's favicon, falling back to the generic globe. Remote favicon
-// URLs are fetched by the renderer itself, so a dead one must not leave a
-// broken-image glyph behind.
-export function Favicon({ src }) {
-  const [failed, setFailed] = useState(false);
-  useEffect(() => setFailed(false), [src]);
+// Remote favicons can't load straight into an <img>: the CSP only allows
+// images from named hosts (index.html), since Tasks renders markdown written
+// by anyone. They come through the main process as data: URLs instead —
+// cached per URL here, and a miss is dropped so it's retried next time.
+const faviconData = new Map(); // url -> Promise<data URL | null>
 
-  if (!src || failed) {
+function resolveFavicon(src) {
+  if (!/^https?:/i.test(src)) return Promise.resolve(src);
+  if (!faviconData.has(src)) {
+    const pending = window.electronAPI
+      .browserFavicon(src)
+      .catch(() => null)
+      .then((data) => {
+        if (!data) faviconData.delete(src);
+        return data;
+      });
+    faviconData.set(src, pending);
+  }
+  return faviconData.get(src);
+}
+
+// A page's favicon, falling back to the generic globe while it loads, when the
+// page has none, or when it can't be fetched.
+export function Favicon({ src }) {
+  const [data, setData] = useState(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let live = true;
+    setData(null);
+    setFailed(false);
+    if (src) resolveFavicon(src).then((d) => live && setData(d));
+    return () => {
+      live = false;
+    };
+  }, [src]);
+
+  if (!data || failed) {
     return <Globe size={13} className="flex-shrink-0 text-muted-foreground" />;
   }
   return (
     <img
-      src={src}
+      src={data}
       alt=""
       width={13}
       height={13}
