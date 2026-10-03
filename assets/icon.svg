@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024"><defs><filter id="s" x="-20%" y="-20%" width="140%" height="140%">
+        <feGaussianBlur in="SourceAlpha" stdDeviation="14"/><feOffset dy="12"/>
+        <feComponentTransfer><feFuncA type="linear" slope="0.35"/></feComponentTransfer>
+        <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
+    <rect x="100" y="100" width="824" height="824" rx="183.11111111111111" fill="#0A60FF" filter="url(#s)"/>
+    <g transform="translate(262.9688888888889 262.9688888888889) scale(4.980622222222222)"><rect x="3.55" y="47.5" width="82.9" height="15" rx="7.5" transform="rotate(45 45 55)" fill="#FFFFFF"/><rect x="7.5" y="57" width="56" height="15" rx="7.5" transform="rotate(-45 35.5 64.5)" fill="#FFFFFF"/><path d="M70 14C71.6 25.5 74.5 28.4 86 30C74.5 31.6 71.6 34.5 70 46C68.4 34.5 65.5 31.6 54 30C65.5 28.4 68.4 25.5 70 14Z" fill="#FFFFFF"/></g>
+  </svg>

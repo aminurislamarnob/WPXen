@@ -15,7 +15,7 @@ import {
   Circle,
 } from 'lucide-react';
 import { Button, IconTile, ProgressLog, StepIndicator, Tooltip } from './ui';
-import logo from '../assets/logo.png';
+import BrandLogo from './BrandLogo';
 
 const CORE_KEYS = ['nginx', 'php', 'mysql', 'dnsmasq', 'wpCli'];
 const CORE_LABELS = {
@@ -205,12 +205,7 @@ export default function Onboarding({ deps, onComplete, onCreateFirstSite }) {
 
         {current === 'welcome' && (
           <div className="text-center">
-            <img
-              src={logo}
-              alt="WPXen"
-              className="h-9 w-auto mx-auto mb-5"
-              draggable={false}
-            />
+            <BrandLogo className="block h-9 w-auto mx-auto mb-5 text-foreground" />
             <StepHeading title="Welcome to WPXen">
               Let&apos;s get your Mac set up for local WordPress development — WPXen
               installs and configures everything it needs via Homebrew.

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Search, ArrowLeft, ArrowRight, PanelLeft } from 'lucide-react';
-import logo from '../assets/logo.png';
+import BrandLogo from './BrandLogo';
 import ActivityBar from './ActivityBar';
 import AgentsSidebar from './AgentsSidebar';
 import KeepAwakeButton from './KeepAwakeButton';
@@ -182,12 +182,7 @@ export default function Layout({ serviceStatus }) {
 
         {/* Footer — app logo, then the keep-awake control */}
         <div className="flex items-center justify-between gap-2 pl-4 pr-2.5 py-3">
-          <img
-            src={logo}
-            alt="WPXen"
-            className="h-5 w-auto object-contain"
-            draggable={false}
-          />
+          <BrandLogo className="h-5 w-auto text-foreground" />
           <KeepAwakeButton />
         </div>
       </aside>
