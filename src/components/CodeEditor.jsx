@@ -4,11 +4,9 @@ import { keymap, EditorView } from '@codemirror/view';
 import { buildEditorMetrics, editorThemes } from '../lib/editorTheme';
 import { editorTypography, onTypographyChange } from '../lib/typography';
 import { onThemeChange, themeName } from '../lib/theme';
-import { Copy, ExternalLink, Save, X, GitCompare, RefreshCw } from 'lucide-react';
-import { FileGlyph } from '../lib/fileIcons';
+import { Copy, ExternalLink, Save, X, RefreshCw } from 'lucide-react';
 import { Tooltip } from './ui';
 import BrowserPane from './browser/BrowserPane';
-import { Favicon } from './browser/BrowserToolbar';
 import DiffView from './DiffView';
 import { languageFor } from '../lib/editorLanguage';
 
@@ -45,19 +43,23 @@ async function loadDiff(rootPath, entry) {
   };
 }
 
-// Editable, syntax-highlighted code editor (CodeMirror 6) with tabs. Handles
-// three tab kinds: 'file' (editable, dirty tracking + save), 'diff' (a
+// Editable, syntax-highlighted code editor (CodeMirror 6). Renders the active
+// tab only — the tab strip belongs to the parent, which shows these tabs in
+// the same strip as its terminal Sessions. Handles three tab kinds: 'file' (editable, dirty tracking + save), 'diff' (a
 // read-only unified diff against a git revision), and 'browser' (an in-app
 // <webview> preview, which renders its own chrome). Tabs are keyed by `key`
 // (a path for files, `diff:<source>:<rel>` for diffs, `browser:<n>` for
 // browsers) so a file and its diff can be open at once. `files` is the open-tab
-// list owned by the parent.
+// list owned by the parent; `activeKey` may be null while the parent shows
+// something else, which keeps unsaved edits here without rendering a page.
+// `onDirtyChange` reports the keys with unsaved edits, for the parent's tab
+// dots and close confirmation.
 export default function CodeEditor({
   rootPath,
   files,
   activeKey,
-  onSelect,
   onClose,
+  onDirtyChange,
   browserState,
   onBrowserStateChange,
 }) {
@@ -167,6 +169,27 @@ export default function CodeEditor({
     });
   }, [activeKey]);
 
+  // Reported as a joined string so the parent only hears about real changes,
+  // not every keystroke.
+  const dirtyKeys = Object.keys(cache)
+    .filter((k) => cache[k]?.text !== undefined && cache[k].text !== cache[k].original)
+    .join('\n');
+  useEffect(() => {
+    onDirtyChange?.(dirtyKeys ? dirtyKeys.split('\n') : []);
+  }, [dirtyKeys, onDirtyChange]);
+
+  // Drop state for tabs the parent closed, so a reopened file loads fresh.
+  useEffect(() => {
+    const open = new Set(files.map((f) => f.key));
+    setCache((prev) => {
+      const gone = Object.keys(prev).filter((k) => !open.has(k));
+      if (!gone.length) return prev;
+      const next = { ...prev };
+      for (const k of gone) delete next[k];
+      return next;
+    });
+  }, [files]);
+
   const requestClose = (key) => {
     const c = cache[key];
     if (c && c.text !== undefined && c.text !== c.original) {
@@ -189,70 +212,6 @@ export default function CodeEditor({
 
   return (
     <div className="h-full flex flex-col bg-background text-foreground">
-      {/* Tab strip — pane chrome sits on `tertiary`, content on `background` */}
-      <div className="flex items-stretch h-9 bg-tertiary border-b border-border overflow-x-auto flex-shrink-0">
-        {files.map((f) => {
-          const isActive = f.key === activeKey;
-          const tabIsDiff = f.kind === 'diff';
-          const tabIsBrowser = f.kind === 'browser';
-          const isDirty =
-            !tabIsDiff &&
-            !tabIsBrowser &&
-            cache[f.key]?.text !== undefined &&
-            cache[f.key].text !== cache[f.key].original;
-          return (
-            <div
-              key={f.key}
-              onClick={() => onSelect(f.key)}
-              title={
-                tabIsBrowser
-                  ? browserState?.[f.key]?.url || 'Browser'
-                  : tabIsDiff
-                    ? `${f.rel} — diff (${f.source})`
-                    : f.path
-              }
-              className={`group flex items-center gap-2 pl-3 pr-2 text-[13px] cursor-pointer border-r border-border whitespace-nowrap transition-colors ${
-                isActive
-                  ? 'bg-background text-foreground'
-                  : 'text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              {tabIsBrowser ? (
-                <Favicon src={browserState?.[f.key]?.favicon} />
-              ) : (
-                <FileGlyph name={f.name} size={13} className="flex-shrink-0" />
-              )}
-              <span className="truncate max-w-[160px]">
-                {tabIsBrowser ? browserState?.[f.key]?.title || f.name : f.name}
-              </span>
-              {tabIsDiff && (
-                <GitCompare size={11} className="flex-shrink-0 text-muted-foreground" />
-              )}
-              {isDirty ? (
-                <span
-                  className="w-1.5 h-1.5 rounded-full bg-highlight group-hover:hidden flex-shrink-0"
-                  title="Unsaved changes"
-                />
-              ) : null}
-              <Tooltip label="Close tab">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    requestClose(f.key);
-                  }}
-                  aria-label="Close tab"
-                  className={`p-0.5 rounded-sm text-muted-foreground hover:text-foreground hover:bg-accent ${
-                    isDirty ? 'hidden group-hover:block' : ''
-                  }`}
-                >
-                  <X size={13} />
-                </button>
-              </Tooltip>
-            </div>
-          );
-        })}
-      </div>
-
       {active?.kind === 'browser' && (
         <BrowserPane
           key={active.key}
