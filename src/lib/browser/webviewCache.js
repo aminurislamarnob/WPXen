@@ -290,11 +290,33 @@ export function navigate(tabKey, url) {
     entry.pendingUrl = target;
     return;
   }
+  let loading;
   try {
-    entry.webview.loadURL(target);
+    loading = entry.webview.loadURL(target);
   } catch {
     // Guest still coming up; it will land on pendingUrl.
+    return;
   }
+  // loadURL returns a promise: a load that can't even start (a URL Chromium
+  // rejects) rejects it rather than throwing above. Show it as the pane's load
+  // error instead of leaving an unhandled rejection and a page that silently
+  // didn't change.
+  Promise.resolve(loading).catch((err) => {
+    const message = String(err?.message || err);
+    const code = Number(message.match(/\((-?\d+)\)/)?.[1]);
+    // ERR_ABORTED: superseded by another navigation — not a failure.
+    if (code === -3) return;
+    entry.handlers.onState?.({
+      loading: false,
+      error: {
+        code: Number.isFinite(code) ? code : -1,
+        // The renderer sees it wrapped: "Error invoking remote method …: Error:
+        // ERR_INVALID_URL (-300) loading '…'" — pick the code out of anywhere.
+        description: message.match(/\b(ERR_[A-Z_]+)\b/)?.[1] || 'ERR_FAILED',
+        url: target,
+      },
+    });
+  });
 }
 
 export function reload(tabKey) {
