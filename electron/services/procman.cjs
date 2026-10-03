@@ -397,6 +397,22 @@ async function start(spec) {
     }
   }
 
+  // No live child at the deadline means it is crash-looping on backoff, which
+  // never reaches 'failed' inside the ready window. Stop retrying and fail
+  // loudly — a caller swapping versions must be able to roll back rather than
+  // be told it worked while the service stays down. (Slow but alive is fine.)
+  if (!entry.child) {
+    entry.desiredRunning = false;
+    clearRespawnTimer(entry);
+    const tail = logTail(name, 300);
+    const error =
+      entry.error ||
+      `${name} exited during startup (last code ${entry.lastExitCode}).` +
+        (tail ? ` Log tail: ${tail.split('\n').slice(-3).join(' · ')}` : '');
+    setState(entry, name, 'failed', error);
+    throw new Error(error);
+  }
+
   if (entry.child && entry.state === 'starting') {
     setState(entry, name, 'running');
   }
