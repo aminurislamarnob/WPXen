@@ -7,10 +7,9 @@
 // renderer cannot reach — window-open policy, DevTools, native menus, key
 // interception — is attached here, keyed by the browser tab's key.
 //
-// register() is deliberately idempotent: reparenting a <webview> across the DOM
-// mints a fresh webContentsId, so the renderer re-registers on every dom-ready
-// and we must tear the previous guest's listeners down rather than stack a
-// second set on top.
+// register() is deliberately idempotent: the renderer re-registers whenever
+// dom-ready reports a different webContentsId, and we must tear the previous
+// guest's listeners down rather than stack a second set on top.
 
 const { openExternalSafely } = require('./safeUrl.cjs');
 
@@ -50,6 +49,13 @@ const deps = {
     return 'openExternalSafely' in overrides
       ? overrides.openExternalSafely
       : openExternalSafely;
+  },
+  // The browser partition's own network stack (cookies, and the system trust
+  // store — so a mkcert-signed https://*.test favicon loads like the page did).
+  get fetchInPartition() {
+    if ('fetchInPartition' in overrides) return overrides.fetchInPartition;
+    return (url, init) =>
+      fromElectron('session').fromPartition(PARTITION).fetch(url, init);
   },
 };
 
@@ -299,8 +305,60 @@ function openDevTools(tabKey) {
   return true;
 }
 
+// ─── Favicons ────────────────────────────────────────────────────────────────
+//
+// A page's favicon can live on any host, but the app's CSP allows images only
+// from named hosts (index.html) — Tasks renders issue and PR bodies written by
+// anyone, which mustn't be able to make the app fetch arbitrary URLs. So the
+// main process fetches a favicon and hands the renderer a data: URL, which the
+// CSP does allow. Bounded on every axis: http(s) only, an image response, a
+// size cap, a timeout, and a small cache (misses included) so a tab strip
+// re-rendering doesn't refetch.
+
+const FAVICON_MAX_BYTES = 256 * 1024;
+const FAVICON_TIMEOUT_MS = 5000;
+const FAVICON_CACHE_SIZE = 200;
+const faviconCache = new Map(); // url -> data URL | null
+
+function rememberFavicon(url, value) {
+  faviconCache.delete(url);
+  faviconCache.set(url, value);
+  if (faviconCache.size > FAVICON_CACHE_SIZE) {
+    faviconCache.delete(faviconCache.keys().next().value);
+  }
+  return value;
+}
+
+async function fetchFavicon(url) {
+  if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) return null;
+  if (faviconCache.has(url)) return faviconCache.get(url);
+  try {
+    const res = await deps.fetchInPartition(url, {
+      signal: AbortSignal.timeout(FAVICON_TIMEOUT_MS),
+    });
+    const type = (res.headers.get('content-type') || '')
+      .split(';')[0]
+      .trim()
+      .toLowerCase();
+    const declared = Number(res.headers.get('content-length') || 0);
+    if (!res.ok || !type.startsWith('image/') || declared > FAVICON_MAX_BYTES) {
+      return rememberFavicon(url, null);
+    }
+    const bytes = Buffer.from(await res.arrayBuffer());
+    if (bytes.length === 0 || bytes.length > FAVICON_MAX_BYTES) {
+      return rememberFavicon(url, null);
+    }
+    return rememberFavicon(url, `data:${type};base64,${bytes.toString('base64')}`);
+  } catch {
+    // Offline, timed out, refused — the globe icon stands in. Not cached, so a
+    // transient failure gets another try next time.
+    return null;
+  }
+}
+
 module.exports = {
   PARTITION,
+  fetchFavicon,
   sanitizeUrl,
   isAllowedBrowserUrl,
   setWindow,

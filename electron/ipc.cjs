@@ -867,6 +867,10 @@ function registerHandlers(win, storeInstance) {
   }));
 
   // Address-bar autocomplete, backed by the JsonStore rather than a SQL layer.
+  // Favicons as data: URLs — the renderer's CSP can't load them from arbitrary
+  // hosts (see browser.fetchFavicon).
+  ipcMain.handle('browser-favicon', (_e, url) => browser.fetchFavicon(url));
+
   ipcMain.handle('browser-history-record', (_e, visit) => {
     browserHistory.record(store, visit || {});
     return { ok: true };
