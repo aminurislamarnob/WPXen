@@ -1,13 +1,16 @@
 // WPXen's "Spark X" logo. The mark is drawn on a 100-unit grid; the
 // wordmark is Sora SemiBold outlined to paths, so it needs no font and
 // takes the text color (`currentColor`) to follow the light/dark theme.
-// The same geometry, rendered, is `assets/icon.svg` and `assets/tray.svg`.
+// The same geometry, rendered, is `assets/icon*.svg` and `assets/tray.svg`.
 
 // Brand blue, fixed rather than the `highlight` token — that one lightens
 // in dark mode, and a logo keeps its color.
 const BRAND_BLUE = '#0A60FF';
 
-function MarkPaths({ fill = BRAND_BLUE }) {
+// The two strokes stay blue in both themes; the spark is blue on light and
+// white on dark, as the design's horizontal lockups draw it. A logo variant,
+// not a theme color, hence the one `dark:` here rather than a token.
+function MarkPaths() {
   return (
     <>
       <rect
@@ -17,7 +20,7 @@ function MarkPaths({ fill = BRAND_BLUE }) {
         height="15"
         rx="7.5"
         transform="rotate(45 45 55)"
-        fill={fill}
+        fill={BRAND_BLUE}
       />
       <rect
         x="7.5"
@@ -26,11 +29,11 @@ function MarkPaths({ fill = BRAND_BLUE }) {
         height="15"
         rx="7.5"
         transform="rotate(-45 35.5 64.5)"
-        fill={fill}
+        fill={BRAND_BLUE}
       />
       <path
         d="M70 14C71.6 25.5 74.5 28.4 86 30C74.5 31.6 71.6 34.5 70 46C68.4 34.5 65.5 31.6 54 30C65.5 28.4 68.4 25.5 70 14Z"
-        fill={fill}
+        className="fill-[#0A60FF] dark:fill-white"
       />
     </>
   );
