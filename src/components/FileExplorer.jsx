@@ -364,7 +364,7 @@ export default function FileExplorer({
     const target = dropTarget || rootPath;
     setDropTarget(null);
     const paths = Array.from(e.dataTransfer.files || [])
-      .map((f) => f.path)
+      .map((f) => window.electronAPI.pathForFile(f))
       .filter(Boolean);
     if (paths.length === 0) return;
     const res = await window.electronAPI.importFiles(rootPath, target, paths);

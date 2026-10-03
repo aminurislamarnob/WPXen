@@ -1,6 +1,6 @@
 'use strict';
 
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 // Event channels the renderer may subscribe to. Any channel pushed from the
 // main process via event.sender.send(...) must be whitelisted here.
@@ -293,6 +293,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('create-folder', rootPath, dirPath, name),
   renamePath: (rootPath, targetPath, newName) =>
     ipcRenderer.invoke('rename-path', rootPath, targetPath, newName),
+  // Absolute path of a File from a native (Finder) drop. Electron 32 removed
+  // File.path; webUtils is only reachable from preload, so it's bridged here.
+  // '' for a File with no backing path (e.g. one built in the renderer).
+  pathForFile: (file) => {
+    try {
+      return webUtils.getPathForFile(file);
+    } catch {
+      return '';
+    }
+  },
   importFiles: (rootPath, dirPath, sourcePaths) =>
     ipcRenderer.invoke('import-files', rootPath, dirPath, sourcePaths),
   trashPath: (rootPath, targetPath) =>
