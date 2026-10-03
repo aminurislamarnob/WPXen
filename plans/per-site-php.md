@@ -89,10 +89,21 @@ wizard).
 
 ### 6. Per-site PHP beyond web requests
 
-- `wordpress.cjs`: `wp()` / `wpAsync()` take the site's PHP version and run
-  WP-CLI with `{prefix}/opt/php@<ver>/bin/php` (falling back to the active
-  binary for the unversioned `php` formula).
-- `agents.cjs`: a site's pty gets the site's PHP `bin` prepended to `PATH`.
+- **WP-CLI** (`wordpress.cjs`): `wp()` / `wpAsync()` run with the Site's PHP
+  binary and put its keg `bin` first on PATH. Saved Sites are found by path
+  through a lookup `ipc.cjs` registers; create / import / clone (which run
+  WP-CLI before the Site is saved) **pin** their target path to its version for
+  the flow's duration, which covers helpers deep inside the flow too.
+- **Agent terminals** (`shellIntegration.cjs`, `agents.cjs`): setting PATH on
+  the pty is not enough — the login shell re-sources the user's startup files,
+  and `eval "$(brew shellenv)"` unconditionally puts `/opt/homebrew/bin` (the
+  global `php`) first. For zsh, a VS Code-style ZDOTDIR wrapper: WPXen-owned
+  startup files (rewritten under the temp dir per spawn) each source the
+  user's real file exactly as zsh would, and only `.zlogin` — the last — puts
+  the Site's PHP first, then restores the user's ZDOTDIR and unsets every
+  `WPXEN_*` variable. Other POSIX shells get the agent's typed command prefixed
+  with the PATH instead; fish is left alone. Floating Workspace terminals
+  belong to no Site and are untouched.
 
 ### 7. Status and UI
 
