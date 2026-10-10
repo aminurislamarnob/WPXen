@@ -181,6 +181,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   remoteTokenStatus: () => ipcRenderer.invoke('remote-token-status'),
   // Hostname verification, on demand (Check again in Settings → Mobile).
   verifyRemoteHostname: () => ipcRenderer.invoke('remote-verify'),
+  // Pairing offer for Settings → Mobile (QR data URL + expiry).
+  newRemotePairing: () => ipcRenderer.invoke('remote-pairing-new'),
   // Editors/terminals detected on this machine, for the settings pickers.
   listExternalTools: () => ipcRenderer.invoke('list-external-tools'),
   // Every agent including ones hidden from the launcher (settings only).

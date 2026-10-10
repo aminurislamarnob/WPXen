@@ -348,6 +348,33 @@ function registerHandlers(win, storeInstance) {
       port: settings.get('remote.port'),
       hostname: settings.get('remote.hostname'),
     }),
+    // Pairing approval: bring the window up, ask Allow/Deny with the
+    // confirmation code, defaulting to Deny. The service times the wait out.
+    promptPairing: async ({ deviceName, platform, code }) => {
+      try {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.show();
+          mainWindow.focus();
+        }
+        const { response } = await dialog.showMessageBox(mainWindow, {
+          type: 'question',
+          buttons: ['Allow', 'Deny'],
+          defaultId: 1,
+          cancelId: 1,
+          message: `Pair ${deviceName} (${platform})?`,
+          detail: `Code: ${code}\n\nOnly allow the phone in your hand — check the code matches.`,
+        });
+        return response === 0 ? 'allow' : 'deny';
+      } catch {
+        return 'deny';
+      }
+    },
+    onPaired: ({ name }) => {
+      try {
+        if (!Notification.isSupported()) return;
+        new Notification({ title: 'New device paired', body: name }).show();
+      } catch {}
+    },
   });
   remoteAccess.startPoller();
   remoteAccess.onStatusChange((status) => {
@@ -2869,6 +2896,18 @@ function registerHandlers(win, storeInstance) {
       return await remoteAccess.verifyHostname();
     } catch (err) {
       return { ok: false, reason: 'connection', error: err?.message };
+    }
+  });
+  // Pairing offer: a QR data URL the phone scans, plus its expiry. The
+  // renderer shows the image and never sees the secret itself.
+  ipcMain.handle('remote-pairing-new', async () => {
+    try {
+      const offer = await remoteAccess.pairingOffer({
+        hostname: settings.get('remote.hostname'),
+      });
+      return { ok: true, qr: offer.qr, expiresAt: offer.expiresAt };
+    } catch (err) {
+      return { ok: false, error: err?.message || 'Could not create a pairing offer.' };
     }
   });
 
