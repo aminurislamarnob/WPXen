@@ -21,9 +21,7 @@ export default function HandoffDialog({ sessionId, onClose, onComplete }) {
           setLoading(false);
         } else {
           setData(res);
-          if (res.agents && res.agents.length > 0) {
-            setTargetId(res.agents[0].id);
-          }
+          if (res.defaultAgentId) setTargetId(res.defaultAgentId);
           setLoading(false);
         }
       })
@@ -61,7 +59,7 @@ export default function HandoffDialog({ sessionId, onClose, onComplete }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
       <div className="panel w-[400px] p-6 shadow-lg relative rounded-xl border border-border">
         <h2 className="text-[15px] font-semibold text-foreground mb-4">
           Hand Off Session
@@ -101,7 +99,7 @@ export default function HandoffDialog({ sessionId, onClose, onComplete }) {
                 </div>
               ) : (
                 <p className="text-[13px] text-muted-foreground">
-                  No other installed agents available.
+                  No installed agents available.
                 </p>
               )}
             </div>
@@ -113,7 +111,7 @@ export default function HandoffDialog({ sessionId, onClose, onComplete }) {
                 Cancel
               </Button>
               <Button onClick={handleRun} disabled={running || !targetId}>
-                {running ? <Loader2 size={14} className="animate-spin mr-2" /> : null}
+                {running ? <Loader2 size={14} className="animate-spin" /> : null}
                 Hand Off
               </Button>
             </div>

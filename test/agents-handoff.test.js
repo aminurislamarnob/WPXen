@@ -6,6 +6,7 @@ import {
   stripAnsi,
   buildPrompt,
   writeHandoffFile,
+  launchTarget,
 } from '../electron/services/handoff.cjs';
 import agents from '../electron/services/agents.cjs';
 
@@ -93,42 +94,68 @@ describe('launching a handoff Session', () => {
     agents.listAllSessions().forEach((s) => agents.stop(s.sessionId));
   });
 
-  it('spawns a new session, writes handoff prompt with -i, and protects the source pty', () => {
+  it('launches the target in the source cwd with a read-this-file prompt', () => {
     vi.useFakeTimers();
     try {
-      // 1. Launch source session
-      const { sessionId: sourceId } = agents.launchFloating({ cwd: home });
-      const sourcePty = ptys[0];
-      sourcePty.emitData('% '); // shell ready
-
-      // 2. Launch handoff session targetting Antigravity
-      const res = agents.launch({
+      const sub = path.join(home, 'wp-content');
+      fs.mkdirSync(sub, { recursive: true });
+      const { sessionId: sourceId } = agents.launch({
         site: site(),
-        agentId: 'antigravity',
-        cwd: home,
-        handoffFrom: sourceId,
-        handoffFile: '/tmp/fake-handoff.md',
+        agentId: 'fake',
+        cwd: sub,
+      });
+      const sourcePty = ptys[0];
+      sourcePty.emitData('% ');
+      vi.advanceTimersByTime(200);
+      sourcePty.write.mockClear();
+
+      const res = launchTarget({
+        agents,
+        site: site(),
+        source: agents.getSession(sourceId),
+        targetAgentId: 'antigravity',
+        handoffFile: '/tmp/wpxen-handoff-x.md',
       });
 
       expect(res.ok).toBe(true);
-      expect(ptys).toHaveLength(2);
-
       const newPty = ptys[1];
-      newPty.emitData('% '); // new shell ready
+      expect(newPty.spawnedWith.opts.cwd).toBe(sub);
+      newPty.emitData('% ');
       vi.advanceTimersByTime(200);
+      expect(newPty.write).toHaveBeenCalledWith(
+        "sh --agy -i 'Read `/tmp/wpxen-handoff-x.md` and continue.'\r"
+      );
 
-      // The handoff writes to the new pty
-      expect(newPty.write).toHaveBeenCalledWith("sh --agy -i '/tmp/fake-handoff.md'\r");
-
-      // The source pty was NOT written to by the handoff launch
+      // The source keeps running, untouched.
       expect(sourcePty.write).not.toHaveBeenCalled();
+      expect(sourcePty.kill).not.toHaveBeenCalled();
 
-      // Metadata is attached
-      const newSession = agents
-        .listAllSessions()
-        .find((s) => s.sessionId === res.sessionId);
-      expect(newSession.handoffFrom).toBe(sourceId);
-      expect(newSession.handoffFile).toBe('/tmp/fake-handoff.md');
+      const row = agents.listAllSessions().find((s) => s.sessionId === res.sessionId);
+      expect(row.handoffFrom).toBe(sourceId);
+      expect(row.handoffFile).toBe('/tmp/wpxen-handoff-x.md');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('uses the prompt positionally for an Agent without a promptFlag', () => {
+    vi.useFakeTimers();
+    try {
+      const { sessionId: sourceId } = agents.launch({ site: site(), agentId: 'fake' });
+      const res = launchTarget({
+        agents,
+        site: site(),
+        source: agents.getSession(sourceId),
+        targetAgentId: 'fake',
+        handoffFile: '/tmp/h.md',
+      });
+      const newPty = ptys.at(-1);
+      newPty.emitData('% ');
+      vi.advanceTimersByTime(200);
+      expect(res.ok).toBe(true);
+      expect(newPty.write).toHaveBeenCalledWith(
+        "sh --agent 'Read `/tmp/h.md` and continue.'\r"
+      );
     } finally {
       vi.useRealTimers();
     }

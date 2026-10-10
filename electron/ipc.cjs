@@ -866,14 +866,17 @@ function registerHandlers(win, storeInstance) {
   ipcMain.handle('agent-handoff-prepare', (_e, sessionId) => {
     const session = agents.getSession(sessionId);
     if (!session) return { error: 'Session not found' };
-    const allAgents = agents.listAgents();
-    const detected = allAgents.filter(
-      (a) => a.detected && a.id !== session.agentId && a.id !== agents.SHELL_ID
-    );
+    const detected = agents
+      .listAgents()
+      .filter((a) => a.detected && a.id !== agents.SHELL_ID);
+    // Handing off to the same Agent is allowed (a fresh context), but the
+    // usual intent is a different one, so that's the default.
+    const other = detected.find((a) => a.id !== session.agentId);
     return {
       contextSource: 'capture',
       modes: ['quick'],
       agents: detected,
+      defaultAgentId: (other || detected[0])?.id || null,
     };
   });
 
@@ -882,6 +885,9 @@ function registerHandlers(win, storeInstance) {
     if (!session) return { error: 'Session not found' };
     const site = findProject(session.siteId);
     if (!site) return { error: 'Project not found' };
+
+    const agent = agents.listAgents({ all: true }).find((a) => a.id === targetAgentId);
+    if (!agent) return { error: 'Target agent not found' };
 
     const capture = agents.getBuffer(sessionId);
     if (!capture) return { error: 'No terminal output available' };
@@ -895,26 +901,14 @@ function registerHandlers(win, storeInstance) {
     });
     const handoffFile = handoff.writeHandoffFile(promptContent);
 
-    const agent = agents.listAgents({ all: true }).find((a) => a.id === targetAgentId);
-    if (!agent) return { error: 'Target agent not found' };
-
     const globalArgs = store.get('agentPresets', {})[targetAgentId]?.args || '';
 
-    // The prompt is "read this file". The file path is passed to launch.
-    // promptFlag is handled inside launch. We just pass `prompt: handoffFile`.
-    // Wait, some agents might just take the file path.
-    // Yes, the issue says:
-    // "The target is launched with a single-line read-this-file prompt (with promptFlag where declared)"
-    // So the prompt string is just the file path, or "read this file: ...".
-    // Wait, if I just pass the file path, the agent might not know what to do if it expects a natural language prompt. But the issue says: "a single-line read-this-file prompt".
-    // I'll just pass `cat ${handoffFile}` or something? No, it says "single-line read-this-file prompt". Let's pass `Please read the context from ${handoffFile} and continue.`.
-    const res = agents.launch({
+    const res = handoff.launchTarget({
+      agents,
       site,
-      agentId: targetAgentId,
-      cwdOverride: session.cwd, // inherit cwd
+      source: session,
+      targetAgentId,
       globalArgs,
-      prompt: `Please read the context from ${handoffFile} and continue.`,
-      handoffFrom: sessionId,
       handoffFile,
     });
 

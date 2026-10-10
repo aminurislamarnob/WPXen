@@ -58,7 +58,36 @@ function writeHandoffFile(promptContent) {
   return filepath;
 }
 
+// The target's whole command-line prompt: one line pointing at the file, so
+// the context itself never has to survive shell quoting.
+function launchPrompt(handoffFile) {
+  return `Read \`${handoffFile}\` and continue.`;
+}
+
+// Start the target Agent on a written handoff file: in the source Session's
+// cwd, as a new tab that remembers where it came from.
+function launchTarget({
+  agents,
+  site,
+  source,
+  targetAgentId,
+  globalArgs = '',
+  handoffFile,
+}) {
+  return agents.launch({
+    site,
+    agentId: targetAgentId,
+    cwd: source.cwd,
+    globalArgs,
+    prompt: launchPrompt(handoffFile),
+    handoffFrom: source.sessionId,
+    handoffFile,
+  });
+}
+
 module.exports = {
+  launchPrompt,
+  launchTarget,
   HANDOFF_FILE_PREFIX,
   stripAnsi,
   markdownFenceFor,

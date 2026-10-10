@@ -11,6 +11,14 @@ function countLeaves(tree) {
   return countLeaves(tree.a) + countLeaves(tree.b);
 }
 
+// A handed-off Session names where it came from and the file it was given.
+function handoffTooltip(tab, tabs) {
+  if (!tab.handoffFrom) return undefined;
+  const origin = tabs.find((t) => t.sessionId === tab.handoffFrom);
+  const from = origin ? sessionTitle(origin, tabs) : 'an ended session';
+  return `Handed off from ${from}\n${tab.handoffFile}`;
+}
+
 export default function TabStrip({
   tabs,
   openFiles,
@@ -45,6 +53,7 @@ export default function TabStrip({
             key={tab.sessionId}
             onClick={() => selectSession(tab.sessionId)}
             onContextMenu={(e) => onTabContextMenu(e, tab.sessionId, 'session')}
+            title={handoffTooltip(tab, tabs)}
             className={`group flex items-center gap-1.5 pl-2.5 pr-1.5 h-7 rounded-lg text-[12.5px] cursor-pointer whitespace-nowrap ${
               isActive
                 ? 'bg-muted text-foreground font-medium'

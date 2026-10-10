@@ -868,11 +868,9 @@ function launch({
   const line = String(prompt || '')
     .replace(/\s*[\r\n]+\s*/g, ' ')
     .trim();
-  const arg = handoffFile || line;
-  const typedArg = arg
-    ? `${agent.promptFlag ? agent.promptFlag + ' ' : ''}${shellQuote(arg)}`
-    : '';
-  const typed = typedArg ? `${resolved.command} ${typedArg}` : resolved.command;
+  const typed = line
+    ? `${resolved.command} ${agent.promptFlag ? agent.promptFlag + ' ' : ''}${shellQuote(line)}`
+    : resolved.command;
 
   // The Site's PHP first on PATH: a zsh wrapper for the whole shell (see
   // shellIntegration.cjs), or for other shells, on the agent's command line.
