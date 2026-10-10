@@ -1459,10 +1459,10 @@ function chatAnswer(sessionId, groups) {
   return sendChatAnswer(session, groups);
 }
 
-function chatSend(sessionId, text) {
+function chatSend(sessionId, text, images = []) {
   const session = getSession(sessionId);
   if (!session) return Promise.reject(new Error('No session'));
-  return sendChat(session, text);
+  return sendChat(session, text, images);
 }
 
 function chatImage(sessionId, ref) {

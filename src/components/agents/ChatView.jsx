@@ -15,13 +15,21 @@ import * as sessionCache from '../../lib/terminal/sessionCache';
 import { ImageRef } from './ImageRef';
 import { contextMeter } from '../../lib/contextMeter';
 import { setViewMode, setReturnToChat } from '../../lib/chatView';
+import { useChatDraft } from '../../lib/chatDraft';
 import { shouldShowWaitingFallback } from '../../lib/chatRows';
+import { recallStep, matchFiles, matchCommands } from '../../lib/chatComplete';
+import { isImageDropPath } from '../../lib/terminal/keys';
 
 export function ChatView({ sessionId }) {
   const viewerId = useId();
   const [messages, setMessages] = useState([]);
   const [nestedMessages, setNestedMessages] = useState({});
-  const [input, setInput] = useState('');
+  const [draft, setDraft, clearDraft] = useChatDraft(sessionId);
+  const input = draft.text;
+  const setInput = (text) => setDraft({ ...draft, text });
+  const attachments = draft.images || [];
+  const setAttachments = (images) => setDraft({ ...draft, images });
+  const clearInput = clearDraft;
   const [atStart, setAtStart] = useState(false);
   const [staleNotice, setStaleNotice] = useState(false);
   const [headerTitle, setHeaderTitle] = useState('');
@@ -42,6 +50,47 @@ export function ChatView({ sessionId }) {
   const needsFallback = shouldShowWaitingFallback(currentSession?.state, foldedMessages, {
     cards: !!currentSession?.ask,
   });
+
+  const history = useMemo(() => {
+    const arr = [];
+    const reversed = [...messages].reverse();
+    for (const msg of reversed) {
+      if (msg.role === 'user' && msg.content && typeof msg.content === 'string') {
+        const text = msg.content.trim();
+        if (text && arr[arr.length - 1] !== text) {
+          arr.push(text);
+        }
+      }
+    }
+    return arr;
+  }, [messages]);
+  const [recallIndex, setRecallIndex] = useState(-1);
+  const [siteFiles, setSiteFiles] = useState([]);
+  const [siteCommands, setSiteCommands] = useState([]);
+
+  useEffect(() => {
+    if (currentSession?.siteId) {
+      window.electronAPI
+        .listFiles(currentSession.siteId)
+        .then(setSiteFiles)
+        .catch(() => {});
+      window.electronAPI
+        .chatCommands(currentSession.siteId)
+        .then(setSiteCommands)
+        .catch(() => {});
+    }
+  }, [currentSession?.siteId]);
+
+  const [mentionState, setMentionState] = useState(null);
+  const mentionMatches = useMemo(() => {
+    if (!mentionState) return [];
+    if (mentionState.type === 'file')
+      return matchFiles(mentionState.query, siteFiles, 50);
+    return matchCommands(mentionState.query, siteCommands, 50);
+  }, [mentionState, siteFiles, siteCommands]);
+
+  const [mentionSelected, setMentionSelected] = useState(0);
+  useEffect(() => setMentionSelected(0), [mentionState?.query]);
 
   useEffect(() => {
     let active = true;
@@ -239,12 +288,92 @@ export function ChatView({ sessionId }) {
     }
   }, []);
 
+  const handlePaste = async (e) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    const newAttachments = [];
+    for (const item of items) {
+      if (item.type.indexOf('image/') === 0) {
+        const file = item.getAsFile();
+        if (file) {
+          const buffer = await file.arrayBuffer();
+          const path = await window.electronAPI.chatSaveImage(buffer);
+          newAttachments.push(path);
+        }
+      }
+    }
+    if (newAttachments.length > 0) {
+      e.preventDefault();
+      setAttachments([...attachments, ...newAttachments]);
+    }
+  };
+
+  const handleDrop = async (e) => {
+    e.preventDefault();
+    const files = [...e.dataTransfer.files];
+    const newAttachments = [];
+    if (files.length > 0) {
+      const paths = files.map((f) => window.electronAPI.pathForFile(f)).filter(Boolean);
+      for (const p of paths) {
+        if (isImageDropPath(p)) newAttachments.push(p);
+      }
+    }
+    if (newAttachments.length > 0) {
+      setAttachments([...attachments, ...newAttachments]);
+    }
+  };
+
   const handleKeyDown = (e) => {
+    if (mentionState) {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setMentionState(null);
+        return;
+      }
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setMentionSelected((s) => Math.min(s + 1, mentionMatches.length - 1));
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setMentionSelected((s) => Math.max(s - 1, 0));
+        return;
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault();
+        const match = mentionMatches[mentionSelected];
+        if (match) {
+          const val = mentionState.type === 'file' ? match : match.name;
+          const before = input.substring(0, mentionState.start);
+          const after = input.substring(mentionState.start + mentionState.query.length);
+          setInput(before + val + ' ' + after);
+          setMentionState(null);
+        }
+        return;
+      }
+    }
+    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+      const caret = e.target.selectionStart;
+      const isFirstLine = !input.substring(0, caret).includes('\n');
+      if (e.key === 'ArrowUp' && !isFirstLine) return;
+
+      const dir = e.key === 'ArrowUp' ? 1 : -1;
+      const { index: nextIdx, text } = recallStep(history, recallIndex, dir);
+      if (nextIdx !== recallIndex) {
+        e.preventDefault();
+        setRecallIndex(nextIdx);
+        if (text !== null) setInput(text);
+        else clearInput();
+        setRecallIndex(-1);
+      }
+      return;
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       if (!input.trim()) return;
-      window.electronAPI.chatSend(sessionId, input);
-      setInput('');
+      window.electronAPI.chatSend(sessionId, input, attachments);
+      clearInput();
       // Force stick to bottom when user sends a message
       setStickToBottom(true);
       setShowLatestPill(false);
@@ -576,12 +705,79 @@ export function ChatView({ sessionId }) {
         )}
 
         <div className="p-4">
+          {mentionState && mentionMatches.length > 0 && (
+            <div className="absolute bottom-full mb-1 left-4 max-h-[200px] overflow-y-auto bg-popover text-popover-foreground border shadow-lg rounded-md z-50 text-[13px] min-w-[250px]">
+              {mentionMatches.map((m, i) => (
+                <div
+                  key={mentionState.type === 'file' ? m : m.name}
+                  className={`px-3 py-1.5 cursor-pointer flex justify-between gap-4 ${i === mentionSelected ? 'bg-accent text-accent-foreground' : 'hover:bg-muted'}`}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    const val = mentionState.type === 'file' ? m : m.name;
+                    const before = input.substring(0, mentionState.start);
+                    const after = input.substring(
+                      mentionState.start + mentionState.query.length
+                    );
+                    setInput(before + val + ' ' + after);
+                    setMentionState(null);
+                  }}
+                >
+                  <span className="truncate">
+                    {mentionState.type === 'file' ? m : m.name}
+                  </span>
+                  {mentionState.type === 'cmd' && (
+                    <span className="opacity-50 text-xs shrink-0">{m.description}</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+          {attachments.length > 0 && (
+            <div className="flex flex-wrap gap-2 mb-2">
+              {attachments.map((path, i) => (
+                <div
+                  key={i}
+                  className="flex items-center gap-1 bg-muted px-2 py-1 rounded text-[11px] max-w-[200px]"
+                >
+                  <span className="truncate flex-1">{path.split(/[\\/]/).pop()}</span>
+                  <button
+                    onClick={() =>
+                      setAttachments(attachments.filter((_, idx) => idx !== i))
+                    }
+                    className="hover:text-destructive shrink-0"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
           <textarea
             className="w-full bg-background border border-input rounded-md px-3 py-2 text-[13px] focus:outline-none focus:ring-1 focus:ring-ring resize-y min-h-[60px]"
             placeholder="Message..."
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => {
+              const val = e.target.value;
+              setInput(val);
+              setRecallIndex(-1);
+
+              const caret = e.target.selectionStart;
+              const textBeforeCaret = val.substring(0, caret);
+              const match = textBeforeCaret.match(/(?:^|\s)([@/])(\S*)$/);
+              if (match) {
+                setMentionState({
+                  type: match[1] === '@' ? 'file' : 'cmd',
+                  query: match[2],
+                  start: caret - match[2].length,
+                });
+              } else {
+                setMentionState(null);
+              }
+            }}
             onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
+            onDrop={handleDrop}
+            onDragOver={(e) => e.preventDefault()}
           />
         </div>
       </div>

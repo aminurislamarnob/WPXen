@@ -25,6 +25,7 @@ import { useSettings } from '../lib/useSettings';
 import { LAST_AGENTS_SITE_KEY, resolveLastSite } from '../lib/activityBar';
 import { useAgentSessions, setSelectedSession } from '../lib/useAgentSessions';
 import TabStrip from './agents/TabStrip';
+import { cleanupOrphanedDrafts } from '../lib/chatDraft';
 import TabContextMenu from './agents/TabContextMenu';
 import { getViewMode, setViewMode } from '../lib/chatView';
 import {
@@ -113,6 +114,15 @@ export default function AgentsPane() {
   const [error, setError] = useState(null);
 
   const allSessions = useAgentSessions();
+  const [sessionsLoaded, setSessionsLoaded] = useState(false);
+  useEffect(() => {
+    window.electronAPI.listAllSessions().then(() => setSessionsLoaded(true));
+  }, []);
+  useEffect(() => {
+    if (sessionsLoaded) {
+      cleanupOrphanedDrafts(allSessions.map((s) => s.id));
+    }
+  }, [sessionsLoaded, allSessions]);
   const tabs = useMemo(() => {
     const valid = allSessions.filter((s) => s.siteId === siteId && !s.paneOf);
     const map = new Map(valid.map((s) => [s.sessionId, s]));

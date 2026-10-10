@@ -399,8 +399,8 @@ function registerHandlers(win, storeInstance) {
   ipcMain.handle('agent-chat-answer', (_e, sessionId, groups) => {
     return agents.chatAnswer(sessionId, groups);
   });
-  ipcMain.handle('agent-chat-send', (_e, sessionId, text) => {
-    return agents.chatSend(sessionId, text);
+  ipcMain.handle('agent-chat-send', (_e, sessionId, text, images) => {
+    return agents.chatSend(sessionId, text, images);
   });
   ipcMain.handle('agent-chat-load-older', (_e, sessionId) => {
     return agents.chatLoadOlder(sessionId);
@@ -2950,3 +2950,13 @@ module.exports = {
   getSetting,
   setSetting,
 };
+
+ipcMain.handle('agent-chat-save-image', async (_e, bytes) => {
+  const os = require('os');
+  const path = require('path');
+  const fs = require('fs/promises');
+  const crypto = require('crypto');
+  const p = path.join(os.tmpdir(), `wpxen-chat-image-${crypto.randomUUID()}.png`);
+  await fs.writeFile(p, Buffer.from(bytes));
+  return p;
+});

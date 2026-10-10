@@ -172,7 +172,66 @@ function renamePath(rootPath, targetPath, newName) {
   return { path: dest };
 }
 
+const { execSync } = require('child_process');
+const listFilesCache = new Map();
+
+function listFiles(rootPath, { limit = 20000 } = {}) {
+  const root = path.resolve(rootPath);
+  const now = Date.now();
+  const cached = listFilesCache.get(root);
+  if (cached && now - cached.time < 30000) {
+    return cached.files;
+  }
+
+  let files = [];
+  try {
+    const isGit = fs.existsSync(path.join(root, '.git'));
+    if (isGit) {
+      const out = execSync('git ls-files --cached --others --exclude-standard', {
+        cwd: root,
+        encoding: 'utf8',
+        maxBuffer: 10 * 1024 * 1024,
+      });
+      const lines = out.split(/\r?\n/);
+      for (const line of lines) {
+        if (!line) continue;
+        files.push(line);
+        if (files.length >= limit) break;
+      }
+    } else {
+      const skipNames = new Set(['node_modules', 'vendor', '.git']);
+      const queue = [root];
+      while (queue.length > 0 && files.length < limit) {
+        const dir = queue.shift();
+        try {
+          const dirents = fs.readdirSync(dir, { withFileTypes: true });
+          for (const d of dirents) {
+            if (d.isDirectory()) {
+              if (skipNames.has(d.name)) continue;
+              const fullPath = path.join(dir, d.name);
+              const relPath = path.relative(root, fullPath).replace(/\\/g, '/');
+              if (relPath === 'wp-content/uploads') continue;
+              queue.push(fullPath);
+            } else if (d.isFile()) {
+              files.push(path.relative(root, path.join(dir, d.name)).replace(/\\/g, '/'));
+              if (files.length >= limit) break;
+            }
+          }
+        } catch {
+          // skip inaccessible
+        }
+      }
+    }
+  } catch {
+    // fallback or ignore
+  }
+
+  listFilesCache.set(root, { time: now, files });
+  return files;
+}
+
 module.exports = {
+  listFiles,
   assertInRoot,
   statPath,
   listDirectory,

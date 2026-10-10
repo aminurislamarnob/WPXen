@@ -14,7 +14,7 @@ function formatBody(text) {
   return `${ESC}[200~${crOnly}${ESC}[201~`;
 }
 
-function sendChat(session, text) {
+function sendChat(session, text, images = []) {
   if (!session || !session.pty) return Promise.reject(new Error('Invalid session'));
 
   const sessionId = session.sessionId;
@@ -26,13 +26,19 @@ function sendChat(session, text) {
         // 1. Clear unsubmitted line
         session.pty.write('\x15');
 
-        // 2. Body
+        // 2. Images
+        for (const img of images) {
+          session.pty.write(`${ESC}[200~${img}${ESC}[201~`);
+        }
+
+        // 3. Body
         const body = formatBody(text);
         if (body) {
+          if (images.length > 0) session.pty.write(' ');
           session.pty.write(body);
         }
 
-        // 3. Enter with delay
+        // 4. Enter with delay
         setTimeout(() => {
           try {
             session.pty.write('\r');

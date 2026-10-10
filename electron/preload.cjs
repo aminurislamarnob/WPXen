@@ -292,7 +292,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('agent-chat-snapshot', sessionId, lines),
   chatAnswer: (sessionId, groups) =>
     ipcRenderer.invoke('agent-chat-answer', sessionId, groups),
-  chatSend: (sessionId, text) => ipcRenderer.invoke('agent-chat-send', sessionId, text),
+  chatSend: (sessionId, text, images) =>
+    ipcRenderer.invoke('agent-chat-send', sessionId, text, images),
+  chatSaveImage: (bytes) => ipcRenderer.invoke('agent-chat-save-image', bytes),
   chatLoadOlder: (sessionId) => ipcRenderer.invoke('agent-chat-load-older', sessionId),
   chatFetchFull: (sessionId, toolUseId) =>
     ipcRenderer.invoke('agent-chat-fetch-full', sessionId, toolUseId),
