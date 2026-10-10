@@ -173,6 +173,38 @@ describe('remoteAccess server', () => {
     }
   });
 
+  // ipc.cjs flips `remote.enabled` back off when a bind fails with nothing
+  // running, and that flip calls stop(). The reason has to survive it, or
+  // Settings replaces "Port N is in use" with a bare "Off" in the same tick.
+  it('keeps the in-use reason when the failed start switches itself off', async () => {
+    const squatter = net.createServer();
+    await new Promise((resolve) => squatter.listen(0, '127.0.0.1', resolve));
+    const taken = squatter.address().port;
+    const seen = [];
+    const off = remoteAccess.onStatusChange((s) => {
+      seen.push({ state: s.state, reason: s.reason });
+      // What ipc.cjs does with a bind failure that left nothing bound.
+      if (s.state === 'error' && s.actualPort == null) remoteAccess.stop();
+    });
+    try {
+      remoteAccess.start({ port: taken });
+      // Not waitForState: the status starts 'off', so only the pushes tell
+      // us the bind has failed and the flip-off has run.
+      const deadline = Date.now() + 3000;
+      while (seen.length < 2 && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 10));
+      }
+      expect(seen).toEqual([
+        { state: 'error', reason: `Port ${taken} is in use` },
+        { state: 'off', reason: `Port ${taken} is in use` },
+      ]);
+      expect(remoteAccess.getStatus().reason).toBe(`Port ${taken} is in use`);
+    } finally {
+      off();
+      squatter.close();
+    }
+  });
+
   it('moving to a new port restarts the server there', async () => {
     const first = await startEphemeral();
     const oldPort = first.actualPort;
