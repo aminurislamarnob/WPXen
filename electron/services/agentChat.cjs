@@ -8,6 +8,7 @@ let deps = {
   readSync: fs.readSync,
   closeSync: fs.closeSync,
   readdirSync: fs.readdirSync,
+  readFileSync: fs.readFileSync,
   setInterval,
   clearInterval,
 };
@@ -302,6 +303,121 @@ function augmentToolRows(rows, subagents) {
   }
 }
 
+// ── Subagents ──────────────────────────────────────────────────────────────
+// Claude keeps a Session's subagents beside its transcript:
+// <project>/<uuid>/subagents/agent-<id>.jsonl, with a .meta.json naming the
+// type, description and the parent's tool_use id.
+function subagentDir(watch) {
+  return path.join(watch.transcriptDir, watch.transcriptId, 'subagents');
+}
+
+// The newest copy of a tool row: a call is re-emitted once its result lands.
+function latestToolRow(watch, toolUseId) {
+  for (let i = watch.currentRows.length - 1; i >= 0; i--) {
+    const r = watch.currentRows[i];
+    if (r.role === 'tool' && r.tool_use?.id === toolUseId) return r;
+  }
+  return null;
+}
+
+function discoverSubagents(watch) {
+  let files;
+  try {
+    files = deps.readdirSync(subagentDir(watch));
+  } catch {
+    return; // no subagents yet
+  }
+  for (const f of files) {
+    const match = /^agent-(.+)\.meta\.json$/.exec(f);
+    if (!match || watch.subagents.has(match[1])) continue;
+    const agentId = match[1];
+    let meta;
+    try {
+      meta = JSON.parse(deps.readFileSync(path.join(subagentDir(watch), f), 'utf8'));
+    } catch {
+      continue; // written but not finished, or unreadable: retry next poll
+    }
+    watch.subagents.set(agentId, {
+      agentId,
+      type: meta.agentType,
+      description: meta.description,
+      toolUseId: meta.toolUseId,
+      expanded: false,
+      fd: null,
+      tailOffset: 0,
+      pageStart: 0,
+      state: {},
+      currentRows: [],
+    });
+    const parentRow = latestToolRow(watch, meta.toolUseId);
+    if (parentRow) {
+      parentRow.subagent = {
+        agentId,
+        type: meta.agentType,
+        description: meta.description,
+      };
+      watch.onRows([parentRow]);
+    }
+  }
+}
+
+function closeSubagent(sub) {
+  if (sub.fd === null) return;
+  try {
+    deps.closeSync(sub.fd);
+  } catch {}
+  sub.fd = null;
+}
+
+function pollSubagent(watch, sub) {
+  const parentRow = latestToolRow(watch, sub.toolUseId);
+  const running = !!parentRow && !parentRow.result;
+  if (!running && !sub.expanded) return closeSubagent(sub);
+
+  const nested = (rows) => rows.map((r) => ({ ...r, parentId: sub.toolUseId }));
+  const reportCount = () => {
+    if (parentRow && sub.state.toolUseCount !== undefined) {
+      parentRow.subagentCount = sub.state.toolUseCount;
+      watch.onRows([parentRow]);
+    }
+  };
+
+  const subPath = path.join(subagentDir(watch), `agent-${sub.agentId}.jsonl`);
+  try {
+    if (sub.fd === null) {
+      sub.fd = deps.openSync(subPath, 'r');
+      const complete = completeLength(sub.fd, deps.statSync(subPath).size);
+      const { rows, pageStart, state } = tailRead(sub.fd, complete, watch.decodeLine);
+      sub.currentRows = rows;
+      sub.pageStart = pageStart;
+      sub.state = state;
+      sub.tailOffset = complete;
+      if (rows.length > 0) watch.onRows(nested(rows));
+      reportCount();
+      return;
+    }
+
+    const size = deps.statSync(subPath).size;
+    if (size <= sub.tailOffset) return;
+    const buf = readRange(sub.fd, sub.tailOffset, size - sub.tailOffset);
+    const { lines, partial } = splitLines(buf);
+    sub.tailOffset += buf.length - partial.length;
+    const newRows = [];
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      const row = watch.decodeLine(line, sub.state);
+      if (row) newRows.push(...[row].flat().map(truncateRow));
+    }
+    if (newRows.length > 0) {
+      sub.currentRows.push(...newRows);
+      watch.onRows(nested(newRows));
+      reportCount();
+    }
+  } catch {
+    // Missing or unreadable subagent file: the parent stays a plain tool row.
+  }
+}
+
 // ── Open / Close ───────────────────────────────────────────────────────────
 function openChat(sessionId, viewerId, opts) {
   const {
@@ -366,52 +482,7 @@ function openChat(sessionId, viewerId, opts) {
   const poll = () => {
     try {
       // 1. Discover subagents
-      try {
-        const subDir = deps.path
-          ? deps.path.join(watch.transcriptDir, 'subagents')
-          : require('path').join(watch.transcriptDir, 'subagents');
-        const files = deps.readdirSync(subDir);
-        for (const f of files) {
-          if (f.endsWith('.meta.json')) {
-            const agentId = f.replace('.meta.json', '').replace('agent-', '');
-            if (!watch.subagents.has(agentId)) {
-              try {
-                const metaRaw = deps.readFileSync(
-                  require('path').join(subDir, f),
-                  'utf8'
-                );
-                const meta = JSON.parse(metaRaw);
-                watch.subagents.set(agentId, {
-                  agentId,
-                  type: meta.agentType,
-                  description: meta.description,
-                  toolUseId: meta.toolUseId,
-                  expanded: false,
-                  fd: null,
-                  fileSize: 0,
-                  tailOffset: 0,
-                  pageStart: 0,
-                  state: {},
-                  currentRows: [],
-                });
-
-                const parentRow = watch.currentRows.find(
-                  (r) =>
-                    r.role === 'tool' && r.tool_use && r.tool_use.id === meta.toolUseId
-                );
-                if (parentRow) {
-                  parentRow.subagent = {
-                    agentId,
-                    type: meta.agentType,
-                    description: meta.description,
-                  };
-                  onRows([parentRow]);
-                }
-              } catch (_e) {}
-            }
-          }
-        }
-      } catch (_e) {}
+      discoverSubagents(watch);
 
       // 2. Poll parent
       const newStat = deps.statSync(watch.path);
@@ -457,95 +528,10 @@ function openChat(sessionId, viewerId, opts) {
         onRows([{ notice: true, kind: 'transcript-changed' }]);
       }
 
-      // 4. Poll subagents
-      for (const sub of watch.subagents.values()) {
-        const parentRow = watch.currentRows.find(
-          (r) => r.role === 'tool' && r.tool_use && r.tool_use.id === sub.toolUseId
-        );
-        const running = parentRow && !parentRow.result;
-        const shouldTail = running || sub.expanded;
-
-        if (!shouldTail) {
-          if (sub.fd !== null) {
-            try {
-              deps.closeSync(sub.fd);
-            } catch {}
-            sub.fd = null;
-          }
-          continue;
-        }
-
-        const subPath = require('path').join(
-          watch.transcriptDir,
-          'subagents',
-          `agent-${sub.agentId}.jsonl`
-        );
-        if (sub.fd === null) {
-          try {
-            sub.fd = deps.openSync(subPath, 'r');
-            sub.fileSize = deps.statSync(subPath).size;
-            const { rows, pageStart, state } = tailRead(
-              sub.fd,
-              sub.fileSize,
-              watch.decodeLine
-            );
-            sub.currentRows = rows;
-            sub.pageStart = pageStart;
-            sub.state = state;
-            sub.tailOffset = sub.fileSize;
-
-            const mappedRows = rows.map((r) => ({ ...r, parentId: sub.toolUseId }));
-            if (mappedRows.length > 0) onRows(mappedRows);
-
-            if (parentRow && state.toolUseCount !== undefined) {
-              parentRow.subagentCount = state.toolUseCount;
-              onRows([parentRow]);
-            }
-          } catch (_e) {}
-        } else {
-          try {
-            const subStat = deps.statSync(subPath);
-            const subSize = subStat.size;
-            if (subSize < sub.tailOffset) {
-              sub.tailOffset = 0;
-              sub.state = {};
-              sub.currentRows = [];
-              sub.pageStart = 0;
-            } else if (subSize > sub.tailOffset) {
-              const length = subSize - sub.tailOffset;
-              const buf = readRange(sub.fd, sub.tailOffset, length);
-              sub.tailOffset = subSize;
-              sub.fileSize = subSize;
-
-              const { lines } = splitLines(buf);
-              const newRows = [];
-              for (const line of lines) {
-                if (!line.trim()) continue;
-                const row = watch.decodeLine(line, sub.state);
-                if (row) {
-                  if (Array.isArray(row)) newRows.push(...row.map(truncateRow));
-                  else newRows.push(truncateRow(row));
-                }
-              }
-
-              if (newRows.length > 0) {
-                sub.currentRows.push(...newRows);
-                const mappedRows = newRows.map((r) => ({
-                  ...r,
-                  parentId: sub.toolUseId,
-                }));
-                onRows(mappedRows);
-
-                if (parentRow && sub.state.toolUseCount !== undefined) {
-                  parentRow.subagentCount = sub.state.toolUseCount;
-                  onRows([parentRow]);
-                }
-              }
-            }
-          } catch (_e) {}
-        }
-      }
-    } catch (_e) {
+      // 4. Poll subagents: only while running or expanded, so a Session
+      // with many finished subagents stays cheap.
+      for (const sub of watch.subagents.values()) pollSubagent(watch, sub);
+    } catch {
       // Missing file or read error
     }
   };
@@ -567,6 +553,9 @@ function loadOlder(sessionId) {
   watch.pageStart = pageStart;
 
   if (rows.length > 0) {
+    // Subagents are discovered from the folder, not the page: an Agent call
+    // paged in now may already have one.
+    augmentToolRows(rows, watch.subagents);
     watch.currentRows.unshift(...rows);
   }
 
@@ -585,6 +574,7 @@ function closeChat(sessionId, viewerId) {
   watch.viewers.delete(viewerId);
   if (watch.viewers.size === 0) {
     if (watch.interval) deps.clearInterval(watch.interval);
+    for (const sub of watch.subagents.values()) closeSubagent(sub);
     if (watch.fd !== null) {
       try {
         deps.closeSync(watch.fd);
@@ -597,6 +587,7 @@ function closeChat(sessionId, viewerId) {
 function closeAllChats() {
   for (const watch of watches.values()) {
     if (watch.interval) deps.clearInterval(watch.interval);
+    for (const sub of watch.subagents.values()) closeSubagent(sub);
     if (watch.fd !== null) {
       try {
         deps.closeSync(watch.fd);
@@ -606,20 +597,25 @@ function closeAllChats() {
   watches.clear();
 }
 
-function chatExpandSubagent(sessionId, agentId, expanded) {
-  const watch = watches.get(sessionId);
-  if (!watch) return;
-  const sub = watch.subagents.get(agentId);
-  if (sub) {
-    sub.expanded = expanded;
-    // We could immediately trigger a poll here to respond instantly, but poll will catch it soon.
+// Subagents are addressed by their parent's tool_use id — what the renderer
+// holds.
+function findSubagent(watch, toolUseId) {
+  for (const sub of watch.subagents.values()) {
+    if (sub.toolUseId === toolUseId) return sub;
   }
+  return null;
 }
 
-function chatLoadOlderSubagent(sessionId, agentId) {
+function chatExpandSubagent(sessionId, toolUseId, expanded) {
+  const watch = watches.get(sessionId);
+  const sub = watch && findSubagent(watch, toolUseId);
+  if (sub) sub.expanded = !!expanded;
+}
+
+function chatLoadOlderSubagent(sessionId, toolUseId) {
   const watch = watches.get(sessionId);
   if (!watch) return { rows: [], atStart: true };
-  const sub = watch.subagents.get(agentId);
+  const sub = findSubagent(watch, toolUseId);
   if (!sub || sub.fd === null) return { rows: [], atStart: true };
 
   const { rows, pageStart, atStart } = loadOlderPage(

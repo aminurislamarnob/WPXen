@@ -292,8 +292,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   chatLoadOlder: (sessionId) => ipcRenderer.invoke('agent-chat-load-older', sessionId),
   chatFetchFull: (sessionId, toolUseId) =>
     ipcRenderer.invoke('agent-chat-fetch-full', sessionId, toolUseId),
-  chatExpandSubagent: (sessionId, parentId) =>
-    ipcRenderer.invoke('agent-chat-expand-subagent', sessionId, parentId),
+  chatExpandSubagent: (sessionId, toolUseId, expanded) =>
+    ipcRenderer.invoke('agent-chat-expand-subagent', sessionId, toolUseId, expanded),
   chatLoadOlderSubagent: (sessionId, parentId) =>
     ipcRenderer.invoke('agent-chat-load-older-subagent', sessionId, parentId),
 

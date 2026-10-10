@@ -1429,8 +1429,8 @@ function chatFetchFull(sessionId, toolUseId) {
   return agentChat.chatFetchFull(sessionId, toolUseId);
 }
 
-function chatExpandSubagent(sessionId, parentId) {
-  return agentChat.chatExpandSubagent(sessionId, parentId);
+function chatExpandSubagent(sessionId, toolUseId, expanded) {
+  return agentChat.chatExpandSubagent(sessionId, toolUseId, expanded);
 }
 
 function chatLoadOlderSubagent(sessionId, parentId) {
