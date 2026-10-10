@@ -75,6 +75,10 @@ const ALLOWED_OPS = new Set([
   'terminal.detach',
   'terminal.write',
   'terminal.resize',
+  'agents.list',
+  'projects.launchTargets',
+  'sessions.launch',
+  'sessions.stop',
 ]);
 
 // Terminal output batches per (device, Session) so a chatty TUI doesn't send
@@ -165,6 +169,11 @@ const deps = {
       subscribeOutput: () => () => {},
       write: () => {},
       resize: () => {},
+      listAgents: () => [],
+      shellId: 'shell',
+      targets: () => [],
+      launch: () => ({ error: 'Unavailable.' }),
+      stop: () => ({ ok: true }),
     };
   },
   // Batching timers, injected so tests flush deterministically.
@@ -1020,6 +1029,47 @@ async function dispatchSessionOp(op, params) {
     if (!deps.sessions.get(sessionId)) throw new Error('Unknown session.');
     deps.sessions.markRead(sessionId);
     return { ok: true };
+  }
+  if (op === 'agents.list') {
+    // Detected AI-provider Agents only: no plain shell, and no install hints
+    // or actions — installing from the phone is out of scope.
+    return {
+      agents: deps.sessions
+        .listAgents()
+        .filter((a) => a && a.detected && a.id !== deps.sessions.shellId)
+        .map((a) => ({ id: a.id, name: a.name })),
+    };
+  }
+  if (op === 'projects.launchTargets') {
+    const projectId = params && params.projectId;
+    if (typeof projectId !== 'string' || !projectId) throw new Error('Project not found');
+    return { targets: deps.sessions.targets(projectId) };
+  }
+  if (op === 'sessions.launch') {
+    const projectId = params && params.projectId;
+    const agentId = params && params.agentId;
+    const agent =
+      typeof agentId === 'string' && agentId
+        ? deps.sessions.listAgents().find((a) => a && a.id === agentId)
+        : null;
+    if (!agent) throw new Error('Unknown agent.');
+    if (agentId === deps.sessions.shellId) {
+      throw new Error('The plain shell is not available on the phone.');
+    }
+    if (!agent.detected)
+      throw new Error(`Agent ${agent.name || agentId} is not installed.`);
+    const launched = deps.sessions.launch({
+      projectId,
+      agentId,
+      targetId: (params && params.targetId) || null,
+    });
+    if (launched && launched.error) throw new Error(launched.error);
+    return launched;
+  }
+  if (op === 'sessions.stop') {
+    const sessionId = params && params.sessionId;
+    if (typeof sessionId !== 'string' || !sessionId) throw new Error('Unknown session.');
+    return deps.sessions.stop(sessionId);
   }
   throw new Error(`Unknown operation: ${op}`);
 }

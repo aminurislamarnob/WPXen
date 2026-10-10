@@ -301,7 +301,7 @@ describe('sessions over the channel', () => {
 
   it('rejects unknown ops and unknown sessions on markRead', async () => {
     const { client } = await pairedPhone();
-    await expect(client.request('sessions.launch')).rejects.toThrow('op_not_allowed');
+    await expect(client.request('sessions.teleport')).rejects.toThrow('op_not_allowed');
     await expect(client.request('sessions.markRead', {})).rejects.toThrow();
     await expect(
       client.request('sessions.markRead', { sessionId: 'nope' })
