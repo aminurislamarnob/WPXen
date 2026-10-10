@@ -19,6 +19,7 @@ export const SECTIONS = [
     items: [
       { id: 'general', label: 'General', icon: 'sliders' },
       { id: 'agents', label: 'Agents', icon: 'cpu' },
+      { id: 'mobile', label: 'Mobile', icon: 'smartphone' },
       { id: 'tools', label: 'External Tools', icon: 'wrench' },
     ],
   },
@@ -506,6 +507,41 @@ export const SETTINGS_ITEMS = [
       'where',
       'mode',
       'git',
+    ],
+  },
+
+  // ── Mobile (Remote Access) ───────────────────────────────────────────────
+  {
+    id: 'remote.enabled',
+    section: 'mobile',
+    title: 'Remote Access',
+    description: 'Let a paired phone reach this Mac over a secure tunnel',
+    keywords: [
+      'remote',
+      'access',
+      'mobile',
+      'phone',
+      'ios',
+      'android',
+      'tunnel',
+      'pair',
+      'companion',
+    ],
+  },
+  {
+    id: 'remote.port',
+    section: 'mobile',
+    title: 'Remote Access port',
+    description: 'Localhost port the Remote Access server listens on',
+    keywords: [
+      'remote',
+      'access',
+      'mobile',
+      'port',
+      'localhost',
+      'server',
+      'phone',
+      'tunnel',
     ],
   },
 

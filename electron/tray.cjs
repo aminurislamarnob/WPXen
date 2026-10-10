@@ -70,6 +70,28 @@ function keepAwakeItems(keepAwake) {
   ];
 }
 
+// Remote Access: visible only while the server holds a port — a status line
+// plus a one-click Turn off that writes through the validated settings path,
+// so Settings and the Mobile section follow. `setEnabled` comes from main.cjs.
+function remoteAccessItems(remoteAccess) {
+  if (!remoteAccess) return [];
+  let status;
+  try {
+    status = remoteAccess.getStatus();
+  } catch {
+    return [];
+  }
+  if (!status || status.actualPort == null) return [];
+  return [
+    { type: 'separator' },
+    { label: 'Remote Access: on', enabled: false },
+    {
+      label: 'Turn off',
+      click: () => remoteAccess.setEnabled(false),
+    },
+  ];
+}
+
 function buildContextMenu(
   mainWindow,
   serviceStatus,
@@ -77,7 +99,8 @@ function buildContextMenu(
   attention,
   onOpenSession,
   keepAwake,
-  folders = []
+  folders = [],
+  remoteAccess = null
 ) {
   const { nginx, php, mysql } = serviceStatus || {};
 
@@ -146,6 +169,7 @@ function buildContextMenu(
       },
     },
     ...keepAwakeItems(keepAwake),
+    ...remoteAccessItems(remoteAccess),
     ...attentionItems(attention, [...(sites || []), ...folders], onOpenSession),
     ...siteItems,
     { type: 'separator' },
@@ -163,11 +187,12 @@ function buildContextMenu(
 // opens one. Call `setAttention()` when they change — the 5 s refresh is for
 // service status and is too slow for a "needs you" signal. `keepAwake` is
 // `{ getStatus, setMode }`; call `updateMenu()` when its status changes.
+// `remoteAccess` is `{ getStatus, setEnabled }`; same deal.
 function createTray(
   mainWindow,
   getStatus,
   getSites,
-  { getAttention, getFolders, onOpenSession, keepAwake } = {}
+  { getAttention, getFolders, onOpenSession, keepAwake, remoteAccess } = {}
 ) {
   tray = new Tray(createTrayIcon());
   tray.setToolTip('WPXen — Local WordPress Development');
@@ -193,7 +218,8 @@ function createTray(
         attention,
         onOpenSession,
         keepAwake,
-        folders
+        folders,
+        remoteAccess
       )
     );
   }

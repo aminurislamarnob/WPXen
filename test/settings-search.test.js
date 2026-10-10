@@ -91,3 +91,15 @@ describe('registry integrity', () => {
     }
   });
 });
+
+describe('Remote Access entries', () => {
+  it('finds the Mobile settings by feature, section and field names', () => {
+    expect(visibleItems('remote access')).toEqual(
+      expect.arrayContaining(['remote.enabled', 'remote.port'])
+    );
+    expect(visibleItems('mobile')).toEqual(
+      expect.arrayContaining(['remote.enabled', 'remote.port'])
+    );
+    expect(visibleItems('port')).toContain('remote.port');
+  });
+});

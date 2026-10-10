@@ -36,6 +36,7 @@ const VALID_EVENT_CHANNELS = [
   'browser-shortcut',
   'settings-updated',
   'keep-awake-status-update',
+  'remote-access-status-update',
 ];
 
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -170,6 +171,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Keep computer awake: { mode, active, workingCount }. Changes are pushed on
   // 'keep-awake-status-update'; the mode itself is the agents.keepAwake setting.
   getKeepAwakeStatus: () => ipcRenderer.invoke('keep-awake-status'),
+  // Remote Access: { state, host, port, actualPort, reason }. Changes arrive
+  // on 'remote-access-status-update'; on/off itself is the remote.enabled setting.
+  getRemoteAccessStatus: () => ipcRenderer.invoke('remote-access-status'),
   // Editors/terminals detected on this machine, for the settings pickers.
   listExternalTools: () => ipcRenderer.invoke('list-external-tools'),
   // Every agent including ones hidden from the launcher (settings only).
