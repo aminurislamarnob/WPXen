@@ -883,7 +883,8 @@ function registerHandlers(win, storeInstance) {
     const transcriptPath = transcripts.locateTranscript(
       session.agentId,
       session.cwd,
-      session.startedAt
+      session.startedAt,
+      session.transcriptId
     );
     const contextSource = transcriptPath ? 'transcript' : 'capture';
     const modes = transcriptPath ? ['focused', 'full'] : ['quick'];
@@ -949,7 +950,8 @@ function registerHandlers(win, storeInstance) {
     const transcriptPath = transcripts.locateTranscript(
       session.agentId,
       session.cwd,
-      session.startedAt
+      session.startedAt,
+      session.transcriptId
     );
     const capture = agents.getBuffer(sessionId);
     if (!transcriptPath && !capture) return { error: 'No terminal output available' };
