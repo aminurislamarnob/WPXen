@@ -68,3 +68,33 @@ describe('shouldShowWaitingFallback', () => {
     expect(shouldShowWaitingFallback('needs-input', messages)).toBe(true);
   });
 });
+
+describe('shouldShowWaitingFallback — only the latest row counts', () => {
+  const ask = (result) => ({
+    role: 'tool',
+    tool_use: { name: 'AskUserQuestion' },
+    result,
+  });
+  const run = (...items) => ({ role: 'tool-run', items });
+
+  it('shows the row when an old question is still open but newer rows followed', () => {
+    const messages = [run(ask()), { role: 'assistant', content: 'moving on' }];
+    expect(shouldShowWaitingFallback('needs-input', messages, { cards: true })).toBe(
+      true
+    );
+  });
+
+  it('hides it while the latest row is an open question card', () => {
+    const messages = [{ role: 'user', content: 'go' }, run({ role: 'tool' }, ask())];
+    expect(shouldShowWaitingFallback('needs-input', messages, { cards: true })).toBe(
+      false
+    );
+  });
+
+  it('shows it for an open question the Agent has no card for', () => {
+    const messages = [run(ask())];
+    expect(shouldShowWaitingFallback('needs-input', messages, { cards: false })).toBe(
+      true
+    );
+  });
+});

@@ -11,6 +11,7 @@ import { QuestionCard } from './QuestionCard';
 import { buildAskAnswerKeys } from '../../lib/agentAsk';
 import { SubagentRow } from './SubagentRow';
 import { WaitingFallback } from './WaitingFallback';
+import * as sessionCache from '../../lib/terminal/sessionCache';
 import { ImageRef } from './ImageRef';
 import { contextMeter } from '../../lib/contextMeter';
 import { setViewMode, setReturnToChat } from '../../lib/chatView';
@@ -38,7 +39,9 @@ export function ChatView({ sessionId }) {
   const foldedMessages = useMemo(() => foldToolRuns(messages), [messages]);
 
   const [fallbackSnapshot, setFallbackSnapshot] = useState('');
-  const needsFallback = shouldShowWaitingFallback(currentSession?.state, foldedMessages);
+  const needsFallback = shouldShowWaitingFallback(currentSession?.state, foldedMessages, {
+    cards: !!currentSession?.ask,
+  });
 
   useEffect(() => {
     let active = true;
@@ -57,6 +60,8 @@ export function ChatView({ sessionId }) {
   const handleSwitchToTerminal = useCallback(() => {
     setViewMode(sessionId, 'terminal');
     setReturnToChat(sessionId, true);
+    // The xterm is un-hidden on the next render; focus it once it's visible.
+    requestAnimationFrame(() => sessionCache.focus(sessionId));
   }, [sessionId]);
 
   // Expose virtualizer

@@ -118,17 +118,15 @@ export function runNeedsAttention(run) {
   );
 }
 
-export function shouldShowWaitingFallback(status, foldedMessages) {
+// "Waiting in terminal": the TUI wants input the transcript can't show.
+// Suppressed only while the latest row is an open question card the chat can
+// answer itself — an older open question, or one this Agent has no card for
+// (`cards`: its registry entry defines no key map), doesn't count.
+export function shouldShowWaitingFallback(status, foldedMessages, { cards = true } = {}) {
   if (status !== 'needs-input') return false;
-
-  for (const msg of foldedMessages) {
-    if (msg.role === 'tool-run') {
-      for (const item of msg.items) {
-        if (item.tool_use?.name === 'AskUserQuestion' && !item.result) {
-          return false;
-        }
-      }
-    }
-  }
-  return true;
+  const last = foldedMessages[foldedMessages.length - 1];
+  const lastRow = last?.role === 'tool-run' ? last.items[last.items.length - 1] : last;
+  const openCard =
+    cards && lastRow?.tool_use?.name === 'AskUserQuestion' && !lastRow.result;
+  return !openCard;
 }
