@@ -402,6 +402,12 @@ function registerHandlers(win, storeInstance) {
   ipcMain.handle('agent-chat-send', (_e, sessionId, text, images) => {
     return agents.chatSend(sessionId, text, images);
   });
+  ipcMain.handle('agent-chat-stop', (_e, sessionId) => {
+    return agents.chatInterrupt(sessionId);
+  });
+  ipcMain.handle('agent-chat-model', (_e, sessionId, modelId) => {
+    return agents.chatModel(sessionId, modelId);
+  });
   ipcMain.handle('agent-chat-load-older', (_e, sessionId) => {
     return agents.chatLoadOlder(sessionId);
   });

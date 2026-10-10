@@ -50,6 +50,13 @@ const REGISTRY = [
     resumeFlag: '--resume',
     chat: 'claude',
     ask: { kind: 'claude-digits' },
+    // Aliases Claude Code's `/model` accepts, as shown in its TUI picker.
+    // The chat view builds its model picker from this; no table hides it.
+    models: [
+      { id: 'opus', label: 'Opus' },
+      { id: 'sonnet', label: 'Sonnet' },
+      { id: 'haiku', label: 'Haiku' },
+    ],
   },
   {
     // command-code installs four aliases for one entry point: cmd, cmdc,
@@ -335,6 +342,7 @@ function listAgents({ all = false, shell = true } = {}) {
         promptFlag: a.promptFlag || null,
         sessionIdFlag: a.sessionIdFlag || null,
         resumeFlag: a.resumeFlag || null,
+        models: a.models ? a.models.map((m) => ({ ...m })) : null,
         chat: a.chat || null,
         // How this Agent's TUI takes a question-card answer; no key map, no cards.
         ask: a.ask?.kind || null,
@@ -1374,7 +1382,12 @@ function stopAll() {
 }
 
 const agentChat = require('./agentChat.cjs');
-const { sendChat, sendChatAnswer } = require('./agentChatSend.cjs');
+const {
+  sendChat,
+  sendChatAnswer,
+  chatStop,
+  chatCommand,
+} = require('./agentChatSend.cjs');
 const { decodeClaudeLine } = require('./agentChatClaude.cjs');
 const transcripts = require('./transcripts.cjs');
 
@@ -1465,6 +1478,24 @@ function chatSend(sessionId, text, images = []) {
   return sendChat(session, text, images);
 }
 
+// Interrupt a working Agent with a single Esc. Cancels any pending delayed
+// Enter first, so nothing stale submits after the interrupt.
+function chatInterrupt(sessionId) {
+  const session = getSession(sessionId);
+  if (!session) return Promise.reject(new Error('No session'));
+  return chatStop(session);
+}
+
+// Switch the Agent's model via `/model <id>`. Queued on the send serialiser
+// behind any in-flight send, so it never lands on a dialog or interleaves.
+function chatModel(sessionId, modelId) {
+  const session = getSession(sessionId);
+  if (!session) return Promise.reject(new Error('No session'));
+  if (!modelId || typeof modelId !== 'string')
+    return Promise.reject(new Error('No model'));
+  return chatCommand(session, `/model ${modelId}`);
+}
+
 function chatImage(sessionId, ref) {
   return agentChat.chatImage(sessionId, ref);
 }
@@ -1500,6 +1531,8 @@ module.exports = {
   closeAllChats,
   chatSend,
   chatAnswer,
+  chatInterrupt,
+  chatModel,
   chatLoadOlder,
   chatFetchFull,
   chatExpandSubagent,

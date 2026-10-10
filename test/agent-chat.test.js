@@ -10,7 +10,12 @@ import {
   TRUNCATE_THRESHOLD,
 } from '../electron/services/agentChat.cjs';
 import { decodeClaudeLine } from '../electron/services/agentChatClaude.cjs';
-import { sendChat, formatBody } from '../electron/services/agentChatSend.cjs';
+import {
+  sendChat,
+  chatStop,
+  chatCommand,
+  formatBody,
+} from '../electron/services/agentChatSend.cjs';
 
 // Real Claude record shapes: the turn sits under message.content, and a tool
 // result is a user record of tool_result blocks keyed by tool_use_id.
@@ -573,6 +578,88 @@ describe('agentChatSend', () => {
     await sendChat(session, 'test');
 
     expect(written).toEqual(['\x15', 'test', '\r']);
+  });
+});
+
+describe('chatStop', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  });
+
+  it('writes exactly one Esc and nothing else', async () => {
+    const written = [];
+    const session = {
+      sessionId: 'stop-exact',
+      pty: { write: (data) => written.push(data) },
+    };
+
+    await chatStop(session);
+
+    expect(written).toEqual(['\x1b']);
+  });
+
+  it('cancels a pending delayed Enter from an earlier send', async () => {
+    const written = [];
+    const session = {
+      sessionId: 'stop-cancel',
+      pty: { write: (data) => written.push(data) },
+    };
+
+    const send = sendChat(session, 'hello');
+    // Let the send start: its body writes on a microtask and the delayed
+    // Enter becomes pending. A real Stop always arrives over IPC after that.
+    await Promise.resolve();
+    await chatStop(session);
+    await vi.advanceTimersByTimeAsync(2000);
+    await send;
+
+    expect(written).toEqual(['\x15', 'hello', '\x1b']);
+    expect(written).not.toContain('\r');
+  });
+});
+
+describe('chatCommand (/model)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  });
+
+  it('writes the command with a delayed Enter and no line clear', async () => {
+    const written = [];
+    const session = {
+      sessionId: 'model-plain',
+      pty: { write: (data) => written.push(data) },
+    };
+
+    const done = chatCommand(session, '/model sonnet');
+    await vi.advanceTimersByTimeAsync(2000);
+    await done;
+
+    expect(written).toEqual(['/model sonnet', '\r']);
+  });
+
+  it('waits for an in-flight send Enter and never interleaves', async () => {
+    const written = [];
+    const session = {
+      sessionId: 'model-queue',
+      pty: { write: (data) => written.push(data) },
+    };
+
+    const first = sendChat(session, 'hello');
+    const second = chatCommand(session, '/model sonnet');
+    await vi.advanceTimersByTimeAsync(4000);
+    await Promise.all([first, second]);
+
+    expect(written).toEqual(['\x15', 'hello', '\r', '/model sonnet', '\r']);
   });
 });
 

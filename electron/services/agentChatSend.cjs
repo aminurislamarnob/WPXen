@@ -4,6 +4,7 @@ const VISUAL_ESC = '\u241B'; // ␛
 
 // Each session gets a promise chain to serialize writes
 const sendChains = new Map();
+const pendingEnters = new Map();
 
 function formatBody(text) {
   const sanitized = text.replace(new RegExp(ESC, 'g'), VISUAL_ESC);
@@ -39,7 +40,8 @@ function sendChat(session, text, images = []) {
         }
 
         // 4. Enter with delay
-        setTimeout(() => {
+        const t = setTimeout(() => {
+          pendingEnters.delete(sessionId);
           try {
             session.pty.write('\r');
           } catch {
@@ -47,6 +49,7 @@ function sendChat(session, text, images = []) {
           }
           resolve();
         }, NATIVE_CHAT_SUBMIT_DELAY_MS);
+        pendingEnters.set(sessionId, { t, resolve });
       } catch {
         resolve(); // proceed chain even on error
       }
@@ -100,7 +103,63 @@ function sendChatAnswer(session, groups) {
   return chain;
 }
 
+function chatStop(session) {
+  if (!session || !session.pty) return Promise.reject(new Error('Invalid session'));
+  const sessionId = session.sessionId;
+  // A delayed Enter from an earlier send would land after the interrupt and
+  // submit something — cancel it and release the send's chain early.
+  const pending = pendingEnters.get(sessionId);
+  if (pending) {
+    clearTimeout(pending.t);
+    pendingEnters.delete(sessionId);
+    pending.resolve();
+  }
+  try {
+    session.pty.write(ESC);
+  } catch {
+    // ignore pty closed errors
+  }
+  return Promise.resolve();
+}
+
+function chatCommand(session, text) {
+  if (!session || !session.pty) return Promise.reject(new Error('Invalid session'));
+  const sessionId = session.sessionId;
+  let chain = sendChains.get(sessionId) || Promise.resolve();
+
+  chain = chain.then(() => {
+    return new Promise((resolve) => {
+      try {
+        // No Ctrl+U: a dialog may be watching the line, so never clear it.
+        // Chaining on the session's tail makes this wait for any pending
+        // Enter above, so the bytes can never interleave with an earlier send.
+        session.pty.write(text);
+        const t = setTimeout(() => {
+          pendingEnters.delete(sessionId);
+          try {
+            session.pty.write('\r');
+          } catch {
+            // ignore pty closed errors
+          }
+          resolve();
+        }, NATIVE_CHAT_SUBMIT_DELAY_MS);
+        pendingEnters.set(sessionId, { t, resolve });
+      } catch {
+        resolve(); // proceed chain even on error
+      }
+    });
+  });
+
+  sendChains.set(sessionId, chain);
+  chain.finally(() => {
+    if (sendChains.get(sessionId) === chain) sendChains.delete(sessionId);
+  });
+  return chain;
+}
+
 module.exports = {
+  chatStop,
+  chatCommand,
   sendChat,
   sendChatAnswer,
   formatBody,

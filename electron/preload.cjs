@@ -294,6 +294,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('agent-chat-answer', sessionId, groups),
   chatSend: (sessionId, text, images) =>
     ipcRenderer.invoke('agent-chat-send', sessionId, text, images),
+  chatStop: (sessionId) => ipcRenderer.invoke('agent-chat-stop', sessionId),
+  chatModel: (sessionId, modelId) =>
+    ipcRenderer.invoke('agent-chat-model', sessionId, modelId),
   chatSaveImage: (bytes) => ipcRenderer.invoke('agent-chat-save-image', bytes),
   chatFiles: (siteId) => ipcRenderer.invoke('agent-chat-files', siteId),
   chatCommands: (siteId) => ipcRenderer.invoke('agent-chat-commands', siteId),

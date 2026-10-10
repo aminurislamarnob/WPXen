@@ -3,7 +3,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { pinnedIndexes, shouldStickToBottom } from '../../lib/chatList';
 import { foldToolRuns, runNeedsAttention } from '../../lib/chatRows';
 import { useMemo } from 'react';
-import { useAgentSessions } from '../../lib/useAgentSessions';
+import { useAgentSessions, useSelectedSession } from '../../lib/useAgentSessions';
 import DiffView from '../DiffView';
 
 import { ChatMarkdown } from './ChatMarkdown';
@@ -22,12 +22,13 @@ import { isImageDropPath } from '../../lib/terminal/keys';
 
 export function ChatView({ sessionId }) {
   const viewerId = useId();
+  const rootRef = useRef(null);
   const [messages, setMessages] = useState([]);
   const [nestedMessages, setNestedMessages] = useState({});
   const [draft, setDraft, clearDraft] = useChatDraft(sessionId);
   const input = draft.text;
   const setInput = (text) => setDraft({ ...draft, text });
-  const attachments = draft.images || [];
+  const attachments = useMemo(() => draft.images || [], [draft.images]);
   const setAttachments = (images) => setDraft({ ...draft, images });
   const clearInput = clearDraft;
   const [atStart, setAtStart] = useState(false);
@@ -35,8 +36,43 @@ export function ChatView({ sessionId }) {
   const [headerTitle, setHeaderTitle] = useState('');
   const [chatState, setChatState] = useState({});
   const sessions = useAgentSessions();
+  const selectedSessionId = useSelectedSession();
   // Session rows are keyed `sessionId`; there is no `id`.
   const currentSession = sessions.find((s) => s.sessionId === sessionId);
+  const isWorking = currentSession?.state === 'working';
+
+  // Per-Agent model table for the picker. Hidden when the Agent has none.
+  const [agentModels, setAgentModels] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    const agentId = currentSession?.agentId;
+    if (!agentId) {
+      setAgentModels(null);
+      return;
+    }
+    window.electronAPI
+      .listAgents()
+      .then((list) => {
+        if (cancelled) return;
+        const entry = (list || []).find((a) => a.id === agentId);
+        setAgentModels(entry?.models?.length ? entry.models : null);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [currentSession?.agentId]);
+
+  // The current model is the latest assistant record's model, matched
+  // against the table's aliases by substring (the record holds a full id).
+  const currentModelId = (() => {
+    const model = chatState?.usage?.model;
+    if (!model || !agentModels) return '';
+    const found = agentModels.find((m) =>
+      String(model).toLowerCase().includes(m.id.toLowerCase())
+    );
+    return found ? found.id : '';
+  })();
 
   // Track auto-scroll state
   const scrollRef = useRef(null);
@@ -288,6 +324,44 @@ export function ChatView({ sessionId }) {
     }
   }, []);
 
+  const handleStop = useCallback(() => {
+    if (currentSession?.state !== 'working') return;
+    window.electronAPI.chatStop(sessionId);
+  }, [sessionId, currentSession?.state]);
+
+  const doSend = useCallback(() => {
+    if (!input.trim()) return;
+    window.electronAPI.chatSend(sessionId, input, attachments);
+    clearInput();
+    // Force stick to bottom when user sends a message
+    setStickToBottom(true);
+    setShowLatestPill(false);
+  }, [sessionId, input, attachments, clearInput]);
+
+  // ⌘. from the terminal: every Cmd chord bubbles out of the xterm, and
+  // nothing in the app menu binds ⌘. Scoped to the focused pane via the
+  // selected Session; the composer's own keydown covers focus inside here.
+  useEffect(() => {
+    const onKey = (e) => {
+      if (!(e.metaKey && !e.ctrlKey && !e.altKey && e.key === '.')) return;
+      if (selectedSessionId !== sessionId) return;
+      if (rootRef.current?.contains(document.activeElement)) return;
+      if (currentSession?.state !== 'working') return;
+      e.preventDefault();
+      window.electronAPI.chatStop(sessionId);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [sessionId, selectedSessionId, currentSession?.state]);
+
+  const handleModelChange = useCallback(
+    (modelId) => {
+      if (!modelId) return;
+      window.electronAPI.chatModel(sessionId, modelId);
+    },
+    [sessionId]
+  );
+
   const handlePaste = async (e) => {
     const items = e.clipboardData?.items;
     if (!items) return;
@@ -324,6 +398,14 @@ export function ChatView({ sessionId }) {
   };
 
   const handleKeyDown = (e) => {
+    // ⌘. interrupts while working. Focus is in the composer, not the xterm,
+    // so the chat view handles its own chord; the window listener covers the
+    // terminal-focused case.
+    if (e.metaKey && !e.ctrlKey && !e.altKey && e.key === '.') {
+      e.preventDefault();
+      handleStop();
+      return;
+    }
     if (mentionState) {
       if (e.key === 'Escape') {
         e.preventDefault();
@@ -371,12 +453,7 @@ export function ChatView({ sessionId }) {
     }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      if (!input.trim()) return;
-      window.electronAPI.chatSend(sessionId, input, attachments);
-      clearInput();
-      // Force stick to bottom when user sends a message
-      setStickToBottom(true);
-      setShowLatestPill(false);
+      doSend();
     }
   };
 
@@ -412,7 +489,10 @@ export function ChatView({ sessionId }) {
   };
 
   return (
-    <div className="flex flex-col h-full bg-background text-foreground relative">
+    <div
+      ref={rootRef}
+      className="flex flex-col h-full bg-background text-foreground relative"
+    >
       {headerTitle && (
         <div className="px-4 py-2 border-b border-border bg-muted/30 text-[13px] font-medium flex-none truncate flex items-center justify-between">
           <span>{headerTitle}</span>
@@ -704,7 +784,7 @@ export function ChatView({ sessionId }) {
           </details>
         )}
 
-        <div className="p-4">
+        <div className="p-4 flex flex-col gap-2">
           {mentionState && mentionMatches.length > 0 && (
             <div className="absolute bottom-full mb-1 left-4 max-h-[200px] overflow-y-auto bg-popover text-popover-foreground border shadow-lg rounded-md z-50 text-[13px] min-w-[250px]">
               {mentionMatches.map((m, i) => (
@@ -779,6 +859,38 @@ export function ChatView({ sessionId }) {
             onDrop={handleDrop}
             onDragOver={(e) => e.preventDefault()}
           />
+          <div className="flex items-center justify-between gap-2">
+            {agentModels ? (
+              <select
+                aria-label="Model"
+                value={currentModelId}
+                onChange={(e) => handleModelChange(e.target.value)}
+                className="bg-background border border-input rounded-md px-2 py-1.5 text-[12px] text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring max-w-[160px]"
+              >
+                {currentModelId === '' && <option value="">Model</option>}
+                {agentModels.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.label}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <span />
+            )}
+            {isWorking ? (
+              <button onClick={handleStop} className="btn btn-danger">
+                Stop
+              </button>
+            ) : (
+              <button
+                onClick={doSend}
+                disabled={!input.trim()}
+                className="btn btn-primary disabled:opacity-50"
+              >
+                Send
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>
