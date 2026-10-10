@@ -407,6 +407,9 @@ function registerHandlers(win, storeInstance) {
   ipcMain.handle('agent-chat-load-older-subagent', (_e, sessionId, parentId) => {
     return agents.chatLoadOlderSubagent(sessionId, parentId);
   });
+  ipcMain.handle('agent-chat-image', (_e, sessionId, ref) => {
+    return agents.chatImage(sessionId, ref);
+  });
 
   // ── Agents working set ("Projects") & session rows ─────────────────────────
   // The sidebar lists working-set Sites with every Session under them, live or

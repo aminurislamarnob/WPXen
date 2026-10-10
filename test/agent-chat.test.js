@@ -372,6 +372,10 @@ describe('decodeClaudeLine', () => {
     expect(users).toEqual([
       expect.objectContaining({ id: 'u-0003', content: 'Add a health check endpoint' }),
       expect.objectContaining({ id: 'u-0005', content: 'Thanks, now add a test' }),
+      expect.objectContaining({
+        id: 'u-0105',
+        content: '[Image #1] what is wrong on this page?',
+      }),
     ]);
   });
 
@@ -729,5 +733,153 @@ describe('subagents in agentChat', () => {
     const rows = watch();
     vi.advanceTimersByTime(500);
     expect(rows.some((r) => r.parentId === 'toolu_Agent1')).toBe(true);
+  });
+});
+
+describe('session facts and images (#115)', () => {
+  function decodeAll() {
+    const state = {};
+    const rows = new Map();
+    const lines = fs
+      .readFileSync(path.join(__dirname, 'fixtures/claude-transcript.jsonl'), 'utf8')
+      .split('\n');
+    for (const line of lines) {
+      for (const row of [decodeClaudeLine(line, state) ?? []].flat()) {
+        if (row.id) rows.set(row.id, row);
+      }
+    }
+    return { state, rows: [...rows.values()] };
+  }
+
+  it('tracks background Bash and Monitor tasks through notifications and TaskStop', () => {
+    const { state } = decodeAll();
+    expect(state.facts.tasks).toEqual({
+      b77r50xr0: { id: 'b77r50xr0', command: 'npm run dev', status: 'completed' },
+      bya76lu8s: { id: 'bya76lu8s', command: 'errors in dev log', status: 'stopped' },
+    });
+  });
+
+  it("marks each task's tool row with its task id", () => {
+    const { rows } = decodeAll();
+    expect(rows.find((r) => r.id === 'toolu_04Bg').taskId).toBe('b77r50xr0');
+    expect(rows.find((r) => r.id === 'toolu_05Mon').taskId).toBe('bya76lu8s');
+  });
+
+  it('keeps the latest TodoWrite list', () => {
+    expect(decodeAll().state.facts.todos).toEqual([
+      { content: 'Add /health route', status: 'completed' },
+      { content: 'Write the health test', status: 'in_progress' },
+    ]);
+  });
+
+  it('records the latest usage and model', () => {
+    expect(decodeAll().state.facts.usage).toEqual({
+      model: 'claude-opus-5-5',
+      tokens: 2 + 1000 + 50000 + 50,
+    });
+  });
+
+  it('references images by record and position, never carrying base64', () => {
+    const { rows } = decodeAll();
+    const pasted = rows.find((r) => r.id === 'u-0105');
+    expect(pasted).toMatchObject({
+      role: 'user',
+      content: '[Image #1] what is wrong on this page?',
+      images: [{ uuid: 'u-0105', path: [1] }],
+    });
+    expect(rows.find((r) => r.id === 'toolu_07Read').result.images).toEqual([
+      { uuid: 'u-0106', path: [0, 0] },
+    ]);
+    expect(JSON.stringify(rows)).not.toContain('iVBORw0KGgo');
+  });
+});
+
+describe('chatImage (#115)', () => {
+  const chat = require('../electron/services/agentChat.cjs');
+  const os = require('node:os');
+  const fixture = fs.readFileSync(
+    path.join(__dirname, 'fixtures/claude-transcript.jsonl'),
+    'utf8'
+  );
+  let dir;
+
+  function open(content = fixture) {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wpxen-img-'));
+    const file = path.join(dir, 'session.jsonl');
+    fs.writeFileSync(file, content);
+    chat.openChat('sess-img', 'viewer-1', {
+      transcriptPath: file,
+      decodeLine: decodeClaudeLine,
+      onRows: () => {},
+    });
+  }
+
+  beforeEach(() => {
+    chat.__setDeps({
+      statSync: fs.statSync,
+      openSync: fs.openSync,
+      readSync: fs.readSync,
+      closeSync: fs.closeSync,
+      readdirSync: fs.readdirSync,
+      setInterval,
+      clearInterval,
+    });
+  });
+
+  afterEach(() => {
+    chat.closeAllChats();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("serves a pasted image from the session's own transcript", async () => {
+    open();
+    const url = await chat.chatImage('sess-img', { uuid: 'u-0105', path: [1] });
+    expect(url).toMatch(/^data:image\/png;base64,iVBORw0KGgo/);
+  });
+
+  it('serves an image inside a tool result', async () => {
+    open();
+    const url = await chat.chatImage('sess-img', { uuid: 'u-0106', path: [0, 0] });
+    expect(url).toMatch(/^data:image\/png;base64,/);
+  });
+
+  it('refuses file paths, unknown records and non-image blocks', async () => {
+    open();
+    for (const ref of [
+      { path: '/etc/passwd' },
+      { uuid: 'u-0105', path: '/Users/dev/.claude/.credentials.json' },
+      { uuid: 'nope', path: [1] },
+      { uuid: 'u-0105', path: [0] }, // the text block
+      { uuid: '"', path: [1] },
+      null,
+    ]) {
+      expect(await chat.chatImage('sess-img', ref)).toBeNull();
+    }
+    expect(
+      await chat.chatImage('no-such-session', { uuid: 'u-0105', path: [1] })
+    ).toBeNull();
+  });
+
+  it('refuses media types a page could script, and caps size', async () => {
+    const rec = (uuid, mediaType, data) =>
+      JSON.stringify({
+        type: 'user',
+        uuid,
+        message: {
+          role: 'user',
+          content: [
+            { type: 'image', source: { type: 'base64', media_type: mediaType, data } },
+          ],
+        },
+      });
+    const big = 'A'.repeat(Math.ceil((chat.IMAGE_MAX_BYTES * 4) / 3) + 8);
+    open(
+      [rec('svg', 'image/svg+xml', 'PHN2Zz4='), rec('big', 'image/png', big)].join('\n') +
+        '\n'
+    );
+    expect(await chat.chatImage('sess-img', { uuid: 'svg', path: [0] })).toBeNull();
+    expect(await chat.chatImage('sess-img', { uuid: 'big', path: [0] })).toEqual({
+      tooLarge: true,
+    });
   });
 });

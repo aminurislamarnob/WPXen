@@ -30,6 +30,49 @@ function toolResultText(content) {
     .join('\n');
 }
 
+// Images stay in the transcript: rows carry where to find one (the record's
+// uuid and the block's position inside message.content), and the main
+// process serves it from there. No base64 and no file path crosses IPC.
+function imageRefs(blocks, uuid, prefix = []) {
+  if (!Array.isArray(blocks) || !uuid) return [];
+  const refs = [];
+  blocks.forEach((b, i) => {
+    if (b?.type === 'image') refs.push({ uuid, path: [...prefix, i] });
+  });
+  return refs;
+}
+
+// Background work a tool call started or stopped, from its result. A task
+// starts running; a <task-notification> or TaskStop later moves it on.
+function noteTask(toolBlock, result, facts) {
+  const meta = result.meta || {};
+  const input = toolBlock.input || {};
+  let started = null;
+  if (toolBlock.name === 'Bash' && input.run_in_background && meta.backgroundTaskId) {
+    started = { id: meta.backgroundTaskId, command: input.command ?? '' };
+  } else if (toolBlock.name === 'Monitor' && meta.taskId) {
+    started = { id: meta.taskId, command: input.description || input.command || '' };
+  }
+  if (started) {
+    toolBlock.taskId = started.id;
+    facts.tasks[started.id] = facts.tasks[started.id] || {
+      ...started,
+      status: 'running',
+    };
+  }
+  if (toolBlock.name === 'TaskStop') {
+    const task = facts.tasks[meta.task_id || input.task_id];
+    if (task) task.status = 'stopped';
+  }
+}
+
+// <task-notification><task-id>…</task-id>…<status>completed</status>…
+function noteTaskNotification(text, facts) {
+  const id = /<task-id>([^<]+)<\/task-id>/.exec(text)?.[1];
+  const status = /<status>([^<]+)<\/status>/.exec(text)?.[1];
+  if (id && status && facts.tasks[id]) facts.tasks[id].status = status;
+}
+
 // The inline diff a file-editing tool call carries, or null. Claude Code's
 // Edit / Write / MultiEdit inputs; MultiEdit's hunks are shown as one diff.
 function editFor(block) {
@@ -60,13 +103,21 @@ function editFor(block) {
 // shows up.
 function attachToolResults(results, record, state) {
   const out = [];
-  for (const b of results) {
+  const tur = record.toolUseResult || {};
+  for (const [b, index] of results) {
     const toolUseId = b.tool_use_id;
     const resultBlock = {
       type: 'tool_result',
       content: toolResultText(b.content),
       tool_use_id: toolUseId,
       is_error: !!b.is_error,
+      images: imageRefs(b.content, record.uuid, [index]),
+      // Only the ids background work is tracked by, not the whole result.
+      meta: {
+        backgroundTaskId: tur.backgroundTaskId,
+        taskId: tur.taskId,
+        task_id: tur.task_id,
+      },
     };
     const callRowId = state.calls[toolUseId];
     const callRow = callRowId && state[callRowId];
@@ -75,13 +126,14 @@ function attachToolResults(results, record, state) {
     );
     if (toolBlock) {
       toolBlock.result = resultBlock;
+      noteTask(toolBlock, resultBlock, state.facts);
       out.push({
         id: toolBlock.rowId,
         role: 'tool',
         tool_use: toolBlock,
         result: resultBlock,
         edit: editFor(toolBlock),
-        record,
+        taskId: toolBlock.taskId,
       });
     } else {
       const orphanRowId = record.uuid || `orphan-${toolUseId}`;
@@ -91,7 +143,6 @@ function attachToolResults(results, record, state) {
         role: 'user',
         orphan: true,
         blocks: [resultBlock],
-        record,
       });
     }
   }
@@ -123,6 +174,8 @@ function decodeClaudeLine(lineStr, state) {
 
   state.calls = state.calls || {};
   state.results = state.results || {};
+  // What the chat shows beside the rows; the only state sent to the renderer.
+  state.facts = state.facts || { tasks: {}, todos: null, usage: null };
 
   // Claude names the conversation in its own record, and renames it later.
   if (record.type === 'ai-title') {
@@ -140,7 +193,9 @@ function decodeClaudeLine(lineStr, state) {
 
     // Tool results arrive as user records of tool_result blocks, keyed by
     // tool_use_id. They attach to their call, never show as a user message.
-    const results = blocks.filter((b) => b.type === 'tool_result');
+    const results = blocks
+      .map((b, i) => [b, i])
+      .filter(([b]) => b.type === 'tool_result');
     if (results.length > 0) return attachToolResults(results, record, state);
 
     const contentStr = blocks
@@ -148,19 +203,37 @@ function decodeClaudeLine(lineStr, state) {
       .map((b) => b.text)
       .join('\n')
       .trim();
-    if (!contentStr) return null;
+    if (contentStr.startsWith('<task-notification>')) {
+      noteTaskNotification(contentStr, state.facts);
+      return null;
+    }
     if (USER_NOISE_PREFIXES.some((p) => contentStr.startsWith(p))) return null;
+    const images = imageRefs(blocks, record.uuid);
+    if (!contentStr && images.length === 0) return null;
 
     return {
       id: record.uuid,
       role: 'user',
       content: contentStr,
-      record,
+      images,
     };
   }
 
   if (record.type === 'assistant') {
+    // Context in use = everything the last request read plus what it wrote.
+    const u = record.message?.usage;
+    if (u && record.message.model && record.message.model !== '<synthetic>') {
+      state.facts.usage = {
+        model: record.message.model,
+        tokens:
+          (u.input_tokens || 0) +
+          (u.cache_creation_input_tokens || 0) +
+          (u.cache_read_input_tokens || 0) +
+          (u.output_tokens || 0),
+      };
+    }
     const id = record.message?.id || record.uuid || Math.random().toString();
+
     if (!state[id]) {
       state[id] = {
         id,
@@ -174,7 +247,14 @@ function decodeClaudeLine(lineStr, state) {
     // its tool_use id, any other block by the record that carries it.
     if (record.message?.content) {
       for (const block of record.message.content) {
-        if (block.type === 'tool_use') state.toolUseCount = (state.toolUseCount || 0) + 1;
+        if (block.type !== 'tool_use') continue;
+        state.toolUseCount = (state.toolUseCount || 0) + 1;
+        if (block.name === 'TodoWrite' && Array.isArray(block.input?.todos)) {
+          state.facts.todos = block.input.todos.map((t) => ({
+            content: t.content,
+            status: t.status,
+          }));
+        }
       }
       const tagged = record.message.content.map((b, i) => ({
         ...b,
@@ -198,6 +278,7 @@ function decodeClaudeLine(lineStr, state) {
         if (!block.result && state.results[block.id]) {
           block.result = state.results[block.id];
           removeIds.push(state.results[block.id].rowId);
+          noteTask(block, block.result, state.facts);
         }
 
         rows.push({
@@ -206,6 +287,7 @@ function decodeClaudeLine(lineStr, state) {
           tool_use: block,
           result: block.result,
           edit: editFor(block),
+          taskId: block.taskId,
         });
       } else if (block.type === 'thinking') {
         rows.push({

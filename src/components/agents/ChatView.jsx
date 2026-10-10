@@ -8,6 +8,8 @@ import DiffView from '../DiffView';
 
 import { ChatMarkdown } from './ChatMarkdown';
 import { SubagentRow } from './SubagentRow';
+import { ImageRef } from './ImageRef';
+import { contextMeter } from '../../lib/contextMeter';
 
 export function ChatView({ sessionId }) {
   const viewerId = useId();
@@ -17,6 +19,7 @@ export function ChatView({ sessionId }) {
   const [atStart, setAtStart] = useState(false);
   const [staleNotice, setStaleNotice] = useState(false);
   const [headerTitle, setHeaderTitle] = useState('');
+  const [chatState, setChatState] = useState({});
   const sessions = useAgentSessions();
   // Session rows are keyed `sessionId`; there is no `id`.
   const currentSession = sessions.find((s) => s.sessionId === sessionId);
@@ -74,10 +77,11 @@ export function ChatView({ sessionId }) {
     const api = window.electronAPI;
     const unsub = api.on(
       'agent-chat-rows',
-      ({ sessionId: rowSessionId, rows, header }) => {
+      ({ sessionId: rowSessionId, rows, header, state }) => {
         if (rowSessionId !== sessionId) return;
 
         if (header?.title) setHeaderTitle(header.title);
+        if (state) setChatState(state);
 
         let newNestedMessages = null;
 
@@ -188,7 +192,7 @@ export function ChatView({ sessionId }) {
       virtualizer.scrollToIndex(foldedMessages.length - 1, { align: 'end' });
       setShowLatestPill(false);
     }
-  }, [messages.length, stickToBottom, virtualizer]);
+  }, [messages.length, foldedMessages.length, stickToBottom, virtualizer]);
 
   const onScroll = useCallback((e) => {
     const el = e.target;
@@ -249,8 +253,13 @@ export function ChatView({ sessionId }) {
   return (
     <div className="flex flex-col h-full bg-background text-foreground relative">
       {headerTitle && (
-        <div className="px-4 py-2 border-b border-border bg-muted/30 text-[13px] font-medium flex-none truncate">
-          {headerTitle}
+        <div className="px-4 py-2 border-b border-border bg-muted/30 text-[13px] font-medium flex-none truncate flex items-center justify-between">
+          <span>{headerTitle}</span>
+          {contextMeter(chatState?.usage) && (
+            <span className="text-muted-foreground font-normal">
+              {contextMeter(chatState.usage).label}
+            </span>
+          )}
         </div>
       )}
       <div className="flex-1 overflow-y-auto p-4" ref={scrollRef} onScroll={onScroll}>
@@ -324,6 +333,27 @@ export function ChatView({ sessionId }) {
                                 </div>
                               ) : (
                                 <div>
+                                  {(() => {
+                                    const taskState = item.taskId
+                                      ? chatState?.tasks?.[item.taskId]
+                                      : null;
+                                    if (!taskState) return null;
+                                    return (
+                                      <div className="mb-2 flex items-center gap-2 text-[11px]">
+                                        <span
+                                          className={`px-1.5 py-0.5 rounded font-medium ${taskState.status === 'running' ? 'bg-highlight/15 text-highlight' : 'bg-muted text-muted-foreground'}`}
+                                        >
+                                          {taskState.status}
+                                        </span>
+                                        <code
+                                          className="font-mono bg-background/50 px-1 rounded truncate flex-1"
+                                          title={taskState.command}
+                                        >
+                                          {taskState.command}
+                                        </code>
+                                      </div>
+                                    );
+                                  })()}
                                   <ChatMarkdown
                                     text={
                                       item.content ||
@@ -333,6 +363,10 @@ export function ChatView({ sessionId }) {
                                     }
                                     empty="Empty"
                                     onLink={handleLink}
+                                  />
+                                  <ImageList
+                                    sessionId={sessionId}
+                                    images={item.result?.images}
                                   />
                                   {(item.result?.truncated ||
                                     (item.blocks &&
@@ -404,11 +438,10 @@ export function ChatView({ sessionId }) {
                           : msg.role}
                       </div>
                       <div className="text-[13px] break-words">
-                        <ChatMarkdown
-                          text={msg.content}
-                          empty="Empty"
-                          onLink={handleLink}
-                        />
+                        {msg.content && (
+                          <ChatMarkdown text={msg.content} empty="" onLink={handleLink} />
+                        )}
+                        <ImageList sessionId={sessionId} images={msg.images} />
                       </div>
                     </div>
                   )}
@@ -442,15 +475,69 @@ export function ChatView({ sessionId }) {
         </button>
       )}
 
-      <div className="p-4 border-t border-border bg-background z-20">
-        <textarea
-          className="w-full bg-background border border-input rounded-md px-3 py-2 text-[13px] focus:outline-none focus:ring-1 focus:ring-ring resize-y min-h-[60px]"
-          placeholder="Message..."
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={handleKeyDown}
-        />
+      <div className="flex flex-col border-t border-border bg-background z-20">
+        {chatState?.tasks &&
+          Object.values(chatState.tasks).some((t) => t.status === 'running') && (
+            <div className="px-4 py-2 border-b border-border bg-muted/20">
+              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-highlight/10 text-highlight">
+                {backgroundTasksLabel(chatState.tasks)}
+              </span>
+            </div>
+          )}
+
+        {chatState?.todos && chatState.todos.length > 0 && (
+          <details className="px-4 py-2 border-b border-border bg-muted/10 text-[12px] group">
+            <summary className="cursor-pointer font-medium opacity-80 hover:opacity-100 select-none outline-none">
+              To-do list ({chatState.todos.filter((t) => t.status === 'completed').length}
+              /{chatState.todos.length})
+            </summary>
+            <div className="mt-2 flex flex-col gap-1 max-h-[150px] overflow-y-auto">
+              {chatState.todos.map((todo, i) => (
+                <div key={i} className="flex gap-2 items-start">
+                  <div className="mt-0.5 flex-none">
+                    {todo.status === 'completed' ? '☑' : '☐'}
+                  </div>
+                  <div
+                    className={`flex-1 ${todo.status === 'completed' ? 'line-through opacity-50' : ''}`}
+                  >
+                    {todo.content}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </details>
+        )}
+
+        <div className="p-4">
+          <textarea
+            className="w-full bg-background border border-input rounded-md px-3 py-2 text-[13px] focus:outline-none focus:ring-1 focus:ring-ring resize-y min-h-[60px]"
+            placeholder="Message..."
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+          />
+        </div>
       </div>
+    </div>
+  );
+}
+
+function backgroundTasksLabel(tasks) {
+  const n = Object.values(tasks).filter((t) => t.status === 'running').length;
+  return `${n} background task${n === 1 ? '' : 's'} running`;
+}
+
+function ImageList({ sessionId, images }) {
+  if (!images?.length) return null;
+  return (
+    <div className="mt-2 flex flex-wrap gap-2">
+      {images.map((ref) => (
+        <ImageRef
+          key={`${ref.uuid}-${ref.path.join('.')}`}
+          sessionId={sessionId}
+          refData={ref}
+        />
+      ))}
     </div>
   );
 }

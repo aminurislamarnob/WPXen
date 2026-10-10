@@ -435,7 +435,7 @@ function openChat(sessionId, viewerId, opts) {
     watch.viewers.add(viewerId);
     // Replay current rows to the new viewer
     if (watch.currentRows.length > 0) {
-      onRows(watch.currentRows);
+      onRows(watch.currentRows, watch.state);
     }
     return;
   }
@@ -475,7 +475,7 @@ function openChat(sessionId, viewerId, opts) {
   watch.tailOffset = complete;
 
   if (rows.length > 0) {
-    onRows(rows);
+    onRows(rows, watch.state);
   }
 
   // Poll for new data
@@ -494,7 +494,7 @@ function openChat(sessionId, viewerId, opts) {
         watch.currentRows = [];
         watch.pageStart = 0;
         watch.staleNotified = false;
-        onRows([{ reset: true }]);
+        onRows([{ reset: true }], watch.state);
         // maybe close subagents too? Not needed, handled.
       } else if (newSize > watch.tailOffset) {
         const length = newSize - watch.tailOffset;
@@ -518,14 +518,14 @@ function openChat(sessionId, viewerId, opts) {
         if (newRows.length > 0) {
           augmentToolRows(newRows, watch.subagents);
           watch.currentRows.push(...newRows);
-          onRows(newRows);
+          onRows(newRows, watch.state);
         }
       }
 
       // 3. Check for stale transcript
       if (!watch.staleNotified && checkStaleTranscript(watch)) {
         watch.staleNotified = true;
-        onRows([{ notice: true, kind: 'transcript-changed' }]);
+        onRows([{ notice: true, kind: 'transcript-changed' }], watch.state);
       }
 
       // 4. Poll subagents: only while running or expanded, so a Session
@@ -633,6 +633,74 @@ function chatLoadOlderSubagent(sessionId, toolUseId) {
   return { rows: mappedRows, atStart };
 }
 
+// Images are served only from this Session's own transcripts, located by a
+// record uuid and a block position — never by a path the renderer supplies.
+const IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+// Raster types only: an SVG data URL can carry script.
+const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+
+function validImageRef(ref) {
+  return (
+    !!ref &&
+    typeof ref.uuid === 'string' &&
+    /^[\w-]{1,100}$/.test(ref.uuid) &&
+    Array.isArray(ref.path) &&
+    ref.path.length >= 1 &&
+    ref.path.length <= 2 &&
+    ref.path.every((i) => Number.isInteger(i) && i >= 0)
+  );
+}
+
+async function findRecord(file, uuid) {
+  const readline = require('readline');
+  const needle = `"uuid":"${uuid}"`;
+  const rl = readline.createInterface({
+    input: fs.createReadStream(file),
+    crlfDelay: Infinity,
+  });
+  try {
+    for await (const line of rl) {
+      if (!line.includes(needle)) continue;
+      try {
+        const record = JSON.parse(line);
+        if (record.uuid === uuid) return record;
+      } catch {}
+    }
+  } finally {
+    rl.close();
+  }
+  return null;
+}
+
+async function chatImage(sessionId, ref) {
+  const watch = watches.get(sessionId);
+  if (!watch || !validImageRef(ref)) return null;
+  const files = [
+    watch.path,
+    ...[...watch.subagents.values()].map((sub) =>
+      path.join(subagentDir(watch), `agent-${sub.agentId}.jsonl`)
+    ),
+  ];
+  for (const file of files) {
+    let record;
+    try {
+      record = await findRecord(file, ref.uuid);
+    } catch {
+      continue;
+    }
+    if (!record) continue;
+    let block = record.message?.content?.[ref.path[0]];
+    if (ref.path.length === 2) block = block?.content?.[ref.path[1]];
+    const source = block?.type === 'image' ? block.source : null;
+    if (source?.type !== 'base64' || typeof source.data !== 'string') return null;
+    if (!IMAGE_TYPES.has(source.media_type)) return null;
+    if (Math.floor((source.data.length * 3) / 4) > IMAGE_MAX_BYTES)
+      return { tooLarge: true };
+    return `data:${source.media_type};base64,${source.data}`;
+  }
+  return null;
+}
+
 module.exports = {
   __setDeps,
   openChat,
@@ -642,6 +710,8 @@ module.exports = {
   chatFetchFull,
   chatExpandSubagent,
   chatLoadOlderSubagent,
+  chatImage,
+  IMAGE_MAX_BYTES,
   // Exposed for testing
   MAX_PAGE_ROWS,
   MAX_PAGE_BYTES,

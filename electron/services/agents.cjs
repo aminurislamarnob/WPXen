@@ -1406,7 +1406,7 @@ function openChat(sessionId, viewerId) {
       [...sessions.values()].some(
         (s) => s.sessionId !== sessionId && !s.exited && s.transcriptId === uuid
       ),
-    onRows: (rows) => {
+    onRows: (rows, state) => {
       let header = undefined;
       const filteredRows = [];
       for (const row of rows) {
@@ -1416,7 +1416,10 @@ function openChat(sessionId, viewerId) {
           filteredRows.push(row);
         }
       }
-      for (const cb of chatListeners) cb({ sessionId, rows: filteredRows, header });
+      // Only the facts (tasks, to-dos, usage) — never the decoder's whole
+      // state, which holds every message of the loaded pages.
+      for (const cb of chatListeners)
+        cb({ sessionId, rows: filteredRows, header, state: state?.facts });
     },
   });
 }
@@ -1451,6 +1454,10 @@ function chatSend(sessionId, text) {
   return sendChat(session, text);
 }
 
+function chatImage(sessionId, ref) {
+  return agentChat.chatImage(sessionId, ref);
+}
+
 module.exports = {
   SHELL_ID,
   setConfig,
@@ -1478,6 +1485,7 @@ module.exports = {
   chatFetchFull,
   chatExpandSubagent,
   chatLoadOlderSubagent,
+  chatImage,
   onFloatingSessionsChanged,
   resolveLaunch,
   launch,

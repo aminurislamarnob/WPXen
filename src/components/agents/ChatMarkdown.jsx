@@ -64,7 +64,7 @@ export function ChatMarkdown({ text, onLink, empty }) {
         highlightCode(source, tree, style, putText, putBreak);
         code.innerHTML = '';
         code.appendChild(fragment);
-      } catch (_err) {
+      } catch {
         // parser failed
       }
     }
