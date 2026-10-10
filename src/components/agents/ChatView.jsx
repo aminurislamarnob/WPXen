@@ -95,7 +95,8 @@ export function ChatView({ sessionId }) {
   const [staleNotice, setStaleNotice] = useState(false);
   const [headerTitle, setHeaderTitle] = useState('');
   const sessions = useAgentSessions();
-  const currentSession = sessions.find((s) => s.id === sessionId);
+  // Session rows are keyed `sessionId`; there is no `id`.
+  const currentSession = sessions.find((s) => s.sessionId === sessionId);
 
   // Track auto-scroll state
   const scrollRef = useRef(null);
