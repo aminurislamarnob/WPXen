@@ -129,7 +129,98 @@ function launchTarget({
   });
 }
 
+// ── Summarised by the current Agent ────────────────────────────────────────
+// The source Agent writes the handoff document itself. WPXen owns the prompt;
+// the marker is how we know the file is finished rather than half-written.
+const SUMMARY_MARKER = '<!-- wpxen-handoff-complete -->';
+const SUMMARY_TIMEOUT_MS = 5 * 60 * 1000;
+const SUMMARY_POLL_MS = 500;
+// Enter goes as its own write after the paste: a \r inside the paste is text
+// to a TUI, and one sent too soon after it can be swallowed with the paste.
+const SUBMIT_DELAY_MS = 500;
+
+function buildSummaryPrompt(filePath) {
+  return [
+    'Write a handoff document so another AI agent can continue this work.',
+    'Save it at exactly this path:',
+    filePath,
+    '',
+    '- Reference specs, commits and diffs by their paths rather than copying their contents.',
+    '- List the clear next steps.',
+    '- Redact any secrets, tokens or API keys.',
+    '',
+    'When the document is complete, end the file with this exact line on its own:',
+    SUMMARY_MARKER,
+  ].join('\n');
+}
+
+function summaryComplete(filePath) {
+  try {
+    const lines = fs.readFileSync(filePath, 'utf8').trimEnd().split('\n');
+    return lines[lines.length - 1].trim() === SUMMARY_MARKER;
+  } catch {
+    return false;
+  }
+}
+
+// prompted → seen-working → complete, or timeout / cancelled. Seeing `working`
+// first stops the idle status from before the prompt counting as done, and
+// completing needs the marker AND idle/done, so neither a half-written file
+// nor a pause on a permission prompt finishes it early.
+function createSummaryTracker({ sessionId, agents, onProgress }) {
+  const handoffId = `${sessionId}-${crypto.randomUUID()}`;
+  const filePath = path.join(
+    os.tmpdir(),
+    `${HANDOFF_FILE_PREFIX}summary-${crypto.randomUUID()}.md`
+  );
+  let state = 'idle';
+  let pollId = null;
+  let timeoutId = null;
+
+  const finish = (phase) => {
+    clearInterval(pollId);
+    clearTimeout(timeoutId);
+    state = phase;
+    onProgress({ handoffId, phase, filePath });
+  };
+
+  const check = () => {
+    if (state !== 'prompted' && state !== 'seen-working') return;
+    const session = agents.getSession(sessionId);
+    // The source was closed while we waited: nothing will ever finish the file.
+    if (!session) return finish('cancelled');
+    const status = session.tracker.snapshot().state;
+    if (state === 'prompted') {
+      if (status === 'working') state = 'seen-working';
+      return;
+    }
+    if ((status === 'idle' || status === 'done') && summaryComplete(filePath)) {
+      finish('complete');
+    }
+  };
+
+  const start = () => {
+    agents.write(sessionId, `\x1b[200~${buildSummaryPrompt(filePath)}\x1b[201~`);
+    setTimeout(() => agents.write(sessionId, '\r'), SUBMIT_DELAY_MS);
+    state = 'prompted';
+    onProgress({ handoffId, phase: 'prompted', filePath });
+    pollId = setInterval(check, SUMMARY_POLL_MS);
+    timeoutId = setTimeout(() => finish('timeout'), SUMMARY_TIMEOUT_MS);
+  };
+
+  const cancel = () => {
+    if (state === 'prompted' || state === 'seen-working') finish('cancelled');
+  };
+
+  return { handoffId, filePath, start, cancel, check, state: () => state };
+}
+
 module.exports = {
+  SUMMARY_MARKER,
+  SUMMARY_TIMEOUT_MS,
+  SUBMIT_DELAY_MS,
+  buildSummaryPrompt,
+  createSummaryTracker,
   launchPrompt,
   launchTarget,
   HANDOFF_FILE_PREFIX,

@@ -215,6 +215,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('agent-set-pane-ratio', rootId, path, ratio),
   prepareHandoff: (sessionId) => ipcRenderer.invoke('agent-handoff-prepare', sessionId),
   runHandoff: (params) => ipcRenderer.invoke('agent-handoff-run', params),
+  onHandoffProgress: (cb) => {
+    const fn = (_e, payload) => cb(payload);
+    ipcRenderer.on('agent-handoff-progress', fn);
+    return () => ipcRenderer.off('agent-handoff-progress', fn);
+  },
+  cancelHandoffSummary: (handoffId) =>
+    ipcRenderer.invoke('agent-handoff-cancel-summary', handoffId),
 
   // Floating Workspace terminals (no owning Site)
   launchFloatingTerminal: (cwd, command) =>
