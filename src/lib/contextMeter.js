@@ -27,7 +27,8 @@ function contextWindowFor(model) {
 // the raw count ("48k tokens").
 export function contextMeter(usage) {
   if (!usage || typeof usage.tokens !== 'number') return null;
-  const limit = usage.model ? contextWindowFor(usage.model) : null;
+  // An Agent that reports its own window (Codex) beats the table.
+  const limit = usage.limit || (usage.model ? contextWindowFor(usage.model) : null);
   if (!limit)
     return { label: `${Math.round(usage.tokens / 1000)}k tokens`, percent: null };
   const percent = Math.round((usage.tokens / limit) * 100);

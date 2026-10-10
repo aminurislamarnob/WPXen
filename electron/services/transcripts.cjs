@@ -46,7 +46,7 @@ function locateClaude({ cwd, startedAt, home, transcriptId }) {
   return latest;
 }
 
-function locateCodex({ cwd, startedAt, home }) {
+function locateCodex({ cwd, startedAt, home, exclude }) {
   const sessionsDir = path.join(home, '.codex', 'sessions');
   if (!deps.existsSync(sessionsDir)) return null;
 
@@ -58,7 +58,6 @@ function locateCodex({ cwd, startedAt, home }) {
   const startY = start.getFullYear();
   const startM = start.getMonth() + 1;
   const startD = start.getDate();
-
   try {
     const years = deps
       .readdirSync(sessionsDir)
@@ -80,6 +79,8 @@ function locateCodex({ cwd, startedAt, home }) {
 
           for (const f of files) {
             const full = path.join(dDir, f);
+            // A rollout already driving another Session is not ours.
+            if (exclude && exclude.has(full)) continue;
             try {
               const stat = deps.statSync(full);
               if (stat.mtimeMs >= startedAt && stat.mtimeMs > maxMtime) {
@@ -153,10 +154,16 @@ const REGISTRY = {
   antigravity: locateAntigravity,
 };
 
-function locateTranscript(agentId, cwd, startedAt, transcriptId) {
+function locateTranscript(agentId, cwd, startedAt, transcriptId, exclude, home) {
   const locator = REGISTRY[agentId];
   if (!locator) return null;
-  return locator({ cwd, startedAt, home: deps.homedir(), transcriptId });
+  return locator({
+    cwd,
+    startedAt,
+    home: home || deps.homedir(),
+    transcriptId,
+    exclude,
+  });
 }
 
 module.exports = {

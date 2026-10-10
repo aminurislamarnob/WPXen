@@ -28,6 +28,13 @@ describe('contextMeter', () => {
     });
   });
 
+  it('prefers a context window the Agent reports itself', () => {
+    expect(contextMeter({ model: null, tokens: 29_742, limit: 258_400 })).toEqual({
+      label: '12% of context',
+      percent: 12,
+    });
+  });
+
   it('shows nothing without usage', () => {
     expect(contextMeter(null)).toBeNull();
   });

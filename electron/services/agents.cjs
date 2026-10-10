@@ -138,6 +138,10 @@ const REGISTRY = [
     cmd: 'codex --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust',
     install: 'npm install -g @openai/codex',
     installer: { kind: 'brew', name: 'codex', cask: true },
+    chat: 'codex',
+    // No session-id flag: the rollout appears after the first message, so
+    // the chat view keeps locating until one shows up.
+    lateBind: true,
   },
 ];
 
@@ -1423,6 +1427,7 @@ const {
   chatCommand,
 } = require('./agentChatSend.cjs');
 const { decodeClaudeLine } = require('./agentChatClaude.cjs');
+const { decodeCodexLine } = require('./agentChatCodex.cjs');
 const transcripts = require('./transcripts.cjs');
 
 const chatListeners = new Set();
@@ -1434,19 +1439,23 @@ function onChatRows(cb) {
 function openChat(sessionId, viewerId) {
   const session = getSession(sessionId);
   if (!session) return;
-  const transcriptPath = transcripts.locateTranscript(
-    session.agentId,
-    session.cwd,
-    session.startedAt,
-    session.transcriptId
-  );
-  if (!transcriptPath) return;
 
   const agent = effectiveRegistry().find((a) => a.id === session.agentId);
   if (!agent || !agent.chat) return;
 
   let decodeLine = null;
   if (agent.chat === 'claude') decodeLine = decodeClaudeLine;
+  else if (agent.chat === 'codex') decodeLine = decodeCodexLine;
+  if (!decodeLine) return;
+
+  const transcriptPath = locateChatTranscript(sessionId, session);
+  if (!transcriptPath) {
+    // Agents without a session-id flag write their transcript after the
+    // first message — keep locating until one shows up.
+    if (agent.lateBind) pendChatLocate(sessionId, viewerId);
+    return;
+  }
+  claimedTranscripts.set(transcriptPath, sessionId);
 
   agentChat.openChat(sessionId, viewerId, {
     transcriptPath,
@@ -1476,6 +1485,56 @@ function openChat(sessionId, viewerId) {
   });
 }
 
+// One rollout drives at most one Session: the first Session to claim it.
+// Claims by other live Sessions are excluded from locating; a claim dies
+// with its Session, and a Session always reclaims its own path.
+const claimedTranscripts = new Map(); // transcriptPath -> sessionId
+const pendingChatLocates = new Map(); // sessionId -> { viewers: Set, timer }
+const CHAT_LOCATE_RETRY_MS = 2000;
+
+function locateChatTranscript(sessionId, session) {
+  const exclude = new Set();
+  for (const [transcriptPath, owner] of claimedTranscripts) {
+    if (owner !== sessionId && sessions.has(owner)) exclude.add(transcriptPath);
+  }
+  // Home comes from this module's deps: the transcripts module's own seam
+  // is a different instance once bundled, so its homedir is not ours.
+  const found = transcripts.locateTranscript(
+    session.agentId,
+    session.cwd,
+    session.startedAt,
+    session.transcriptId,
+    exclude,
+    deps.homedir()
+  );
+  if (!found) return null;
+  const owner = claimedTranscripts.get(found);
+  if (owner && owner !== sessionId && sessions.has(owner)) return null;
+  return found;
+}
+
+function pendChatLocate(sessionId, viewerId) {
+  let pending = pendingChatLocates.get(sessionId);
+  if (!pending) {
+    pending = { viewers: new Set(), timer: null };
+    pendingChatLocates.set(sessionId, pending);
+    pending.timer = setInterval(() => {
+      const session = getSession(sessionId);
+      if (!session) {
+        clearInterval(pending.timer);
+        pendingChatLocates.delete(sessionId);
+        return;
+      }
+      const transcriptPath = locateChatTranscript(sessionId, session);
+      if (!transcriptPath) return;
+      clearInterval(pending.timer);
+      pendingChatLocates.delete(sessionId);
+      for (const viewer of pending.viewers) openChat(sessionId, viewer);
+    }, CHAT_LOCATE_RETRY_MS);
+  }
+  pending.viewers.add(viewerId);
+}
+
 function chatLoadOlder(sessionId) {
   return agentChat.loadOlder(sessionId);
 }
@@ -1493,10 +1552,20 @@ function chatLoadOlderSubagent(sessionId, parentId) {
 }
 
 function closeChat(sessionId, viewerId) {
+  const pending = pendingChatLocates.get(sessionId);
+  if (pending) {
+    pending.viewers.delete(viewerId);
+    if (pending.viewers.size === 0) {
+      clearInterval(pending.timer);
+      pendingChatLocates.delete(sessionId);
+    }
+  }
   agentChat.closeChat(sessionId, viewerId);
 }
 
 function closeAllChats() {
+  for (const [, pending] of pendingChatLocates) clearInterval(pending.timer);
+  pendingChatLocates.clear();
   agentChat.closeAllChats();
 }
 
