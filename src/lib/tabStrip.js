@@ -76,3 +76,81 @@ export function paneIds(layout, rootId) {
   if (layout.leaf) return [layout.leaf];
   return [...paneIds(layout.a), ...paneIds(layout.b)];
 }
+
+function getLeaves(tree, x = 0, y = 0, w = 1, h = 1) {
+  if (tree.leaf) {
+    return [{ id: tree.leaf, x, y, w, h }];
+  }
+  const r = tree.ratio ? tree.ratio / 100 : 0.5;
+  if (tree.dir === 'down') {
+    return [
+      ...getLeaves(tree.a, x, y, w, h * r),
+      ...getLeaves(tree.b, x, y + h * r, w, h * (1 - r)),
+    ];
+  } else {
+    return [
+      ...getLeaves(tree.a, x, y, w * r, h),
+      ...getLeaves(tree.b, x + w * r, y, w * (1 - r), h),
+    ];
+  }
+}
+
+export function neighbour(tree, sessionId, direction) {
+  const leaves = getLeaves(tree);
+  const current = leaves.find((l) => l.id === sessionId);
+  if (!current) return null;
+
+  const EPSILON = 0.0001;
+  let candidates = [];
+
+  for (const leaf of leaves) {
+    if (leaf.id === sessionId) continue;
+
+    if (direction === 'left') {
+      if (Math.abs(leaf.x + leaf.w - current.x) < EPSILON) {
+        if (
+          leaf.y < current.y + current.h - EPSILON &&
+          leaf.y + leaf.h > current.y + EPSILON
+        ) {
+          candidates.push(leaf);
+        }
+      }
+    } else if (direction === 'right') {
+      if (Math.abs(leaf.x - (current.x + current.w)) < EPSILON) {
+        if (
+          leaf.y < current.y + current.h - EPSILON &&
+          leaf.y + leaf.h > current.y + EPSILON
+        ) {
+          candidates.push(leaf);
+        }
+      }
+    } else if (direction === 'up') {
+      if (Math.abs(leaf.y + leaf.h - current.y) < EPSILON) {
+        if (
+          leaf.x < current.x + current.w - EPSILON &&
+          leaf.x + leaf.w > current.x + EPSILON
+        ) {
+          candidates.push(leaf);
+        }
+      }
+    } else if (direction === 'down') {
+      if (Math.abs(leaf.y - (current.y + current.h)) < EPSILON) {
+        if (
+          leaf.x < current.x + current.w - EPSILON &&
+          leaf.x + leaf.w > current.x + EPSILON
+        ) {
+          candidates.push(leaf);
+        }
+      }
+    }
+  }
+
+  if (candidates.length === 0) return null;
+
+  if (direction === 'left' || direction === 'right') {
+    candidates.sort((a, b) => a.y - b.y);
+  } else {
+    candidates.sort((a, b) => a.x - b.x);
+  }
+  return candidates[0].id;
+}

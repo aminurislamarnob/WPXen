@@ -7,7 +7,7 @@ export default function SplitLayout({
   rootId,
   path = '',
   tree,
-  activeId,
+  focusedId,
   rootPath,
   onOpenFile,
   onOpenLink,
@@ -29,58 +29,59 @@ export default function SplitLayout({
   };
 
   if (tree.leaf) {
+    // `path` is empty only for an unsplit tab: no border, no close button.
+    const split = path !== '';
+    const isFocused = tree.leaf === focusedId;
     return (
-      <Terminal
-        sessionId={tree.leaf}
-        rootPath={rootPath}
-        onOpenFile={onOpenFile}
-        onOpenLink={onOpenLink}
-        onExited={() => onExited(tree.leaf)}
-        onRestart={() => onRestart(tree.leaf)}
-        onClosePane={path ? () => onClosePane(tree.leaf) : undefined}
-        onFocus={() => onFocusPane?.(tree.leaf)}
-        onBlur={() => onBlurPane?.()}
-      />
+      <div
+        className={`relative h-full w-full ${
+          split && isFocused
+            ? 'z-10 ring-1 ring-highlight'
+            : 'z-0 ring-1 ring-transparent'
+        }`}
+        onClickCapture={() => onFocusPane?.(tree.leaf)}
+      >
+        <Terminal
+          sessionId={tree.leaf}
+          rootPath={rootPath}
+          onOpenFile={onOpenFile}
+          onOpenLink={onOpenLink}
+          onExited={() => onExited(tree.leaf)}
+          onRestart={() => onRestart(tree.leaf)}
+          onClosePane={split ? () => onClosePane(tree.leaf) : undefined}
+          onFocus={() => onFocusPane?.(tree.leaf)}
+          onBlur={() => onBlurPane?.()}
+          isFocused={isFocused}
+        />
+      </div>
     );
   }
 
   const direction = tree.dir === 'down' ? 'vertical' : 'horizontal';
+  const child = (key, node) => (
+    <SplitLayout
+      rootId={rootId}
+      path={path + key}
+      tree={node}
+      focusedId={focusedId}
+      rootPath={rootPath}
+      onOpenFile={onOpenFile}
+      onOpenLink={onOpenLink}
+      onExited={onExited}
+      onRestart={onRestart}
+      onFocusPane={onFocusPane}
+      onBlurPane={onBlurPane}
+      onClosePane={onClosePane}
+    />
+  );
 
   return (
     <PanelGroup direction={direction} onLayout={handleLayout} autoSaveId={null}>
       <Panel defaultSize={tree.ratio || 50} minSize={10}>
-        <SplitLayout
-          rootId={rootId}
-          path={path + 'a'}
-          tree={tree.a}
-          activeId={activeId}
-          rootPath={rootPath}
-          onOpenFile={onOpenFile}
-          onOpenLink={onOpenLink}
-          onExited={onExited}
-          onRestart={onRestart}
-          onFocusPane={onFocusPane}
-          onBlurPane={onBlurPane}
-          onClosePane={onClosePane}
-        />
+        {child('a', tree.a)}
       </Panel>
       <ResizeHandle direction={direction} />
-      <Panel minSize={10}>
-        <SplitLayout
-          rootId={rootId}
-          path={path + 'b'}
-          tree={tree.b}
-          activeId={activeId}
-          rootPath={rootPath}
-          onOpenFile={onOpenFile}
-          onOpenLink={onOpenLink}
-          onExited={onExited}
-          onRestart={onRestart}
-          onFocusPane={onFocusPane}
-          onBlurPane={onBlurPane}
-          onClosePane={onClosePane}
-        />
-      </Panel>
+      <Panel minSize={10}>{child('b', tree.b)}</Panel>
     </PanelGroup>
   );
 }

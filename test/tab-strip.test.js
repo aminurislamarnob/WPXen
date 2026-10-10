@@ -5,6 +5,7 @@ import {
   nextActive,
   needsBulkConfirm,
   paneIds,
+  neighbour,
 } from '../src/lib/tabStrip';
 
 describe('tabStrip', () => {
@@ -119,6 +120,66 @@ describe('tabStrip', () => {
         b: { dir: 'down', a: { leaf: 'p1' }, b: { leaf: 'p2' } },
       };
       expect(paneIds(layout, 's1')).toEqual(['s1', 'p1', 'p2']);
+    });
+  });
+
+  describe('neighbour', () => {
+    it('returns null for a single leaf', () => {
+      const tree = { leaf: 'a' };
+      expect(neighbour(tree, 'a', 'left')).toBe(null);
+      expect(neighbour(tree, 'a', 'right')).toBe(null);
+      expect(neighbour(tree, 'a', 'up')).toBe(null);
+      expect(neighbour(tree, 'a', 'down')).toBe(null);
+    });
+
+    it('works for a 2-pane row', () => {
+      const tree = { dir: 'right', ratio: 50, a: { leaf: 'a' }, b: { leaf: 'b' } };
+      expect(neighbour(tree, 'a', 'right')).toBe('b');
+      expect(neighbour(tree, 'b', 'left')).toBe('a');
+      expect(neighbour(tree, 'a', 'left')).toBe(null);
+      expect(neighbour(tree, 'b', 'right')).toBe(null);
+    });
+
+    it('works for a 2x2 grid', () => {
+      const tree = {
+        dir: 'right',
+        ratio: 50,
+        a: {
+          dir: 'down',
+          ratio: 50,
+          a: { leaf: 'top-left' },
+          b: { leaf: 'bottom-left' },
+        },
+        b: {
+          dir: 'down',
+          ratio: 50,
+          a: { leaf: 'top-right' },
+          b: { leaf: 'bottom-right' },
+        },
+      };
+      expect(neighbour(tree, 'top-left', 'right')).toBe('top-right');
+      expect(neighbour(tree, 'top-right', 'left')).toBe('top-left');
+      expect(neighbour(tree, 'bottom-left', 'right')).toBe('bottom-right');
+      expect(neighbour(tree, 'bottom-left', 'up')).toBe('top-left');
+      expect(neighbour(tree, 'top-left', 'down')).toBe('bottom-left');
+    });
+
+    it('works for an L-shape (right split whose right side is split down)', () => {
+      const tree = {
+        dir: 'right',
+        ratio: 50,
+        a: { leaf: 'left' },
+        b: {
+          dir: 'down',
+          ratio: 50,
+          a: { leaf: 'top-right' },
+          b: { leaf: 'bottom-right' },
+        },
+      };
+      expect(neighbour(tree, 'left', 'right')).toBe('top-right'); // overlaps both, picks first found (usually top-right)
+      expect(neighbour(tree, 'top-right', 'left')).toBe('left');
+      expect(neighbour(tree, 'bottom-right', 'left')).toBe('left');
+      expect(neighbour(tree, 'left', 'down')).toBe(null);
     });
   });
 });

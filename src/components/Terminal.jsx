@@ -24,6 +24,7 @@ export default function Terminal({
   onClosePane,
   onFocus,
   onBlur,
+  isFocused,
 }) {
   // Link clicks: plain → the action card, ⌘ / ⇧⌘ → straight to a destination.
   // `onOpenLink(url, destination)` — 'system' or 'app' — is the owner's.
@@ -108,6 +109,12 @@ export default function Terminal({
     // getOrCreate already replaced entry.handlers; nothing else to do.
     void entry;
   }, [sessionId, rootPath, onOpenFile, onOpenLink, onLinkClick, onTitle]);
+
+  useEffect(() => {
+    if (isFocused) {
+      termRef.current?.focus();
+    }
+  }, [isFocused]);
 
   const onDragOver = (e) => {
     e.preventDefault();
