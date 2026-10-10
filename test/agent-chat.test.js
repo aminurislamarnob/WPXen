@@ -361,8 +361,8 @@ describe('decodeClaudeLine', () => {
     const state = {};
     const rows = new Map();
     for (const line of lines) {
-      const row = decodeClaudeLine(line, state);
-      if (row) rows.set(row.id, row);
+      const out = decodeClaudeLine(line, state);
+      for (const row of [out ?? []].flat()) rows.set(row.id, row);
     }
     return [...rows.values()];
   }
@@ -382,10 +382,16 @@ describe('decodeClaudeLine', () => {
     expect(contents.join('\n')).not.toMatch(/register_rest_route|<command-name>|caveat/i);
   });
 
-  it('merges assistant records by message id', () => {
-    const assistants = decodeFixture().filter((r) => r.role === 'assistant');
-    expect(assistants.map((r) => r.id)).toEqual(['msg_01HealthA', 'msg_02HealthB']);
-    expect(assistants[0].content).toContain("I'll look at the routes first.");
+  it('splits assistant messages into one row per block, merged by message id', () => {
+    const rows = decodeFixture();
+    expect(rows.filter((r) => r.role === 'assistant').map((r) => r.id)).toEqual([
+      'msg_01HealthA-1',
+      'msg_02HealthB-0',
+    ]);
+    expect(rows.find((r) => r.id === 'msg_01HealthA-0')).toMatchObject({
+      role: 'reasoning',
+      content: 'The routes live in the plugin bootstrap.',
+    });
   });
 
   it('accumulates assistant blocks', () => {
@@ -396,12 +402,14 @@ describe('decodeClaudeLine', () => {
     let res = decodeClaudeLine(
       JSON.stringify({
         type: 'assistant',
-        message: { id: msgId, content: [{ type: 'thinking', text: 'hmmm' }] },
+        message: { id: msgId, content: [{ type: 'thinking', thinking: 'hmmm' }] },
       }),
       state
     );
 
-    expect(res.content).toContain('> Thinking...');
+    expect(res).toBeInstanceOf(Array);
+    expect(res[0].role).toBe('reasoning');
+    expect(res[0].content).toBe('hmmm');
 
     // Second block
     res = decodeClaudeLine(
@@ -412,7 +420,10 @@ describe('decodeClaudeLine', () => {
       state
     );
 
-    expect(res.content).toContain('I am claude');
+    expect(res).toBeInstanceOf(Array);
+    expect(res.length).toBe(2);
+    expect(res[1].role).toBe('assistant');
+    expect(res[1].content).toBe('I am claude');
 
     // State should have combined both
     expect(state[msgId].blocks.length).toBe(2);
@@ -443,8 +454,9 @@ describe('decodeClaudeLine', () => {
       state
     );
 
-    expect(callRes.remove).toEqual(['orphan-1']);
-    expect(callRes.blocks[0].result.content).toBe('result content');
+    expect(callRes).toBeInstanceOf(Array);
+    expect(callRes[0].remove).toEqual(['orphan-1']);
+    expect(callRes[0].result.content).toBe('result content');
   });
 
   it('handles cross-page tool pairing (call then result via polling)', () => {
@@ -470,9 +482,9 @@ describe('decodeClaudeLine', () => {
     );
 
     // It should re-emit the modified call row instead of an orphan
-    expect(resultRes.id).toBe('msg-1');
+    expect(resultRes.id).toBe('msg-1-0');
     expect(resultRes.orphan).toBeUndefined();
-    expect(resultRes.blocks[0].result.content).toBe('result content');
+    expect(resultRes.result.content).toBe('result content');
   });
 });
 

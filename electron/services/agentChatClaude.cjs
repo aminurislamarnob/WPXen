@@ -30,11 +30,30 @@ function toolResultText(content) {
     .join('\n');
 }
 
-// Attach results to the assistant row that made the call and re-emit that
-// row. A result whose call is on a page not loaded yet becomes an orphan row
-// until the call shows up.
+// The inline diff a file-editing tool call carries, or null.
+function editFor(block) {
+  if (block.name === 'replace' || block.name === 'replace_file_content') {
+    return {
+      path: block.input.TargetFile,
+      original: block.input.TargetContent,
+      modified: block.input.ReplacementContent,
+    };
+  }
+  if (block.name === 'write_to_file') {
+    return {
+      path: block.input.TargetFile,
+      original: '',
+      modified: block.input.CodeContent,
+    };
+  }
+  return null;
+}
+
+// Attach results to their calls and re-emit each call's tool row. A result
+// whose call is on a page not loaded yet becomes an orphan row until the call
+// shows up.
 function attachToolResults(results, record, state) {
-  let out = null;
+  const out = [];
   for (const b of results) {
     const toolUseId = b.tool_use_id;
     const resultBlock = {
@@ -43,26 +62,36 @@ function attachToolResults(results, record, state) {
       tool_use_id: toolUseId,
       is_error: !!b.is_error,
     };
-    const callRow = state.calls[toolUseId] && state[state.calls[toolUseId]];
-    const toolUseBlock = callRow?.blocks.find(
-      (x) => x.type === 'tool_use' && x.id === toolUseId
-    );
-    if (toolUseBlock) {
-      toolUseBlock.result = resultBlock;
-      out = out || { ...callRow, record };
+    const callRowId = state.calls[toolUseId];
+    const callRow = callRowId && state[callRowId];
+    const blockIndex = callRow
+      ? callRow.blocks.findIndex((x) => x.type === 'tool_use' && x.id === toolUseId)
+      : -1;
+    if (blockIndex !== -1) {
+      const toolBlock = callRow.blocks[blockIndex];
+      toolBlock.result = resultBlock;
+      out.push({
+        id: `${callRowId}-${blockIndex}`,
+        role: 'tool',
+        tool_use: toolBlock,
+        result: resultBlock,
+        edit: editFor(toolBlock),
+        record,
+      });
     } else {
       const orphanRowId = record.uuid || `orphan-${toolUseId}`;
       state.results[toolUseId] = { ...resultBlock, rowId: orphanRowId };
-      out = out || {
+      out.push({
         id: orphanRowId,
         role: 'user',
         orphan: true,
         blocks: [resultBlock],
         record,
-      };
+      });
     }
   }
-  return out;
+  if (out.length === 0) return null;
+  return out.length === 1 ? out[0] : out;
 }
 
 function decodeClaudeLine(lineStr, state) {
@@ -124,7 +153,6 @@ function decodeClaudeLine(lineStr, state) {
       state[id] = {
         id,
         role: 'assistant',
-        content: '',
         blocks: [],
       };
     }
@@ -134,28 +162,60 @@ function decodeClaudeLine(lineStr, state) {
     }
 
     const removeIds = [];
-    let combinedContent = '';
+    const rows = [];
 
+    let blockIndex = 0;
     for (const block of state[id].blocks) {
+      const blockId = `${id}-${blockIndex}`;
+      blockIndex++;
+
       if (block.type === 'text') {
-        combinedContent += block.text + '\n';
+        if (block.text && block.text.includes('<ai-title>')) {
+          const match = block.text.match(/<ai-title>(.*?)<\/ai-title>/);
+          if (match) {
+            rows.push({
+              isHeader: true,
+              title: match[1],
+            });
+            const cleaned = block.text.replace(/<ai-title>.*?<\/ai-title>/, '').trim();
+            if (cleaned) {
+              rows.push({ id: blockId, role: 'assistant', content: cleaned });
+            }
+            continue;
+          }
+        }
+
+        if (block.text) {
+          rows.push({ id: blockId, role: 'assistant', content: block.text });
+        }
       } else if (block.type === 'tool_use') {
         state.calls[block.id] = id;
         if (!block.result && state.results[block.id]) {
           block.result = state.results[block.id];
           removeIds.push(state.results[block.id].rowId);
         }
-        combinedContent += `\`\`\`tool_use\n${JSON.stringify(block, null, 2)}\n\`\`\`\n`;
+
+        rows.push({
+          id: blockId,
+          role: 'tool',
+          tool_use: block,
+          result: block.result,
+          edit: editFor(block),
+        });
       } else if (block.type === 'thinking') {
-        combinedContent += `> Thinking...\n`;
+        rows.push({
+          id: blockId,
+          role: 'reasoning',
+          content: block.thinking,
+        });
       }
     }
 
-    state[id].content = combinedContent.trim();
+    if (removeIds.length > 0 && rows.length > 0) {
+      rows[0].remove = removeIds;
+    }
 
-    const out = { ...state[id] };
-    if (removeIds.length > 0) out.remove = removeIds;
-    return out;
+    return rows;
   }
 
   return null;

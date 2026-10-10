@@ -117,7 +117,10 @@ function tailRead(fd, fileSize, decodeLine) {
   for (const line of allLines) {
     if (!line.trim()) continue;
     const row = decodeLine(line, state);
-    if (row) decoded.push(truncateRow(row));
+    if (row) {
+      if (Array.isArray(row)) decoded.push(...row.map(truncateRow));
+      else decoded.push(truncateRow(row));
+    }
   }
 
   const pageStart = cursor + remainingBuffer.length;
@@ -167,7 +170,10 @@ function loadOlderPage(fd, pageStart, decodeLine, results = {}) {
   for (const line of allLines) {
     if (!line.trim()) continue;
     const row = decodeLine(line, state);
-    if (row) decoded.push(truncateRow(row));
+    if (row) {
+      if (Array.isArray(row)) decoded.push(...row.map(truncateRow));
+      else decoded.push(truncateRow(row));
+    }
   }
 
   const newPageStart = cursor + remainingBuffer.length;
@@ -369,7 +375,10 @@ function openChat(sessionId, viewerId, opts) {
         for (const line of lines) {
           if (!line.trim()) continue;
           const row = watch.decodeLine(line, watch.state);
-          if (row) newRows.push(truncateRow(row));
+          if (row) {
+            if (Array.isArray(row)) newRows.push(...row.map(truncateRow));
+            else newRows.push(truncateRow(row));
+          }
         }
 
         if (newRows.length > 0) {
