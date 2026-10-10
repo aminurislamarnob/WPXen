@@ -32,10 +32,19 @@ describe('Chat pin (Session transcript pinning)', () => {
     home = fs.mkdtempSync(path.join(os.tmpdir(), 'wpxen-chat-pin-'));
     fs.mkdirSync(path.join(home, 'code.test'));
 
+    // Detection honors the faked env: these tests launch the real claude and
+    // antigravity commands, so stand-ins must exist inside it.
+    const bin = path.join(home, 'bin');
+    fs.mkdirSync(bin);
+    for (const name of ['claude', 'agy']) {
+      fs.writeFileSync(path.join(bin, name), '#!/bin/sh\ntrue\n');
+      fs.chmodSync(path.join(bin, name), 0o755);
+    }
+
     ptys = [];
     agents.__setDeps({
       homedir: () => home,
-      shellEnv: () => ({ PATH: '/bin' }),
+      shellEnv: () => ({ PATH: `${bin}:/bin` }),
       userShell: () => '/bin/zsh',
       spawnPty: (file, args, opts) => {
         const p = fakePty();
@@ -64,7 +73,6 @@ describe('Chat pin (Session transcript pinning)', () => {
     const cwd = path.join(home, 'code.test');
 
     // We launch claude. It should append --session-id <uuid>
-    console.log(agents.listAgents({ all: true }).find((a) => a.id === 'claude'));
     const res = agents.launch({
       site: { id: 's1', path: cwd },
       agentId: 'claude',

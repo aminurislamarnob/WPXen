@@ -314,7 +314,7 @@ function resolveBin(cmd, env) {
 // `agents: false` drops the providers and leaves only the plain shell; used by
 // Settings → Agents, which has nothing to configure for it.
 function listAgents({ all = false, shell = true } = {}) {
-  const env = resolveShellEnv();
+  const env = deps.shellEnv();
   const providers = effectiveRegistry()
     .filter((a) => all || !config.enabled || config.enabled.includes(a.id))
     // A command override can carry arguments ('claude --resume'); only the

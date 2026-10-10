@@ -29,6 +29,12 @@ let ptys;
 beforeEach(() => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'wpxen-floating-'));
   fs.mkdirSync(path.join(home, 'code'));
+  // Detection honors the faked env, so `sh` — which every launch here
+  // resolves via overrides — must exist inside it (/usr/bin/sh is absent on
+  // macOS).
+  const bin = path.join(home, 'bin');
+  fs.mkdirSync(bin);
+  fs.symlinkSync('/bin/sh', path.join(bin, 'sh'));
   ptys = [];
   agents.__setDeps({
     spawnPty: (file, args, opts) => {
@@ -37,7 +43,7 @@ beforeEach(() => {
       ptys.push(p);
       return p;
     },
-    shellEnv: () => ({ PATH: '/usr/bin' }),
+    shellEnv: () => ({ PATH: `${bin}:/usr/bin` }),
     userShell: () => '/bin/zsh',
     homedir: () => home,
   });
