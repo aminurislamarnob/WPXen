@@ -292,6 +292,7 @@ function registerHandlers(win, storeInstance) {
         if (value) remoteAccess.start({ port: all['remote.port'] });
         else remoteAccess.stop();
         remoteAccess.syncTunnel().catch(() => {});
+        applyRemoteReason();
       },
       'remote.port': (value, all) => {
         if (all['remote.enabled']) remoteAccess.start({ port: value });
@@ -301,6 +302,7 @@ function registerHandlers(win, storeInstance) {
       'remote.hostname': () => {
         remoteAccess.maybeVerify().catch(() => {});
       },
+      'remote.keepAwake': () => applyRemoteReason(),
     },
   });
   settings.migrateLegacy();
@@ -434,6 +436,7 @@ function registerHandlers(win, storeInstance) {
         w.webContents.send('remote-devices-update', devices);
       }
     }
+    applyRemoteReason();
   });
   if (settings.get('remote.enabled')) {
     try {
@@ -442,6 +445,18 @@ function registerHandlers(win, storeInstance) {
   }
   // The tunnel comes up with the app when it was left on with a token saved.
   remoteAccess.syncTunnel().catch(() => {});
+  // The keep-awake remote reason follows Remote Access, its setting, and the
+  // connected devices. Session changes already re-run the hold decision
+  // through watchSessions; the first evaluation happens here.
+  function applyRemoteReason() {
+    try {
+      keepAwake.setRemote({
+        enabled: settings.get('remote.enabled') && settings.get('remote.keepAwake'),
+        connectedDevices: remoteAccess.listDevices().filter((d) => d.connected).length,
+      });
+    } catch {}
+  }
+  applyRemoteReason();
 
   // Apply persisted DB credentials so MySQL operations authenticate correctly.
   mysql.setCredentials({

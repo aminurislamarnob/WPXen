@@ -563,6 +563,24 @@ export const SETTINGS_ITEMS = [
       'dns',
     ],
   },
+  {
+    id: 'remote.keepAwake',
+    section: 'mobile',
+    title: 'Keep Mac awake for remote access',
+    description: 'Hold the Mac awake while an Agent works or a phone is connected',
+    keywords: [
+      'remote',
+      'access',
+      'mobile',
+      'keep',
+      'awake',
+      'sleep',
+      'caffeinate',
+      'phone',
+      'connected',
+      'working',
+    ],
+  },
 
   // ── External tools ───────────────────────────────────────────────────────
   {
