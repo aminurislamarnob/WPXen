@@ -94,6 +94,11 @@ describe('shouldBubbleChord', () => {
       true
     );
   });
+  it('bubbles Cmd+. so the chat view can interrupt the agent', () => {
+    expect(shouldBubbleChord(key({ code: 'Period', key: '.', metaKey: true }))).toBe(
+      true
+    );
+  });
   it('does not bubble a plain Tab (completion)', () => {
     expect(shouldBubbleChord(key({ code: 'Tab' }))).toBe(false);
     expect(shouldBubbleChord(key({ code: 'Tab', shiftKey: true }))).toBe(false);
