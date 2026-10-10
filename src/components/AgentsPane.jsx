@@ -415,10 +415,18 @@ export default function AgentsPane() {
     const ids = new Set(allSessions.map((s) => s.sessionId));
     for (const id of listedRef.current) if (!ids.has(id)) sessionCache.dispose(id);
     if (activeTab && !ids.has(activeTab) && listedRef.current.has(activeTab)) {
+      // Its first pane closed while others remain: the main process promoted
+      // the next pane, so the tab lives on under that id.
+      const prevLayout = prevTabsRef.current.find(
+        (t) => t.sessionId === activeTab
+      )?.layout;
+      const promoted = paneIds(prevLayout, activeTab).find((id) =>
+        tabs.some((t) => t.sessionId === id)
+      );
       const prev = prevTabsRef.current.map((t) => t.sessionId);
       const after = prev.slice(prev.indexOf(activeTab) + 1).find((id) => ids.has(id));
       const before = prev.filter((id) => ids.has(id)).pop();
-      setActiveTab(after || before || null);
+      setActiveTab(promoted || after || before || null);
     }
     listedRef.current = ids;
     prevTabsRef.current = tabs;
@@ -940,7 +948,7 @@ export default function AgentsPane() {
                       rootPath={sitePath}
                       onOpenFile={openFileAtLine}
                       onOpenLink={handleOpenLink}
-                      onExited={destroyTab}
+                      onExited={requestClosePane}
                       onRestart={respawn}
                       onFocusPane={paneFocus}
                       onBlurPane={paneBlur}
