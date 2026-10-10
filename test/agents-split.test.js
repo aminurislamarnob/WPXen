@@ -191,19 +191,60 @@ describe('pane lifecycle', () => {
     expect(rows.find((r) => r.sessionId === rootId).layout.b.leaf).toBe(c1);
   });
 
-  it('closing the tab stops every pane', () => {
+  it('closing the tab stops every pane, without promoting one', () => {
+    const s = site();
+    const { sessionId: rootId } = agents.launch({ site: s, agentId: agents.SHELL_ID });
+    const { sessionId: c1 } = agents.splitPane(rootId, 'right', s);
+    agents.splitPane(c1, 'down', s);
+
+    agents.stopTab(rootId);
+
+    for (const p of ptys) expect(p.kill).toHaveBeenCalledWith('SIGTERM');
+    expect(agents.listAllSessions()).toEqual([]);
+  });
+
+  it('closing the tab from a pane ends the whole tab', () => {
     const s = site();
     const { sessionId: rootId } = agents.launch({ site: s, agentId: agents.SHELL_ID });
     const { sessionId: c1 } = agents.splitPane(rootId, 'right', s);
 
-    // UI would call destroyTab on all panes in the tree:
-    agents.stop(c1);
-    agents.stop(rootId);
+    agents.stopTab(c1);
 
-    expect(ptys[0].kill).toHaveBeenCalledWith('SIGTERM');
-    expect(ptys[1].kill).toHaveBeenCalledWith('SIGTERM');
+    expect(agents.listAllSessions()).toEqual([]);
+  });
 
+  it('respawning an exited pane replaces its leaf in place', () => {
+    const s = site();
+    const { sessionId: rootId } = agents.launch({ site: s, agentId: agents.SHELL_ID });
+    const { sessionId: c1 } = agents.splitPane(rootId, 'right', s);
+    ptys[1].emitExit(0);
+
+    const res = agents.respawnPane(c1, { site: s });
+
+    expect(res.ok).toBe(true);
+    expect(res.rootId).toBe(rootId);
     const rows = agents.listAllSessions();
-    expect(rows.length).toBe(0);
+    expect(rows.find((r) => r.sessionId === c1)).toBeUndefined();
+    expect(rows.find((r) => r.sessionId === res.sessionId).paneOf).toBe(rootId);
+    expect(rows.find((r) => r.sessionId === rootId).layout).toMatchObject({
+      a: { leaf: rootId },
+      b: { leaf: res.sessionId },
+    });
+  });
+
+  it('respawning the first pane keeps the tab under the new id', () => {
+    const s = site();
+    const { sessionId: rootId } = agents.launch({ site: s, agentId: agents.SHELL_ID });
+    const { sessionId: c1 } = agents.splitPane(rootId, 'right', s);
+    ptys[0].emitExit(0);
+
+    const res = agents.respawnPane(rootId, { site: s });
+
+    expect(res.rootId).toBe(res.sessionId);
+    const rows = agents.listAllSessions();
+    const newRoot = rows.find((r) => r.sessionId === res.sessionId);
+    expect(newRoot.paneOf).toBeNull();
+    expect(newRoot.layout).toMatchObject({ a: { leaf: res.sessionId }, b: { leaf: c1 } });
+    expect(rows.find((r) => r.sessionId === c1).paneOf).toBe(res.sessionId);
   });
 });

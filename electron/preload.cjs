@@ -272,6 +272,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.send('terminal-resize', sessionId, cols, rows),
   terminalClear: (sessionId) => ipcRenderer.send('terminal-clear', sessionId),
   terminalStop: (sessionId) => ipcRenderer.invoke('terminal-stop', sessionId),
+  terminalStopTab: (sessionId) => ipcRenderer.invoke('terminal-stop-tab', sessionId),
+  respawnPane: (sessionId) => ipcRenderer.invoke('agent-respawn-pane', sessionId),
 
   // In-app browser. The renderer owns the <webview>; these reach its guest in
   // the main process, keyed by the browser tab's key.

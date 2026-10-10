@@ -69,3 +69,10 @@ export function needsBulkConfirm(impact, suppressed) {
   if (impact.dirty.length > 0) return true;
   return impact.running > 0 && !suppressed;
 }
+
+// Every Session a tab holds: its panes, or just itself when it isn't split.
+export function paneIds(layout, rootId) {
+  if (!layout) return [rootId];
+  if (layout.leaf) return [layout.leaf];
+  return [...paneIds(layout.a), ...paneIds(layout.b)];
+}

@@ -14,6 +14,8 @@ export default function SplitLayout({
   onExited,
   onRestart,
   onFocusPane,
+  onBlurPane,
+  onClosePane,
 }) {
   // A drag fires onLayout on every frame; the main process only needs the
   // ratio it settles on.
@@ -35,8 +37,9 @@ export default function SplitLayout({
         onOpenLink={onOpenLink}
         onExited={() => onExited(tree.leaf)}
         onRestart={() => onRestart(tree.leaf)}
-        onClosePane={() => window.electronAPI.terminalStop(tree.leaf)}
+        onClosePane={path ? () => onClosePane(tree.leaf) : undefined}
         onFocus={() => onFocusPane?.(tree.leaf)}
+        onBlur={() => onBlurPane?.()}
       />
     );
   }
@@ -57,6 +60,8 @@ export default function SplitLayout({
           onExited={onExited}
           onRestart={onRestart}
           onFocusPane={onFocusPane}
+          onBlurPane={onBlurPane}
+          onClosePane={onClosePane}
         />
       </Panel>
       <ResizeHandle direction={direction} />
@@ -72,6 +77,8 @@ export default function SplitLayout({
           onExited={onExited}
           onRestart={onRestart}
           onFocusPane={onFocusPane}
+          onBlurPane={onBlurPane}
+          onClosePane={onClosePane}
         />
       </Panel>
     </PanelGroup>

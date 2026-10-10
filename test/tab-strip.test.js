@@ -4,6 +4,7 @@ import {
   closeImpact,
   nextActive,
   needsBulkConfirm,
+  paneIds,
 } from '../src/lib/tabStrip';
 
 describe('tabStrip', () => {
@@ -103,6 +104,21 @@ describe('tabStrip', () => {
 
     it('always asks for unsaved files, even when suppressed', () => {
       expect(needsBulkConfirm({ running: 0, dirty: ['f1'] }, true)).toBe(true);
+    });
+  });
+
+  describe('paneIds', () => {
+    it('is just the tab when it is not split', () => {
+      expect(paneIds(null, 's1')).toEqual(['s1']);
+    });
+
+    it('lists every pane of a nested split', () => {
+      const layout = {
+        dir: 'right',
+        a: { leaf: 's1' },
+        b: { dir: 'down', a: { leaf: 'p1' }, b: { leaf: 'p2' } },
+      };
+      expect(paneIds(layout, 's1')).toEqual(['s1', 'p1', 'p2']);
     });
   });
 });

@@ -25,9 +25,17 @@ import { LAST_AGENTS_SITE_KEY, resolveLastSite } from '../lib/activityBar';
 import { useAgentSessions, setSelectedSession } from '../lib/useAgentSessions';
 import TabStrip from './agents/TabStrip';
 import TabContextMenu from './agents/TabContextMenu';
-import { tabsToClose, closeImpact, nextActive, needsBulkConfirm } from '../lib/tabStrip';
+import {
+  tabsToClose,
+  closeImpact,
+  nextActive,
+  needsBulkConfirm,
+  paneIds,
+} from '../lib/tabStrip';
 
 const CLOSE_CONFIRM_KEY = 'wpxen.terminalCloseConfirmSuppressed';
+// The registry id of the plain shell (`SHELL_ID` in services/agents.cjs).
+const SHELL_AGENT_ID = 'shell';
 
 // Whether the right-hand Explorer is collapsed — one choice for every
 // project, like Orca's right sidebar, kept across restarts.
@@ -111,6 +119,10 @@ export default function AgentsPane() {
   );
   const [activeTab, setActiveTab] = useState(null); // sessionId
   const [activePaneId, setActivePaneId] = useState(null); // focused pane inside activeTab
+  const sessionsById = useMemo(
+    () => Object.fromEntries(allSessions.map((s) => [s.sessionId, s])),
+    [allSessions]
+  );
   const [addMenu, setAddMenu] = useState(null); // { x, y } when the + menu is open
   const [browserMenu, setBrowserMenu] = useState(null); // { x, y } for the browser targets
   const [browserBusy, setBrowserBusy] = useState(null); // target id being resolved
@@ -127,7 +139,7 @@ export default function AgentsPane() {
   // themselves live in webviewCache, not here.
   const [browserState, setBrowserState] = useState({}); // key -> {url,title,loading,error}
   const browserSeq = useRef(0);
-  const [closeConfirm, setCloseConfirm] = useState(null); // sessionId pending confirm
+  const [closeConfirm, setCloseConfirm] = useState(null); // { id, scope: tab | pane } pending confirm
   const [suppressClose, setSuppressClose] = useState(false); // checkbox in dialog
 
   // The Explorer is a collapsible right sidebar: the toolbar button, ⌘⇧E, or
@@ -206,19 +218,20 @@ export default function AgentsPane() {
     return () => window.removeEventListener('keydown', onKey);
   }, [toggleExplorer, activeTab, showingFile]);
 
+  // ⌘W belongs to the app menu (Close Window), so the main process only
+  // forwards it while a terminal pane here has focus — see paneFocus below.
+  const closePaneRef = useRef(null);
   useEffect(() => {
     return window.electronAPI.on('agents-shortcut', (e) => {
-      if (e.key === 'w' && activePaneId) {
-        window.electronAPI.terminalStop(activePaneId);
-        sessionCache.dispose(activePaneId);
-      }
+      if (e.key === 'w' && activePaneId) closePaneRef.current(activePaneId);
     });
   }, [activePaneId]);
-
-  useEffect(() => {
-    window.electronAPI.setAgentsFocus?.(true);
-    return () => window.electronAPI.setAgentsFocus?.(false);
-  }, []);
+  const paneFocus = (sessionId) => {
+    setActivePaneId(sessionId);
+    window.electronAPI.setAgentsFocus(true);
+  };
+  const paneBlur = () => window.electronAPI.setAgentsFocus(false);
+  useEffect(() => () => window.electronAPI.setAgentsFocus(false), []);
 
   // Hold the Explorer's pixel width as the window resizes.
   useEffect(() => {
@@ -377,9 +390,16 @@ export default function AgentsPane() {
     setView('file');
   };
 
-  // Actually tear the Session down: stop the pty (which drops it from the
-  // session list, and so from the tabs) and dispose the cached xterm.
+  // Actually tear the tab down: stop every pane's pty (which drops them from
+  // the session list, and so from the tabs) and dispose the cached xterms.
   const destroyTab = async (sessionId) => {
+    const ids = paneIds(sessionsById[sessionId]?.layout, sessionId);
+    await window.electronAPI.terminalStopTab(sessionId);
+    ids.forEach((id) => sessionCache.dispose(id));
+  };
+
+  // One pane of a split; its sibling takes the space.
+  const destroyPane = async (sessionId) => {
     await window.electronAPI.terminalStop(sessionId);
     sessionCache.dispose(sessionId);
   };
@@ -416,21 +436,39 @@ export default function AgentsPane() {
   // running and the user hasn't suppressed the prompt. An already-exited
   // session closes without asking.
   const closeTab = (sessionId) => {
-    if (
-      sessionCache.isExited(sessionId) ||
-      localStorage.getItem(CLOSE_CONFIRM_KEY) === '1'
-    ) {
+    const { running } = closeImpact([sessionId], sessionsById, []);
+    if (running === 0 || localStorage.getItem(CLOSE_CONFIRM_KEY) === '1') {
       return destroyTab(sessionId);
     }
     setSuppressClose(false);
-    setCloseConfirm(sessionId);
+    setCloseConfirm({ id: sessionId, scope: 'tab' });
   };
+
+  // A single pane, from its close button or ⌘W. An unsplit tab closes as a
+  // tab; in a split, only a running Agent asks first — plain shells just go.
+  const requestClosePane = (sessionId) => {
+    const s = sessionsById[sessionId];
+    if (!s) return;
+    const rootId = s.paneOf || sessionId;
+    if (!sessionsById[rootId]?.layout) return closeTab(rootId);
+    if (
+      s.exited ||
+      s.agentId === SHELL_AGENT_ID ||
+      localStorage.getItem(CLOSE_CONFIRM_KEY) === '1'
+    ) {
+      return destroyPane(sessionId);
+    }
+    setSuppressClose(false);
+    setCloseConfirm({ id: sessionId, scope: 'pane' });
+  };
+  closePaneRef.current = requestClosePane;
 
   const confirmClose = () => {
     if (suppressClose) localStorage.setItem(CLOSE_CONFIRM_KEY, '1');
-    const id = closeConfirm;
+    const { id, scope } = closeConfirm;
     setCloseConfirm(null);
-    destroyTab(id);
+    if (scope === 'pane') destroyPane(id);
+    else destroyTab(id);
   };
 
   const [tabMenu, setTabMenu] = useState(null);
@@ -444,11 +482,6 @@ export default function AgentsPane() {
     const keysToClose = tabsToClose(orderedKeys, targetKey, action);
     if (keysToClose.length === 0) return;
 
-    const sessionsById = allSessions.reduce((acc, t) => {
-      acc[t.sessionId] = t;
-      return acc;
-    }, {});
-
     const impact = closeImpact(keysToClose, sessionsById, dirtyKeys);
 
     const performClose = () => {
@@ -459,21 +492,7 @@ export default function AgentsPane() {
 
       const closingSessions = keysToClose.filter((k) => sessionKeys.includes(k));
       for (const sessionId of closingSessions) {
-        const session = sessionsById[sessionId];
-        if (session && session.layout) {
-          const ids = [];
-          const traverse = (node) => {
-            if (node.leaf) ids.push(node.leaf);
-            else if (node.dir) {
-              traverse(node.a);
-              traverse(node.b);
-            }
-          };
-          traverse(session.layout);
-          ids.forEach((paneId) => destroyTab(paneId));
-        } else {
-          destroyTab(sessionId);
-        }
+        destroyTab(sessionId);
       }
 
       const activeKeyToUse = showingFile ? activeKey : activeTab;
@@ -555,8 +574,17 @@ export default function AgentsPane() {
   };
 
   // Respawn the same Agent after its shell exited: launch a fresh Session and
-  // reap the dead one. The new Session takes the end of the tab strip.
+  // reap the dead one. The new Session takes the end of the tab strip. In a
+  // split, the main process swaps the pane in place instead.
   const respawn = async (sessionId) => {
+    const s = sessionsById[sessionId];
+    if (s?.paneOf || s?.layout) {
+      const res = await window.electronAPI.respawnPane(sessionId);
+      if (res?.error) return setError(res.error);
+      sessionCache.dispose(sessionId);
+      if (res.rootId !== (s.paneOf || sessionId)) selectSession(res.rootId);
+      return;
+    }
     const tab = tabs.find((t) => t.sessionId === sessionId);
     if (!tab) return;
     const res = await window.electronAPI.launchAgent(siteId, tab.agentId, tab.targetId);
@@ -914,7 +942,9 @@ export default function AgentsPane() {
                       onOpenLink={handleOpenLink}
                       onExited={destroyTab}
                       onRestart={respawn}
-                      onFocusPane={setActivePaneId}
+                      onFocusPane={paneFocus}
+                      onBlurPane={paneBlur}
+                      onClosePane={requestClosePane}
                     />
                   ) : (
                     <div className="h-full flex flex-col items-center justify-center text-center">
@@ -977,7 +1007,7 @@ export default function AgentsPane() {
         title={bulkCloseConfirm ? 'Close tabs?' : 'End session?'}
         description={
           closeConfirm
-            ? `This will terminate the running agent in ${tabs.find((t) => t.sessionId === closeConfirm)?.agentName || 'this session'}. Anything it is doing will be interrupted.`
+            ? `This will terminate the running agent in ${sessionsById[closeConfirm.id]?.agentName || 'this session'}${closeConfirm.scope === 'tab' && sessionsById[closeConfirm.id]?.layout ? ' and every pane split from it' : ''}. Anything it is doing will be interrupted.`
             : bulkCloseConfirm
               ? `${bulkCloseConfirm.impact.running} running session${bulkCloseConfirm.impact.running === 1 ? '' : 's'} will be stopped${bulkCloseConfirm.impact.dirty.length > 0 ? `, and ${bulkCloseConfirm.impact.dirty.length} file${bulkCloseConfirm.impact.dirty.length === 1 ? ' has' : 's have'} unsaved changes` : ''}.`
               : ''

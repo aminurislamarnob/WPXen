@@ -845,6 +845,20 @@ function registerHandlers(win, storeInstance) {
     return agents.splitPane(sessionId, dir, site, globalArgs);
   });
 
+  ipcMain.handle('agent-respawn-pane', (_e, sessionId) => {
+    const session = agents.getSession(sessionId);
+    if (!session) return { error: 'Session not found' };
+    const site = findProject(session.siteId);
+    if (!site) return { error: 'Project not found' };
+    const target = session.targetId
+      ? (site.launchTargets || []).find((t) => t.id === session.targetId) || null
+      : null;
+    const globalArgs = store.get('agentPresets', {})[session.agentId]?.args || '';
+    return agents.respawnPane(sessionId, { site, target, globalArgs });
+  });
+
+  ipcMain.handle('terminal-stop-tab', (_e, sessionId) => agents.stopTab(sessionId));
+
   ipcMain.handle('agent-set-pane-ratio', (_e, rootId, path, ratio) => {
     agents.setPaneRatio(rootId, path, ratio);
   });
