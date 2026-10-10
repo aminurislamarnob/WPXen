@@ -113,35 +113,50 @@ function locateCodex({ cwd, startedAt, home, exclude }) {
   return latest;
 }
 
-function locateAntigravity({ cwd, home }) {
-  const lastPath = path.join(
+function antigravityMapPath(home) {
+  return path.join(
     home,
     '.gemini',
     'antigravity-cli',
     'cache',
     'last_conversations.json'
   );
-  if (!deps.existsSync(lastPath)) return null;
+}
 
+function antigravityTranscriptPath(home, convId) {
+  return path.join(
+    home,
+    '.gemini',
+    'antigravity-cli',
+    'brain',
+    convId,
+    '.system_generated',
+    'logs',
+    'transcript.jsonl'
+  );
+}
+
+// The conversation id currently mapped to a working folder, or null. The map
+// changes when a new conversation starts — re-read it every time.
+function antigravityConversationId(cwd, home) {
+  const lastPath = antigravityMapPath(home || deps.homedir());
   try {
-    const content = deps.readFileSync(lastPath, 'utf8');
-    const map = JSON.parse(content);
-    const convId = map[cwd];
-    if (convId) {
-      const transcript = path.join(
-        home,
-        '.gemini',
-        'antigravity-cli',
-        'brain',
-        convId,
-        '.system_generated',
-        'logs',
-        'transcript.jsonl'
-      );
-      if (deps.existsSync(transcript)) {
-        return transcript;
-      }
-    }
+    if (!deps.existsSync(lastPath)) return null;
+    const map = JSON.parse(deps.readFileSync(lastPath, 'utf8'));
+    return map[cwd] || null;
+  } catch {
+    return null;
+  }
+}
+
+function locateAntigravity({ cwd, home, exclude }) {
+  const convId = antigravityConversationId(cwd, home);
+  if (!convId) return null;
+  const transcript = antigravityTranscriptPath(home, convId);
+  // A transcript already driving another Session is not ours.
+  if (exclude && exclude.has(transcript)) return null;
+  try {
+    if (deps.existsSync(transcript)) return transcript;
   } catch {
     // skip
   }
@@ -169,4 +184,6 @@ function locateTranscript(agentId, cwd, startedAt, transcriptId, exclude, home) 
 module.exports = {
   __setDeps,
   locateTranscript,
+  antigravityConversationId,
+  antigravityTranscriptPath,
 };
