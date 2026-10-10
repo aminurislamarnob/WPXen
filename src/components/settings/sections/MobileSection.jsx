@@ -1,10 +1,21 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Download, Loader, Smartphone } from 'lucide-react';
-import { Button, Card, Row, SectionLabel, SettingsRow, Toggle } from '../../ui';
+import {
+  Button,
+  Card,
+  ConfirmDialog,
+  Row,
+  SectionLabel,
+  SettingsRow,
+  Toggle,
+} from '../../ui';
 import { NumberSetting, TextSetting } from '../controls';
 import { useSettings } from '../../../lib/useSettings';
 import { useSettingsContext } from '../SettingsLayout';
-import { useRemoteAccessStatus } from '../../../lib/useRemoteAccess';
+import {
+  useRemoteAccessDevices,
+  useRemoteAccessStatus,
+} from '../../../lib/useRemoteAccess';
 
 // Bounds mirror services/remoteAccess.cjs (the schema enforces them; these
 // only clamp the field). Keep the three in sync.
@@ -32,6 +43,26 @@ const VERIFY_REASON_COPY = {
   timeout: 'Timed out waiting for the hostname.',
 };
 
+function formatRelativeTime(timestamp) {
+  if (typeof timestamp !== 'number') return 'never';
+  const seconds = Math.max(0, Math.round((Date.now() - timestamp) / 1000));
+  if (seconds < 60) return 'just now';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} h ago`;
+  return `${Math.floor(hours / 24)} d ago`;
+}
+
+function formatDate(timestamp) {
+  if (typeof timestamp !== 'number') return '—';
+  return new Date(timestamp).toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+}
+
 // Settings → Mobile: Remote Access (#140 tracer, #141 tunnel) — the switch,
 // the port, the tunnel token and hostname, and the live tunnel and
 // verification state. Pairing and the phone arrive in later tickets.
@@ -52,6 +83,12 @@ export default function MobileSection() {
   const [pairingError, setPairingError] = useState(null);
   const [pairingBusy, setPairingBusy] = useState(false);
   const [, setTick] = useState(0);
+  const [renamingId, setRenamingId] = useState(null);
+  const [renameDraft, setRenameDraft] = useState('');
+  const [revoking, setRevoking] = useState(null);
+  const [deviceError, setDeviceError] = useState(null);
+  const [deviceBusy, setDeviceBusy] = useState(false);
+  const devices = useRemoteAccessDevices();
 
   const tokenSaved = status.tokenSaved === true;
   const enabled = settings['remote.enabled'] === true;
@@ -151,6 +188,53 @@ export default function MobileSection() {
   const pairingSecondsLeft = pairing
     ? Math.max(0, Math.round((pairing.expiresAt - Date.now()) / 1000))
     : 0;
+
+  async function saveRename(id) {
+    setDeviceError(null);
+    setDeviceBusy(true);
+    try {
+      const result = await window.electronAPI.renameRemoteDevice(id, renameDraft);
+      if (result?.ok) {
+        setRenamingId(null);
+        setRenameDraft('');
+      } else {
+        setDeviceError(result?.error || 'Could not rename the device.');
+      }
+    } catch {
+      setDeviceError('Could not rename the device.');
+    } finally {
+      setDeviceBusy(false);
+    }
+  }
+
+  async function confirmRevoke() {
+    if (!revoking) return;
+    setDeviceError(null);
+    setDeviceBusy(true);
+    try {
+      const result = await window.electronAPI.revokeRemoteDevice(revoking.id);
+      if (!result?.ok) setDeviceError(result?.error || 'Could not revoke the device.');
+    } catch {
+      setDeviceError('Could not revoke the device.');
+    } finally {
+      setDeviceBusy(false);
+      setRevoking(null);
+    }
+  }
+
+  async function disconnectAll() {
+    setDeviceError(null);
+    setDeviceBusy(true);
+    try {
+      const result = await window.electronAPI.disconnectRemoteDevices();
+      if (!result?.ok)
+        setDeviceError(result?.error || 'Could not disconnect the devices.');
+    } catch {
+      setDeviceError('Could not disconnect the devices.');
+    } finally {
+      setDeviceBusy(false);
+    }
+  }
 
   const canPair =
     enabled &&
@@ -449,6 +533,117 @@ export default function MobileSection() {
             </div>
           )}
         </Card>
+      </div>
+
+      <div>
+        <SectionLabel>Paired Devices</SectionLabel>
+        <Card>
+          {devices.length === 0 ? (
+            <p className="settings-row text-xs text-muted-foreground">
+              No phones or tablets paired yet.
+            </p>
+          ) : (
+            devices.map((device, i) => (
+              <div
+                key={device.id}
+                className={i > 0 ? 'border-t border-border' : undefined}
+              >
+                <div className="settings-row gap-2">
+                  <span
+                    aria-label={device.connected ? 'Connected now' : 'Not connected'}
+                    title={device.connected ? 'Connected now' : 'Not connected'}
+                    className={`w-2 h-2 rounded-full flex-shrink-0 mt-1.5 ${
+                      device.connected ? 'bg-status-running' : 'bg-muted-foreground/40'
+                    }`}
+                  />
+                  <div className="flex-1 min-w-0">
+                    {renamingId === device.id ? (
+                      <input
+                        type="text"
+                        aria-label="Device name"
+                        autoFocus
+                        className="form-input !text-xs !w-48"
+                        value={renameDraft}
+                        onChange={(e) => setRenameDraft(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') saveRename(device.id);
+                          else if (e.key === 'Escape') setRenamingId(null);
+                        }}
+                      />
+                    ) : (
+                      <>
+                        <p className="text-[13px] text-foreground truncate">
+                          {device.name}
+                        </p>
+                        <p className="text-xs text-muted-foreground truncate mt-0.5">
+                          {device.platform} · paired {formatDate(device.pairedAt)} · seen{' '}
+                          {formatRelativeTime(device.lastSeen)}
+                          {device.connected ? ' · connected now' : ''}
+                        </p>
+                      </>
+                    )}
+                  </div>
+                  {renamingId === device.id ? (
+                    <>
+                      <button
+                        onClick={() => saveRename(device.id)}
+                        disabled={deviceBusy}
+                        className="btn-secondary text-xs flex-shrink-0"
+                      >
+                        Save
+                      </button>
+                      <button
+                        onClick={() => setRenamingId(null)}
+                        className="btn-ghost text-xs flex-shrink-0"
+                      >
+                        Cancel
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        onClick={() => {
+                          setRenamingId(device.id);
+                          setRenameDraft(device.name);
+                          setDeviceError(null);
+                        }}
+                        className="btn-ghost text-xs flex-shrink-0"
+                      >
+                        Rename
+                      </button>
+                      <Button
+                        variant="danger"
+                        onClick={() => setRevoking(device)}
+                        disabled={deviceBusy}
+                      >
+                        Revoke
+                      </Button>
+                    </>
+                  )}
+                </div>
+              </div>
+            ))
+          )}
+        </Card>
+        {deviceError && (
+          <p className="text-[11px] text-destructive mt-1.5 px-1">{deviceError}</p>
+        )}
+        {devices.some((d) => d.connected) && (
+          <div className="mt-1.5 px-1">
+            <Button variant="secondary" onClick={disconnectAll} disabled={deviceBusy}>
+              Disconnect all devices
+            </Button>
+          </div>
+        )}
+        <ConfirmDialog
+          open={revoking != null}
+          title={`Revoke ${revoking?.name || 'this device'}?`}
+          description="It loses access immediately and its live connection drops. It can only come back by pairing again."
+          confirmLabel="Revoke"
+          danger
+          onConfirm={confirmRevoke}
+          onCancel={() => setRevoking(null)}
+        />
       </div>
     </div>
   );

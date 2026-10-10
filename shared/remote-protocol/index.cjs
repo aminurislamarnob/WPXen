@@ -11,7 +11,13 @@
 // The frame format is documented in frames.cjs. Only tweetnacl plus the local
 // base64 helper are allowed here — no Buffer, crypto, atob or WebSocket.
 
-const { PROTOCOL_VERSION, HEALTH_PATH, DEVICE_PATH } = require('./protocol.cjs');
+const {
+  PROTOCOL_VERSION,
+  HEALTH_PATH,
+  DEVICE_PATH,
+  CLOSE_REVOKED,
+  CLOSE_DISCONNECT_ALL,
+} = require('./protocol.cjs');
 const { encodeBase64, decodeBase64 } = require('./base64.cjs');
 const {
   newKeyPair,
@@ -35,6 +41,8 @@ module.exports = {
   PROTOCOL_VERSION,
   HEALTH_PATH,
   DEVICE_PATH,
+  CLOSE_REVOKED,
+  CLOSE_DISCONNECT_ALL,
   encodeBase64,
   decodeBase64,
   newKeyPair,
