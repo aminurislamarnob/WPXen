@@ -35,6 +35,8 @@ export function foldToolRuns(rows) {
   let currentRun = null;
 
   for (const row of rows) {
+    if (row.parentId) continue; // Nested rows are handled separately
+
     if (
       row.role === 'tool' ||
       row.role === 'tool_result' ||
@@ -91,4 +93,17 @@ export function foldToolRuns(rows) {
   }
 
   return folded;
+}
+
+// What a subagent row's header shows: running until the parent Agent / Task
+// call has its result, then done or failed from that result.
+export function subagentSummary(item) {
+  const meta = item.subagent || {};
+  const n = item.subagentCount;
+  return {
+    status: !item.result ? 'running' : item.result.is_error ? 'failed' : 'done',
+    type: meta.type || item.tool_use?.input?.subagent_type || 'Subagent',
+    description: meta.description || item.tool_use?.input?.description || 'Task',
+    count: n ? `${n} tool call${n === 1 ? '' : 's'}` : null,
+  };
 }

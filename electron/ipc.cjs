@@ -401,6 +401,12 @@ function registerHandlers(win, storeInstance) {
   ipcMain.handle('agent-chat-fetch-full', (_e, sessionId, toolUseId) => {
     return agents.chatFetchFull(sessionId, toolUseId);
   });
+  ipcMain.handle('agent-chat-expand-subagent', (_e, sessionId, toolUseId, expanded) => {
+    return agents.chatExpandSubagent(sessionId, toolUseId, expanded);
+  });
+  ipcMain.handle('agent-chat-load-older-subagent', (_e, sessionId, parentId) => {
+    return agents.chatLoadOlderSubagent(sessionId, parentId);
+  });
 
   // ── Agents working set ("Projects") & session rows ─────────────────────────
   // The sidebar lists working-set Sites with every Session under them, live or

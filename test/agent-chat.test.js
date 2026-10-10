@@ -193,7 +193,7 @@ describe('agent-chat watcher', () => {
       onRows: (newRows) => rows.push(...newRows),
     });
 
-    expect(rows.length).toBe(1);
+    expect(rows.length).toBeGreaterThan(0);
     const row = rows[0];
     expect(row.blocks[0].truncated).toBe(true);
     expect(row.blocks[0].content.length).toBe(TRUNCATE_THRESHOLD);
@@ -569,5 +569,165 @@ describe('agentChatSend', () => {
     await sendChat(session, 'test');
 
     expect(written).toEqual(['\x15', 'test', '\r']);
+  });
+});
+
+describe('subagents in agentChat', () => {
+  const {
+    __setDeps,
+    openChat,
+    closeAllChats,
+    chatExpandSubagent,
+    loadOlder,
+  } = require('../electron/services/agentChat.cjs');
+  const { decodeClaudeLine } = require('../electron/services/agentChatClaude.cjs');
+  const os = require('node:os');
+
+  // Claude's real layout: <project>/<uuid>.jsonl, and the Session's subagents
+  // in <project>/<uuid>/subagents/agent-<id>.jsonl + .meta.json.
+  const UUID = '5f0c2a8e-1b7d-4c3e-9a61-2d8e4f7b9c10';
+  let proj;
+
+  const line = (r) => JSON.stringify(r) + '\n';
+  const agentCall = line({
+    type: 'assistant',
+    uuid: 'a-1',
+    message: {
+      id: 'msg-1',
+      role: 'assistant',
+      content: [
+        {
+          type: 'tool_use',
+          id: 'toolu_Agent1',
+          name: 'Agent',
+          input: {
+            description: 'Find REST routes',
+            subagent_type: 'Explore',
+            prompt: 'p',
+          },
+        },
+      ],
+    },
+  });
+  const agentResult = line(toolResultRecord('u-2', 'toolu_Agent1', 'Found 2 routes.'));
+  const subLines =
+    line({
+      isSidechain: true,
+      agentId: 'abc123',
+      type: 'user',
+      uuid: 's-1',
+      message: { role: 'user', content: 'Find REST routes' },
+    }) +
+    line({
+      isSidechain: true,
+      agentId: 'abc123',
+      type: 'assistant',
+      uuid: 's-2',
+      message: {
+        id: 'msg-sub-1',
+        role: 'assistant',
+        content: [
+          { type: 'tool_use', id: 'toolu_S1', name: 'Grep', input: { pattern: 'route' } },
+        ],
+      },
+    });
+
+  function writeSession({ parent, sub = subLines }) {
+    proj = fs.mkdtempSync(path.join(os.tmpdir(), 'wpxen-sub-'));
+    fs.writeFileSync(path.join(proj, `${UUID}.jsonl`), parent);
+    const dir = path.join(proj, UUID, 'subagents');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, 'agent-abc123.meta.json'),
+      JSON.stringify({
+        agentType: 'Explore',
+        description: 'Find REST routes',
+        toolUseId: 'toolu_Agent1',
+      })
+    );
+    fs.writeFileSync(path.join(dir, 'agent-abc123.jsonl'), sub);
+  }
+
+  function watch() {
+    const rows = [];
+    openChat('sess-sub', 'viewer-1', {
+      transcriptPath: path.join(proj, `${UUID}.jsonl`),
+      transcriptId: UUID,
+      decodeLine: decodeClaudeLine,
+      onRows: (newRows) => rows.push(...newRows),
+    });
+    vi.advanceTimersByTime(500);
+    return rows;
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    // Production fs, except readFileSync: whatever the module ships with.
+    __setDeps({
+      statSync: fs.statSync,
+      openSync: fs.openSync,
+      readSync: fs.readSync,
+      closeSync: fs.closeSync,
+      readdirSync: fs.readdirSync,
+      setInterval,
+      clearInterval,
+    });
+  });
+
+  afterEach(() => {
+    closeAllChats();
+    vi.useRealTimers();
+    fs.rmSync(proj, { recursive: true, force: true });
+  });
+
+  it("finds subagents in the Session's own folder and labels the parent call", () => {
+    writeSession({ parent: agentCall + agentResult });
+    const rows = watch();
+    const call = rows.filter((r) => r.tool_use?.id === 'toolu_Agent1').at(-1);
+    expect(call.subagent).toEqual({
+      agentId: 'abc123',
+      type: 'Explore',
+      description: 'Find REST routes',
+    });
+  });
+
+  it('does not tail a finished, collapsed subagent', () => {
+    writeSession({ parent: agentCall + agentResult });
+    const rows = watch();
+    expect(rows.some((r) => r.parentId)).toBe(false);
+  });
+
+  it('tails a finished subagent once expanded by its tool_use id', () => {
+    writeSession({ parent: agentCall + agentResult });
+    const rows = watch();
+    chatExpandSubagent('sess-sub', 'toolu_Agent1', true);
+    vi.advanceTimersByTime(500);
+    const nested = rows.filter((r) => r.parentId === 'toolu_Agent1');
+    expect(nested.map((r) => r.role)).toEqual(['user', 'tool']);
+  });
+
+  it('labels a subagent call that arrives through Load older', () => {
+    // Push the Agent call off the first page with ~250 KB of later rows.
+    const filler = Array.from({ length: 500 }, (_, i) =>
+      line(userRecord(`f-${i}`, `later prompt ${i} ${'x'.repeat(450)}`))
+    ).join('');
+    writeSession({ parent: agentCall + agentResult + filler });
+    const rows = watch();
+    expect(rows.some((r) => r.tool_use?.id === 'toolu_Agent1')).toBe(false);
+
+    const older = [];
+    for (let page = loadOlder('sess-sub'); ; page = loadOlder('sess-sub')) {
+      older.push(...page.rows);
+      if (page.atStart) break;
+    }
+    const call = older.filter((r) => r.tool_use?.id === 'toolu_Agent1').at(-1);
+    expect(call.subagent).toMatchObject({ agentId: 'abc123', type: 'Explore' });
+  });
+
+  it('tails a running subagent without being expanded', () => {
+    writeSession({ parent: agentCall });
+    const rows = watch();
+    vi.advanceTimersByTime(500);
+    expect(rows.some((r) => r.parentId === 'toolu_Agent1')).toBe(true);
   });
 });

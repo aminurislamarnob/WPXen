@@ -173,6 +173,9 @@ function decodeClaudeLine(lineStr, state) {
     // state and so may see only part of a message: a tool call is keyed by
     // its tool_use id, any other block by the record that carries it.
     if (record.message?.content) {
+      for (const block of record.message.content) {
+        if (block.type === 'tool_use') state.toolUseCount = (state.toolUseCount || 0) + 1;
+      }
       const tagged = record.message.content.map((b, i) => ({
         ...b,
         rowId: b.type === 'tool_use' ? b.id : `${record.uuid || id}-${i}`,

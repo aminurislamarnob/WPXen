@@ -8,6 +8,7 @@ let deps = {
   readSync: fs.readSync,
   closeSync: fs.closeSync,
   readdirSync: fs.readdirSync,
+  readFileSync: fs.readFileSync,
   setInterval,
   clearInterval,
 };
@@ -285,6 +286,138 @@ function completeLength(fd, size) {
   return 0;
 }
 
+function augmentToolRows(rows, subagents) {
+  for (const row of rows) {
+    if (row.role === 'tool' && row.tool_use) {
+      for (const sub of subagents.values()) {
+        if (sub.toolUseId === row.tool_use.id) {
+          row.subagent = {
+            agentId: sub.agentId,
+            type: sub.type,
+            description: sub.description,
+          };
+          row.subagentCount = sub.state?.toolUseCount || 0;
+        }
+      }
+    }
+  }
+}
+
+// ── Subagents ──────────────────────────────────────────────────────────────
+// Claude keeps a Session's subagents beside its transcript:
+// <project>/<uuid>/subagents/agent-<id>.jsonl, with a .meta.json naming the
+// type, description and the parent's tool_use id.
+function subagentDir(watch) {
+  return path.join(watch.transcriptDir, watch.transcriptId, 'subagents');
+}
+
+// The newest copy of a tool row: a call is re-emitted once its result lands.
+function latestToolRow(watch, toolUseId) {
+  for (let i = watch.currentRows.length - 1; i >= 0; i--) {
+    const r = watch.currentRows[i];
+    if (r.role === 'tool' && r.tool_use?.id === toolUseId) return r;
+  }
+  return null;
+}
+
+function discoverSubagents(watch) {
+  let files;
+  try {
+    files = deps.readdirSync(subagentDir(watch));
+  } catch {
+    return; // no subagents yet
+  }
+  for (const f of files) {
+    const match = /^agent-(.+)\.meta\.json$/.exec(f);
+    if (!match || watch.subagents.has(match[1])) continue;
+    const agentId = match[1];
+    let meta;
+    try {
+      meta = JSON.parse(deps.readFileSync(path.join(subagentDir(watch), f), 'utf8'));
+    } catch {
+      continue; // written but not finished, or unreadable: retry next poll
+    }
+    watch.subagents.set(agentId, {
+      agentId,
+      type: meta.agentType,
+      description: meta.description,
+      toolUseId: meta.toolUseId,
+      expanded: false,
+      fd: null,
+      tailOffset: 0,
+      pageStart: 0,
+      state: {},
+      currentRows: [],
+    });
+    const parentRow = latestToolRow(watch, meta.toolUseId);
+    if (parentRow) {
+      parentRow.subagent = {
+        agentId,
+        type: meta.agentType,
+        description: meta.description,
+      };
+      watch.onRows([parentRow]);
+    }
+  }
+}
+
+function closeSubagent(sub) {
+  if (sub.fd === null) return;
+  try {
+    deps.closeSync(sub.fd);
+  } catch {}
+  sub.fd = null;
+}
+
+function pollSubagent(watch, sub) {
+  const parentRow = latestToolRow(watch, sub.toolUseId);
+  const running = !!parentRow && !parentRow.result;
+  if (!running && !sub.expanded) return closeSubagent(sub);
+
+  const nested = (rows) => rows.map((r) => ({ ...r, parentId: sub.toolUseId }));
+  const reportCount = () => {
+    if (parentRow && sub.state.toolUseCount !== undefined) {
+      parentRow.subagentCount = sub.state.toolUseCount;
+      watch.onRows([parentRow]);
+    }
+  };
+
+  const subPath = path.join(subagentDir(watch), `agent-${sub.agentId}.jsonl`);
+  try {
+    if (sub.fd === null) {
+      sub.fd = deps.openSync(subPath, 'r');
+      const complete = completeLength(sub.fd, deps.statSync(subPath).size);
+      const { rows, pageStart, state } = tailRead(sub.fd, complete, watch.decodeLine);
+      sub.currentRows = rows;
+      sub.pageStart = pageStart;
+      sub.state = state;
+      sub.tailOffset = complete;
+      if (rows.length > 0) watch.onRows(nested(rows));
+      reportCount();
+      return;
+    }
+
+    const size = deps.statSync(subPath).size;
+    if (size <= sub.tailOffset) return;
+    const buf = readRange(sub.fd, sub.tailOffset, size - sub.tailOffset);
+    const { lines, partial } = splitLines(buf);
+    sub.tailOffset += buf.length - partial.length;
+    const newRows = [];
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      const row = watch.decodeLine(line, sub.state);
+      if (row) newRows.push(...[row].flat().map(truncateRow));
+    }
+    if (newRows.length > 0) {
+      sub.currentRows.push(...newRows);
+      watch.onRows(nested(newRows));
+      reportCount();
+    }
+  } catch {
+    // Missing or unreadable subagent file: the parent stays a plain tool row.
+  }
+}
+
 // ── Open / Close ───────────────────────────────────────────────────────────
 function openChat(sessionId, viewerId, opts) {
   const {
@@ -328,6 +461,7 @@ function openChat(sessionId, viewerId, opts) {
     staleNotified: false,
     isPinnedElsewhere,
     notStale: new Set(), // folder files ruled out as this Session's successor
+    subagents: new Map(),
     tailOffset: 0, // end of the last complete line read
   };
   watches.set(sessionId, watch);
@@ -347,22 +481,22 @@ function openChat(sessionId, viewerId, opts) {
   // Poll for new data
   const poll = () => {
     try {
+      // 1. Discover subagents
+      discoverSubagents(watch);
+
+      // 2. Poll parent
       const newStat = deps.statSync(watch.path);
       const newSize = newStat.size;
 
       if (newSize < watch.tailOffset) {
-        // File truncated — reset
         watch.tailOffset = 0;
         watch.state = {};
         watch.currentRows = [];
         watch.pageStart = 0;
         watch.staleNotified = false;
         onRows([{ reset: true }]);
-        return;
-      }
-
-      if (newSize > watch.tailOffset) {
-        // Read incremental data
+        // maybe close subagents too? Not needed, handled.
+      } else if (newSize > watch.tailOffset) {
         const length = newSize - watch.tailOffset;
         const buf = readRange(watch.fd, watch.tailOffset, length);
         watch.fileSize = newSize;
@@ -382,16 +516,21 @@ function openChat(sessionId, viewerId, opts) {
         }
 
         if (newRows.length > 0) {
+          augmentToolRows(newRows, watch.subagents);
           watch.currentRows.push(...newRows);
           onRows(newRows);
         }
       }
 
-      // Check for stale transcript
+      // 3. Check for stale transcript
       if (!watch.staleNotified && checkStaleTranscript(watch)) {
         watch.staleNotified = true;
         onRows([{ notice: true, kind: 'transcript-changed' }]);
       }
+
+      // 4. Poll subagents: only while running or expanded, so a Session
+      // with many finished subagents stays cheap.
+      for (const sub of watch.subagents.values()) pollSubagent(watch, sub);
     } catch {
       // Missing file or read error
     }
@@ -414,6 +553,9 @@ function loadOlder(sessionId) {
   watch.pageStart = pageStart;
 
   if (rows.length > 0) {
+    // Subagents are discovered from the folder, not the page: an Agent call
+    // paged in now may already have one.
+    augmentToolRows(rows, watch.subagents);
     watch.currentRows.unshift(...rows);
   }
 
@@ -432,6 +574,7 @@ function closeChat(sessionId, viewerId) {
   watch.viewers.delete(viewerId);
   if (watch.viewers.size === 0) {
     if (watch.interval) deps.clearInterval(watch.interval);
+    for (const sub of watch.subagents.values()) closeSubagent(sub);
     if (watch.fd !== null) {
       try {
         deps.closeSync(watch.fd);
@@ -444,6 +587,7 @@ function closeChat(sessionId, viewerId) {
 function closeAllChats() {
   for (const watch of watches.values()) {
     if (watch.interval) deps.clearInterval(watch.interval);
+    for (const sub of watch.subagents.values()) closeSubagent(sub);
     if (watch.fd !== null) {
       try {
         deps.closeSync(watch.fd);
@@ -453,6 +597,42 @@ function closeAllChats() {
   watches.clear();
 }
 
+// Subagents are addressed by their parent's tool_use id — what the renderer
+// holds.
+function findSubagent(watch, toolUseId) {
+  for (const sub of watch.subagents.values()) {
+    if (sub.toolUseId === toolUseId) return sub;
+  }
+  return null;
+}
+
+function chatExpandSubagent(sessionId, toolUseId, expanded) {
+  const watch = watches.get(sessionId);
+  const sub = watch && findSubagent(watch, toolUseId);
+  if (sub) sub.expanded = !!expanded;
+}
+
+function chatLoadOlderSubagent(sessionId, toolUseId) {
+  const watch = watches.get(sessionId);
+  if (!watch) return { rows: [], atStart: true };
+  const sub = findSubagent(watch, toolUseId);
+  if (!sub || sub.fd === null) return { rows: [], atStart: true };
+
+  const { rows, pageStart, atStart } = loadOlderPage(
+    sub.fd,
+    sub.pageStart,
+    watch.decodeLine
+  );
+  sub.pageStart = pageStart;
+
+  if (rows.length > 0) {
+    sub.currentRows.unshift(...rows);
+  }
+
+  const mappedRows = rows.map((r) => ({ ...r, parentId: sub.toolUseId }));
+  return { rows: mappedRows, atStart };
+}
+
 module.exports = {
   __setDeps,
   openChat,
@@ -460,6 +640,8 @@ module.exports = {
   closeAllChats,
   loadOlder,
   chatFetchFull,
+  chatExpandSubagent,
+  chatLoadOlderSubagent,
   // Exposed for testing
   MAX_PAGE_ROWS,
   MAX_PAGE_BYTES,

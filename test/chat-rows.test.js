@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { foldToolRuns } from '../src/lib/chatRows.js';
+import { foldToolRuns, subagentSummary } from '../src/lib/chatRows.js';
 
 describe('foldToolRuns', () => {
   it('groups consecutive tool rows', () => {
@@ -54,5 +54,44 @@ describe('foldToolRuns', () => {
   it('handles empty tools gracefully', () => {
     const rows = [{ id: '1', role: 'tool' }];
     expect(foldToolRuns(rows)[0].summary).toBe('Tool interactions');
+  });
+});
+
+describe('subagentSummary', () => {
+  const call = (extra) => ({
+    role: 'tool',
+    tool_use: { id: 't1', name: 'Agent', input: { description: 'From input' } },
+    subagent: { agentId: 'a', type: 'Explore', description: 'Find routes' },
+    ...extra,
+  });
+
+  it('is running until the parent call has a result', () => {
+    expect(subagentSummary(call())).toMatchObject({
+      status: 'running',
+      type: 'Explore',
+      description: 'Find routes',
+      count: null,
+    });
+  });
+
+  it('is done or failed from the result, and counts tool calls', () => {
+    expect(
+      subagentSummary(call({ result: { is_error: false }, subagentCount: 12 }))
+    ).toMatchObject({
+      status: 'done',
+      count: '12 tool calls',
+    });
+    expect(
+      subagentSummary(call({ result: { is_error: true }, subagentCount: 1 }))
+    ).toMatchObject({
+      status: 'failed',
+      count: '1 tool call',
+    });
+  });
+
+  it("falls back to the call's own input for the description", () => {
+    expect(subagentSummary(call({ subagent: { agentId: 'a' } })).description).toBe(
+      'From input'
+    );
   });
 });
