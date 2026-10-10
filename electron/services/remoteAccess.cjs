@@ -71,7 +71,17 @@ const ALLOWED_OPS = new Set([
   'projects.list',
   'sessions.list',
   'sessions.markRead',
+  'terminal.attach',
+  'terminal.detach',
+  'terminal.write',
 ]);
+
+// Terminal output batches per (device, Session) so a chatty TUI doesn't send
+// thousands of tiny frames: flush every 20 ms, or at 16 KB, whichever first.
+const TERMINAL_FLUSH_MS = 20;
+const TERMINAL_BATCH_BYTES = 16 * 1024;
+// A single write frame caps at 64 KB; bigger input is rejected, not chunked.
+const TERMINAL_WRITE_MAX_BYTES = 64 * 1024;
 
 // The Cloudflare tunnel token, Keychain-encrypted via safeStorage. Ciphertext
 // only in the store — never plaintext, never a setting, never logged.
@@ -147,7 +157,14 @@ const deps = {
       markRead: () => {},
       get: () => null,
       projects: () => [],
+      subscribeOutput: () => () => {},
+      write: () => {},
     };
+  },
+  // Batching timers, injected so tests flush deterministically.
+  get timers() {
+    if ('timers' in overrides) return overrides.timers;
+    return { setTimeout, clearTimeout };
   },
 };
 
@@ -829,6 +846,7 @@ function trackChannel(id, entry) {
     if (!set) return;
     set.delete(entry);
     if (set.size === 0) deviceSockets.delete(id);
+    detachTerminalsForWs(entry.ws);
     publishDevices();
   });
   publishDevices();
@@ -998,6 +1016,116 @@ async function dispatchSessionOp(op, params) {
     return { ok: true };
   }
   throw new Error(`Unknown operation: ${op}`);
+}
+
+// ─── Live terminal for the phone ─────────────────────────────────────────
+// Each (device, Session) pair holds one engine subscription plus its batch
+// buffer. Replay goes out immediately (ordering with later chunks depends on
+// it); live chunks batch on the injected timer so tests flush deterministically.
+const terminalSubs = new Map(); // `${deviceId}\n${sessionId}` -> sub
+
+function terminalKey(deviceId, sessionId) {
+  return `${deviceId}\n${sessionId}`;
+}
+
+function terminalAttach(deviceId, sessionId, send, ws) {
+  if (!deps.sessions.get(sessionId)) throw new Error('Unknown session.');
+  terminalDetach(deviceId, sessionId);
+  const sub = {
+    buffer: '',
+    timer: null,
+    send,
+    ws,
+    deviceId,
+    sessionId,
+    unsubscribe: null,
+  };
+  const flush = () => {
+    if (sub.timer != null) {
+      try {
+        deps.timers.clearTimeout(sub.timer);
+      } catch {}
+      sub.timer = null;
+    }
+    if (!sub.buffer) return;
+    const data = sub.buffer;
+    sub.buffer = '';
+    send({ kind: 'event', name: 'terminal.data', payload: { sessionId, data } });
+  };
+  const schedule = () => {
+    if (sub.timer != null) return;
+    try {
+      sub.timer = deps.timers.setTimeout(flush, TERMINAL_FLUSH_MS);
+    } catch {}
+  };
+  sub.unsubscribe = deps.sessions.subscribeOutput(sessionId, {
+    onReplay: ({ data, exited }) => {
+      send({
+        kind: 'event',
+        name: 'terminal.replay',
+        payload: { sessionId, data, exited },
+      });
+    },
+    onData: (chunk) => {
+      sub.buffer += chunk;
+      if (Buffer.byteLength(sub.buffer, 'utf8') >= TERMINAL_BATCH_BYTES) flush();
+      else schedule();
+    },
+    onExit: (code) => {
+      flush();
+      send({ kind: 'event', name: 'terminal.exit', payload: { sessionId, code } });
+    },
+  });
+  terminalSubs.set(terminalKey(deviceId, sessionId), sub);
+  return { ok: true };
+}
+
+// Detaching only drops the subscription — the Session keeps running.
+function terminalDetach(deviceId, sessionId) {
+  if (!deps.sessions.get(sessionId)) throw new Error('Unknown session.');
+  const key = terminalKey(deviceId, sessionId);
+  const sub = terminalSubs.get(key);
+  if (!sub) return { ok: true };
+  terminalSubs.delete(key);
+  if (sub.timer != null) {
+    try {
+      deps.timers.clearTimeout(sub.timer);
+    } catch {}
+  }
+  try {
+    sub.unsubscribe();
+  } catch {}
+  return { ok: true };
+}
+
+function terminalWrite(sessionId, data) {
+  if (typeof data !== 'string') throw new Error('Terminal input must be text.');
+  if (Buffer.byteLength(data, 'utf8') > TERMINAL_WRITE_MAX_BYTES) {
+    throw new Error('Terminal input is too large (max 64 KB).');
+  }
+  const session = deps.sessions.get(sessionId);
+  if (!session) throw new Error('Unknown session.');
+  // Exited Sessions swallow input silently — never an error, never a write.
+  if (session.exited) return { ok: true };
+  deps.sessions.write(sessionId, data);
+  return { ok: true };
+}
+
+// Tear down every terminal subscription riding one socket. Detaching never
+// stops the Session; the engine subscription just goes away with the socket.
+function detachTerminalsForWs(ws) {
+  for (const [key, sub] of [...terminalSubs.entries()]) {
+    if (sub.ws !== ws) continue;
+    terminalSubs.delete(key);
+    if (sub.timer != null) {
+      try {
+        deps.timers.clearTimeout(sub.timer);
+      } catch {}
+    }
+    try {
+      sub.unsubscribe();
+    } catch {}
+  }
 }
 
 // ─── Pairing rate limiting ───────────────────────────────────────────────
@@ -1269,6 +1397,34 @@ function handleDeviceConnection(ws, req) {
         result: { pong: true, serverTime: deps.now() },
       });
     }
+    if (
+      payload.op === 'terminal.attach' ||
+      payload.op === 'terminal.detach' ||
+      payload.op === 'terminal.write'
+    ) {
+      if (!device) return drop(ws);
+      try {
+        const params = payload.params || {};
+        const targetId = params.sessionId;
+        if (typeof targetId !== 'string' || !targetId)
+          throw new Error('Unknown session.');
+        let result;
+        if (payload.op === 'terminal.attach') {
+          result = terminalAttach(device.id, targetId, sendSealed, ws);
+        } else if (payload.op === 'terminal.detach') {
+          result = terminalDetach(device.id, targetId);
+        } else {
+          result = terminalWrite(targetId, params.data);
+        }
+        return sendSealed({ kind: 'response', id: payload.id, result });
+      } catch (err) {
+        return sendSealed({
+          kind: 'response',
+          id: payload.id,
+          error: err?.message || 'Failed.',
+        });
+      }
+    }
     try {
       const result = await dispatchSessionOp(payload.op, payload.params);
       return sendSealed({ kind: 'response', id: payload.id, result });
@@ -1308,6 +1464,20 @@ function dispose() {
     }
   }
   deviceSockets.clear();
+  for (const key of [...terminalSubs.keys()]) {
+    try {
+      const sub = terminalSubs.get(key);
+      if (sub) {
+        if (sub.timer != null) {
+          try {
+            deps.timers.clearTimeout(sub.timer);
+          } catch {}
+        }
+        if (sub.unsubscribe) sub.unsubscribe();
+      }
+    } catch {}
+  }
+  terminalSubs.clear();
   listeners.clear();
   deviceListeners.clear();
   tunnel = { state: 'not-configured', reason: null };
