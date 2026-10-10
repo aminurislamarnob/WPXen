@@ -17,6 +17,7 @@ export default function RootLayout() {
       <Stack.Screen name="index" options={{ title: 'WPXen Mobile' }} />
       <Stack.Screen name="pair" options={{ title: 'Add Mac' }} />
       <Stack.Screen name="host/[id]" options={{ title: 'Mac' }} />
+      <Stack.Screen name="host/[id]/session/[sessionId]" options={{ title: 'Session' }} />
     </Stack>
   );
 }

@@ -348,6 +348,21 @@ function registerHandlers(win, storeInstance) {
       port: settings.get('remote.port'),
       hostname: settings.get('remote.hostname'),
     }),
+    // The Session engine, narrowed to what the phone may reach (read-only;
+    // the engine itself is never changed for Remote Access).
+    sessions: {
+      list: agents.listAllSessions,
+      subscribe: agents.onSessionsChanged,
+      markRead: (id, read) => agents.markRead(id, read),
+      get: (id) => agents.getSession(id),
+      projects: () => {
+        const byId = new Map(getProjectRecords().map((r) => [r.id, r]));
+        return getProjectIds()
+          .map((id) => byId.get(id))
+          .filter(Boolean)
+          .map((r) => ({ id: r.id, name: r.name, kind: r.kind }));
+      },
+    },
     // Pairing approval: bring the window up, ask Allow/Deny with the
     // confirmation code, defaulting to Deny. The service times the wait out.
     promptPairing: async ({ deviceName, platform, code }) => {
