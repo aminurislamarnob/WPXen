@@ -1,7 +1,16 @@
 import { Panel, PanelGroup } from 'react-resizable-panels';
+import { MessageSquare, TerminalSquare } from 'lucide-react';
 import ResizeHandle from '../ResizeHandle';
 import Terminal from '../Terminal';
-import { useEffect, useRef } from 'react';
+import { ChatView } from './ChatView';
+import {
+  getViewMode,
+  subscribe,
+  getReturnToChat,
+  setViewMode as setViewModeGlobal,
+  setReturnToChat,
+} from '../../lib/chatView';
+import { useEffect, useRef, useState } from 'react';
 
 export default function SplitLayout({
   rootId,
@@ -13,12 +22,38 @@ export default function SplitLayout({
   onOpenLink,
   onExited,
   onRestart,
+  onResume,
   onFocusPane,
   onBlurPane,
   onClosePane,
   onHandoff,
   sessionsById = {},
 }) {
+  const [viewMode, setViewMode] = useState(
+    tree.leaf ? getViewMode(tree.leaf) : 'terminal'
+  );
+
+  const sessionState = sessionsById[tree?.leaf]?.state;
+  const previousState = useRef(sessionState);
+
+  useEffect(() => {
+    if (!tree.leaf) return;
+    if (previousState.current === 'needs-input' && sessionState !== 'needs-input') {
+      if (getReturnToChat(tree.leaf)) {
+        setViewModeGlobal(tree.leaf, 'chat');
+        setReturnToChat(tree.leaf, false);
+      }
+    }
+    previousState.current = sessionState;
+  }, [sessionState, tree.leaf]);
+
+  useEffect(() => {
+    if (!tree.leaf) return;
+    return subscribe(() => {
+      setViewMode(getViewMode(tree.leaf));
+    });
+  }, [tree.leaf]);
+
   // A drag fires onLayout on every frame; the main process only needs the
   // ratio it settles on.
   const saveTimer = useRef(null);
@@ -34,6 +69,27 @@ export default function SplitLayout({
     // `path` is empty only for an unsplit tab: no border, no close button.
     const split = path !== '';
     const isFocused = tree.leaf === focusedId;
+    // The view toggle lives in whichever surface is showing — the terminal's
+    // toolbar or the chat header — so it never covers either one's buttons.
+    const viewToggle = sessionsById[tree.leaf]?.chat ? (
+      <button
+        title={
+          viewMode === 'chat'
+            ? 'Switch to Terminal View (⌘⇧C)'
+            : 'Switch to Chat View (⌘⇧C)'
+        }
+        aria-label={
+          viewMode === 'chat' ? 'Switch to terminal view' : 'Switch to chat view'
+        }
+        onClick={() =>
+          setViewModeGlobal(tree.leaf, viewMode === 'chat' ? 'terminal' : 'chat')
+        }
+        className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+      >
+        {viewMode === 'chat' ? <TerminalSquare size={14} /> : <MessageSquare size={14} />}
+      </button>
+    ) : null;
+
     return (
       <div
         className={`relative h-full w-full ${
@@ -43,20 +99,31 @@ export default function SplitLayout({
         }`}
         onClickCapture={() => onFocusPane?.(tree.leaf)}
       >
-        <Terminal
-          sessionId={tree.leaf}
-          rootPath={rootPath}
-          onOpenFile={onOpenFile}
-          onOpenLink={onOpenLink}
-          onExited={() => onExited(tree.leaf)}
-          onRestart={() => onRestart(tree.leaf)}
-          onClosePane={split ? () => onClosePane(tree.leaf) : undefined}
-          onFocus={() => onFocusPane?.(tree.leaf)}
-          onBlur={() => onBlurPane?.()}
-          isFocused={isFocused}
-          isAgent={sessionsById[tree.leaf]?.isAgent}
-          onHandoff={onHandoff}
-        />
+        <div className={viewMode === 'chat' ? 'hidden' : 'h-full w-full'}>
+          <Terminal
+            sessionId={tree.leaf}
+            rootPath={rootPath}
+            onOpenFile={onOpenFile}
+            onOpenLink={onOpenLink}
+            onExited={() => onExited(tree.leaf)}
+            onRestart={() => onRestart(tree.leaf)}
+            onClosePane={split ? () => onClosePane(tree.leaf) : undefined}
+            onFocus={() => onFocusPane?.(tree.leaf)}
+            onBlur={() => onBlurPane?.()}
+            isFocused={isFocused && viewMode !== 'chat'}
+            isAgent={sessionsById[tree.leaf]?.isAgent}
+            onHandoff={onHandoff}
+            actions={viewToggle}
+          />
+        </div>
+        {viewMode === 'chat' && (
+          <ChatView
+            sessionId={tree.leaf}
+            onRestart={() => onRestart?.(tree.leaf)}
+            onResume={() => onResume?.(tree.leaf)}
+            headerActions={viewToggle}
+          />
+        )}
       </div>
     );
   }
@@ -73,6 +140,7 @@ export default function SplitLayout({
       onOpenLink={onOpenLink}
       onExited={onExited}
       onRestart={onRestart}
+      onResume={onResume}
       onFocusPane={onFocusPane}
       onBlurPane={onBlurPane}
       onClosePane={onClosePane}

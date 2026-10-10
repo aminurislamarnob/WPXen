@@ -14,7 +14,14 @@ function __setDeps(newDeps) {
   deps = { ...deps, ...newDeps };
 }
 
-function locateClaude({ cwd, startedAt, home }) {
+const { claudeTranscriptPath } = require('./agentChatClaude.cjs');
+
+function locateClaude({ cwd, startedAt, home, transcriptId }) {
+  if (transcriptId) {
+    const pinned = claudeTranscriptPath({ home, cwd, uuid: transcriptId });
+    if (pinned && deps.existsSync(pinned)) return pinned;
+  }
+
   // Claude replaces each non-alphanumeric character with '-'
   const encoded = cwd.replace(/[^a-zA-Z0-9]/g, '-');
   const dir = path.join(home, '.claude', 'projects', encoded);
@@ -39,7 +46,7 @@ function locateClaude({ cwd, startedAt, home }) {
   return latest;
 }
 
-function locateCodex({ cwd, startedAt, home }) {
+function locateCodex({ cwd, startedAt, home, exclude }) {
   const sessionsDir = path.join(home, '.codex', 'sessions');
   if (!deps.existsSync(sessionsDir)) return null;
 
@@ -51,7 +58,6 @@ function locateCodex({ cwd, startedAt, home }) {
   const startY = start.getFullYear();
   const startM = start.getMonth() + 1;
   const startD = start.getDate();
-
   try {
     const years = deps
       .readdirSync(sessionsDir)
@@ -73,6 +79,8 @@ function locateCodex({ cwd, startedAt, home }) {
 
           for (const f of files) {
             const full = path.join(dDir, f);
+            // A rollout already driving another Session is not ours.
+            if (exclude && exclude.has(full)) continue;
             try {
               const stat = deps.statSync(full);
               if (stat.mtimeMs >= startedAt && stat.mtimeMs > maxMtime) {
@@ -105,35 +113,50 @@ function locateCodex({ cwd, startedAt, home }) {
   return latest;
 }
 
-function locateAntigravity({ cwd, home }) {
-  const lastPath = path.join(
+function antigravityMapPath(home) {
+  return path.join(
     home,
     '.gemini',
     'antigravity-cli',
     'cache',
     'last_conversations.json'
   );
-  if (!deps.existsSync(lastPath)) return null;
+}
 
+function antigravityTranscriptPath(home, convId) {
+  return path.join(
+    home,
+    '.gemini',
+    'antigravity-cli',
+    'brain',
+    convId,
+    '.system_generated',
+    'logs',
+    'transcript.jsonl'
+  );
+}
+
+// The conversation id currently mapped to a working folder, or null. The map
+// changes when a new conversation starts — re-read it every time.
+function antigravityConversationId(cwd, home) {
+  const lastPath = antigravityMapPath(home || deps.homedir());
   try {
-    const content = deps.readFileSync(lastPath, 'utf8');
-    const map = JSON.parse(content);
-    const convId = map[cwd];
-    if (convId) {
-      const transcript = path.join(
-        home,
-        '.gemini',
-        'antigravity-cli',
-        'brain',
-        convId,
-        '.system_generated',
-        'logs',
-        'transcript.jsonl'
-      );
-      if (deps.existsSync(transcript)) {
-        return transcript;
-      }
-    }
+    if (!deps.existsSync(lastPath)) return null;
+    const map = JSON.parse(deps.readFileSync(lastPath, 'utf8'));
+    return map[cwd] || null;
+  } catch {
+    return null;
+  }
+}
+
+function locateAntigravity({ cwd, home, exclude }) {
+  const convId = antigravityConversationId(cwd, home);
+  if (!convId) return null;
+  const transcript = antigravityTranscriptPath(home, convId);
+  // A transcript already driving another Session is not ours.
+  if (exclude && exclude.has(transcript)) return null;
+  try {
+    if (deps.existsSync(transcript)) return transcript;
   } catch {
     // skip
   }
@@ -146,13 +169,21 @@ const REGISTRY = {
   antigravity: locateAntigravity,
 };
 
-function locateTranscript(agentId, cwd, startedAt) {
+function locateTranscript(agentId, cwd, startedAt, transcriptId, exclude, home) {
   const locator = REGISTRY[agentId];
   if (!locator) return null;
-  return locator({ cwd, startedAt, home: deps.homedir() });
+  return locator({
+    cwd,
+    startedAt,
+    home: home || deps.homedir(),
+    transcriptId,
+    exclude,
+  });
 }
 
 module.exports = {
   __setDeps,
   locateTranscript,
+  antigravityConversationId,
+  antigravityTranscriptPath,
 };

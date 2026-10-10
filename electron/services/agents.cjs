@@ -46,6 +46,17 @@ const REGISTRY = [
     cmd: 'claude --dangerously-skip-permissions',
     install: 'npm install -g @anthropic-ai/claude-code',
     installer: { kind: 'brew', name: 'claude-code', cask: true },
+    sessionIdFlag: '--session-id',
+    resumeFlag: '--resume',
+    chat: 'claude',
+    ask: { kind: 'claude-digits' },
+    // Aliases Claude Code's `/model` accepts, as shown in its TUI picker.
+    // The chat view builds its model picker from this; no table hides it.
+    models: [
+      { id: 'opus', label: 'Opus' },
+      { id: 'sonnet', label: 'Sonnet' },
+      { id: 'haiku', label: 'Haiku' },
+    ],
   },
   {
     // command-code installs four aliases for one entry point: cmd, cmdc,
@@ -78,6 +89,10 @@ const REGISTRY = [
     // looks for, so it lands straight on PATH.
     installer: { kind: 'brew', name: 'antigravity-cli', cask: true },
     promptFlag: '-i',
+    chat: 'antigravity',
+    // Mapped per working folder only once a conversation exists — keep
+    // locating until one shows up, like Codex.
+    lateBind: true,
   },
   {
     id: 'mimo',
@@ -127,6 +142,10 @@ const REGISTRY = [
     cmd: 'codex --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust',
     install: 'npm install -g @openai/codex',
     installer: { kind: 'brew', name: 'codex', cask: true },
+    chat: 'codex',
+    // No session-id flag: the rollout appears after the first message, so
+    // the chat view keeps locating until one shows up.
+    lateBind: true,
   },
 ];
 
@@ -312,7 +331,7 @@ function resolveBin(cmd, env) {
 // `agents: false` drops the providers and leaves only the plain shell; used by
 // Settings → Agents, which has nothing to configure for it.
 function listAgents({ all = false, shell = true } = {}) {
-  const env = resolveShellEnv();
+  const env = deps.shellEnv();
   const providers = effectiveRegistry()
     .filter((a) => all || !config.enabled || config.enabled.includes(a.id))
     // A command override can carry arguments ('claude --resume'); only the
@@ -329,6 +348,12 @@ function listAgents({ all = false, shell = true } = {}) {
         // Install button off this and branches on `kind` for its wording.
         installer: a.installer ? { ...a.installer } : null,
         promptFlag: a.promptFlag || null,
+        sessionIdFlag: a.sessionIdFlag || null,
+        resumeFlag: a.resumeFlag || null,
+        models: a.models ? a.models.map((m) => ({ ...m })) : null,
+        chat: a.chat || null,
+        // How this Agent's TUI takes a question-card answer; no key map, no cards.
+        ask: a.ask?.kind || null,
         isCustom: !!a.isCustom,
         isShell: false,
         enabled: !config.enabled || config.enabled.includes(a.id),
@@ -389,6 +414,9 @@ const deps = {
 
 function __setDeps(next) {
   Object.assign(deps, next);
+  if (next.setInterval || next.statSync) {
+    require('./agentChat.cjs').__setDeps(next);
+  }
 }
 
 // Builds the brew argv for an Agent's package. Pure, so the arg shape is
@@ -808,6 +836,10 @@ function sessionRow(s) {
     layout: !s.paneOf ? layouts.get(s.sessionId) || { leaf: s.sessionId } : null,
     handoffFrom: s.handoffFrom || null,
     handoffFile: s.handoffFile || null,
+    resumeFrom: s.resumeFrom || null,
+    transcriptId: s.transcriptId || null,
+    chat: s.chat || null,
+    ask: s.ask || null,
     // The issue or PR Start → launched this Session for, else null.
     issue: s.issue || null,
     startedAt: s.startedAt,
@@ -848,11 +880,17 @@ function launch({
   paneOf = null,
   handoffFrom = null,
   handoffFile = null,
+  // Resume a pinned transcript in a new Session: the Agent keeps appending
+  // to the same transcript file, so no fresh --session-id is typed.
+  resume = null,
+  resumeFrom = null,
 }) {
   // `all` so launching by id still works for an agent hidden from the
   // launcher (e.g. a saved session being restored).
   const agent = listAgents({ all: true }).find((a) => a.id === agentId);
   if (!agent) return { error: `Unknown agent: ${agentId}` };
+  if (resume && !agent.resumeFlag)
+    return { error: `${agent.name} does not support resuming a session` };
   // The shell is always present, so this only ever rejects a missing provider.
   if (!agent.detected) return { error: `${agent.name} is not installed` };
 
@@ -868,9 +906,17 @@ function launch({
   const line = String(prompt || '')
     .replace(/\s*[\r\n]+\s*/g, ' ')
     .trim();
-  const typed = line
-    ? `${resolved.command} ${agent.promptFlag ? agent.promptFlag + ' ' : ''}${shellQuote(line)}`
-    : resolved.command;
+
+  const transcriptId = resume || (agent.sessionIdFlag ? randomUUID() : undefined);
+  let typed = resolved.command;
+  if (resume) {
+    typed += ` ${agent.resumeFlag} ${resume}`;
+  } else if (transcriptId) {
+    typed += ` ${agent.sessionIdFlag} ${transcriptId}`;
+  }
+  if (line) {
+    typed += ` ${agent.promptFlag ? agent.promptFlag + ' ' : ''}${shellQuote(line)}`;
+  }
 
   // The Site's PHP first on PATH: a zsh wrapper for the whole shell (see
   // shellIntegration.cjs), or for other shells, on the agent's command line.
@@ -896,8 +942,36 @@ function launch({
       paneOf,
       handoffFrom,
       handoffFile,
+      resumeFrom,
+      transcriptId,
+      chat: agent.chat || null,
+      ask: agent.ask || null,
     },
     failLabel: agent.name,
+  });
+}
+
+// Resume a pinned transcript in a new Session beside the old one. The new
+// Session carries the same transcriptId, so its chat view continues the same
+// conversation. Gating on the old Session having exited is the caller's job —
+// two live Sessions must never drive one conversation — so this only checks
+// the transcript and the Agent's resumeFlag.
+function resumeChatSession(sessionId, { site, target = null, globalArgs = '' } = {}) {
+  const old = sessions.get(sessionId);
+  if (!old) return { error: 'Session not found' };
+  if (!old.transcriptId) return { error: 'No pinned transcript to resume' };
+  const agent = listAgents({ all: true }).find((a) => a.id === old.agentId);
+  if (!agent) return { error: `Unknown agent: ${old.agentId}` };
+  if (!agent.resumeFlag)
+    return { error: `${agent.name} does not support resuming a session` };
+  return launch({
+    site,
+    agentId: old.agentId,
+    target,
+    globalArgs,
+    cwd: old.cwd,
+    resume: old.transcriptId,
+    resumeFrom: old.sessionId,
   });
 }
 
@@ -1349,6 +1423,211 @@ function stopAll() {
   for (const sessionId of [...sessions.keys()]) stop(sessionId);
 }
 
+const agentChat = require('./agentChat.cjs');
+const {
+  sendChat,
+  sendChatAnswer,
+  chatStop,
+  chatCommand,
+} = require('./agentChatSend.cjs');
+const { decodeClaudeLine } = require('./agentChatClaude.cjs');
+const { decodeCodexLine } = require('./agentChatCodex.cjs');
+const { decodeAntigravityLine } = require('./agentChatAntigravity.cjs');
+const transcripts = require('./transcripts.cjs');
+
+const chatListeners = new Set();
+function onChatRows(cb) {
+  chatListeners.add(cb);
+  return () => chatListeners.delete(cb);
+}
+
+function openChat(sessionId, viewerId) {
+  const session = getSession(sessionId);
+  if (!session) return;
+
+  const agent = effectiveRegistry().find((a) => a.id === session.agentId);
+  if (!agent || !agent.chat) return;
+
+  let decodeLine = null;
+  if (agent.chat === 'claude') decodeLine = decodeClaudeLine;
+  else if (agent.chat === 'codex') decodeLine = decodeCodexLine;
+  else if (agent.chat === 'antigravity') decodeLine = decodeAntigravityLine;
+  if (!decodeLine) return;
+
+  const transcriptPath = locateChatTranscript(sessionId, session);
+  if (!transcriptPath) {
+    // Agents without a session-id flag write their transcript after the
+    // first message — keep locating until one shows up.
+    if (agent.lateBind) pendChatLocate(sessionId, viewerId);
+    return;
+  }
+  claimedTranscripts.set(transcriptPath, sessionId);
+
+  // Antigravity re-maps the folder when a new conversation starts — the
+  // watcher reports it like a changed transcript.
+  const home = deps.homedir();
+  const relocate =
+    agent.chat === 'antigravity'
+      ? () => {
+          const convId = transcripts.antigravityConversationId(session.cwd, home);
+          return convId ? transcripts.antigravityTranscriptPath(home, convId) : null;
+        }
+      : null;
+
+  agentChat.openChat(sessionId, viewerId, {
+    transcriptPath,
+    decodeLine,
+    relocate,
+    transcriptId: session.transcriptId,
+    startedAt: session.startedAt,
+    // Another live Session's own transcript is never this one's successor.
+    isPinnedElsewhere: (uuid) =>
+      [...sessions.values()].some(
+        (s) => s.sessionId !== sessionId && !s.exited && s.transcriptId === uuid
+      ),
+    onRows: (rows, state) => {
+      let header = undefined;
+      const filteredRows = [];
+      for (const row of rows) {
+        if (row.isHeader) {
+          header = row;
+        } else {
+          filteredRows.push(row);
+        }
+      }
+      // Only the facts (tasks, to-dos, usage) — never the decoder's whole
+      // state, which holds every message of the loaded pages.
+      for (const cb of chatListeners)
+        cb({ sessionId, rows: filteredRows, header, state: state?.facts });
+    },
+  });
+}
+
+// One rollout drives at most one Session: the first Session to claim it.
+// Claims by other live Sessions are excluded from locating; a claim dies
+// with its Session, and a Session always reclaims its own path.
+const claimedTranscripts = new Map(); // transcriptPath -> sessionId
+const pendingChatLocates = new Map(); // sessionId -> { viewers: Set, timer }
+const CHAT_LOCATE_RETRY_MS = 2000;
+
+function locateChatTranscript(sessionId, session) {
+  const exclude = new Set();
+  for (const [transcriptPath, owner] of claimedTranscripts) {
+    if (owner !== sessionId && sessions.has(owner)) exclude.add(transcriptPath);
+  }
+  // Home comes from this module's deps: the transcripts module's own seam
+  // is a different instance once bundled, so its homedir is not ours.
+  const found = transcripts.locateTranscript(
+    session.agentId,
+    session.cwd,
+    session.startedAt,
+    session.transcriptId,
+    exclude,
+    deps.homedir()
+  );
+  if (!found) return null;
+  const owner = claimedTranscripts.get(found);
+  if (owner && owner !== sessionId && sessions.has(owner)) return null;
+  return found;
+}
+
+function pendChatLocate(sessionId, viewerId) {
+  let pending = pendingChatLocates.get(sessionId);
+  if (!pending) {
+    pending = { viewers: new Set(), timer: null };
+    pendingChatLocates.set(sessionId, pending);
+    pending.timer = setInterval(() => {
+      const session = getSession(sessionId);
+      if (!session) {
+        clearInterval(pending.timer);
+        pendingChatLocates.delete(sessionId);
+        return;
+      }
+      const transcriptPath = locateChatTranscript(sessionId, session);
+      if (!transcriptPath) return;
+      clearInterval(pending.timer);
+      pendingChatLocates.delete(sessionId);
+      for (const viewer of pending.viewers) openChat(sessionId, viewer);
+    }, CHAT_LOCATE_RETRY_MS);
+  }
+  pending.viewers.add(viewerId);
+}
+
+function chatLoadOlder(sessionId) {
+  return agentChat.loadOlder(sessionId);
+}
+
+function chatFetchFull(sessionId, toolUseId) {
+  return agentChat.chatFetchFull(sessionId, toolUseId);
+}
+
+function chatExpandSubagent(sessionId, toolUseId, expanded) {
+  return agentChat.chatExpandSubagent(sessionId, toolUseId, expanded);
+}
+
+function chatLoadOlderSubagent(sessionId, parentId) {
+  return agentChat.chatLoadOlderSubagent(sessionId, parentId);
+}
+
+function closeChat(sessionId, viewerId) {
+  const pending = pendingChatLocates.get(sessionId);
+  if (pending) {
+    pending.viewers.delete(viewerId);
+    if (pending.viewers.size === 0) {
+      clearInterval(pending.timer);
+      pendingChatLocates.delete(sessionId);
+    }
+  }
+  agentChat.closeChat(sessionId, viewerId);
+}
+
+function closeAllChats() {
+  for (const [, pending] of pendingChatLocates) clearInterval(pending.timer);
+  pendingChatLocates.clear();
+  agentChat.closeAllChats();
+}
+
+function chatAnswer(sessionId, groups) {
+  const session = getSession(sessionId);
+  if (!session) return Promise.reject(new Error('No session'));
+  return sendChatAnswer(session, groups);
+}
+
+function chatSend(sessionId, text, images = []) {
+  const session = getSession(sessionId);
+  if (!session) return Promise.reject(new Error('No session'));
+  return sendChat(session, text, images);
+}
+
+// Interrupt a working Agent with a single Esc. Cancels any pending delayed
+// Enter first, so nothing stale submits after the interrupt.
+function chatInterrupt(sessionId) {
+  const session = getSession(sessionId);
+  if (!session) return Promise.reject(new Error('No session'));
+  return chatStop(session);
+}
+
+// Switch the Agent's model via `/model <id>`. Queued on the send serialiser
+// behind any in-flight send, so it never lands on a dialog or interleaves.
+function chatModel(sessionId, modelId) {
+  const session = getSession(sessionId);
+  if (!session) return Promise.reject(new Error('No session'));
+  if (!modelId || typeof modelId !== 'string')
+    return Promise.reject(new Error('No model'));
+  return chatCommand(session, `/model ${modelId}`);
+}
+
+function chatImage(sessionId, ref) {
+  return agentChat.chatImage(sessionId, ref);
+}
+
+function chatSnapshot(sessionId, lines = 15) {
+  const session = getSession(sessionId);
+  if (!session) return '';
+  const { snapshotBuffer } = require('./ansi.cjs');
+  return snapshotBuffer(session.buffer, lines);
+}
+
 module.exports = {
   SHELL_ID,
   setConfig,
@@ -1367,10 +1646,24 @@ module.exports = {
   listAllSessions,
   listFloatingSessions,
   onSessionsChanged,
+  onChatRows,
+  openChat,
+  closeChat,
+  closeAllChats,
+  chatSend,
+  chatAnswer,
+  chatInterrupt,
+  chatModel,
+  chatLoadOlder,
+  chatFetchFull,
+  chatExpandSubagent,
+  chatLoadOlderSubagent,
+  chatImage,
   onFloatingSessionsChanged,
   resolveLaunch,
   launch,
   launchFloating,
+  resumeChatSession,
   attach,
   write,
   setView,
@@ -1386,6 +1679,7 @@ module.exports = {
   respawnPane,
   getSession,
   getBuffer,
+  chatSnapshot,
   hasActiveSessions,
   activeSiteIds,
   stopAll,

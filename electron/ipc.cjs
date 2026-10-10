@@ -255,6 +255,15 @@ function registerHandlers(win, storeInstance) {
   // output) back to the renderer through this window.
   browser.setWindow(win);
 
+  win.webContents.on('did-start-navigation', (e, url, isInPlace, isMainFrame) => {
+    if (isMainFrame && !isInPlace) {
+      agents.closeAllChats();
+    }
+  });
+  win.on('closed', () => {
+    agents.closeAllChats();
+  });
+
   // Bind the settings schema to the store. Side effects that used to live in
   // the save-settings ladder hang off `effects` — one place per key, run only
   // when that key actually changed.
@@ -377,6 +386,62 @@ function registerHandlers(win, storeInstance) {
   // The live Sessions for a Site — the renderer restores its terminal tabs.
   ipcMain.handle('agent-sessions', (_e, siteId) => agents.listSessions(siteId));
 
+  ipcMain.on('agent-chat-open', (_e, sessionId, viewerId) => {
+    agents.openChat(sessionId, viewerId);
+  });
+  ipcMain.on('agent-chat-close', (_e, sessionId, viewerId) => {
+    agents.closeChat(sessionId, viewerId);
+  });
+  ipcMain.handle('agent-chat-snapshot', (_e, sessionId, lines) => {
+    return agents.chatSnapshot(sessionId, lines);
+  });
+
+  ipcMain.handle('agent-chat-answer', (_e, sessionId, groups) => {
+    return agents.chatAnswer(sessionId, groups);
+  });
+  ipcMain.handle('agent-chat-send', (_e, sessionId, text, images) => {
+    return agents.chatSend(sessionId, text, images);
+  });
+  ipcMain.handle('agent-chat-stop', (_e, sessionId) => {
+    return agents.chatInterrupt(sessionId);
+  });
+  ipcMain.handle('agent-chat-model', (_e, sessionId, modelId) => {
+    return agents.chatModel(sessionId, modelId);
+  });
+  ipcMain.handle('agent-chat-load-older', (_e, sessionId) => {
+    return agents.chatLoadOlder(sessionId);
+  });
+  ipcMain.handle('agent-chat-fetch-full', (_e, sessionId, toolUseId) => {
+    return agents.chatFetchFull(sessionId, toolUseId);
+  });
+  ipcMain.handle('agent-chat-expand-subagent', (_e, sessionId, toolUseId, expanded) => {
+    return agents.chatExpandSubagent(sessionId, toolUseId, expanded);
+  });
+  ipcMain.handle('agent-chat-load-older-subagent', (_e, sessionId, parentId) => {
+    return agents.chatLoadOlderSubagent(sessionId, parentId);
+  });
+  // The composer's @ and / completions, for the Session's own Site — looked
+  // up here, so the renderer never names a path.
+  ipcMain.handle('agent-chat-files', async (_e, siteId) => {
+    const site = findProject(siteId);
+    return site?.path ? files.listFiles(site.path) : [];
+  });
+  ipcMain.handle('agent-chat-commands', (_e, siteId) => {
+    const site = findProject(siteId);
+    return require('./services/chatCommands.cjs').listCommands(site?.path);
+  });
+  // A pasted or dropped image, saved to a temp file the TUI can attach.
+  ipcMain.handle('agent-chat-save-image', async (_e, bytes) => {
+    const os = require('os');
+    const fsp = require('fs/promises');
+    const p = path.join(os.tmpdir(), `wpxen-chat-image-${crypto.randomUUID()}.png`);
+    await fsp.writeFile(p, Buffer.from(bytes));
+    return p;
+  });
+  ipcMain.handle('agent-chat-image', (_e, sessionId, ref) => {
+    return agents.chatImage(sessionId, ref);
+  });
+
   // ── Agents working set ("Projects") & session rows ─────────────────────────
   // The sidebar lists working-set Sites with every Session under them, live or
   // exited. Both lists are pushed on change so it never polls.
@@ -402,6 +467,10 @@ function registerHandlers(win, storeInstance) {
 
   agents.onSessionsChanged((list) => {
     if (win && !win.isDestroyed()) win.webContents.send('agent-sessions-update', list);
+  });
+
+  agents.onChatRows((data) => {
+    if (win && !win.isDestroyed()) win.webContents.send('agent-chat-rows', data);
   });
 
   ipcMain.handle('agent-projects-get', () => getProjectIds());
@@ -838,6 +907,15 @@ function registerHandlers(win, storeInstance) {
     return res;
   });
 
+  ipcMain.handle('agent-resume-session', (_e, sessionId) => {
+    const old = agents.listAllSessions().find((s) => s.sessionId === sessionId);
+    if (!old) return { error: 'Session not found' };
+    const site = findProject(old.siteId);
+    if (!site) return { error: 'Project not found' };
+    const globalArgs = store.get('agentPresets', {})[old.agentId]?.args || '';
+    return agents.resumeChatSession(sessionId, { site, globalArgs });
+  });
+
   ipcMain.handle('agent-split-pane', (_e, sessionId, dir) => {
     const session = agents.getSession(sessionId);
     if (!session) return { error: 'session not found' };
@@ -883,7 +961,8 @@ function registerHandlers(win, storeInstance) {
     const transcriptPath = transcripts.locateTranscript(
       session.agentId,
       session.cwd,
-      session.startedAt
+      session.startedAt,
+      session.transcriptId
     );
     const contextSource = transcriptPath ? 'transcript' : 'capture';
     const modes = transcriptPath ? ['focused', 'full'] : ['quick'];
@@ -949,7 +1028,8 @@ function registerHandlers(win, storeInstance) {
     const transcriptPath = transcripts.locateTranscript(
       session.agentId,
       session.cwd,
-      session.startedAt
+      session.startedAt,
+      session.transcriptId
     );
     const capture = agents.getBuffer(sessionId);
     if (!transcriptPath && !capture) return { error: 'No terminal output available' };

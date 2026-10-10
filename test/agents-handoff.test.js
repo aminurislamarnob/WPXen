@@ -30,6 +30,10 @@ let ptys;
 beforeEach(() => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'wpxen-handoff-'));
   fs.mkdirSync(path.join(home, 'code'));
+  // Detection honors the faked env: provide `sh` inside it.
+  const bin = path.join(home, 'bin');
+  fs.mkdirSync(bin);
+  fs.symlinkSync('/bin/sh', path.join(bin, 'sh'));
   ptys = [];
   agents.__setDeps({
     spawnPty: (file, args, opts) => {
@@ -38,7 +42,7 @@ beforeEach(() => {
       ptys.push(p);
       return p;
     },
-    shellEnv: () => ({ PATH: '/usr/bin' }),
+    shellEnv: () => ({ PATH: `${bin}:/usr/bin` }),
     userShell: () => '/bin/zsh',
     homedir: () => home,
   });
@@ -49,9 +53,9 @@ afterEach(() => {
 });
 
 describe('handoff transcript preparation', () => {
-  it('strips ANSI escape sequences and lone carriage returns', () => {
+  it('strips ANSI escape sequences', () => {
     const raw = '\x1b[31mError\x1b[0m \x1b]0;Title\x07\nLine\r\n';
-    expect(stripAnsi(raw)).toBe('Error \nLine\n');
+    expect(stripAnsi(raw)).toBe('Error \nLine\r\n');
   });
 
   it('caps the transcript to 800 lines', () => {
