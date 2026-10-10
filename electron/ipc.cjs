@@ -389,6 +389,13 @@ function registerHandlers(win, storeInstance) {
       } catch {}
     }
   });
+  remoteAccess.onDevicesChanged((devices) => {
+    for (const w of BrowserWindow.getAllWindows()) {
+      if (!w.isDestroyed() && w.webContents) {
+        w.webContents.send('remote-devices-update', devices);
+      }
+    }
+  });
   if (settings.get('remote.enabled')) {
     try {
       remoteAccess.start({ port: settings.get('remote.port') });
@@ -2908,6 +2915,30 @@ function registerHandlers(win, storeInstance) {
       return { ok: true, qr: offer.qr, expiresAt: offer.expiresAt };
     } catch (err) {
       return { ok: false, error: err?.message || 'Could not create a pairing offer.' };
+    }
+  });
+  // Paired devices: list, rename, revoke, disconnect-all. Revoke and rename
+  // validate in the service and report back for the UI to say why.
+  ipcMain.handle('remote-devices-list', () => remoteAccess.listDevices());
+  ipcMain.handle('remote-device-rename', async (_e, id, name) => {
+    try {
+      return await remoteAccess.renameDevice(id, name);
+    } catch (err) {
+      return { ok: false, error: err?.message || 'Could not rename the device.' };
+    }
+  });
+  ipcMain.handle('remote-device-revoke', async (_e, id) => {
+    try {
+      return await remoteAccess.revokeDevice(id);
+    } catch (err) {
+      return { ok: false, error: err?.message || 'Could not revoke the device.' };
+    }
+  });
+  ipcMain.handle('remote-devices-disconnect', async () => {
+    try {
+      return await remoteAccess.disconnectAll();
+    } catch (err) {
+      return { ok: false, error: err?.message || 'Could not disconnect the devices.' };
     }
   });
 

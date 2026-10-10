@@ -29,3 +29,27 @@ export function useRemoteAccessStatus() {
 
   return status;
 }
+
+// Paired devices, kept current by the main-process broadcast.
+export function useRemoteAccessDevices() {
+  const [devices, setDevices] = useState([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    window.electronAPI
+      .listRemoteDevices()
+      .then((list) => {
+        if (!cancelled && Array.isArray(list)) setDevices(list);
+      })
+      .catch(() => {});
+    const off = window.electronAPI.on('remote-devices-update', (list) => {
+      if (Array.isArray(list)) setDevices(list);
+    });
+    return () => {
+      cancelled = true;
+      off();
+    };
+  }, []);
+
+  return devices;
+}

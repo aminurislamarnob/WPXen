@@ -13,6 +13,8 @@ const {
   openFrame,
   randomNonce,
   PAIR_ERRORS,
+  CLOSE_REVOKED,
+  CLOSE_DISCONNECT_ALL,
   newKeyPair,
   keyPairFromSecret,
   publicKeyB64,
@@ -44,6 +46,9 @@ const HOST_KEY_KEY = 'wpxenRemoteHostKey';
 
 // Paired devices: [{ id, name, platform, publicKey, pairedAt, lastSeen }].
 const DEVICE_KEY = 'wpxenRemoteDevices';
+// Last seen writes at most once a minute per device: a store write per frame
+// would churn the disk for no visible gain.
+const LAST_SEEN_MIN_MS = 60_000;
 
 // A pairing offer lives 5 minutes and works once: on use, on Deny and on
 // expiry it dies. Hitting the pairing rate limit kills it too.
@@ -731,28 +736,140 @@ async function pairingOffer({ hostname }) {
 
 // ─── Device registry ─────────────────────────────────────────────────────
 
-function listDevices() {
+// Live sockets by device id. The source of the connected-now indicator;
+// revoking or disconnecting closes these first.
+const deviceSockets = new Map(); // deviceId -> Set(ws)
+const deviceListeners = new Set();
+
+function readDeviceRecords() {
   const store = deps.store;
   if (!store) return [];
   const all = store.get(DEVICE_KEY, []);
   return Array.isArray(all) ? all : [];
 }
 
+// The Settings → Mobile rows: the record plus whether a socket is live now.
+function listDevices() {
+  return readDeviceRecords()
+    .filter((d) => d && typeof d.id === 'string')
+    .map((d) => ({
+      id: d.id,
+      name: d.name,
+      platform: d.platform,
+      pairedAt: d.pairedAt,
+      lastSeen: d.lastSeen,
+      connected: (deviceSockets.get(d.id)?.size || 0) > 0,
+    }));
+}
+
+function publishDevices() {
+  const snapshot = listDevices();
+  for (const cb of [...deviceListeners]) {
+    try {
+      cb(snapshot);
+    } catch {}
+  }
+}
+
+function onDevicesChanged(cb) {
+  deviceListeners.add(cb);
+  return () => deviceListeners.delete(cb);
+}
+
 function findDevice(id) {
-  return listDevices().find((d) => d && d.id === id) || null;
+  return readDeviceRecords().find((d) => d && d.id === id) || null;
 }
 
 function saveDevice(record) {
-  deps.store.set(DEVICE_KEY, [...listDevices(), record]);
+  deps.store.set(DEVICE_KEY, [...readDeviceRecords(), record]);
+  publishDevices();
 }
 
 function touchDevice(id) {
   const store = deps.store;
   if (!store) return;
+  const t = deps.now();
+  let wrote = false;
   store.set(
     DEVICE_KEY,
-    listDevices().map((d) => (d && d.id === id ? { ...d, lastSeen: deps.now() } : d))
+    readDeviceRecords().map((d) => {
+      if (!d || d.id !== id) return d;
+      if (d.lastSeen && t - d.lastSeen < LAST_SEEN_MIN_MS) return d;
+      wrote = true;
+      return { ...d, lastSeen: t };
+    })
   );
+  if (wrote) publishDevices();
+}
+
+function trackSocket(id, ws) {
+  if (!deviceSockets.has(id)) deviceSockets.set(id, new Set());
+  deviceSockets.get(id).add(ws);
+  ws.on('close', () => {
+    const set = deviceSockets.get(id);
+    if (!set) return;
+    set.delete(ws);
+    if (set.size === 0) deviceSockets.delete(id);
+    publishDevices();
+  });
+  publishDevices();
+}
+
+// Rename is a local label only; the phone keeps its own name.
+async function renameDevice(id, name) {
+  const clean = String(name || '').trim();
+  if (!clean) throw new Error('Enter a device name.');
+  if (clean.length > 100) throw new Error('Keep the device name under 100 characters.');
+  const store = deps.store;
+  if (!store) throw new Error('Remote Access needs a store before it can start');
+  const records = readDeviceRecords();
+  if (!records.some((d) => d && d.id === id)) throw new Error('Unknown device.');
+  store.set(
+    DEVICE_KEY,
+    records.map((d) => (d && d.id === id ? { ...d, name: clean } : d))
+  );
+  publishDevices();
+  return { ok: true };
+}
+
+// Revoke deletes the record (push fields die with it — they are empty until
+// the push ticket) and closes every live socket at once with the revoked
+// code, so the phone can say it was removed. The next connect fails exactly
+// like an unknown device: closed, no reply.
+async function revokeDevice(id) {
+  const store = deps.store;
+  if (!store) throw new Error('Remote Access needs a store before it can start');
+  if (!readDeviceRecords().some((d) => d && d.id === id))
+    throw new Error('Unknown device.');
+  const sockets = deviceSockets.get(id);
+  if (sockets) {
+    for (const ws of [...sockets]) {
+      try {
+        ws.close(CLOSE_REVOKED, 'revoked');
+      } catch {}
+    }
+    deviceSockets.delete(id);
+  }
+  store.set(
+    DEVICE_KEY,
+    readDeviceRecords().filter((d) => !d || d.id !== id)
+  );
+  publishDevices();
+  return { ok: true };
+}
+
+// Drop every live socket. Records are kept, so the devices reconnect.
+async function disconnectAll() {
+  for (const [id, sockets] of [...deviceSockets.entries()]) {
+    for (const ws of [...sockets]) {
+      try {
+        ws.close(CLOSE_DISCONNECT_ALL, 'disconnecting');
+      } catch {}
+    }
+    deviceSockets.delete(id);
+  }
+  publishDevices();
+  return { ok: true };
 }
 
 // ─── Pairing rate limiting ───────────────────────────────────────────────
@@ -968,6 +1085,7 @@ function handleDeviceConnection(ws, req) {
     devicePublicKey = deviceKey;
     inCounter = 0;
     outCounter = 0;
+    trackSocket(deviceId, ws);
     welcome();
   }
 
@@ -984,6 +1102,7 @@ function handleDeviceConnection(ws, req) {
       } catch {
         return drop(ws);
       }
+      trackSocket(device.id, ws);
       welcome();
     }
     if (typeof msg.counter !== 'number' || msg.counter !== inCounter + 1) return drop(ws);
@@ -999,6 +1118,7 @@ function handleDeviceConnection(ws, req) {
       return drop(ws);
     }
     inCounter = msg.counter;
+    touchDevice(device.id);
     if (!payload || payload.kind !== 'request' || typeof payload.id !== 'string')
       return drop(ws);
     if (!ALLOWED_OPS.has(payload.op)) {
@@ -1027,7 +1147,16 @@ function handleDeviceConnection(ws, req) {
 function dispose() {
   stop();
   stopPoller();
+  for (const sockets of deviceSockets.values()) {
+    for (const ws of [...sockets]) {
+      try {
+        ws.close();
+      } catch {}
+    }
+  }
+  deviceSockets.clear();
   listeners.clear();
+  deviceListeners.clear();
   tunnel = { state: 'not-configured', reason: null };
   verification = { state: 'idle', reason: null, checkedAt: null };
   lastTunnelKey = null;
@@ -1062,6 +1191,11 @@ module.exports = {
   verifyHostname,
   maybeVerify,
   pairingOffer,
+  listDevices,
+  onDevicesChanged,
+  renameDevice,
+  revokeDevice,
+  disconnectAll,
   dispose,
   __setDeps,
 };
