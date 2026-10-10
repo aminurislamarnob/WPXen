@@ -49,6 +49,7 @@ const REGISTRY = [
     sessionIdFlag: '--session-id',
     resumeFlag: '--resume',
     chat: 'claude',
+    ask: { kind: 'claude-digits' },
   },
   {
     // command-code installs four aliases for one entry point: cmd, cmdc,
@@ -1369,7 +1370,7 @@ function stopAll() {
 }
 
 const agentChat = require('./agentChat.cjs');
-const { sendChat } = require('./agentChatSend.cjs');
+const { sendChat, sendChatAnswer } = require('./agentChatSend.cjs');
 const { decodeClaudeLine } = require('./agentChatClaude.cjs');
 const transcripts = require('./transcripts.cjs');
 
@@ -1448,6 +1449,12 @@ function closeAllChats() {
   agentChat.closeAllChats();
 }
 
+function chatAnswer(sessionId, groups) {
+  const session = getSession(sessionId);
+  if (!session) return Promise.reject(new Error('No session'));
+  return sendChatAnswer(session, groups);
+}
+
 function chatSend(sessionId, text) {
   const session = getSession(sessionId);
   if (!session) return Promise.reject(new Error('No session'));
@@ -1481,6 +1488,7 @@ module.exports = {
   closeChat,
   closeAllChats,
   chatSend,
+  chatAnswer,
   chatLoadOlder,
   chatFetchFull,
   chatExpandSubagent,

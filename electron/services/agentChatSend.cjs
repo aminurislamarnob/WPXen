@@ -59,8 +59,45 @@ function sendChat(session, text) {
   return chain;
 }
 
+const NATIVE_CHAT_QUESTION_STEP_MS = 1000;
+
+function sendChatAnswer(session, groups) {
+  if (!session || !session.pty) return Promise.reject(new Error('Invalid session'));
+
+  const sessionId = session.sessionId;
+  let chain = sendChains.get(sessionId) || Promise.resolve();
+
+  for (const group of groups) {
+    chain = chain.then(() => {
+      return new Promise((resolve) => {
+        try {
+          if (group.raw !== undefined) {
+            session.pty.write(group.raw);
+          } else if (group.text !== undefined) {
+            session.pty.write(formatBody(group.text));
+          }
+        } catch {
+          // ignore
+        }
+        setTimeout(resolve, NATIVE_CHAT_QUESTION_STEP_MS);
+      });
+    });
+  }
+
+  sendChains.set(sessionId, chain);
+  chain.finally(() => {
+    if (sendChains.get(sessionId) === chain) {
+      sendChains.delete(sessionId);
+    }
+  });
+
+  return chain;
+}
+
 module.exports = {
   sendChat,
+  sendChatAnswer,
   formatBody,
   NATIVE_CHAT_SUBMIT_DELAY_MS,
+  NATIVE_CHAT_QUESTION_STEP_MS,
 };

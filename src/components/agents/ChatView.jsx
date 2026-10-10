@@ -7,6 +7,7 @@ import { useAgentSessions } from '../../lib/useAgentSessions';
 import DiffView from '../DiffView';
 
 import { ChatMarkdown } from './ChatMarkdown';
+import { QuestionCard } from './QuestionCard';
 import { SubagentRow } from './SubagentRow';
 import { ImageRef } from './ImageRef';
 import { contextMeter } from '../../lib/contextMeter';
@@ -334,6 +335,33 @@ export function ChatView({ sessionId }) {
                               ) : (
                                 <div>
                                   {(() => {
+                                    const isAsk =
+                                      item.tool_use?.name === 'AskUserQuestion';
+                                    if (isAsk) {
+                                      return (
+                                        <QuestionCard
+                                          prompt={item.tool_use.input}
+                                          result={item.result?.answers}
+                                          onSubmit={async (selections) => {
+                                            const { buildAskAnswerKeys } =
+                                              await import('../../lib/agentAsk');
+                                            const agentAskKind =
+                                              currentSession?.agentConfig?.ask?.kind ||
+                                              'claude-digits';
+                                            const groups = buildAskAnswerKeys(
+                                              item.tool_use.input,
+                                              selections,
+                                              agentAskKind
+                                            );
+                                            window.electronAPI.chatAnswer(
+                                              sessionId,
+                                              groups
+                                            );
+                                          }}
+                                        />
+                                      );
+                                    }
+
                                     const taskState = item.taskId
                                       ? chatState?.tasks?.[item.taskId]
                                       : null;

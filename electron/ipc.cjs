@@ -392,6 +392,9 @@ function registerHandlers(win, storeInstance) {
   ipcMain.on('agent-chat-close', (_e, sessionId, viewerId) => {
     agents.closeChat(sessionId, viewerId);
   });
+  ipcMain.handle('agent-chat-answer', (_e, sessionId, groups) => {
+    return agents.chatAnswer(sessionId, groups);
+  });
   ipcMain.handle('agent-chat-send', (_e, sessionId, text) => {
     return agents.chatSend(sessionId, text);
   });
