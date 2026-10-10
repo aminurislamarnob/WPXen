@@ -1,8 +1,7 @@
 import { Panel, PanelGroup } from 'react-resizable-panels';
 import ResizeHandle from '../ResizeHandle';
-import Terminal from './Terminal';
-import { debounce } from 'lodash';
-import { useMemo } from 'react';
+import Terminal from '../Terminal';
+import { useEffect, useRef } from 'react';
 
 export default function SplitLayout({
   rootId,
@@ -15,11 +14,16 @@ export default function SplitLayout({
   onExited,
   onRestart,
 }) {
-  const handleLayout = useMemo(() => {
-    return debounce((sizes) => {
-      window.api.setPaneRatio(rootId, path, sizes[0]);
+  // A drag fires onLayout on every frame; the main process only needs the
+  // ratio it settles on.
+  const saveTimer = useRef(null);
+  useEffect(() => () => clearTimeout(saveTimer.current), []);
+  const handleLayout = (sizes) => {
+    clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      window.electronAPI.setPaneRatio(rootId, path, sizes[0]);
     }, 500);
-  }, [rootId, path]);
+  };
 
   if (tree.leaf) {
     return (
@@ -28,8 +32,8 @@ export default function SplitLayout({
         rootPath={rootPath}
         onOpenFile={onOpenFile}
         onOpenLink={onOpenLink}
-        onExited={onExited}
-        onRestart={onRestart}
+        onExited={() => onExited(tree.leaf)}
+        onRestart={() => onRestart(tree.leaf)}
       />
     );
   }

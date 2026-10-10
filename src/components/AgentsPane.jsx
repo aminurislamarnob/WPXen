@@ -882,8 +882,8 @@ export default function AgentsPane() {
                       rootPath={sitePath}
                       onOpenFile={openFileAtLine}
                       onOpenLink={handleOpenLink}
-                      onExited={() => destroyTab(activeTab)}
-                      onRestart={() => respawn(activeTab)}
+                      onExited={destroyTab}
+                      onRestart={respawn}
                     />
                   ) : (
                     <div className="h-full flex flex-col items-center justify-center text-center">
