@@ -5,6 +5,12 @@ import { FileGlyph } from '../../lib/fileIcons';
 import { Favicon } from '../browser/BrowserToolbar';
 import { sessionTitle } from '../../lib/agentsList';
 
+function countLeaves(tree) {
+  if (!tree) return 1;
+  if (tree.leaf) return 1;
+  return countLeaves(tree.a) + countLeaves(tree.b);
+}
+
 export default function TabStrip({
   tabs,
   openFiles,
@@ -52,6 +58,17 @@ export default function TabStrip({
               className="flex-shrink-0"
             />
             <span className="truncate max-w-[140px]">{sessionTitle(tab, tabs)}</span>
+            {(() => {
+              const panes = tab.layout ? countLeaves(tab.layout) : 1;
+              if (panes > 1) {
+                return (
+                  <span className="ml-0.5 rounded-[4px] bg-border/50 px-1 py-0.5 text-[10px] font-medium tabular-nums leading-none text-muted-foreground">
+                    {panes}
+                  </span>
+                );
+              }
+              return null;
+            })()}
             <Tooltip label="Close session">
               <button
                 onClick={(e) => {

@@ -126,7 +126,12 @@ describe('mostUrgent', () => {
 });
 
 describe('buildActivity', () => {
-  const row = (sessionId, state, changedAt) => ({ sessionId, state, changedAt });
+  const row = (sessionId, state, changedAt) => ({
+    sessionId,
+    state,
+    changedAt,
+    children: [],
+  });
 
   it('flattens every project, tagging rows with their site name', () => {
     const rows = buildActivity([
@@ -163,7 +168,12 @@ describe('buildActivity', () => {
 });
 
 describe('applyListOptions', () => {
-  const s = (sessionId, state, changedAt) => ({ sessionId, state, changedAt });
+  const s = (sessionId, state, changedAt) => ({
+    sessionId,
+    state,
+    changedAt,
+    children: [],
+  });
   const projects = [
     {
       site: { id: 'b', name: 'Blog' },

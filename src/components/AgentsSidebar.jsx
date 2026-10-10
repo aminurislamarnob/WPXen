@@ -15,6 +15,7 @@ import {
   Check,
   Bell,
   BellOff,
+  TerminalSquare,
 } from 'lucide-react';
 import { ProviderIcon } from './providerIcons';
 import { Tooltip, ConfirmDialog } from './ui';
@@ -169,7 +170,15 @@ function RowAction({ label, onClick, children }) {
 // One agent Session: status glyph, provider mark, title, and how long since
 // its status last changed. Unread rows are bold. On hover the age gives way to
 // a read/unread toggle, plus dismiss on an exited row.
-export function SessionRow({ session: s, now, selected, onOpen, siteName, compact }) {
+export function SessionRow({
+  session: s,
+  now,
+  selected,
+  onOpen,
+  siteName,
+  compact,
+  isChild,
+}) {
   const ended = s.state === 'exited' || s.state === 'error';
   return (
     <div
@@ -184,7 +193,11 @@ export function SessionRow({ session: s, now, selected, onOpen, siteName, compac
       }`}
     >
       <AgentStatusGlyph state={s.state} />
-      <ProviderIcon agentId={s.agentId} brand size={13} className="flex-shrink-0" />
+      {isChild ? (
+        <TerminalSquare size={13} className="flex-shrink-0 text-muted-foreground" />
+      ) : (
+        <ProviderIcon agentId={s.agentId} brand size={13} className="flex-shrink-0" />
+      )}
       {s.issue?.number && (
         <span
           title={`${s.issue.repo}#${s.issue.number} · ${s.issue.title}`}
@@ -596,14 +609,30 @@ export default function AgentsSidebar() {
               {isOpen && (
                 <div className="ml-[18px] mt-0.5 space-y-0.5 border-l border-sidebar-border pl-2">
                   {rows.map((s) => (
-                    <SessionRow
-                      key={s.sessionId}
-                      session={s}
-                      compact={compact}
-                      now={now}
-                      selected={s.sessionId === selected}
-                      onOpen={() => openSession(site.id, s.sessionId)}
-                    />
+                    <div key={s.sessionId}>
+                      <SessionRow
+                        session={s}
+                        compact={compact}
+                        now={now}
+                        selected={s.sessionId === selected}
+                        onOpen={() => openSession(site.id, s.sessionId)}
+                      />
+                      {s.children?.length > 0 && (
+                        <div className="ml-4 mt-0.5 space-y-0.5 border-l border-sidebar-border/50 pl-2">
+                          {s.children.map((c) => (
+                            <SessionRow
+                              key={c.sessionId}
+                              session={c}
+                              compact={compact}
+                              now={now}
+                              selected={c.sessionId === selected}
+                              onOpen={() => openSession(site.id, c.sessionId)}
+                              isChild
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   ))}
                   {rows.length === 0 && (
                     <p className="px-2 py-1 text-xs text-muted-foreground">
