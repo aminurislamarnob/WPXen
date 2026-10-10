@@ -282,6 +282,45 @@ describe('agent-chat watcher', () => {
     expect(rows).not.toContainEqual({ notice: true, kind: 'transcript-changed' });
   });
 
+  it('attaches a result on a newer page to its call once Load older brings it in', () => {
+    // The call, then ~250 KB of later turns, then the call's result: the
+    // result lands on the first page as an orphan, the call on an older one.
+    const call = JSON.stringify({
+      type: 'assistant',
+      message: {
+        id: 'msg-call',
+        content: [{ type: 'tool_use', id: 'toolu_X', name: 'Bash', input: {} }],
+      },
+    });
+    const filler = Array.from({ length: 500 }, (_, i) =>
+      JSON.stringify(userRecord(`f-${i}`, `later ${i} ${'x'.repeat(450)}`))
+    );
+    const result = JSON.stringify(toolResultRecord('r-1', 'toolu_X', 'done'));
+    fakeFolder({
+      'long.jsonl': {
+        content: [call, ...filler, result].join('\n') + '\n',
+        mtimeMs: 100,
+      },
+    });
+
+    const rows = [];
+    openChat('sess-6', 'viewer-1', {
+      transcriptPath: '/fake/long.jsonl',
+      decodeLine: decodeClaudeLine,
+      onRows: (newRows) => rows.push(...newRows),
+    });
+    expect(rows.find((r) => r.orphan)?.id).toBe('r-1');
+
+    const older = [];
+    for (let page = loadOlder('sess-6'); ; page = loadOlder('sess-6')) {
+      older.push(...page.rows);
+      if (page.atStart) break;
+    }
+    const callRow = older.find((r) => r.id === 'msg-call');
+    expect(callRow.blocks[0].result.content).toBe('done');
+    expect(callRow.remove).toEqual(['r-1']);
+  });
+
   it('holds a partial last line until it completes, then decodes it once', () => {
     const first = JSON.stringify(userRecord('p-1', 'first')) + '\n';
     const second = JSON.stringify(userRecord('p-2', 'second'));

@@ -125,7 +125,9 @@ function tailRead(fd, fileSize, decodeLine) {
 }
 
 // ── Older page ─────────────────────────────────────────────────────────────
-function loadOlderPage(fd, pageStart, decodeLine) {
+// `results` holds the orphan tool results newer pages already decoded, so a
+// call paged in here picks its result up.
+function loadOlderPage(fd, pageStart, decodeLine, results = {}) {
   if (pageStart <= 0) return { rows: [], pageStart: 0, atStart: true };
 
   let cursor = pageStart;
@@ -160,7 +162,7 @@ function loadOlderPage(fd, pageStart, decodeLine) {
     remainingBuffer = Buffer.alloc(0);
   }
 
-  const state = {};
+  const state = { results };
   const decoded = [];
   for (const line of allLines) {
     if (!line.trim()) continue;
@@ -393,10 +395,12 @@ function loadOlder(sessionId) {
   const watch = watches.get(sessionId);
   if (!watch) return { rows: [], atStart: true };
 
+  watch.state.results = watch.state.results || {};
   const { rows, pageStart, atStart } = loadOlderPage(
     watch.fd,
     watch.pageStart,
-    watch.decodeLine
+    watch.decodeLine,
+    watch.state.results
   );
   watch.pageStart = pageStart;
 
