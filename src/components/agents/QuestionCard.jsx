@@ -1,174 +1,150 @@
 import { useState } from 'react';
 import { Button } from '../ui';
+import { askAnswerStatus } from '../../lib/agentAsk';
 
-export function QuestionCard({ prompt, result, onSubmit }) {
-  // result is the `toolUseResult.answers` from the transcript if it's already answered.
-  // prompt is the AskUserQuestion input.
+// What each card sent, by `${sessionId}:${toolUseId}`. Module-level because
+// the virtualised list unmounts cards scrolled out of view, and a remounted
+// card must stay locked rather than offer to answer twice.
+const sentAnswers = new Map();
 
-  const [selections, setSelections] = useState(
-    prompt.questions.map(() => ({ indices: [], other: '' }))
-  );
-  const [otherActive, setOtherActive] = useState(prompt.questions.map(() => false));
+const emptySelections = (questions) => questions.map(() => ({ indices: [], other: '' }));
 
-  const isAnswered = !!result;
+// An AskUserQuestion call as a card. Choosing sends key steps to the TUI
+// (onSubmit); once the transcript records the answer (`recorded`, the result's
+// answers by question text) the card shows it, and flags a difference from
+// what was sent.
+export function QuestionCard({ sessionId, toolUseId, prompt, recorded, onSubmit }) {
   const questions = prompt.questions || [];
+  const key = `${sessionId}:${toolUseId}`;
+  const [selections, setSelections] = useState(() => emptySelections(questions));
+  const [otherOpen, setOtherOpen] = useState(() => questions.map(() => false));
+  const [sent, setSent] = useState(() => sentAnswers.get(key) || null);
 
-  const handleToggle = (qIndex, oIndex, multi) => {
-    if (isAnswered) return;
-    setSelections((prev) => {
-      const next = [...prev];
-      const sel = next[qIndex];
-      if (multi) {
-        if (sel.indices.includes(oIndex)) {
-          sel.indices = sel.indices.filter((i) => i !== oIndex);
-        } else {
-          sel.indices = [...sel.indices, oIndex].sort((a, b) => a - b);
-        }
-      } else {
-        sel.indices = [oIndex];
-        sel.other = '';
-        next[qIndex] = sel;
-        // Auto-submit single select if it's the only question
-        if (questions.length === 1 && !multi) {
-          setTimeout(() => onSubmit(next), 0);
-        }
-      }
-      return next;
-    });
+  const status = askAnswerStatus(prompt, recorded, sent);
+  const locked = !!status || !!sent;
+  // One single-select question answers on click; anything else needs Submit.
+  const instant = questions.length === 1 && !questions[0]?.multiSelect;
+
+  const submit = (next) => {
+    if (locked) return;
+    sentAnswers.set(key, next);
+    setSent(next);
+    onSubmit(next);
   };
 
-  const handleOtherClick = (qIndex) => {
-    if (isAnswered) return;
-    setOtherActive((prev) => {
-      const next = [...prev];
-      next[qIndex] = true;
-      return next;
-    });
-    setSelections((prev) => {
-      const next = [...prev];
-      if (!questions[qIndex].multiSelect) {
-        next[qIndex].indices = [];
-      }
-      return next;
-    });
+  const choose = (qi, oi) => {
+    if (locked) return;
+    const q = questions[qi];
+    const prev = selections[qi];
+    const indices = q.multiSelect
+      ? prev.indices.includes(oi)
+        ? prev.indices.filter((i) => i !== oi)
+        : [...prev.indices, oi].sort((a, b) => a - b)
+      : [oi];
+    const next = selections.map((sel, i) =>
+      i === qi ? { indices, other: q.multiSelect ? sel.other : '' } : sel
+    );
+    setSelections(next);
+    if (instant) submit(next);
   };
 
-  const handleOtherChange = (qIndex, val) => {
-    setSelections((prev) => {
-      const next = [...prev];
-      next[qIndex].other = val;
-      return next;
-    });
-  };
-
-  const handleOtherKeyDown = (e) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      if (questions.length === 1) {
-        onSubmit(selections);
-      }
+  const openOther = (qi) => {
+    if (locked) return;
+    setOtherOpen((prev) => prev.map((open, i) => (i === qi ? true : open)));
+    if (!questions[qi].multiSelect) {
+      setSelections((prev) =>
+        prev.map((sel, i) => (i === qi ? { ...sel, indices: [] } : sel))
+      );
     }
   };
 
-  const handleSubmit = () => {
-    if (!isAnswered) {
-      onSubmit(selections);
-    }
-  };
+  const typeOther = (qi, other) =>
+    setSelections((prev) => prev.map((sel, i) => (i === qi ? { ...sel, other } : sel)));
+
+  const optionClass = (on) =>
+    `w-full text-left px-3 py-2 text-[13px] rounded-md border transition-colors ${
+      on
+        ? 'bg-highlight/10 border-highlight/50 text-foreground'
+        : 'bg-background border-border hover:bg-accent'
+    }`;
 
   return (
-    <div className="bg-elevation-2 rounded-md border border-elevation-3 overflow-hidden my-2">
-      {questions.map((q, qi) => {
-        // Find if transcript answers exist
-        const recordedAnswer = result && result[q.question];
+    <div className="my-2 rounded-lg border border-border bg-card overflow-hidden">
+      {questions.map((q, qi) => (
+        <div key={qi} className="p-3 border-b border-border last:border-b-0">
+          {q.header && (
+            <div className="text-[11px] text-muted-foreground mb-1">{q.header}</div>
+          )}
+          <div className="text-[13px] font-medium mb-2">{q.question}</div>
 
-        return (
-          <div key={qi} className="p-3 border-b border-elevation-3 last:border-b-0">
-            {q.header && <div className="text-xs text-text-muted mb-1">{q.header}</div>}
-            <div className="text-sm font-medium text-text-main mb-2">{q.question}</div>
-
-            {isAnswered ? (
-              <div className="text-sm text-text-muted bg-elevation-1 p-2 rounded">
-                Answered:{' '}
-                <span className="text-text-main">{recordedAnswer || 'None'}</span>
-              </div>
-            ) : (
-              <div className="space-y-1">
-                {q.options.map((opt, oi) => {
-                  const isSelected = selections[qi].indices.includes(oi);
-                  return (
-                    <div
-                      key={oi}
-                      onClick={() => handleToggle(qi, oi, q.multiSelect)}
-                      className={`px-3 py-2 text-sm rounded cursor-pointer border ${
-                        isSelected
-                          ? 'bg-primary-500/10 border-primary-500/50 text-primary-400'
-                          : 'bg-elevation-1 border-transparent text-text-main hover:bg-elevation-3'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2">
-                        {q.multiSelect && (
-                          <input
-                            type="checkbox"
-                            checked={isSelected}
-                            readOnly
-                            className="pointer-events-none"
-                          />
-                        )}
-                        {!q.multiSelect && (
-                          <div
-                            className={`w-3 h-3 rounded-full border ${isSelected ? 'border-4 border-primary-500' : 'border-elevation-4'}`}
-                          />
-                        )}
-                        <span>{opt.label}</span>
-                        {opt.description && (
-                          <span className="text-text-muted text-xs ml-1">
-                            - {opt.description}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-
-                <div
-                  className={`px-3 py-2 text-sm rounded cursor-pointer border ${
-                    otherActive[qi] || selections[qi].other
-                      ? 'bg-primary-500/10 border-primary-500/50 text-primary-400'
-                      : 'bg-elevation-1 border-transparent text-text-main hover:bg-elevation-3'
-                  }`}
-                  onClick={() => handleOtherClick(qi)}
-                >
-                  <div className="flex items-center gap-2">
-                    {!q.multiSelect && (
-                      <div
-                        className={`w-3 h-3 rounded-full border ${otherActive[qi] || selections[qi].other ? 'border-4 border-primary-500' : 'border-elevation-4'}`}
-                      />
-                    )}
-                    {otherActive[qi] ? (
-                      <input
-                        autoFocus
-                        type="text"
-                        value={selections[qi].other}
-                        onChange={(e) => handleOtherChange(qi, e.target.value)}
-                        onKeyDown={(e) => handleOtherKeyDown(e, qi)}
-                        className="bg-transparent outline-none flex-1"
-                        placeholder="Type your answer..."
-                      />
-                    ) : (
-                      <span>Other...</span>
-                    )}
-                  </div>
+          {status ? (
+            <div className="text-[13px] rounded-md bg-muted px-2 py-1.5">
+              <span className="text-muted-foreground">Answered: </span>
+              {status[qi].answer || 'No answer'}
+              {status[qi].mismatch && (
+                <div className="mt-1 text-[12px] text-status-warning">
+                  The card sent “{status[qi].sent}”, but the terminal recorded this
+                  answer.
                 </div>
-              </div>
-            )}
-          </div>
-        );
-      })}
+              )}
+            </div>
+          ) : (
+            <div className="space-y-1">
+              {q.options.map((opt, oi) => (
+                <button
+                  key={oi}
+                  type="button"
+                  disabled={locked}
+                  onClick={() => choose(qi, oi)}
+                  className={optionClass(selections[qi].indices.includes(oi))}
+                >
+                  <span>{opt.label}</span>
+                  {opt.description && (
+                    <span className="ml-1 text-[12px] text-muted-foreground">
+                      — {opt.description}
+                    </span>
+                  )}
+                </button>
+              ))}
+              {otherOpen[qi] ? (
+                <input
+                  autoFocus
+                  type="text"
+                  disabled={locked}
+                  value={selections[qi].other}
+                  onChange={(e) => typeOther(qi, e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && instant && selections[qi].other.trim()) {
+                      e.preventDefault();
+                      submit(selections);
+                    }
+                  }}
+                  className="form-input w-full"
+                  placeholder="Type your answer…"
+                />
+              ) : (
+                <button
+                  type="button"
+                  disabled={locked}
+                  onClick={() => openOther(qi)}
+                  className={optionClass(false)}
+                >
+                  Other…
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      ))}
 
-      {!isAnswered && (questions.length > 1 || questions[0]?.multiSelect) && (
-        <div className="p-3 bg-elevation-1 flex justify-end">
-          <Button onClick={handleSubmit} variant="primary">
+      {!status && sent && (
+        <div className="px-3 py-2 text-[12px] text-muted-foreground border-t border-border">
+          Sent — waiting for the answer to be recorded.
+        </div>
+      )}
+      {!locked && !instant && (
+        <div className="p-3 flex justify-end border-t border-border">
+          <Button variant="primary" onClick={() => submit(selections)}>
             Submit
           </Button>
         </div>

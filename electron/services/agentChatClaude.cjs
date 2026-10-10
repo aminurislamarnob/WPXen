@@ -112,6 +112,11 @@ function attachToolResults(results, record, state) {
       tool_use_id: toolUseId,
       is_error: !!b.is_error,
       images: imageRefs(b.content, record.uuid, [index]),
+      // AskUserQuestion records the chosen labels, keyed by question text.
+      answers:
+        tur.answers && typeof tur.answers === 'object' && !Array.isArray(tur.answers)
+          ? tur.answers
+          : undefined,
       // Only the ids background work is tracked by, not the whole result.
       meta: {
         backgroundTaskId: tur.backgroundTaskId,

@@ -3,7 +3,7 @@ import {
   sendChatAnswer,
   NATIVE_CHAT_QUESTION_STEP_MS,
 } from '../electron/services/agentChatSend.cjs';
-import { buildAskAnswerKeys } from '../src/lib/agentAsk.js';
+import { buildAskAnswerKeys, askAnswerStatus } from '../src/lib/agentAsk.js';
 
 describe('AskUserQuestion keys', () => {
   it('buildAskAnswerKeys generates digits for single-select', () => {
@@ -72,5 +72,56 @@ describe('sendChatAnswer serialiser', () => {
 
     await vi.advanceTimersByTimeAsync(NATIVE_CHAT_QUESTION_STEP_MS);
     await promise;
+  });
+});
+
+describe('askAnswerStatus', () => {
+  const prompt = {
+    questions: [
+      {
+        question: 'Which route?',
+        multiSelect: false,
+        options: [{ label: '/health' }, { label: '/status' }],
+      },
+      {
+        question: 'Which checks?',
+        multiSelect: true,
+        options: [{ label: 'db' }, { label: 'cache' }, { label: 'queue' }],
+      },
+    ],
+  };
+
+  it('reports nothing before an answer is recorded', () => {
+    expect(askAnswerStatus(prompt, null, null)).toBeNull();
+  });
+
+  it('shows the recorded answer, matching what was sent', () => {
+    const sent = [
+      { indices: [0], other: '' },
+      { indices: [0, 2], other: '' },
+    ];
+    const recorded = { 'Which route?': '/health', 'Which checks?': 'db, queue' };
+    expect(askAnswerStatus(prompt, recorded, sent)).toEqual([
+      { answer: '/health', mismatch: false },
+      { answer: 'db, queue', mismatch: false },
+    ]);
+  });
+
+  it('flags a recorded answer that differs from what was clicked', () => {
+    const sent = [
+      { indices: [0], other: '' },
+      { indices: [1], other: '' },
+    ];
+    const recorded = { 'Which route?': '/status', 'Which checks?': 'cache' };
+    expect(askAnswerStatus(prompt, recorded, sent)[0]).toEqual({
+      answer: '/status',
+      mismatch: true,
+      sent: '/health',
+    });
+  });
+
+  it('never flags a mismatch for an answer given in the terminal', () => {
+    const recorded = { 'Which route?': '/status', 'Which checks?': 'db' };
+    expect(askAnswerStatus(prompt, recorded, null).every((q) => !q.mismatch)).toBe(true);
   });
 });

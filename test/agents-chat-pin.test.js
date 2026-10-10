@@ -86,6 +86,8 @@ describe('Chat pin (Session transcript pinning)', () => {
     const row = agents.listAllSessions().find((s) => s.sessionId === sessionId);
     expect(row).toBeDefined();
     expect(row.transcriptId).toBeDefined();
+    // Question cards use this Agent's key map.
+    expect(row.ask).toBe('claude-digits');
 
     // It should have written to the pty
     const pty = ptys[0];
@@ -120,6 +122,7 @@ describe('Chat pin (Session transcript pinning)', () => {
     const row = agents.listAllSessions().find((s) => s.sessionId === sessionId);
     expect(row).toBeDefined();
     expect(row.transcriptId).toBeNull();
+    expect(row.ask).toBeNull();
 
     const pty = ptys[0];
     pty.emitData('some output');

@@ -8,6 +8,7 @@ import DiffView from '../DiffView';
 
 import { ChatMarkdown } from './ChatMarkdown';
 import { QuestionCard } from './QuestionCard';
+import { buildAskAnswerKeys } from '../../lib/agentAsk';
 import { SubagentRow } from './SubagentRow';
 import { ImageRef } from './ImageRef';
 import { contextMeter } from '../../lib/contextMeter';
@@ -335,29 +336,28 @@ export function ChatView({ sessionId }) {
                               ) : (
                                 <div>
                                   {(() => {
-                                    const isAsk =
-                                      item.tool_use?.name === 'AskUserQuestion';
-                                    if (isAsk) {
+                                    // Only Agents with a key map get a card;
+                                    // otherwise it stays a plain tool row.
+                                    if (
+                                      item.tool_use?.name === 'AskUserQuestion' &&
+                                      currentSession?.ask
+                                    ) {
                                       return (
                                         <QuestionCard
+                                          sessionId={sessionId}
+                                          toolUseId={item.tool_use.id}
                                           prompt={item.tool_use.input}
-                                          result={item.result?.answers}
-                                          onSubmit={async (selections) => {
-                                            const { buildAskAnswerKeys } =
-                                              await import('../../lib/agentAsk');
-                                            const agentAskKind =
-                                              currentSession?.agentConfig?.ask?.kind ||
-                                              'claude-digits';
-                                            const groups = buildAskAnswerKeys(
-                                              item.tool_use.input,
-                                              selections,
-                                              agentAskKind
-                                            );
+                                          recorded={item.result?.answers}
+                                          onSubmit={(selections) =>
                                             window.electronAPI.chatAnswer(
                                               sessionId,
-                                              groups
-                                            );
-                                          }}
+                                              buildAskAnswerKeys(
+                                                item.tool_use.input,
+                                                selections,
+                                                currentSession.ask
+                                              )
+                                            )
+                                          }
                                         />
                                       );
                                     }

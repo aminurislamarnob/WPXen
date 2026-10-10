@@ -58,3 +58,18 @@ export function buildAskAnswerKeys(prompt, selections, kind) {
   }
   return groups;
 }
+
+// Once the transcript records an answer: what each question was answered
+// with, and whether it differs from what the card sent. `sent` is null when
+// the answer was given in the terminal — nothing to compare against then.
+export function askAnswerStatus(prompt, recorded, sent) {
+  if (!recorded) return null;
+  return prompt.questions.map((q, i) => {
+    const answer = recorded[q.question] ?? '';
+    if (!sent) return { answer, mismatch: false };
+    const sentLabel = answerLabels(q, sent[i]).join(', ');
+    return answer === sentLabel
+      ? { answer, mismatch: false }
+      : { answer, mismatch: true, sent: sentLabel };
+  });
+}

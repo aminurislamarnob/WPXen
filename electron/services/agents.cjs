@@ -336,6 +336,8 @@ function listAgents({ all = false, shell = true } = {}) {
         sessionIdFlag: a.sessionIdFlag || null,
         resumeFlag: a.resumeFlag || null,
         chat: a.chat || null,
+        // How this Agent's TUI takes a question-card answer; no key map, no cards.
+        ask: a.ask?.kind || null,
         isCustom: !!a.isCustom,
         isShell: false,
         enabled: !config.enabled || config.enabled.includes(a.id),
@@ -820,6 +822,7 @@ function sessionRow(s) {
     handoffFile: s.handoffFile || null,
     transcriptId: s.transcriptId || null,
     chat: s.chat || null,
+    ask: s.ask || null,
     // The issue or PR Start → launched this Session for, else null.
     issue: s.issue || null,
     startedAt: s.startedAt,
@@ -916,6 +919,7 @@ function launch({
       handoffFile,
       transcriptId,
       chat: agent.chat || null,
+      ask: agent.ask || null,
     },
     failLabel: agent.name,
   });
