@@ -119,3 +119,132 @@ describe('agents split layout', () => {
     expect(rootRow.layout.b.ratio).toBe(60);
   });
 });
+
+describe('pane lifecycle', () => {
+  const site = () => ({ id: 'shop', name: 'Shop', path: path.join(home, 'code') });
+
+  it('collapse at depth 1', () => {
+    const s = site();
+    const { sessionId: rootId } = agents.launch({ site: s, agentId: agents.SHELL_ID });
+    const { sessionId: childId } = agents.splitPane(rootId, 'right', s);
+
+    agents.stop(childId);
+
+    const rows = agents.listAllSessions();
+    const rootRow = rows.find((r) => r.sessionId === rootId);
+    expect(rootRow.layout).toEqual({ leaf: rootId });
+    expect(rows.find((r) => r.sessionId === childId)).toBeUndefined();
+  });
+
+  it('collapse at depth 3', () => {
+    const s = site();
+    const { sessionId: rootId } = agents.launch({ site: s, agentId: agents.SHELL_ID });
+    const { sessionId: c1 } = agents.splitPane(rootId, 'right', s);
+    const { sessionId: c2 } = agents.splitPane(c1, 'down', s);
+
+    agents.stop(c1);
+
+    const rootRow = agents.listAllSessions().find((r) => r.sessionId === rootId);
+    expect(rootRow.layout).toEqual({
+      dir: 'right',
+      ratio: 50,
+      a: { leaf: rootId },
+      b: { leaf: c2 },
+    });
+  });
+
+  it('promoting the root rewrites paneOf and moves layout', () => {
+    const s = site();
+    const { sessionId: rootId } = agents.launch({ site: s, agentId: agents.SHELL_ID });
+    const { sessionId: c1 } = agents.splitPane(rootId, 'right', s);
+    const { sessionId: c2 } = agents.splitPane(c1, 'down', s);
+
+    agents.stop(rootId);
+
+    const rows = agents.listAllSessions();
+    expect(rows.find((r) => r.sessionId === rootId)).toBeUndefined();
+
+    const newRootRow = rows.find((r) => r.sessionId === c1);
+    expect(newRootRow.paneOf).toBeNull();
+    expect(newRootRow.layout).toEqual({
+      dir: 'down',
+      ratio: 50,
+      a: { leaf: c1 },
+      b: { leaf: c2 },
+    });
+
+    const c2Row = rows.find((r) => r.sessionId === c2);
+    expect(c2Row.paneOf).toBe(c1);
+  });
+
+  it('an exited pane stays a leaf', () => {
+    const s = site();
+    const { sessionId: rootId } = agents.launch({ site: s, agentId: agents.SHELL_ID });
+    const { sessionId: c1 } = agents.splitPane(rootId, 'right', s);
+
+    ptys[1].emitExit(1); // child exited
+
+    const rows = agents.listAllSessions();
+    const childRow = rows.find((r) => r.sessionId === c1);
+    expect(childRow).toBeDefined();
+    expect(childRow.exited).toBe(true);
+    expect(rows.find((r) => r.sessionId === rootId).layout.b.leaf).toBe(c1);
+  });
+
+  it('closing the tab stops every pane, without promoting one', () => {
+    const s = site();
+    const { sessionId: rootId } = agents.launch({ site: s, agentId: agents.SHELL_ID });
+    const { sessionId: c1 } = agents.splitPane(rootId, 'right', s);
+    agents.splitPane(c1, 'down', s);
+
+    agents.stopTab(rootId);
+
+    for (const p of ptys) expect(p.kill).toHaveBeenCalledWith('SIGTERM');
+    expect(agents.listAllSessions()).toEqual([]);
+  });
+
+  it('closing the tab from a pane ends the whole tab', () => {
+    const s = site();
+    const { sessionId: rootId } = agents.launch({ site: s, agentId: agents.SHELL_ID });
+    const { sessionId: c1 } = agents.splitPane(rootId, 'right', s);
+
+    agents.stopTab(c1);
+
+    expect(agents.listAllSessions()).toEqual([]);
+  });
+
+  it('respawning an exited pane replaces its leaf in place', () => {
+    const s = site();
+    const { sessionId: rootId } = agents.launch({ site: s, agentId: agents.SHELL_ID });
+    const { sessionId: c1 } = agents.splitPane(rootId, 'right', s);
+    ptys[1].emitExit(0);
+
+    const res = agents.respawnPane(c1, { site: s });
+
+    expect(res.ok).toBe(true);
+    expect(res.rootId).toBe(rootId);
+    const rows = agents.listAllSessions();
+    expect(rows.find((r) => r.sessionId === c1)).toBeUndefined();
+    expect(rows.find((r) => r.sessionId === res.sessionId).paneOf).toBe(rootId);
+    expect(rows.find((r) => r.sessionId === rootId).layout).toMatchObject({
+      a: { leaf: rootId },
+      b: { leaf: res.sessionId },
+    });
+  });
+
+  it('respawning the first pane keeps the tab under the new id', () => {
+    const s = site();
+    const { sessionId: rootId } = agents.launch({ site: s, agentId: agents.SHELL_ID });
+    const { sessionId: c1 } = agents.splitPane(rootId, 'right', s);
+    ptys[0].emitExit(0);
+
+    const res = agents.respawnPane(rootId, { site: s });
+
+    expect(res.rootId).toBe(res.sessionId);
+    const rows = agents.listAllSessions();
+    const newRoot = rows.find((r) => r.sessionId === res.sessionId);
+    expect(newRoot.paneOf).toBeNull();
+    expect(newRoot.layout).toMatchObject({ a: { leaf: res.sessionId }, b: { leaf: c1 } });
+    expect(rows.find((r) => r.sessionId === c1).paneOf).toBe(res.sessionId);
+  });
+});

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowDown } from 'lucide-react';
+import { ArrowDown, X } from 'lucide-react';
 import '@xterm/xterm/css/xterm.css';
 import { formatDropInput } from '../lib/terminal/keys';
 import * as sessionCache from '../lib/terminal/sessionCache';
@@ -21,6 +21,9 @@ export default function Terminal({
   onOpenFile,
   onOpenLink,
   onTitle,
+  onClosePane,
+  onFocus,
+  onBlur,
 }) {
   // Link clicks: plain → the action card, ⌘ / ⇧⌘ → straight to a destination.
   // `onOpenLink(url, destination)` — 'system' or 'app' — is the owner's.
@@ -140,8 +143,20 @@ export default function Terminal({
       className="relative h-full w-full overflow-hidden bg-background"
       onDragOver={onDragOver}
       onDrop={onDrop}
+      onFocusCapture={onFocus}
+      onBlurCapture={onBlur}
     >
       <div ref={hostRef} className="h-full w-full p-2" />
+      {onClosePane && (
+        <button
+          onClick={onClosePane}
+          className="absolute right-2 top-2 z-10 flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+          aria-label="Close pane"
+          title="Close pane"
+        >
+          <X size={14} />
+        </button>
+      )}
       {linkRequest && (
         <LinkActionCard
           request={linkRequest}

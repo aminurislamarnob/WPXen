@@ -4,6 +4,7 @@ import {
   closeImpact,
   nextActive,
   needsBulkConfirm,
+  paneIds,
 } from '../src/lib/tabStrip';
 
 describe('tabStrip', () => {
@@ -45,6 +46,31 @@ describe('tabStrip', () => {
         dirty: ['f1'],
       });
     });
+
+    it('counts split panes inside the layout tree', () => {
+      const sessionsById = {
+        s1: {
+          exited: false,
+          layout: { dir: 'right', a: { leaf: 's1' }, b: { leaf: 'p2' } },
+        },
+        p2: { exited: false },
+        s2: {
+          exited: false,
+          layout: { dir: 'right', a: { leaf: 's2' }, b: { leaf: 'p3' } },
+        },
+        p3: { exited: true },
+      };
+
+      expect(closeImpact(['s1'], sessionsById, [])).toEqual({
+        running: 2, // s1 and p2 are both running
+        dirty: [],
+      });
+
+      expect(closeImpact(['s2'], sessionsById, [])).toEqual({
+        running: 1, // s2 is running, p3 is exited
+        dirty: [],
+      });
+    });
   });
 
   describe('nextActive', () => {
@@ -78,6 +104,21 @@ describe('tabStrip', () => {
 
     it('always asks for unsaved files, even when suppressed', () => {
       expect(needsBulkConfirm({ running: 0, dirty: ['f1'] }, true)).toBe(true);
+    });
+  });
+
+  describe('paneIds', () => {
+    it('is just the tab when it is not split', () => {
+      expect(paneIds(null, 's1')).toEqual(['s1']);
+    });
+
+    it('lists every pane of a nested split', () => {
+      const layout = {
+        dir: 'right',
+        a: { leaf: 's1' },
+        b: { dir: 'down', a: { leaf: 'p1' }, b: { leaf: 'p2' } },
+      };
+      expect(paneIds(layout, 's1')).toEqual(['s1', 'p1', 'p2']);
     });
   });
 });

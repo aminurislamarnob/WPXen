@@ -785,13 +785,25 @@ function registerHandlers(win, storeInstance) {
   ipcMain.on('floating-focus', (_e, focused) => {
     floatingFocused = !!focused;
   });
+
+  let agentsFocused = false;
+  ipcMain.on('agents-focus', (_e, focused) => {
+    agentsFocused = !!focused;
+  });
+
   if (win) {
     win.webContents.on('before-input-event', (event, input) => {
-      if (!floatingFocused || input.type !== 'keyDown') return;
+      if (input.type !== 'keyDown') return;
       if (!input.meta || input.control || input.alt || input.shift) return;
       if (String(input.key || '').toLowerCase() !== 'w') return;
-      event.preventDefault();
-      win.webContents.send('floating-shortcut', { key: 'w' });
+
+      if (floatingFocused) {
+        event.preventDefault();
+        win.webContents.send('floating-shortcut', { key: 'w' });
+      } else if (agentsFocused) {
+        event.preventDefault();
+        win.webContents.send('agents-shortcut', { key: 'w' });
+      }
     });
   }
   ipcMain.handle('agent-session-mark', (_e, sessionId, read) => {
@@ -832,6 +844,20 @@ function registerHandlers(win, storeInstance) {
     const globalArgs = store.get('agentPresets', {})[agents.SHELL_ID]?.args || '';
     return agents.splitPane(sessionId, dir, site, globalArgs);
   });
+
+  ipcMain.handle('agent-respawn-pane', (_e, sessionId) => {
+    const session = agents.getSession(sessionId);
+    if (!session) return { error: 'Session not found' };
+    const site = findProject(session.siteId);
+    if (!site) return { error: 'Project not found' };
+    const target = session.targetId
+      ? (site.launchTargets || []).find((t) => t.id === session.targetId) || null
+      : null;
+    const globalArgs = store.get('agentPresets', {})[session.agentId]?.args || '';
+    return agents.respawnPane(sessionId, { site, target, globalArgs });
+  });
+
+  ipcMain.handle('terminal-stop-tab', (_e, sessionId) => agents.stopTab(sessionId));
 
   ipcMain.handle('agent-set-pane-ratio', (_e, rootId, path, ratio) => {
     agents.setPaneRatio(rootId, path, ratio);

@@ -1181,10 +1181,124 @@ function setPaneRatio(rootId, path, ratio) {
   emitChange({ immediate: true });
 }
 
+function removeLeaf(node, leafId) {
+  if (node.leaf === leafId) return null;
+  if (node.dir) {
+    const a = removeLeaf(node.a, leafId);
+    const b = removeLeaf(node.b, leafId);
+    if (!a && !b) return null;
+    if (!a) return b;
+    if (!b) return a;
+    return { ...node, a, b };
+  }
+  return node;
+}
+
+function firstLeaf(node) {
+  if (node.leaf) return node.leaf;
+  return firstLeaf(node.a);
+}
+
+function rewritePaneOf(node, rootId) {
+  if (node.leaf) {
+    const s = sessions.get(node.leaf);
+    if (s) s.paneOf = node.leaf === rootId ? null : rootId;
+  } else if (node.dir) {
+    rewritePaneOf(node.a, rootId);
+    rewritePaneOf(node.b, rootId);
+  }
+}
+
+function closePane(sessionId) {
+  const session = sessions.get(sessionId);
+  if (!session) return;
+  const rootId = session.paneOf || sessionId;
+  const tree = layouts.get(rootId);
+  if (tree) {
+    const newTree = removeLeaf(tree, sessionId);
+    if (!newTree) {
+      layouts.delete(rootId);
+    } else if (!newTree.dir) {
+      layouts.delete(rootId);
+      const remainingId = newTree.leaf;
+      if (remainingId !== rootId) {
+        rewritePaneOf(newTree, remainingId);
+      }
+    } else if (rootId === sessionId) {
+      const newRootId = firstLeaf(newTree);
+      layouts.delete(rootId);
+      layouts.set(newRootId, newTree);
+      rewritePaneOf(newTree, newRootId);
+    } else {
+      layouts.set(rootId, newTree);
+    }
+  }
+}
+
+function leaves(node) {
+  if (node.leaf) return [node.leaf];
+  return [...leaves(node.a), ...leaves(node.b)];
+}
+
+function replaceLeaf(node, oldId, newId) {
+  if (node.leaf) return node.leaf === oldId ? { leaf: newId } : node;
+  return {
+    ...node,
+    a: replaceLeaf(node.a, oldId, newId),
+    b: replaceLeaf(node.b, oldId, newId),
+  };
+}
+
+// Closing a tab ends every pane in it. Dropping the layout first keeps stop()
+// from promoting a pane into a tab that is going away anyway.
+function stopTab(sessionId) {
+  const session = sessions.get(sessionId);
+  if (!session) return;
+  const rootId = session.paneOf || sessionId;
+  const tree = layouts.get(rootId);
+  layouts.delete(rootId);
+  for (const id of tree ? leaves(tree) : [rootId]) stop(id);
+}
+
+// Restart a pane in place: a fresh Session of the same Agent in the same cwd
+// takes the old leaf's spot, and the old one is stopped. A restarted first
+// pane keeps the tab, so the layout moves to the new id.
+function respawnPane(sessionId, { site, target = null, globalArgs = '' }) {
+  const old = sessions.get(sessionId);
+  if (!old) return { error: 'Session not found' };
+  const rootId = old.paneOf || sessionId;
+  const isRoot = rootId === sessionId;
+  const res = launch({
+    site,
+    agentId: old.agentId,
+    target,
+    globalArgs,
+    cwd: old.cwd,
+    paneOf: isRoot ? null : rootId,
+  });
+  if (!res.ok) return res;
+  const tree = layouts.get(rootId);
+  if (tree) {
+    const next = replaceLeaf(tree, sessionId, res.sessionId);
+    if (isRoot) {
+      layouts.delete(rootId);
+      layouts.set(res.sessionId, next);
+      rewritePaneOf(next, res.sessionId);
+    } else {
+      layouts.set(rootId, next);
+    }
+  }
+  stop(sessionId);
+  return { ok: true, sessionId: res.sessionId, rootId: isRoot ? res.sessionId : rootId };
+}
+
 // Graceful stop: SIGTERM, escalate to SIGKILL after a grace period (Q11).
 function stop(sessionId) {
   const session = sessions.get(sessionId);
   if (!session) return;
+
+  closePane(sessionId);
+
   if (!session.exited) {
     try {
       session.pty.kill('SIGTERM');
@@ -1256,6 +1370,8 @@ module.exports = {
   splitPane,
   setPaneRatio,
   stop,
+  stopTab,
+  respawnPane,
   getSession,
   hasActiveSessions,
   activeSiteIds,
