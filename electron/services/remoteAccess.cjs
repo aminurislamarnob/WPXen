@@ -79,6 +79,9 @@ const ALLOWED_OPS = new Set([
   'projects.launchTargets',
   'sessions.launch',
   'sessions.stop',
+  'device.setPushToken',
+  'device.setPushEnabled',
+  'device.pushState',
 ]);
 
 // Terminal output batches per (device, Session) so a chatty TUI doesn't send
@@ -103,6 +106,20 @@ const VERIFY_REASONS = ['dns', 'connection', 'wrong-server', 'wrong-port', 'time
 // how often the tunnel child is re-checked while it should be running.
 const VERIFY_TIMEOUT_MS = 15_000;
 const TUNNEL_POLL_MS = 2000;
+
+// Expo push endpoint: one HTTPS POST carries every pending message. No
+// relay of our own, no direct APNs/FCM in this ticket.
+const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
+
+// Alert kinds the engine approves, mapped to the generic bodies the phone
+// may show. A terminal bell reads as needs-input: it always signals for
+// attention, and the payload never says more than that.
+const ALERT_BODIES = {
+  'needs-input': 'A Session needs your input',
+  done: 'A Session finished',
+  error: 'A Session exited with an error',
+  bell: 'A Session needs your input',
+};
 
 // Deliberately not Orca's 6768, so both apps can run on the same Mac.
 const DEFAULT_PORT = 6780;
@@ -150,6 +167,9 @@ const deps = {
   },
   get onPaired() {
     return 'onPaired' in overrides ? overrides.onPaired : () => {};
+  },
+  get log() {
+    return 'log' in overrides ? overrides.log : console.warn;
   },
   get getRemoteConfig() {
     return 'getRemoteConfig' in overrides
@@ -924,6 +944,120 @@ async function disconnectAll() {
   return { ok: true };
 }
 
+// ─── Push tokens ─────────────────────────────────────────────────────────
+// The token and its switch live on the device record. Revoking deletes the
+// record, so both die with it — nothing extra to clear.
+
+function updateDevice(id, patch) {
+  const store = deps.store;
+  if (!store) throw new Error('Remote Access needs a store before it can start');
+  const records = readDeviceRecords();
+  if (!records.some((d) => d && d.id === id)) throw new Error('Unknown device.');
+  store.set(
+    DEVICE_KEY,
+    records.map((d) => (d && d.id === id ? { ...d, ...patch } : d))
+  );
+  publishDevices();
+}
+
+async function setDevicePushToken(id, token) {
+  if (
+    token !== null &&
+    (typeof token !== 'string' || !token.trim() || token.length > 512)
+  ) {
+    throw new Error('Enter a valid push token.');
+  }
+  updateDevice(id, { pushToken: token && token.trim() ? token.trim() : null });
+  return { ok: true };
+}
+
+async function setDevicePushEnabled(id, enabled) {
+  if (typeof enabled !== 'boolean')
+    throw new Error('Push enabled must be true or false.');
+  updateDevice(id, { pushEnabled: enabled });
+  return { ok: true };
+}
+
+async function devicePushState(id) {
+  const device = findDevice(id);
+  if (!device) throw new Error('Unknown device.');
+  return { hasToken: !!device.pushToken, pushEnabled: device.pushEnabled !== false };
+}
+
+// ─── Session alert push ──────────────────────────────────────────────────
+// Called with alerts the engine already approved (switches, suppress-when-
+// focused, cooldown all ran before listeners) — never re-gated here.
+
+function pushTargets() {
+  return readDeviceRecords().filter(
+    (d) => d && typeof d.id === 'string' && d.pushToken && d.pushEnabled !== false
+  );
+}
+
+async function handleSessionAlert(alert) {
+  const body = alert && ALERT_BODIES[alert.kind];
+  if (!body || !alert.sessionId) return { ok: true, sent: 0 };
+  const targets = pushTargets();
+  if (targets.length === 0) return { ok: true, sent: 0 };
+  let hostId = null;
+  try {
+    hostId = getHostId();
+  } catch (err) {
+    deps.log(`[remote-access] push skipped: ${err?.message || err}`);
+    return { ok: true, sent: 0 };
+  }
+  const messages = targets.map((d) => ({
+    to: d.pushToken,
+    title: 'WPXen',
+    body,
+    data: { hostId, sessionId: alert.sessionId },
+    sound: 'default',
+    priority: 'high',
+  }));
+  let receipts = [];
+  try {
+    const res = await deps.fetch(EXPO_PUSH_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(messages),
+    });
+    try {
+      receipts = (await res.json())?.data || [];
+    } catch {
+      receipts = [];
+    }
+  } catch (err) {
+    // One attempt per alert: failures log without the token and stop here,
+    // never a tight retry loop.
+    deps.log(
+      `[remote-access] push failed for ${targets.length} device(s): ${err?.message || err}`
+    );
+    return { ok: false, sent: 0 };
+  }
+  // A dead token clears itself so one uninstalled app can't wedge the rest.
+  const dead = new Set();
+  receipts.forEach((receipt, i) => {
+    if (
+      receipt &&
+      receipt.status === 'error' &&
+      receipt.details?.error === 'DeviceNotRegistered' &&
+      messages[i]
+    ) {
+      dead.add(messages[i].to);
+    }
+  });
+  if (dead.size > 0 && deps.store) {
+    deps.store.set(
+      DEVICE_KEY,
+      readDeviceRecords().map((d) =>
+        d && dead.has(d.pushToken) ? { ...d, pushToken: null } : d
+      )
+    );
+    publishDevices();
+  }
+  return { ok: true, sent: targets.length };
+}
+
 // ─── Sessions for the phone ──────────────────────────────────────────────
 // The Session engine is read here, never changed. The narrow `sessions` dep
 // (list/subscribe/markRead/get/projects, injected from ipc.cjs like
@@ -1474,11 +1608,35 @@ function handleDeviceConnection(ws, req) {
       payload.op === 'terminal.attach' ||
       payload.op === 'terminal.detach' ||
       payload.op === 'terminal.write' ||
-      payload.op === 'terminal.resize'
+      payload.op === 'terminal.resize' ||
+      payload.op === 'device.setPushToken' ||
+      payload.op === 'device.setPushEnabled' ||
+      payload.op === 'device.pushState'
     ) {
       if (!device) return drop(ws);
       try {
         const params = payload.params || {};
+        if (payload.op === 'device.setPushToken') {
+          return sendSealed({
+            kind: 'response',
+            id: payload.id,
+            result: await setDevicePushToken(device.id, params.token),
+          });
+        }
+        if (payload.op === 'device.setPushEnabled') {
+          return sendSealed({
+            kind: 'response',
+            id: payload.id,
+            result: await setDevicePushEnabled(device.id, params.enabled),
+          });
+        }
+        if (payload.op === 'device.pushState') {
+          return sendSealed({
+            kind: 'response',
+            id: payload.id,
+            result: await devicePushState(device.id),
+          });
+        }
         const targetId = params.sessionId;
         if (typeof targetId !== 'string' || !targetId)
           throw new Error('Unknown session.');
@@ -1595,6 +1753,10 @@ module.exports = {
   renameDevice,
   revokeDevice,
   disconnectAll,
+  setDevicePushToken,
+  setDevicePushEnabled,
+  devicePushState,
+  handleSessionAlert,
   dispose,
   __setDeps,
 };
