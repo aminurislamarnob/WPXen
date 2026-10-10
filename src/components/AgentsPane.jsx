@@ -31,6 +31,7 @@ import {
   nextActive,
   needsBulkConfirm,
   paneIds,
+  neighbour,
 } from '../lib/tabStrip';
 
 const CLOSE_CONFIRM_KEY = 'wpxen.terminalCloseConfirmSuppressed';
@@ -118,11 +119,19 @@ export default function AgentsPane() {
     [allSessions, siteId]
   );
   const [activeTab, setActiveTab] = useState(null); // sessionId
-  const [activePaneId, setActivePaneId] = useState(null); // focused pane inside activeTab
+  // The focused pane of each split tab; an unsplit tab is its own pane.
+  const [focusedPaneBySession, setFocusedPaneBySession] = useState({});
   const sessionsById = useMemo(
     () => Object.fromEntries(allSessions.map((s) => [s.sessionId, s])),
     [allSessions]
   );
+  // A remembered pane that has since closed falls back to the first one.
+  const rememberedPane = activeTab ? focusedPaneBySession[activeTab] : null;
+  const focusedPaneId = activeTab
+    ? sessionsById[rememberedPane]?.paneOf === activeTab
+      ? rememberedPane
+      : activeTab
+    : null;
   const [addMenu, setAddMenu] = useState(null); // { x, y } when the + menu is open
   const [browserMenu, setBrowserMenu] = useState(null); // { x, y } for the browser targets
   const [browserBusy, setBrowserBusy] = useState(null); // target id being resolved
@@ -209,25 +218,42 @@ export default function AgentsPane() {
       if (e.metaKey && !e.ctrlKey && !e.altKey && e.key.toLowerCase() === 'd') {
         e.preventDefault();
         const dir = e.shiftKey ? 'down' : 'right';
-        if (activeTab && !showingFile) {
-          window.electronAPI.splitPane(activeTab, dir);
+        if (focusedPaneId && !showingFile) {
+          window.electronAPI.splitPane(focusedPaneId, dir);
+        }
+      }
+      if (e.metaKey && e.altKey && !e.ctrlKey && !e.shiftKey) {
+        let direction = null;
+        if (e.code === 'ArrowLeft') direction = 'left';
+        if (e.code === 'ArrowRight') direction = 'right';
+        if (e.code === 'ArrowUp') direction = 'up';
+        if (e.code === 'ArrowDown') direction = 'down';
+
+        if (direction && activeTab && !showingFile) {
+          const tab = allSessions.find((t) => t.sessionId === activeTab);
+          const tree = tab?.layout ?? { leaf: activeTab };
+          const nextId = neighbour(tree, focusedPaneId, direction);
+          if (nextId) {
+            e.preventDefault();
+            setFocusedPaneBySession((prev) => ({ ...prev, [activeTab]: nextId }));
+          }
         }
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [toggleExplorer, activeTab, showingFile]);
+  }, [toggleExplorer, activeTab, showingFile, focusedPaneId, allSessions]);
 
   // ⌘W belongs to the app menu (Close Window), so the main process only
   // forwards it while a terminal pane here has focus — see paneFocus below.
   const closePaneRef = useRef(null);
   useEffect(() => {
     return window.electronAPI.on('agents-shortcut', (e) => {
-      if (e.key === 'w' && activePaneId) closePaneRef.current(activePaneId);
+      if (e.key === 'w' && focusedPaneId) closePaneRef.current(focusedPaneId);
     });
-  }, [activePaneId]);
+  }, [focusedPaneId]);
   const paneFocus = (sessionId) => {
-    setActivePaneId(sessionId);
+    setFocusedPaneBySession((prev) => ({ ...prev, [activeTab]: sessionId }));
     window.electronAPI.setAgentsFocus(true);
   };
   const paneBlur = () => window.electronAPI.setAgentsFocus(false);
@@ -436,8 +462,8 @@ export default function AgentsPane() {
   // browser tab covers the terminal, so its output still counts as unread.
   const showingFile = view === 'file' && openFiles.some((f) => f.key === activeKey);
   useEffect(() => {
-    setSelectedSession(siteId && !showingFile ? activeTab : null);
-  }, [siteId, activeTab, showingFile]);
+    setSelectedSession(siteId && !showingFile ? focusedPaneId : null);
+  }, [siteId, focusedPaneId, showingFile]);
   useEffect(() => () => setSelectedSession(null), []);
 
   // Close request from the tab's X: confirm first if the session is still
@@ -939,7 +965,7 @@ export default function AgentsPane() {
                     <SplitLayout
                       key={activeTab}
                       rootId={activeTab}
-                      activeId={activeTab}
+                      focusedId={focusedPaneId}
                       tree={
                         tabs.find((t) => t.sessionId === activeTab)?.layout ?? {
                           leaf: activeTab,
