@@ -649,6 +649,7 @@ function resolveLaunch({ cmd, sitePath, globalArgs = '', target = null }) {
 const { randomUUID } = require('crypto');
 const MAX_BUFFER = 1024 * 1024; // ~1 MB ring buffer (Q9)
 const sessions = new Map(); // sessionId -> session
+const layouts = new Map(); // rootId -> layout tree
 
 // Change feed for the Agents sidebar. Title updates arrive at spinner rate, so
 // notifications are coalesced into one per CHANGE_DEBOUNCE_MS; launches, exits
@@ -798,6 +799,8 @@ function sessionRow(s) {
     agentName: s.agentName,
     targetId: s.targetId,
     label: s.label,
+    paneOf: s.paneOf || null,
+    layout: !s.paneOf ? layouts.get(s.sessionId) || { leaf: s.sessionId } : null,
     // The issue or PR Start → launched this Session for, else null.
     issue: s.issue || null,
     startedAt: s.startedAt,
@@ -835,6 +838,7 @@ function launch({
   cwd: cwdOverride = null,
   prompt = '',
   issue = null,
+  paneOf = null,
 }) {
   // `all` so launching by id still works for an agent hidden from the
   // launcher (e.g. a saved session being restored).
@@ -879,6 +883,7 @@ function launch({
       targetId: target?.id || null,
       label: resolved.label,
       issue: issue ? cleanIssueLink(issue) : null,
+      paneOf,
     },
     failLabel: agent.name,
   });
@@ -1115,6 +1120,67 @@ function resize(sessionId, cols, rows) {
   }
 }
 
+function splitPane(sessionId, dir, site, globalArgs = '') {
+  const session = sessions.get(sessionId);
+  if (!session) return { error: 'no session' };
+
+  const rootId = session.paneOf || sessionId;
+  let tree = layouts.get(rootId) || { leaf: rootId };
+
+  const res = launch({
+    site,
+    agentId: SHELL_ID,
+    cwd: session.cwd,
+    globalArgs,
+    paneOf: rootId,
+  });
+
+  if (!res.ok) return res;
+
+  function insert(node) {
+    if (node.leaf === sessionId) {
+      return {
+        dir,
+        ratio: 50,
+        a: { leaf: sessionId },
+        b: { leaf: res.sessionId },
+      };
+    }
+    if (node.dir) {
+      return {
+        ...node,
+        a: insert(node.a),
+        b: insert(node.b),
+      };
+    }
+    return node;
+  }
+
+  layouts.set(rootId, insert(tree));
+  emitChange({ immediate: true });
+  return { ok: true, sessionId: res.sessionId };
+}
+
+function setPaneRatio(rootId, path, ratio) {
+  let tree = layouts.get(rootId);
+  if (!tree) return;
+
+  function update(node, currentPath) {
+    if (!node.dir) return node;
+    if (currentPath === path) {
+      return { ...node, ratio };
+    }
+    return {
+      ...node,
+      a: update(node.a, currentPath + 'a'),
+      b: update(node.b, currentPath + 'b'),
+    };
+  }
+
+  layouts.set(rootId, update(tree, ''));
+  emitChange({ immediate: true });
+}
+
 // Graceful stop: SIGTERM, escalate to SIGKILL after a grace period (Q11).
 function stop(sessionId) {
   const session = sessions.get(sessionId);
@@ -1187,6 +1253,8 @@ module.exports = {
   setNotificationSettings,
   clearBuffer,
   resize,
+  splitPane,
+  setPaneRatio,
   stop,
   getSession,
   hasActiveSessions,
