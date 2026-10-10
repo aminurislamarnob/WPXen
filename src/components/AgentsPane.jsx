@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import { ProviderIcon } from './providerIcons';
 import { Panel, PanelGroup } from 'react-resizable-panels';
-import Terminal from './Terminal';
+import SplitLayout from './agents/SplitLayout';
 import FileExplorer from './FileExplorer';
 import CodeEditor from './CodeEditor';
 import ResizeHandle from './ResizeHandle';
@@ -105,7 +105,7 @@ export default function AgentsPane() {
   const tabs = useMemo(
     () =>
       allSessions
-        .filter((s) => s.siteId === siteId)
+        .filter((s) => s.siteId === siteId && !s.paneOf)
         .sort((a, b) => a.startedAt - b.startedAt),
     [allSessions, siteId]
   );
@@ -182,14 +182,28 @@ export default function AgentsPane() {
   }, []);
   useEffect(() => {
     const onKey = (e) => {
-      if (!e.metaKey || !e.shiftKey || e.ctrlKey || e.altKey) return;
-      if (e.key.toLowerCase() !== 'e') return;
-      e.preventDefault();
-      toggleExplorer();
+      if (
+        e.metaKey &&
+        e.shiftKey &&
+        !e.ctrlKey &&
+        !e.altKey &&
+        e.key.toLowerCase() === 'e'
+      ) {
+        e.preventDefault();
+        toggleExplorer();
+        return;
+      }
+      if (e.metaKey && !e.ctrlKey && !e.altKey && e.key.toLowerCase() === 'd') {
+        e.preventDefault();
+        const dir = e.shiftKey ? 'down' : 'right';
+        if (activeTab && !showingFile) {
+          window.electronAPI.splitPane(activeTab, dir);
+        }
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [toggleExplorer]);
+  }, [toggleExplorer, activeTab, showingFile]);
   // Hold the Explorer's pixel width as the window resizes.
   useEffect(() => {
     const panel = explorerRef.current;
@@ -467,15 +481,30 @@ export default function AgentsPane() {
     const canCloseRight = tabsToClose(orderedKeys, key, 'right').length > 0;
     const canCloseLeft = tabsToClose(orderedKeys, key, 'left').length > 0;
 
+    const items = [];
+    if (kind === 'session') {
+      items.push({
+        label: 'Split right',
+        onClick: () => window.electronAPI.splitPane(key, 'right'),
+      });
+      items.push({
+        label: 'Split down',
+        onClick: () => window.electronAPI.splitPane(key, 'down'),
+      });
+      items.push('separator');
+    }
+
+    items.push({
+      label: 'Close',
+      disabled: !canClose,
+      onClick: () => handleBulkClose('close', key),
+    });
+
     setTabMenu({
       x: e.clientX,
       y: e.clientY,
       items: [
-        {
-          label: 'Close',
-          disabled: !canClose,
-          onClick: () => handleBulkClose('close', key),
-        },
+        ...items,
         {
           label: 'Close Others',
           disabled: !canCloseOthers,
@@ -841,9 +870,15 @@ export default function AgentsPane() {
 
                 <div className={showingFile ? 'hidden' : 'flex-1 min-h-0 px-4 pb-4'}>
                   {showingFile ? null : activeTab ? (
-                    <Terminal
+                    <SplitLayout
                       key={activeTab}
-                      sessionId={activeTab}
+                      rootId={activeTab}
+                      activeId={activeTab}
+                      tree={
+                        tabs.find((t) => t.sessionId === activeTab)?.layout ?? {
+                          leaf: activeTab,
+                        }
+                      }
                       rootPath={sitePath}
                       onOpenFile={openFileAtLine}
                       onOpenLink={handleOpenLink}

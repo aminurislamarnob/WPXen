@@ -824,6 +824,19 @@ function registerHandlers(win, storeInstance) {
     return res;
   });
 
+  ipcMain.handle('agent-split-pane', (_e, sessionId, dir) => {
+    const session = agents.getSession(sessionId);
+    if (!session) return { error: 'session not found' };
+    const site = findProject(session.siteId);
+    if (!site) return { error: 'Project not found' };
+    const globalArgs = store.get('agentPresets', {})[agents.SHELL_ID]?.args || '';
+    return agents.splitPane(sessionId, dir, site, globalArgs);
+  });
+
+  ipcMain.handle('agent-set-pane-ratio', (_e, rootId, path, ratio) => {
+    agents.setPaneRatio(rootId, path, ratio);
+  });
+
   // ── Launch Presets (global, per-Agent) & Launch Targets (per-Site) ─────────
   // Global default flags typed for an Agent on every launch, keyed by agentId:
   // { [agentId]: { args } }. `resolveLaunch` treats an absent/empty entry as
