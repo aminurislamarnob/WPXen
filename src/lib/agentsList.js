@@ -41,9 +41,36 @@ export function buildProjects({ projectIds, sites, sessions }) {
     const site = byId.get(id);
     if (!site) continue;
     const list = bySite.get(id) || [];
+
+    const enrichedList = list.map((s) => ({
+      ...s,
+      displayTitle: sessionTitle(s, list),
+      children: [],
+    }));
+    const rootMap = new Map();
+    const childrenList = [];
+
+    for (const s of enrichedList) {
+      if (s.paneOf) {
+        childrenList.push(s);
+      } else {
+        rootMap.set(s.sessionId, s);
+      }
+    }
+
+    for (const s of childrenList) {
+      const root = rootMap.get(s.paneOf);
+      if (root) {
+        root.children.push(s);
+      } else {
+        // If paneOf is missing (e.g. root filtered/not found), just make it a root
+        rootMap.set(s.sessionId, s);
+      }
+    }
+
     out.push({
       site,
-      sessions: list.map((s) => ({ ...s, displayTitle: sessionTitle(s, list) })),
+      sessions: Array.from(rootMap.values()),
     });
   }
   return out;
@@ -81,8 +108,14 @@ const ACTIVITY_RANK = { 'needs-input': 0, working: 1 };
 
 export function buildActivity(projects) {
   const rows = [];
+  function add(s, siteName) {
+    rows.push({ ...s, siteName });
+    if (s.children) {
+      for (const c of s.children) add(c, siteName);
+    }
+  }
   for (const { site, sessions } of projects || []) {
-    for (const s of sessions) rows.push({ ...s, siteName: site.name });
+    for (const s of sessions) add(s, site.name);
   }
   const rank = (s) => ACTIVITY_RANK[s.state] ?? 2;
   return rows.sort((a, b) => rank(a) - rank(b) || b.changedAt - a.changedAt);
@@ -115,24 +148,61 @@ const ENDED_STATES = new Set(['exited', 'error']);
 export function applyListOptions(projects, options = DEFAULT_LIST_OPTIONS) {
   const o = { ...DEFAULT_LIST_OPTIONS, ...options };
   let out = projects.map(({ site, sessions }) => {
-    let list = o.hideExited
-      ? sessions.filter((s) => !ENDED_STATES.has(s.state))
-      : sessions;
+    let list = sessions.map((s) => {
+      let filteredChildren = o.hideExited
+        ? s.children.filter((c) => !ENDED_STATES.has(c.state))
+        : [...s.children];
+
+      if (o.sessionSort === 'attention') {
+        filteredChildren = filteredChildren.sort(
+          (a, b) =>
+            (SESSION_RANK[a.state] ?? 4) - (SESSION_RANK[b.state] ?? 4) ||
+            b.changedAt - a.changedAt
+        );
+      }
+      return { ...s, children: filteredChildren };
+    });
+
+    if (o.hideExited) {
+      list = list.filter((s) => !ENDED_STATES.has(s.state) || s.children.length > 0);
+    }
+
     if (o.sessionSort === 'attention') {
-      list = [...list].sort(
-        (a, b) =>
-          (SESSION_RANK[a.state] ?? 4) - (SESSION_RANK[b.state] ?? 4) ||
-          b.changedAt - a.changedAt
-      );
+      const rank = (s) => {
+        let best = SESSION_RANK[s.state] ?? 4;
+        for (const c of s.children) {
+          const cRank = SESSION_RANK[c.state] ?? 4;
+          if (cRank < best) best = cRank;
+        }
+        return best;
+      };
+      const recent = (s) => {
+        let best = s.changedAt;
+        for (const c of s.children) {
+          if (c.changedAt > best) best = c.changedAt;
+        }
+        return best;
+      };
+
+      list = [...list].sort((a, b) => rank(a) - rank(b) || recent(b) - recent(a));
     }
     return { site, sessions: list };
   });
+
   if (o.hideEmpty) out = out.filter((p) => p.sessions.length > 0);
   if (o.projectSort === 'name') {
     out = [...out].sort((a, b) => a.site.name.localeCompare(b.site.name));
   } else if (o.projectSort === 'recent') {
-    // Most recent status change among a project's sessions; none sorts last.
-    const latest = (p) => Math.max(-Infinity, ...p.sessions.map((s) => s.changedAt));
+    const latest = (p) => {
+      let max = -Infinity;
+      for (const s of p.sessions) {
+        if (s.changedAt > max) max = s.changedAt;
+        for (const c of s.children) {
+          if (c.changedAt > max) max = c.changedAt;
+        }
+      }
+      return max;
+    };
     out = [...out].sort((a, b) => latest(b) - latest(a));
   }
   return out;

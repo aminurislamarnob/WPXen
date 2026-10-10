@@ -338,14 +338,18 @@ export default function AgentsPane() {
         else preferActive = res?.sessionId || null;
       }
 
+      const all = await window.electronAPI.listAllSessions();
+      if (cancelled) return;
       if (preferActive) {
-        setActiveTab(preferActive);
+        // A nested sidebar row names a split pane: open its tab, focus the pane.
+        const rootId = (all || []).find((s) => s.sessionId === preferActive)?.paneOf;
+        if (rootId)
+          setFocusedPaneBySession((prev) => ({ ...prev, [rootId]: preferActive }));
+        setActiveTab(rootId || preferActive);
         setView('session');
       } else {
-        const all = await window.electronAPI.listAllSessions();
-        if (cancelled) return;
         const first = (all || [])
-          .filter((s) => s.siteId === siteId)
+          .filter((s) => s.siteId === siteId && !s.paneOf)
           .sort((a, b) => a.startedAt - b.startedAt)[0];
         setActiveTab(first?.sessionId || null);
       }
