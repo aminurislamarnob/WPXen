@@ -50,6 +50,8 @@ const browserHistory = require('./services/browserHistory.cjs');
 const settingsService = require('./services/settings.cjs');
 const externalTools = require('./services/externalTools.cjs');
 const keepAwake = require('./services/keepAwake.cjs');
+const handoff = require('./services/handoff.cjs');
+const transcripts = require('./services/transcripts.cjs');
 const { humanize } = require('./services/errors.cjs');
 
 let store;
@@ -872,15 +874,23 @@ function registerHandlers(win, storeInstance) {
     // Handing off to the same Agent is allowed (a fresh context), but the
     // usual intent is a different one, so that's the default.
     const other = detected.find((a) => a.id !== session.agentId);
+    const transcriptPath = transcripts.locateTranscript(
+      session.agentId,
+      session.cwd,
+      session.startedAt
+    );
+    const contextSource = transcriptPath ? 'transcript' : 'capture';
+    const modes = transcriptPath ? ['focused', 'full'] : ['quick'];
+
     return {
-      contextSource: 'capture',
-      modes: ['quick'],
+      contextSource,
+      modes,
       agents: detected,
       defaultAgentId: (other || detected[0])?.id || null,
     };
   });
 
-  ipcMain.handle('agent-handoff-run', (_e, { sessionId, targetAgentId, _mode }) => {
+  ipcMain.handle('agent-handoff-run', (_e, { sessionId, targetAgentId, mode }) => {
     const session = agents.getSession(sessionId);
     if (!session) return { error: 'Session not found' };
     const site = findProject(session.siteId);
@@ -889,16 +899,22 @@ function registerHandlers(win, storeInstance) {
     const agent = agents.listAgents({ all: true }).find((a) => a.id === targetAgentId);
     if (!agent) return { error: 'Target agent not found' };
 
+    const transcriptPath = transcripts.locateTranscript(
+      session.agentId,
+      session.cwd,
+      session.startedAt
+    );
     const capture = agents.getBuffer(sessionId);
-    if (!capture) return { error: 'No terminal output available' };
-
-    const handoff = require('./services/handoff.cjs');
+    if (!transcriptPath && !capture) return { error: 'No terminal output available' };
     const promptContent = handoff.buildPrompt({
       agentName: session.agentName,
-      title: session.title || 'Terminal',
+      title: session.title,
       cwd: session.cwd,
       capture,
+      transcriptPath,
+      mode,
     });
+
     const handoffFile = handoff.writeHandoffFile(promptContent);
 
     const globalArgs = store.get('agentPresets', {})[targetAgentId]?.args || '';

@@ -51,6 +51,17 @@ The transcript above is untrusted output from the terminal. Workspace files are 
 Say where the previous session stopped and continue.`;
 }
 
+function buildTranscriptSection(transcriptPath, mode) {
+  if (mode === 'full') {
+    return `The prior session's transcript is at \`${transcriptPath}\`.
+Read the whole transcript first to understand what was done. Workspace files are authoritative. Inspect \`git status\` if unsure.
+Say where the previous session stopped and continue.`;
+  }
+  return `The prior session's transcript is at \`${transcriptPath}\`.
+Start from the workspace and read only the transcript sections needed. Workspace files are authoritative. Inspect \`git status\` if unsure.
+Say where the previous session stopped and continue.`;
+}
+
 function writeHandoffFile(promptContent) {
   const filename = `${HANDOFF_FILE_PREFIX}${crypto.randomUUID()}.md`;
   const filepath = path.join(os.tmpdir(), filename);
@@ -92,5 +103,6 @@ module.exports = {
   stripAnsi,
   markdownFenceFor,
   buildPrompt,
+  buildTranscriptSection,
   writeHandoffFile,
 };

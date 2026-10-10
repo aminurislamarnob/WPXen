@@ -161,3 +161,18 @@ describe('launching a handoff Session', () => {
     }
   });
 });
+
+describe('buildTranscriptSection', () => {
+  const { buildTranscriptSection } = require('../electron/services/handoff.cjs');
+  it('builds full framing', () => {
+    const text = buildTranscriptSection('/my/path.jsonl', 'full');
+    expect(text).toContain('Read the whole transcript first');
+    expect(text).toContain('`/my/path.jsonl`');
+  });
+
+  it('builds focused framing', () => {
+    const text = buildTranscriptSection('/my/path.jsonl', 'focused');
+    expect(text).toContain('read only the transcript sections needed');
+    expect(text).toContain('`/my/path.jsonl`');
+  });
+});
