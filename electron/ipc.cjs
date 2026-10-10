@@ -452,12 +452,9 @@ function registerHandlers(win, storeInstance) {
     }
   });
   ipcMain.handle('agent-folder-clone-abort', () => gitClone.abort());
-  // Where the clone dialog's parent folder starts: ~/Projects when it exists,
-  // else the home folder.
-  ipcMain.handle('agent-clone-default-parent', () => {
-    const projects = path.join(os.homedir(), 'Projects');
-    return fs.existsSync(projects) ? projects : os.homedir();
-  });
+  // Where the clone dialog's parent folder starts: the WPXen sites folder
+  // (Settings → Sites), so cloned projects sit beside the Sites.
+  ipcMain.handle('agent-clone-default-parent', () => settings.get('sites.dir'));
 
   // A project's sidebar icon (services/projectIcon.cjs): its WordPress Site
   // Icon, Orca's repo icon when the Site's folder is a GitHub repo, else the
