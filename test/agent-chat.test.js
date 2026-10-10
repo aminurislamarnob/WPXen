@@ -316,8 +316,8 @@ describe('agent-chat watcher', () => {
       older.push(...page.rows);
       if (page.atStart) break;
     }
-    const callRow = older.find((r) => r.id === 'msg-call');
-    expect(callRow.blocks[0].result.content).toBe('done');
+    const callRow = older.find((r) => r.id === 'msg-call-0');
+    expect(callRow.result.content).toBe('done');
     expect(callRow.remove).toEqual(['r-1']);
   });
 
@@ -380,6 +380,46 @@ describe('decodeClaudeLine', () => {
       .filter((r) => r.role === 'user')
       .map((r) => r.content);
     expect(contents.join('\n')).not.toMatch(/register_rest_route|<command-name>|caveat/i);
+  });
+
+  it("takes the header title from Claude's ai-title record", () => {
+    const state = {};
+    const lines = fs
+      .readFileSync(path.join(__dirname, 'fixtures/claude-transcript.jsonl'), 'utf8')
+      .split('\n');
+    const headers = lines
+      .flatMap((l) => [decodeClaudeLine(l, state) ?? []].flat())
+      .filter((r) => r.isHeader);
+    expect(headers).toEqual([{ isHeader: true, title: 'Health check endpoint' }]);
+  });
+
+  it('renders Edit, Write and MultiEdit calls as inline diffs', () => {
+    const P = '/Users/dev/Sites/shop.test/wp-content/plugins/shop/';
+    const edits = Object.fromEntries(
+      decodeFixture()
+        .filter((r) => r.role === 'tool' && r.edit)
+        .map((r) => [r.tool_use.name, r.edit])
+    );
+    expect(edits.Edit).toEqual({
+      path: P + 'rest.php',
+      original: "register_rest_route('shop/v1', '/orders'",
+      modified: "register_rest_route('shop/v1', '/health'",
+    });
+    expect(edits.Write).toEqual({
+      path: P + 'tests/test-health.php',
+      original: '',
+      modified: '<?php\nclass Test_Health extends WP_UnitTestCase {}\n',
+    });
+    expect(edits.MultiEdit).toEqual({
+      path: P + 'shop.php',
+      original: 'Version: 1.0\n\n// routes',
+      modified: 'Version: 1.1\n\n// routes: orders, health',
+    });
+  });
+
+  it('attaches each edit result to its call', () => {
+    const tools = decodeFixture().filter((r) => r.role === 'tool');
+    expect(tools.every((t) => t.result)).toBe(true);
   });
 
   it('splits assistant messages into one row per block, merged by message id', () => {

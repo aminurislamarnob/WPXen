@@ -148,53 +148,55 @@ export function ChatView({ sessionId }) {
 
   useEffect(() => {
     const api = window.electronAPI;
-    const unsub = api.on('agent-chat-rows', ({ sessionId: rowSessionId, rows }) => {
-      if (rowSessionId !== sessionId) return;
+    const unsub = api.on(
+      'agent-chat-rows',
+      ({ sessionId: rowSessionId, rows, header }) => {
+        if (rowSessionId !== sessionId) return;
 
-      if (arguments[0].header && arguments[0].header.title)
-        setHeaderTitle(arguments[0].header.title);
+        if (header?.title) setHeaderTitle(header.title);
 
-      setMessages((prev) => {
-        let next = [...prev];
-        let changed = false;
+        setMessages((prev) => {
+          let next = [...prev];
+          let changed = false;
 
-        for (const row of rows) {
-          if (row.reset) {
-            next = [];
-            setAtStart(false);
-            setStaleNotice(false);
+          for (const row of rows) {
+            if (row.reset) {
+              next = [];
+              setAtStart(false);
+              setStaleNotice(false);
+              changed = true;
+              continue;
+            }
+            if (row.notice) {
+              if (row.kind === 'transcript-changed') setStaleNotice(true);
+              continue;
+            }
+
+            if (row.remove) {
+              next = next.filter((m) => !row.remove.includes(m.id));
+              changed = true;
+            }
+
+            if (!row.id) continue;
             changed = true;
-            continue;
-          }
-          if (row.notice) {
-            if (row.kind === 'transcript-changed') setStaleNotice(true);
-            continue;
+
+            const idx = next.findIndex((m) => m.id === row.id);
+            if (idx >= 0) {
+              next[idx] = row;
+            } else {
+              next.push(row);
+            }
           }
 
-          if (row.remove) {
-            next = next.filter((m) => !row.remove.includes(m.id));
-            changed = true;
+          if (changed) {
+            if (!stickToBottom) {
+              setShowLatestPill(true);
+            }
           }
-
-          if (!row.id) continue;
-          changed = true;
-
-          const idx = next.findIndex((m) => m.id === row.id);
-          if (idx >= 0) {
-            next[idx] = row;
-          } else {
-            next.push(row);
-          }
-        }
-
-        if (changed) {
-          if (!stickToBottom) {
-            setShowLatestPill(true);
-          }
-        }
-        return changed ? next : prev;
-      });
-    });
+          return changed ? next : prev;
+        });
+      }
+    );
 
     api.chatOpen(sessionId, viewerId);
     return () => {

@@ -1,3 +1,35 @@
+// Tool name -> summary kind. Claude Code's names, then Antigravity's.
+const TOOL_KINDS = {
+  Read: 'read',
+  NotebookRead: 'read',
+  Bash: 'bash',
+  Edit: 'edit',
+  Write: 'edit',
+  MultiEdit: 'edit',
+  NotebookEdit: 'edit',
+  Grep: 'search',
+  Glob: 'search',
+  read_file: 'read',
+  view_file: 'read',
+  bash: 'bash',
+  run_command: 'bash',
+  replace: 'edit',
+  replace_file_content: 'edit',
+  write_to_file: 'edit',
+  multi_edit: 'edit',
+  grep_search: 'search',
+  glob: 'search',
+};
+
+// [kind, singular, plural] in summary order; '#' is the count.
+const SUMMARY_PARTS = [
+  ['read', 'Read # file', 'Read # files'],
+  ['bash', 'Ran # command', 'Ran # commands'],
+  ['edit', 'Edited # file', 'Edited # files'],
+  ['search', 'Searched # time', 'Searched # times'],
+  ['other', 'Used # tool', 'Used # tools'],
+];
+
 export function foldToolRuns(rows) {
   const folded = [];
   let currentRun = null;
@@ -35,40 +67,16 @@ export function foldToolRuns(rows) {
         }
       }
 
-      let read = (nameCounts['read_file'] || 0) + (nameCounts['view_file'] || 0);
-      let bash = (nameCounts['bash'] || 0) + (nameCounts['run_command'] || 0);
-      let edit =
-        (nameCounts['replace'] || 0) +
-        (nameCounts['replace_file_content'] || 0) +
-        (nameCounts['write_to_file'] || 0) +
-        (nameCounts['multi_edit'] || 0);
-      let search = (nameCounts['grep_search'] || 0) + (nameCounts['glob'] || 0);
+      const counts = { read: 0, bash: 0, edit: 0, search: 0, other: 0 };
+      for (const [name, n] of Object.entries(nameCounts)) {
+        counts[TOOL_KINDS[name] || 'other'] += n;
+      }
 
       const parts = [];
-      if (read > 0) parts.push(`Read ${read} file${read > 1 ? 's' : ''}`);
-      if (bash > 0) parts.push(`Ran ${bash} command${bash > 1 ? 's' : ''}`);
-      if (edit > 0) parts.push(`Edited ${edit} file${edit > 1 ? 's' : ''}`);
-      if (search > 0) parts.push(`Searched ${search} time${search > 1 ? 's' : ''}`);
-
-      const otherNames = Object.keys(nameCounts).filter(
-        (n) =>
-          ![
-            'read_file',
-            'view_file',
-            'bash',
-            'run_command',
-            'replace',
-            'replace_file_content',
-            'write_to_file',
-            'multi_edit',
-            'grep_search',
-            'glob',
-          ].includes(n)
-      );
-
-      let other = 0;
-      for (const n of otherNames) other += nameCounts[n];
-      if (other > 0) parts.push(`Used ${other} tool${other > 1 ? 's' : ''}`);
+      for (const [kind, one, many] of SUMMARY_PARTS) {
+        const n = counts[kind];
+        if (n > 0) parts.push((n === 1 ? one : many).replace('#', n));
+      }
 
       if (parts.length === 0) {
         run.summary = 'Tool interactions';

@@ -30,20 +30,26 @@ function toolResultText(content) {
     .join('\n');
 }
 
-// The inline diff a file-editing tool call carries, or null.
+// The inline diff a file-editing tool call carries, or null. Claude Code's
+// Edit / Write / MultiEdit inputs; MultiEdit's hunks are shown as one diff.
 function editFor(block) {
-  if (block.name === 'replace' || block.name === 'replace_file_content') {
+  const input = block.input || {};
+  if (typeof input.file_path !== 'string') return null;
+  if (block.name === 'Edit') {
     return {
-      path: block.input.TargetFile,
-      original: block.input.TargetContent,
-      modified: block.input.ReplacementContent,
+      path: input.file_path,
+      original: input.old_string ?? '',
+      modified: input.new_string ?? '',
     };
   }
-  if (block.name === 'write_to_file') {
+  if (block.name === 'Write') {
+    return { path: input.file_path, original: '', modified: input.content ?? '' };
+  }
+  if (block.name === 'MultiEdit' && Array.isArray(input.edits)) {
     return {
-      path: block.input.TargetFile,
-      original: '',
-      modified: block.input.CodeContent,
+      path: input.file_path,
+      original: input.edits.map((e) => e.old_string ?? '').join('\n\n'),
+      modified: input.edits.map((e) => e.new_string ?? '').join('\n\n'),
     };
   }
   return null;
@@ -119,6 +125,13 @@ function decodeClaudeLine(lineStr, state) {
   state.calls = state.calls || {};
   state.results = state.results || {};
 
+  // Claude names the conversation in its own record, and renames it later.
+  if (record.type === 'ai-title') {
+    return typeof record.aiTitle === 'string' && record.aiTitle.trim()
+      ? { isHeader: true, title: record.aiTitle.trim() }
+      : null;
+  }
+
   if (record.type === 'user') {
     // The turn lives under message.content: a string, or an array of blocks.
     const content = record.message?.content;
@@ -170,21 +183,6 @@ function decodeClaudeLine(lineStr, state) {
       blockIndex++;
 
       if (block.type === 'text') {
-        if (block.text && block.text.includes('<ai-title>')) {
-          const match = block.text.match(/<ai-title>(.*?)<\/ai-title>/);
-          if (match) {
-            rows.push({
-              isHeader: true,
-              title: match[1],
-            });
-            const cleaned = block.text.replace(/<ai-title>.*?<\/ai-title>/, '').trim();
-            if (cleaned) {
-              rows.push({ id: blockId, role: 'assistant', content: cleaned });
-            }
-            continue;
-          }
-        }
-
         if (block.text) {
           rows.push({ id: blockId, role: 'assistant', content: block.text });
         }

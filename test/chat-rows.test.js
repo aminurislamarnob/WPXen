@@ -38,6 +38,19 @@ describe('foldToolRuns', () => {
     expect(foldToolRuns(editSearch)[0].summary).toBe('Edited 1 file, Searched 1 time');
   });
 
+  it("summarises Claude Code's tool names", () => {
+    const tool = (name) => ({
+      id: name + Math.random(),
+      role: 'tool',
+      tool_use: { name },
+    });
+    const run = ['Read', 'Read', 'Bash', 'Edit', 'Write', 'MultiEdit', 'Grep', 'Glob'];
+    expect(foldToolRuns(run.map(tool))[0].summary).toBe(
+      'Read 2 files, Ran 1 command, Edited 3 files, Searched 2 times'
+    );
+    expect(foldToolRuns([tool('WebFetch')])[0].summary).toBe('Used 1 tool');
+  });
+
   it('handles empty tools gracefully', () => {
     const rows = [{ id: '1', role: 'tool' }];
     expect(foldToolRuns(rows)[0].summary).toBe('Tool interactions');
