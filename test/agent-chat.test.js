@@ -203,20 +203,44 @@ describe('agent-chat watcher', () => {
     expect(full).toBe(largeStr);
   });
 
-  it('detects stale transcript', () => {
+  // A project folder of transcripts: name -> { content, mtimeMs }. Each open
+  // gets its own fd so reads hit the right file.
+  function fakeFolder(files) {
+    const fds = new Map();
     __setDeps({
       statSync: (p) => {
-        if (p.endsWith('newer.jsonl')) return { mtimeMs: 200, size: 10 };
-        return { size: 0, mtimeMs: 100 };
+        const f = files[path.basename(p)];
+        return { size: Buffer.byteLength(f.content), mtimeMs: f.mtimeMs };
       },
-      readdirSync: () => ['old.jsonl', 'newer.jsonl'],
-      openSync: () => 1,
-      readSync: () => 0,
+      readdirSync: () => Object.keys(files),
+      openSync: (p) => {
+        const fd = fds.size + 10;
+        fds.set(fd, path.basename(p));
+        return fd;
+      },
+      readSync: (fd, buf, offset, length, position) => {
+        const slice = Buffer.from(files[fds.get(fd)].content).slice(
+          position,
+          position + length
+        );
+        slice.copy(buf, offset);
+        return slice.length;
+      },
       closeSync: () => {},
       setInterval,
       clearInterval,
     });
+  }
 
+  const CLEAR_HEAD =
+    JSON.stringify(
+      userRecord(
+        'c-1',
+        '<command-name>/clear</command-name>\n<command-args></command-args>'
+      )
+    ) + '\n';
+
+  function watchOld(extra = {}) {
     const rows = [];
     openChat('sess-4', 'viewer-1', {
       transcriptPath: '/fake/old.jsonl',
@@ -224,11 +248,60 @@ describe('agent-chat watcher', () => {
       startedAt: new Date(150).toISOString(),
       decodeLine: (line) => ({ decoded: line }),
       onRows: (newRows) => rows.push(...newRows),
+      ...extra,
+    });
+    vi.advanceTimersByTime(500);
+    return rows;
+  }
+
+  it('detects stale transcript after /clear', () => {
+    fakeFolder({
+      'old.jsonl': { content: '', mtimeMs: 100 },
+      'newer.jsonl': { content: CLEAR_HEAD, mtimeMs: 200 },
+    });
+    expect(watchOld()).toContainEqual({ notice: true, kind: 'transcript-changed' });
+  });
+
+  it("ignores another session's newer transcript in the same folder", () => {
+    fakeFolder({
+      'old.jsonl': { content: '', mtimeMs: 100 },
+      'other.jsonl': {
+        content: JSON.stringify(userRecord('o-1', 'unrelated work')) + '\n',
+        mtimeMs: 200,
+      },
+    });
+    expect(watchOld()).not.toContainEqual({ notice: true, kind: 'transcript-changed' });
+  });
+
+  it('ignores a /clear transcript another live Session has pinned', () => {
+    fakeFolder({
+      'old.jsonl': { content: '', mtimeMs: 100 },
+      'pinned.jsonl': { content: CLEAR_HEAD, mtimeMs: 200 },
+    });
+    const rows = watchOld({ isPinnedElsewhere: (uuid) => uuid === 'pinned' });
+    expect(rows).not.toContainEqual({ notice: true, kind: 'transcript-changed' });
+  });
+
+  it('holds a partial last line until it completes, then decodes it once', () => {
+    const first = JSON.stringify(userRecord('p-1', 'first')) + '\n';
+    const second = JSON.stringify(userRecord('p-2', 'second'));
+    const files = { 'live.jsonl': { content: first, mtimeMs: 100 } };
+    fakeFolder(files);
+
+    const rows = [];
+    openChat('sess-5', 'viewer-1', {
+      transcriptPath: '/fake/live.jsonl',
+      decodeLine: decodeClaudeLine,
+      onRows: (newRows) => rows.push(...newRows),
     });
 
+    // Claude flushes half a record, then the rest.
+    files['live.jsonl'].content = first + second.slice(0, 20);
+    vi.advanceTimersByTime(500);
+    files['live.jsonl'].content = first + second + '\n';
     vi.advanceTimersByTime(500);
 
-    expect(rows).toContainEqual({ notice: true, kind: 'transcript-changed' });
+    expect(rows.map((r) => r.content)).toEqual(['first', 'second']);
   });
 });
 

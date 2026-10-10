@@ -1401,6 +1401,11 @@ function openChat(sessionId, viewerId) {
     decodeLine,
     transcriptId: session.transcriptId,
     startedAt: session.startedAt,
+    // Another live Session's own transcript is never this one's successor.
+    isPinnedElsewhere: (uuid) =>
+      [...sessions.values()].some(
+        (s) => s.sessionId !== sessionId && !s.exited && s.transcriptId === uuid
+      ),
     onRows: (rows) => {
       for (const cb of chatListeners) cb({ sessionId, rows });
     },

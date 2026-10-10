@@ -212,25 +212,50 @@ function fetchFull(fd, fileSize, toolUseId) {
 }
 
 // ── Stale transcript detection ─────────────────────────────────────────────
+// /clear starts a new transcript file that opens with the /clear command
+// record, within its first few KB.
+const CLEAR_MARKER = '<command-name>/clear</command-name>';
+const CLEAR_HEAD_BYTES = 16 * 1024;
+
+function opensWithClear(fullPath) {
+  let fd = null;
+  try {
+    fd = deps.openSync(fullPath, 'r');
+    return readRange(fd, 0, CLEAR_HEAD_BYTES).toString('utf8').includes(CLEAR_MARKER);
+  } catch {
+    return false;
+  } finally {
+    if (fd !== null) {
+      try {
+        deps.closeSync(fd);
+      } catch {}
+    }
+  }
+}
+
+// The Session moved on to a new conversation file (/clear). The project
+// folder is shared by every Claude session in that cwd, so a newer file only
+// counts if /clear opened it and no other live Session has pinned it.
 function checkStaleTranscript(watch) {
   if (!watch.transcriptDir || !watch.transcriptId) return false;
   try {
     const files = deps.readdirSync(watch.transcriptDir);
-    const jsonlFiles = files.filter((f) => f.endsWith('.jsonl'));
-    for (const f of jsonlFiles) {
-      const uuid = f.replace('.jsonl', '');
-      if (uuid !== watch.transcriptId) {
-        // Check if this file is newer
-        const fullPath = path.join(watch.transcriptDir, f);
-        try {
-          const stat = deps.statSync(fullPath);
-          if (stat.mtimeMs > watch.startedAtMs) {
-            return true;
-          }
-        } catch {
-          // ignore stat errors on individual files
-        }
+    for (const f of files) {
+      if (!f.endsWith('.jsonl') || watch.notStale.has(f)) continue;
+      const uuid = f.slice(0, -'.jsonl'.length);
+      if (uuid === watch.transcriptId) continue;
+      const fullPath = path.join(watch.transcriptDir, f);
+      try {
+        if (deps.statSync(fullPath).mtimeMs <= watch.startedAtMs) continue;
+      } catch {
+        continue;
       }
+      // A file's head never changes, so a miss is final.
+      if (watch.isPinnedElsewhere(uuid) || !opensWithClear(fullPath)) {
+        watch.notStale.add(f);
+        continue;
+      }
+      return true;
     }
   } catch {
     // ignore readdir errors
@@ -238,9 +263,31 @@ function checkStaleTranscript(watch) {
   return false;
 }
 
+// Bytes up to and including the last newline: a trailing partial line is
+// held back until Claude finishes writing it.
+function completeLength(fd, size) {
+  let cursor = size;
+  while (cursor > 0) {
+    const start = Math.max(0, cursor - PAGE_CHUNK);
+    const buf = readRange(fd, start, cursor - start);
+    const nl = buf.lastIndexOf(0x0a);
+    if (nl !== -1) return start + nl + 1;
+    cursor = start;
+  }
+  return 0;
+}
+
 // ── Open / Close ───────────────────────────────────────────────────────────
 function openChat(sessionId, viewerId, opts) {
-  const { transcriptPath, onRows, decodeLine, onNotice, transcriptId, startedAt } = opts;
+  const {
+    transcriptPath,
+    onRows,
+    decodeLine,
+    onNotice,
+    transcriptId,
+    startedAt,
+    isPinnedElsewhere = () => false,
+  } = opts;
 
   let watch = watches.get(sessionId);
   if (watch) {
@@ -271,16 +318,19 @@ function openChat(sessionId, viewerId, opts) {
     pageStart: 0,
     state: {},
     staleNotified: false,
-    tailOffset: 0, // byte offset for incremental polling after initial tail
+    isPinnedElsewhere,
+    notStale: new Set(), // folder files ruled out as this Session's successor
+    tailOffset: 0, // end of the last complete line read
   };
   watches.set(sessionId, watch);
 
   // Initial tail read
-  const { rows, pageStart, state } = tailRead(fd, stat.size, decodeLine);
+  const complete = completeLength(fd, stat.size);
+  const { rows, pageStart, state } = tailRead(fd, complete, decodeLine);
   watch.currentRows = rows;
   watch.pageStart = pageStart;
   watch.state = state;
-  watch.tailOffset = stat.size;
+  watch.tailOffset = complete;
 
   if (rows.length > 0) {
     onRows(rows);
@@ -307,10 +357,12 @@ function openChat(sessionId, viewerId, opts) {
         // Read incremental data
         const length = newSize - watch.tailOffset;
         const buf = readRange(watch.fd, watch.tailOffset, length);
-        watch.tailOffset = newSize;
         watch.fileSize = newSize;
 
-        const { lines } = splitLines(buf);
+        // Only complete lines advance the offset; a partial one is re-read
+        // whole on the next poll.
+        const { lines, partial } = splitLines(buf);
+        watch.tailOffset += buf.length - partial.length;
         const newRows = [];
         for (const line of lines) {
           if (!line.trim()) continue;
