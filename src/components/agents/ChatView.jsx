@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useId, useCallback } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { pinnedIndexes, shouldStickToBottom } from '../../lib/chatList';
-import { foldToolRuns } from '../../lib/chatRows';
+import { foldToolRuns, runNeedsAttention } from '../../lib/chatRows';
 import { useMemo } from 'react';
 import { useAgentSessions } from '../../lib/useAgentSessions';
 import DiffView from '../DiffView';
@@ -306,7 +306,7 @@ export function ChatView({ sessionId }) {
                       <div className="font-semibold text-[11px] mb-1 opacity-70">
                         Tool Run
                       </div>
-                      <details className="text-[13px]">
+                      <details className="text-[13px]" open={runNeedsAttention(msg)}>
                         <summary className="cursor-pointer font-medium">
                           {msg.summary}
                         </summary>

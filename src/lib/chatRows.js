@@ -107,3 +107,13 @@ export function subagentSummary(item) {
     count: n ? `${n} tool call${n === 1 ? '' : 's'}` : null,
   };
 }
+
+// A folded tool run opens by default while it holds something live: an
+// unanswered question card, or a subagent still running. Collapsed, they'd
+// sit behind a "Used 1 tool" summary.
+export function runNeedsAttention(run) {
+  return run.items.some(
+    (item) =>
+      !item.result && (item.tool_use?.name === 'AskUserQuestion' || !!item.subagent)
+  );
+}
