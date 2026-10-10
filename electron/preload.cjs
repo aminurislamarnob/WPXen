@@ -20,6 +20,7 @@ const VALID_EVENT_CHANNELS = [
   'site-import-progress',
   'site-clone-progress',
   'site-changeurl-progress',
+  'agent-clone-progress',
   'blueprint-save-progress',
   'terminal-data',
   'terminal-replay',
@@ -195,6 +196,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getAgentProjectRecords: () => ipcRenderer.invoke('agent-project-records'),
   // Pick any folder and add it as a project → { ok, id } | { canceled }.
   addAgentFolder: () => ipcRenderer.invoke('agent-folder-add'),
+  // Clone a Git URL into <parent>/<repo-name> and add it as a project →
+  // { ok, id } | { error }. Progress arrives on 'agent-clone-progress'.
+  cloneAgentFolder: (url, parent) =>
+    ipcRenderer.invoke('agent-folder-clone', { url, parent }),
+  abortAgentClone: () => ipcRenderer.invoke('agent-folder-clone-abort'),
+  getCloneDefaultParent: () => ipcRenderer.invoke('agent-clone-default-parent'),
   removeAgentProject: (siteId) => ipcRenderer.invoke('agent-project-remove', siteId),
   getGitBranch: (rootPath) => ipcRenderer.invoke('git-branch', rootPath),
   setAgentView: (sessionId) => ipcRenderer.send('agent-view', sessionId),

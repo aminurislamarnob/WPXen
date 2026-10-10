@@ -10,6 +10,7 @@ import {
   X,
   FolderPlus,
   FolderOpen,
+  Globe,
   SlidersHorizontal,
   Check,
   Bell,
@@ -21,6 +22,7 @@ import LaunchMenu from './LaunchMenu';
 import ProjectIcon from './ProjectIcon';
 import ProjectIconPicker from './ProjectIconPicker';
 import ProjectMenu from './ProjectMenu';
+import CloneRepoModal from './CloneRepoModal';
 import { useOpenLink } from '../lib/useOpenLink';
 import AgentStatusGlyph from './AgentStatusGlyph';
 import {
@@ -39,7 +41,7 @@ import {
 } from '../lib/useAgentSessions';
 
 // The Agents-mode sidebar: the "Projects" list. A Project is a Site — or any
-// folder added with Add project → Add folder… — in the Agents working set;
+// folder added with Add project → Add folder… or Clone from URL… — in the Agents working set;
 // under it, one row per agent Session (a "workspace") — live or exited. A
 // Site joins the working set when a Session is launched in it. Clicking a
 // Session row opens it in the Agents pane; the hover "+" on a Project starts
@@ -267,6 +269,7 @@ export default function AgentsSidebar() {
   const [iconPicker, setIconPicker] = useState(null); // { site, anchor }
   const openLink = useOpenLink();
   const [addMenu, setAddMenu] = useState(null); // { x, y } — Add project picker
+  const [cloning, setCloning] = useState(false); // Clone from URL dialog open
   // New workspace menu; `siteId: null` shows the project list first.
   const [newMenu, setNewMenu] = useState(null); // { x, y, siteId }
   const [removing, setRemoving] = useState(null); // { site, live } pending confirm
@@ -696,6 +699,16 @@ export default function AgentsSidebar() {
             <button
               onClick={() => {
                 setAddMenu(null);
+                setCloning(true);
+              }}
+              className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[13px] text-foreground hover:bg-accent"
+            >
+              <Globe size={14} className="text-muted-foreground" />
+              Clone from URL…
+            </button>
+            <button
+              onClick={() => {
+                setAddMenu(null);
                 navigate('/sites', { state: { addForAgents: true } });
               }}
               className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[13px] text-muted-foreground hover:bg-accent hover:text-foreground"
@@ -705,6 +718,16 @@ export default function AgentsSidebar() {
             </button>
           </div>
         </>
+      )}
+
+      {cloning && (
+        <CloneRepoModal
+          onClose={() => setCloning(false)}
+          onCloned={(id) => {
+            setCloning(false);
+            navigate(`/agents/${encodeURIComponent(id)}`);
+          }}
+        />
       )}
 
       {newMenu && newMenu.siteId && (

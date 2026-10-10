@@ -44,6 +44,7 @@ const projectIcon = require('./services/projectIcon.cjs');
 const agentProjects = require('./services/agentProjects.cjs');
 const files = require('./services/files.cjs');
 const git = require('./services/git.cjs');
+const gitClone = require('./services/gitClone.cjs');
 const browser = require('./services/browser.cjs');
 const browserHistory = require('./services/browserHistory.cjs');
 const settingsService = require('./services/settings.cjs');
@@ -416,7 +417,12 @@ function registerHandlers(win, storeInstance) {
       properties: ['openDirectory', 'createDirectory'],
     });
     if (res.canceled || !res.filePaths?.[0]) return { canceled: true };
-    const dir = res.filePaths[0];
+    return { ok: true, id: addFolderProject(res.filePaths[0]) };
+  });
+
+  // Make `dir` a project and return its id — reusing a Site or folder project
+  // already rooted there.
+  function addFolderProject(dir) {
     const folders = store.get(agentProjects.FOLDERS_KEY, []);
     let id = agentProjects.projectIdForPath(dir, store.get('sites', []), folders);
     if (!id) {
@@ -425,7 +431,32 @@ function registerHandlers(win, storeInstance) {
       id = folder.id;
     }
     addToProjects(id);
-    return { ok: true, id };
+    return id;
+  }
+
+  // Add project → Clone from URL…: clone into <parent>/<repo-name>, streaming
+  // `agent-clone-progress`, then add the clone as a folder project.
+  ipcMain.handle('agent-folder-clone', async (event, { url, parent } = {}) => {
+    try {
+      const dir = await gitClone.clone({
+        url,
+        parent,
+        env: agents.resolveShellEnv(),
+        onProgress: (p) => {
+          if (!event.sender.isDestroyed()) event.sender.send('agent-clone-progress', p);
+        },
+      });
+      return { ok: true, id: addFolderProject(dir) };
+    } catch (e) {
+      return { error: e.message };
+    }
+  });
+  ipcMain.handle('agent-folder-clone-abort', () => gitClone.abort());
+  // Where the clone dialog's parent folder starts: ~/Projects when it exists,
+  // else the home folder.
+  ipcMain.handle('agent-clone-default-parent', () => {
+    const projects = path.join(os.homedir(), 'Projects');
+    return fs.existsSync(projects) ? projects : os.homedir();
   });
 
   // A project's sidebar icon (services/projectIcon.cjs): its WordPress Site

@@ -357,11 +357,16 @@ app.on('before-quit', (e) => {
     require('./services/cloudflared.cjs').stopAll();
   } catch {}
 
+  // Cancel an in-flight Clone from URL… so git isn't orphaned and its
+  // half-cloned folder is removed before we exit.
+  const gitClone = require('./services/gitClone.cjs');
+
   const procman = require('./services/procman.cjs');
   const deadline = new Promise((r) => setTimeout(r, 30_000));
-  Promise.race([procman.stopAll({ deadlineMs: 25_000 }), deadline]).finally(() =>
-    app.exit(0)
-  );
+  Promise.race([
+    Promise.all([procman.stopAll({ deadlineMs: 25_000 }), gitClone.stopAll()]),
+    deadline,
+  ]).finally(() => app.exit(0));
 });
 
 // Terminal-initiated shutdowns (dev mode, logout) go through the same cleanup.
