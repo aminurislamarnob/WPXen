@@ -111,10 +111,17 @@ describe('decodeAntigravityLine', () => {
     expect(replace.edit.original).not.toBe(replace.edit.modified);
   });
 
-  it('records token usage from the planner', () => {
+  it("records the planner's token usage in the facts the renderer receives", () => {
     const state = {};
     decodeAntigravityLine(byStep(1).line, state);
-    expect(state.usage.totalTokens).toBe(12322 + 0 + 423);
+    expect(state.facts.usage).toEqual({ model: null, tokens: 12322 + 0 + 423 });
+  });
+
+  it('never puts the raw record on a row', () => {
+    const state = {};
+    const rows = rawLines.flatMap((l) => [decodeAntigravityLine(l, state) ?? []].flat());
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.some((r) => 'record' in r)).toBe(false);
   });
 
   it('decodes an assistant markdown planner', () => {

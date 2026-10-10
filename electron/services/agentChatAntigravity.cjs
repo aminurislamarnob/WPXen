@@ -68,12 +68,13 @@ function decodeAntigravityLine(lineStr, state) {
   const step = record.step_index;
 
   state.agyPending = state.agyPending || null;
-  state.usage = state.usage || null;
+  // What the chat shows beside the rows; the only state sent to the renderer.
+  state.facts = state.facts || { tasks: {}, todos: null, usage: null };
 
   if (record.type === 'USER_INPUT') {
     const text = unwrapUserRequest(record.content);
     if (!text) return null;
-    return { id: `agy-${step}-user`, role: 'user', content: text, record };
+    return { id: `agy-${step}-user`, role: 'user', content: text };
   }
 
   if (record.type === 'PLANNER_RESPONSE') {
@@ -82,12 +83,14 @@ function decodeAntigravityLine(lineStr, state) {
       record.cache_read_tokens != null ||
       record.output_tokens != null
     ) {
-      state.usage = {
-        totalTokens:
+      // Per request, so it is the context in use now. No model name is
+      // recorded, so the meter shows a raw count.
+      state.facts.usage = {
+        model: null,
+        tokens:
           (record.input_tokens || 0) +
           (record.cache_read_tokens || 0) +
           (record.output_tokens || 0),
-        model: 'unknown',
       };
     }
 
@@ -98,7 +101,6 @@ function decodeAntigravityLine(lineStr, state) {
         id: `agy-${step}-thinking`,
         role: 'reasoning',
         content: thinking,
-        record,
       });
     }
 
@@ -110,13 +112,13 @@ function decodeAntigravityLine(lineStr, state) {
       const id = `agy-${step}-${index}`;
       const edit = editForCall(name, input);
       pending.push({ id, name, input, edit });
-      rows.push({ id, role: 'tool', tool_use: { id, name, input }, edit, record });
+      rows.push({ id, role: 'tool', tool_use: { id, name, input }, edit });
     });
     if (pending.length > 0) state.agyPending = { step, calls: pending };
 
     const content = typeof record.content === 'string' ? record.content.trim() : '';
     if (content) {
-      rows.push({ id: `agy-${step}-msg`, role: 'assistant', content, record });
+      rows.push({ id: `agy-${step}-msg`, role: 'assistant', content });
     }
     return rows;
   }
@@ -147,7 +149,6 @@ function decodeAntigravityLine(lineStr, state) {
         tool_use: { id: call.id, name: call.name, input: call.input },
         result: resultBlock,
         edit: call.edit,
-        record,
       };
     }
 
@@ -156,7 +157,6 @@ function decodeAntigravityLine(lineStr, state) {
       role: 'tool',
       tool_use: { id: `agy-${step}-result`, name: 'tool', input: null },
       result: resultBlock,
-      record,
     };
   }
 
@@ -166,7 +166,6 @@ function decodeAntigravityLine(lineStr, state) {
       id: `agy-${step}-error`,
       role: 'assistant',
       content: `⚠ ${record.error}`,
-      record,
     };
   }
 
