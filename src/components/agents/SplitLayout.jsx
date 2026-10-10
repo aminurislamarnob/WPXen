@@ -1,7 +1,9 @@
 import { Panel, PanelGroup } from 'react-resizable-panels';
 import ResizeHandle from '../ResizeHandle';
 import Terminal from '../Terminal';
-import { useEffect, useRef } from 'react';
+import { ChatView } from './ChatView';
+import { getViewMode, subscribe } from '../../lib/chatView';
+import { useEffect, useRef, useState } from 'react';
 
 export default function SplitLayout({
   rootId,
@@ -19,6 +21,17 @@ export default function SplitLayout({
   onHandoff,
   sessionsById = {},
 }) {
+  const [viewMode, setViewMode] = useState(
+    tree.leaf ? getViewMode(tree.leaf) : 'terminal'
+  );
+
+  useEffect(() => {
+    if (!tree.leaf) return;
+    return subscribe(() => {
+      setViewMode(getViewMode(tree.leaf));
+    });
+  }, [tree.leaf]);
+
   // A drag fires onLayout on every frame; the main process only needs the
   // ratio it settles on.
   const saveTimer = useRef(null);
@@ -43,20 +56,23 @@ export default function SplitLayout({
         }`}
         onClickCapture={() => onFocusPane?.(tree.leaf)}
       >
-        <Terminal
-          sessionId={tree.leaf}
-          rootPath={rootPath}
-          onOpenFile={onOpenFile}
-          onOpenLink={onOpenLink}
-          onExited={() => onExited(tree.leaf)}
-          onRestart={() => onRestart(tree.leaf)}
-          onClosePane={split ? () => onClosePane(tree.leaf) : undefined}
-          onFocus={() => onFocusPane?.(tree.leaf)}
-          onBlur={() => onBlurPane?.()}
-          isFocused={isFocused}
-          isAgent={sessionsById[tree.leaf]?.isAgent}
-          onHandoff={onHandoff}
-        />
+        <div className={viewMode === 'chat' ? 'hidden' : 'h-full w-full'}>
+          <Terminal
+            sessionId={tree.leaf}
+            rootPath={rootPath}
+            onOpenFile={onOpenFile}
+            onOpenLink={onOpenLink}
+            onExited={() => onExited(tree.leaf)}
+            onRestart={() => onRestart(tree.leaf)}
+            onClosePane={split ? () => onClosePane(tree.leaf) : undefined}
+            onFocus={() => onFocusPane?.(tree.leaf)}
+            onBlur={() => onBlurPane?.()}
+            isFocused={isFocused && viewMode !== 'chat'}
+            isAgent={sessionsById[tree.leaf]?.isAgent}
+            onHandoff={onHandoff}
+          />
+        </div>
+        {viewMode === 'chat' && <ChatView sessionId={tree.leaf} />}
       </div>
     );
   }

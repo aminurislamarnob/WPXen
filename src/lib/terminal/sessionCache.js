@@ -261,6 +261,7 @@ export function detach(sessionId) {
 export function fit(sessionId) {
   const entry = cache.get(sessionId);
   if (!entry || !entry.wrapper.isConnected) return;
+  if (entry.wrapper.clientWidth === 0) return;
   entry.fit.fit();
   window.electronAPI.terminalResize(sessionId, entry.term.cols, entry.term.rows);
 }

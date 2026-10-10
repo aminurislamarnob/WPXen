@@ -27,6 +27,7 @@ const VALID_EVENT_CHANNELS = [
   'terminal-exit',
   'agent-sessions-update',
   'agent-floating-sessions-update',
+  'agent-chat-rows',
   'floating-shortcut',
   'agents-shortcut',
   'agent-projects-update',
@@ -283,6 +284,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   terminalStop: (sessionId) => ipcRenderer.invoke('terminal-stop', sessionId),
   terminalStopTab: (sessionId) => ipcRenderer.invoke('terminal-stop-tab', sessionId),
   respawnPane: (sessionId) => ipcRenderer.invoke('agent-respawn-pane', sessionId),
+  chatOpen: (sessionId, viewerId) =>
+    ipcRenderer.send('agent-chat-open', sessionId, viewerId),
+  chatClose: (sessionId, viewerId) =>
+    ipcRenderer.send('agent-chat-close', sessionId, viewerId),
+  chatSend: (sessionId, text) => ipcRenderer.invoke('agent-chat-send', sessionId, text),
 
   // In-app browser. The renderer owns the <webview>; these reach its guest in
   // the main process, keyed by the browser tab's key.
