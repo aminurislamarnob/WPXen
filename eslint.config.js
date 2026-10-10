@@ -14,6 +14,9 @@ module.exports = [
       'release/**',
       'assets/bin/**',
       'reference/**',
+      // WPXen Mobile is its own package with its own lint/typecheck/test.
+      // The desktop gate never touches it.
+      'mobile/**',
     ],
   },
 
