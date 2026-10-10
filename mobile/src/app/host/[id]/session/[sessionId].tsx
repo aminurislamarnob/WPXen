@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { WebView, type WebViewMessageEvent } from 'react-native-webview';
 import { useLocalSearchParams } from 'expo-router';
+import { Alert } from 'react-native';
 import { HostConnection } from '../../../../connection/manager';
 import { findHost } from '../../../../hosts/hostList';
 import {
@@ -61,7 +62,12 @@ const KEY_LABELS: Record<KeyId, string> = {
 };
 
 export default function SessionTerminalScreen() {
-  const { id, sessionId } = useLocalSearchParams<{ id: string; sessionId: string }>();
+  const { id, sessionId, agent, project } = useLocalSearchParams<{
+    id: string;
+    sessionId: string;
+    agent?: string;
+    project?: string;
+  }>();
   const appearance = useColorScheme();
   const theme: 'light' | 'dark' = appearance === 'light' ? 'light' : 'dark';
   const [missing, setMissing] = useState(false);
@@ -294,6 +300,23 @@ export default function SessionTerminalScreen() {
     [exited, sendWrite]
   );
 
+  const stopSession = useCallback(() => {
+    if (exited !== null) return;
+    const what = agent ? `Stop ${agent}${project ? ` in ${project}` : ''}?` : 'Stop this Session?';
+    Alert.alert(what, 'Unsaved Agent work in progress will be interrupted.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Stop',
+        style: 'destructive',
+        onPress: () => {
+          connection.current
+            ?.request('sessions.stop', { sessionId })
+            .catch(() => {});
+        },
+      },
+    ]);
+  }, [agent, project, exited, sessionId]);
+
   const onFrameLayout = useCallback(
     (event: LayoutChangeEvent) => {
       const { width, height } = event.nativeEvent.layout;
@@ -394,6 +417,10 @@ export default function SessionTerminalScreen() {
             <Pressable style={styles.sizeKey} onPress={() => changeTextSize(1)}>
               <Text style={styles.keyLabel}>A+</Text>
             </Pressable>
+            <View style={styles.sizeSpacer} />
+            <Pressable style={styles.sizeKey} onPress={stopSession}>
+              <Text style={[styles.keyLabel, styles.stopLabel]}>Stop</Text>
+            </Pressable>
           </View>
           <View style={styles.keyBar}>
             {KEY_BAR_ORDER.filter((key) => key !== 'ctrl-c').map((key) => (
@@ -428,6 +455,8 @@ const styles = StyleSheet.create({
   sizeRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8, paddingTop: 6, gap: 8, backgroundColor: '#1c1c1e' },
   sizeKey: { paddingVertical: 6, paddingHorizontal: 12, borderRadius: 8, backgroundColor: '#2c2c2e' },
   sizeLabel: { color: '#fff', fontSize: 12, minWidth: 20, textAlign: 'center' },
+  sizeSpacer: { flex: 1 },
+  stopLabel: { color: '#ff6961' },
   keyBar: { flexDirection: 'row', padding: 8, gap: 6, backgroundColor: '#1c1c1e' },
   key: {
     flex: 1,

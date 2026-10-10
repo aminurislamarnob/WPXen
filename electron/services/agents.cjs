@@ -901,6 +901,29 @@ function launch({
   });
 }
 
+// One launch path for the desktop New-session menu and the phone, so the two
+// can never drift: resolve the Project, apply its Launch Preset flags and the
+// chosen Launch Target, launch, and join the working set. Store-adjacent
+// pieces (lookup, presets, working set) arrive as arguments; the engine stays
+// store-free.
+function launchForProject(
+  { findProject, getPresetArgs, addToProjects },
+  { projectId, agentId, targetId = null }
+) {
+  const site = findProject(projectId);
+  if (!site) return { error: 'Project not found' };
+  const globalArgs = getPresetArgs(agentId) || '';
+  let target = null;
+  if (targetId) {
+    target = (site.launchTargets || []).find((t) => t.id === targetId) || null;
+    if (!target) return { error: 'Launch target not found' };
+  }
+  const res = launch({ site, agentId, target, globalArgs });
+  // Launching is the common way a Site joins the working set.
+  if (res?.ok) addToProjects(projectId);
+  return res;
+}
+
 // A Floating Workspace terminal: a plain shell in `cwd`, owned by no Site. It
 // runs on the same pty engine (ring buffer, status tracking, reaped on quit)
 // but stays out of everything that means "a Site's Sessions" — the Projects
@@ -1441,6 +1464,7 @@ module.exports = {
   resolveLaunch,
   launch,
   launchFloating,
+  launchForProject,
   attach,
   subscribeOutput,
   write,
