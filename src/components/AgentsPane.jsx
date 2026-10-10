@@ -123,6 +123,25 @@ export default function AgentsPane() {
       cleanupOrphanedDrafts(allSessions.map((s) => s.sessionId));
     }
   }, [sessionsLoaded, allSessions]);
+
+  // "Open Claude Sessions in chat view": a chat-capable Session row seen for
+  // the first time starts in chat view. Rows present at the initial load are
+  // existing Sessions and keep their mode, whatever the setting.
+  const chatDefaultSeenRef = useRef(null);
+  useEffect(() => {
+    if (!sessionsLoaded) return;
+    if (chatDefaultSeenRef.current === null) {
+      chatDefaultSeenRef.current = new Set(allSessions.map((s) => s.sessionId));
+      return;
+    }
+    for (const s of allSessions) {
+      if (!chatDefaultSeenRef.current.has(s.sessionId)) {
+        chatDefaultSeenRef.current.add(s.sessionId);
+        if (s.chat && settings['agents.chatViewDefault'])
+          setViewMode(s.sessionId, 'chat');
+      }
+    }
+  }, [allSessions, sessionsLoaded, settings]);
   const tabs = useMemo(() => {
     const valid = allSessions.filter((s) => s.siteId === siteId && !s.paneOf);
     const map = new Map(valid.map((s) => [s.sessionId, s]));
@@ -255,6 +274,23 @@ export default function AgentsPane() {
         toggleExplorer();
         return;
       }
+      // ⌘⇧C flips the focused pane between terminal and chat view. Every ⌘
+      // chord bubbles out of the xterm, and the chat composer never stops
+      // ⌘ chords, so this fires from either side.
+      if (
+        e.metaKey &&
+        e.shiftKey &&
+        !e.ctrlKey &&
+        !e.altKey &&
+        e.key.toLowerCase() === 'c'
+      ) {
+        const id = focusedPaneId;
+        if (id && sessionsById[id]?.chat && !showingFile) {
+          e.preventDefault();
+          setViewMode(id, getViewMode(id) === 'chat' ? 'terminal' : 'chat');
+        }
+        return;
+      }
       if (e.metaKey && !e.ctrlKey && !e.altKey && e.key.toLowerCase() === 'd') {
         e.preventDefault();
         const dir = e.shiftKey ? 'down' : 'right';
@@ -282,7 +318,7 @@ export default function AgentsPane() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [toggleExplorer, activeTab, showingFile, focusedPaneId, allSessions]);
+  }, [toggleExplorer, activeTab, showingFile, focusedPaneId, allSessions, sessionsById]);
 
   // ⌘W belongs to the app menu (Close Window), so the main process only
   // forwards it while a terminal pane here has focus — see paneFocus below.

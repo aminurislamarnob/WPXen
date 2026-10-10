@@ -25,7 +25,7 @@ import { shouldShowWaitingFallback } from '../../lib/chatRows';
 import { recallStep, matchFiles, matchCommands } from '../../lib/chatComplete';
 import { isImageDropPath } from '../../lib/terminal/keys';
 
-export function ChatView({ sessionId, onRestart, onResume }) {
+export function ChatView({ sessionId, onRestart, onResume, headerActions }) {
   const viewerId = useId();
   const rootRef = useRef(null);
   const [messages, setMessages] = useState([]);
@@ -506,14 +506,15 @@ export function ChatView({ sessionId, onRestart, onResume }) {
       ref={rootRef}
       className="flex flex-col h-full bg-background text-foreground relative"
     >
-      {headerTitle && (
-        <div className="px-4 py-2 border-b border-border bg-muted/30 text-[13px] font-medium flex-none truncate flex items-center justify-between">
-          <span>{headerTitle}</span>
+      {(headerTitle || headerActions) && (
+        <div className="px-4 py-1 border-b border-border bg-tertiary text-[13px] font-medium flex-none flex items-center gap-3">
+          <span className="flex-1 truncate">{headerTitle}</span>
           {contextMeter(chatState?.usage) && (
             <span className="text-muted-foreground font-normal">
               {contextMeter(chatState.usage).label}
             </span>
           )}
+          {headerActions}
         </div>
       )}
       <div className="flex-1 overflow-y-auto p-4" ref={scrollRef} onScroll={onScroll}>

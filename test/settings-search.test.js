@@ -91,3 +91,10 @@ describe('registry integrity', () => {
     }
   });
 });
+
+describe('agents chat view default', () => {
+  it('is findable by "chat"', () => {
+    const found = SETTINGS_ITEMS.filter((i) => matchesQuery(i, 'chat'));
+    expect(found.map((i) => i.id)).toContain('agents.chatViewDefault');
+  });
+});

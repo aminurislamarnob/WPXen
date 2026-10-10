@@ -1,4 +1,5 @@
 import { Panel, PanelGroup } from 'react-resizable-panels';
+import { MessageSquare, TerminalSquare } from 'lucide-react';
 import ResizeHandle from '../ResizeHandle';
 import Terminal from '../Terminal';
 import { ChatView } from './ChatView';
@@ -68,6 +69,27 @@ export default function SplitLayout({
     // `path` is empty only for an unsplit tab: no border, no close button.
     const split = path !== '';
     const isFocused = tree.leaf === focusedId;
+    // The view toggle lives in whichever surface is showing — the terminal's
+    // toolbar or the chat header — so it never covers either one's buttons.
+    const viewToggle = sessionsById[tree.leaf]?.chat ? (
+      <button
+        title={
+          viewMode === 'chat'
+            ? 'Switch to Terminal View (⌘⇧C)'
+            : 'Switch to Chat View (⌘⇧C)'
+        }
+        aria-label={
+          viewMode === 'chat' ? 'Switch to terminal view' : 'Switch to chat view'
+        }
+        onClick={() =>
+          setViewModeGlobal(tree.leaf, viewMode === 'chat' ? 'terminal' : 'chat')
+        }
+        className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+      >
+        {viewMode === 'chat' ? <TerminalSquare size={14} /> : <MessageSquare size={14} />}
+      </button>
+    ) : null;
+
     return (
       <div
         className={`relative h-full w-full ${
@@ -91,6 +113,7 @@ export default function SplitLayout({
             isFocused={isFocused && viewMode !== 'chat'}
             isAgent={sessionsById[tree.leaf]?.isAgent}
             onHandoff={onHandoff}
+            actions={viewToggle}
           />
         </div>
         {viewMode === 'chat' && (
@@ -98,6 +121,7 @@ export default function SplitLayout({
             sessionId={tree.leaf}
             onRestart={() => onRestart?.(tree.leaf)}
             onResume={() => onResume?.(tree.leaf)}
+            headerActions={viewToggle}
           />
         )}
       </div>
