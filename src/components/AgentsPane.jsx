@@ -30,6 +30,9 @@ import { useSettings } from '../lib/useSettings';
 import { LAST_AGENTS_SITE_KEY, resolveLastSite } from '../lib/activityBar';
 import { sessionTitle } from '../lib/agentsList';
 import { useAgentSessions, setSelectedSession } from '../lib/useAgentSessions';
+import TabStrip from './agents/TabStrip';
+import TabContextMenu from './agents/TabContextMenu';
+import { tabsToClose, closeImpact, nextActive } from '../lib/tabStrip';
 
 const CLOSE_CONFIRM_KEY = 'wpxen.terminalCloseConfirmSuppressed';
 
@@ -407,6 +410,101 @@ export default function AgentsPane() {
     destroyTab(id);
   };
 
+  const [tabMenu, setTabMenu] = useState(null);
+  const [bulkCloseConfirm, setBulkCloseConfirm] = useState(null);
+
+  const handleBulkClose = (action, targetKey, targetKind) => {
+    const sessionKeys = tabs.map((t) => t.sessionId);
+    const fileKeys = openFiles.map((f) => f.key);
+    const orderedKeys = [...sessionKeys, ...fileKeys];
+
+    const keysToClose = tabsToClose(orderedKeys, targetKey, action);
+    if (keysToClose.length === 0) return;
+
+    const sessionsById = tabs.reduce((acc, t) => {
+      acc[t.sessionId] = t;
+      return acc;
+    }, {});
+
+    const impact = closeImpact(keysToClose, sessionsById, dirtyKeys);
+
+    const performClose = () => {
+      const closingFiles = keysToClose.filter((k) => fileKeys.includes(k));
+      for (const key of closingFiles) {
+        closeFileRef.current(key);
+      }
+
+      const closingSessions = keysToClose.filter((k) => sessionKeys.includes(k));
+      for (const sessionId of closingSessions) {
+        destroyTab(sessionId);
+      }
+
+      const activeKeyToUse = showingFile ? activeKey : activeTab;
+      const nextKey = nextActive(orderedKeys, keysToClose, activeKeyToUse);
+
+      if (nextKey) {
+        if (sessionKeys.includes(nextKey)) {
+          selectSession(nextKey);
+        } else {
+          selectFile(nextKey);
+        }
+      } else {
+        setView('session');
+        setActiveTab(null);
+        setActiveKey(null);
+      }
+    };
+
+    if (
+      (impact.running > 0 || impact.dirty.length > 0) &&
+      localStorage.getItem(CLOSE_CONFIRM_KEY) !== '1'
+    ) {
+      setBulkCloseConfirm({ action, targetKey, impact, performClose });
+      setSuppressClose(false);
+    } else {
+      performClose();
+    }
+  };
+
+  const onTabContextMenu = (e, key, kind) => {
+    e.preventDefault();
+    const sessionKeys = tabs.map((t) => t.sessionId);
+    const fileKeys = openFiles.map((f) => f.key);
+    const orderedKeys = [...sessionKeys, ...fileKeys];
+
+    const canClose = tabsToClose(orderedKeys, key, 'close').length > 0;
+    const canCloseOthers = tabsToClose(orderedKeys, key, 'others').length > 0;
+    const canCloseRight = tabsToClose(orderedKeys, key, 'right').length > 0;
+    const canCloseLeft = tabsToClose(orderedKeys, key, 'left').length > 0;
+
+    setTabMenu({
+      x: e.clientX,
+      y: e.clientY,
+      items: [
+        {
+          label: 'Close',
+          disabled: !canClose,
+          onClick: () => handleBulkClose('close', key, kind),
+        },
+        {
+          label: 'Close Others',
+          disabled: !canCloseOthers,
+          onClick: () => handleBulkClose('others', key, kind),
+        },
+        {
+          label: 'Close Tabs to the Right',
+          disabled: !canCloseRight,
+          onClick: () => handleBulkClose('right', key, kind),
+        },
+        {
+          label: 'Close Tabs to the Left',
+          disabled: !canCloseLeft,
+          onClick: () => handleBulkClose('left', key, kind),
+        },
+      ],
+    });
+  };
+
   // Respawn the same Agent after its shell exited: launch a fresh Session and
   // reap the dead one. The new Session takes the end of the tab strip.
   const respawn = async (sessionId) => {
@@ -634,159 +732,37 @@ export default function AgentsPane() {
             >
               <div className="h-full min-w-0 flex flex-col">
                 {/* Tab strip */}
-                <div
-                  className="drag-strip flex items-center gap-1 px-2 h-10 flex-shrink-0 overflow-x-auto"
-                  style={controlsInset ? { paddingLeft: controlsInset } : undefined}
-                >
-                  {tabs.map((tab) => {
-                    const isActive = !showingFile && tab.sessionId === activeTab;
-                    return (
-                      <div
-                        key={tab.sessionId}
-                        onClick={() => selectSession(tab.sessionId)}
-                        className={`group flex items-center gap-1.5 pl-2.5 pr-1.5 h-7 rounded-lg text-[12.5px] cursor-pointer whitespace-nowrap ${
-                          isActive
-                            ? 'bg-muted text-foreground font-medium'
-                            : 'text-muted-foreground hover:bg-accent'
-                        }`}
-                      >
-                        <ProviderIcon
-                          agentId={tab.agentId}
-                          brand
-                          size={13}
-                          className="flex-shrink-0"
-                        />
-                        <span className="truncate max-w-[140px]">
-                          {sessionTitle(tab, tabs)}
-                        </span>
-                        <Tooltip label="Close session">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              closeTab(tab.sessionId);
-                            }}
-                            aria-label="Close session"
-                            className="p-0.5 rounded hover:bg-accent text-muted-foreground hover:text-foreground"
-                          >
-                            <X size={12} />
-                          </button>
-                        </Tooltip>
-                      </div>
-                    );
-                  })}
+                <TabStrip
+                  tabs={tabs}
+                  openFiles={openFiles}
+                  activeTab={activeTab}
+                  activeKey={activeKey}
+                  showingFile={showingFile}
+                  selectSession={selectSession}
+                  selectFile={selectFile}
+                  closeTab={closeTab}
+                  requestCloseFile={requestCloseFile}
+                  browserState={browserState}
+                  dirtyKeys={dirtyKeys}
+                  openAddMenu={openAddMenu}
+                  detectedCount={detected.length}
+                  setSettingsOpen={setSettingsOpen}
+                  setBrowserMenu={setBrowserMenu}
+                  toggleExplorer={toggleExplorer}
+                  sitePath={sitePath}
+                  explorerCollapsed={explorerCollapsed}
+                  controlsInset={controlsInset}
+                  onTabContextMenu={onTabContextMenu}
+                />
 
-                  {openFiles.map((f) => {
-                    const isActive = showingFile && f.key === activeKey;
-                    const isBrowser = f.kind === 'browser';
-                    const isDiff = f.kind === 'diff';
-                    const isDirty = dirtyKeys.includes(f.key);
-                    return (
-                      <div
-                        key={f.key}
-                        onClick={() => selectFile(f.key)}
-                        title={
-                          isBrowser
-                            ? browserState[f.key]?.url || 'Browser'
-                            : isDiff
-                              ? `${f.rel} — diff (${f.source})`
-                              : f.path
-                        }
-                        className={`group flex items-center gap-1.5 pl-2.5 pr-1.5 h-7 rounded-lg text-[12.5px] cursor-pointer whitespace-nowrap ${
-                          isActive
-                            ? 'bg-muted text-foreground font-medium'
-                            : 'text-muted-foreground hover:bg-accent'
-                        }`}
-                      >
-                        {isBrowser ? (
-                          <Favicon src={browserState[f.key]?.favicon} />
-                        ) : (
-                          <FileGlyph name={f.name} size={13} className="flex-shrink-0" />
-                        )}
-                        <span className="truncate max-w-[140px]">
-                          {isBrowser ? browserState[f.key]?.title || f.name : f.name}
-                        </span>
-                        {isDiff && (
-                          <GitCompare
-                            size={11}
-                            className="flex-shrink-0 text-muted-foreground"
-                          />
-                        )}
-                        {isDirty && (
-                          <span
-                            className="w-1.5 h-1.5 rounded-full bg-highlight group-hover:hidden flex-shrink-0"
-                            title="Unsaved changes"
-                          />
-                        )}
-                        <Tooltip label="Close tab">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              requestCloseFile(f.key);
-                            }}
-                            aria-label="Close tab"
-                            className={`p-0.5 rounded hover:bg-accent text-muted-foreground hover:text-foreground ${
-                              isDirty ? 'hidden group-hover:block' : ''
-                            }`}
-                          >
-                            <X size={12} />
-                          </button>
-                        </Tooltip>
-                      </div>
-                    );
-                  })}
-
-                  {/* Add-session button. The menu is rendered fixed (below) so the
-                tab strip's overflow-x-auto can't clip it. */}
-                  <Tooltip label="New session">
-                    <button
-                      onClick={openAddMenu}
-                      disabled={detected.length === 0}
-                      aria-label="New session"
-                      className="flex-shrink-0 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent disabled:opacity-40"
-                    >
-                      <Plus size={16} />
-                    </button>
-                  </Tooltip>
-                  <Tooltip label="Launch settings">
-                    <button
-                      onClick={() => setSettingsOpen(true)}
-                      disabled={detected.length === 0}
-                      aria-label="Launch settings"
-                      className="flex-shrink-0 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent disabled:opacity-40"
-                    >
-                      <Settings2 size={15} />
-                    </button>
-                  </Tooltip>
-                  <div className="drag-region flex-1 self-stretch" />
-                  <Tooltip label="Open browser">
-                    <button
-                      onClick={(e) => {
-                        const r = e.currentTarget.getBoundingClientRect();
-                        setBrowserMenu((m) =>
-                          m ? null : { x: r.right - 220, y: r.bottom + 4 }
-                        );
-                      }}
-                      aria-label="Open browser"
-                      className="flex-shrink-0 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent"
-                    >
-                      <Globe size={15} />
-                    </button>
-                  </Tooltip>
-                  {sitePath && (
-                    <Tooltip label="Toggle sidebar" keys={['⌘', '⇧', 'E']}>
-                      <button
-                        onClick={toggleExplorer}
-                        aria-label="Toggle sidebar"
-                        aria-pressed={!explorerCollapsed}
-                        className={`flex-shrink-0 p-1 rounded-md hover:text-foreground hover:bg-accent ${
-                          explorerCollapsed ? 'text-muted-foreground' : 'text-foreground'
-                        }`}
-                      >
-                        <PanelRight size={15} />
-                      </button>
-                    </Tooltip>
-                  )}
-                </div>
+                {tabMenu && (
+                  <TabContextMenu
+                    x={tabMenu.x}
+                    y={tabMenu.y}
+                    items={tabMenu.items}
+                    onClose={() => setTabMenu(null)}
+                  />
+                )}
 
                 {browserMenu && (
                   <>
@@ -941,15 +917,30 @@ export default function AgentsPane() {
         )}
       </div>
       <ConfirmDialog
-        open={closeConfirm != null}
-        title="End session?"
-        description={`This will terminate the running agent in ${
-          tabs.find((t) => t.sessionId === closeConfirm)?.agentName || 'this session'
-        }. Anything it is doing will be interrupted.`}
-        confirmLabel="End Session"
+        open={closeConfirm != null || bulkCloseConfirm != null}
+        title={bulkCloseConfirm ? 'Close tabs?' : 'End session?'}
+        description={
+          closeConfirm
+            ? `This will terminate the running agent in ${tabs.find((t) => t.sessionId === closeConfirm)?.agentName || 'this session'}. Anything it is doing will be interrupted.`
+            : bulkCloseConfirm
+              ? `${bulkCloseConfirm.impact.running} running session${bulkCloseConfirm.impact.running === 1 ? '' : 's'} will be stopped${bulkCloseConfirm.impact.dirty.length > 0 ? `, and ${bulkCloseConfirm.impact.dirty.length} file${bulkCloseConfirm.impact.dirty.length === 1 ? ' has' : 's have'} unsaved changes` : ''}.`
+              : ''
+        }
+        confirmLabel={bulkCloseConfirm ? 'Close Tabs' : 'End Session'}
         danger
-        onConfirm={confirmClose}
-        onCancel={() => setCloseConfirm(null)}
+        onConfirm={
+          closeConfirm
+            ? confirmClose
+            : () => {
+                if (suppressClose) localStorage.setItem(CLOSE_CONFIRM_KEY, '1');
+                bulkCloseConfirm.performClose();
+                setBulkCloseConfirm(null);
+              }
+        }
+        onCancel={() => {
+          setCloseConfirm(null);
+          setBulkCloseConfirm(null);
+        }}
       >
         <label className="mt-3 flex items-center gap-2 text-[12.5px] text-muted-foreground cursor-pointer select-none">
           <input
