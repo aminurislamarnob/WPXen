@@ -1,8 +1,35 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
-import { openChat, closeAllChats, __setDeps } from '../electron/services/agentChat.cjs';
+import {
+  openChat,
+  closeAllChats,
+  loadOlder,
+  chatFetchFull,
+  __setDeps,
+  TRUNCATE_THRESHOLD,
+} from '../electron/services/agentChat.cjs';
 import { decodeClaudeLine } from '../electron/services/agentChatClaude.cjs';
+import { sendChat, formatBody } from '../electron/services/agentChatSend.cjs';
+
+// Real Claude record shapes: the turn sits under message.content, and a tool
+// result is a user record of tool_result blocks keyed by tool_use_id.
+function userRecord(uuid, text) {
+  return { type: 'user', uuid, message: { role: 'user', content: text } };
+}
+function toolResultRecord(uuid, toolUseId, content) {
+  return {
+    type: 'user',
+    uuid,
+    message: {
+      role: 'user',
+      content: [
+        { tool_use_id: toolUseId, type: 'tool_result', content, is_error: false },
+      ],
+    },
+    toolUseResult: { stdout: content, stderr: '', interrupted: false },
+  };
+}
 
 describe('agent-chat watcher', () => {
   beforeEach(() => {
@@ -20,7 +47,7 @@ describe('agent-chat watcher', () => {
     let mockContent = Buffer.from('');
 
     __setDeps({
-      statSync: () => ({ size: mockSize }),
+      statSync: () => ({ size: mockSize, mtimeMs: 100 }),
       openSync: () => 1,
       readSync: (fd, buf, offset, length, position) => {
         const slice = mockContent.slice(position, position + length);
@@ -90,6 +117,118 @@ describe('agent-chat watcher', () => {
     vi.advanceTimersByTime(500);
 
     expect(rows).toContainEqual({ reset: true });
+  });
+
+  it('handles chunk-based tail reading and loadOlder', () => {
+    // Generate lines of ~500 bytes each.
+    // 400 lines * 500 bytes = ~200,000 bytes (~195 KB)
+    // PAGE_CHUNK is 64KB.
+    // Chunk 1 (64KB) -> ~131 lines. Total lines = 131 (< 200). Continues.
+    // Chunk 2 (64KB) -> ~131 lines. Total lines = 262 (> 200). Stops.
+    // Remaining bytes ~ 69KB. loadOlder will read the rest.
+    const padding = 'A'.repeat(480);
+    const lines = Array.from(
+      { length: 400 },
+      (_, i) => `${JSON.stringify(userRecord(`msg-${i + 1}`, padding))}\n`
+    );
+    const mockContent = Buffer.from(lines.join(''));
+    let mockSize = mockContent.length;
+
+    __setDeps({
+      statSync: () => ({ size: mockSize }),
+      openSync: () => 1,
+      readSync: (fd, buf, offset, length, position) => {
+        const slice = mockContent.slice(position, position + length);
+        slice.copy(buf);
+        return slice.length;
+      },
+      closeSync: () => {},
+      setInterval,
+      clearInterval,
+    });
+
+    const rows = [];
+    openChat('sess-2', 'viewer-1', {
+      transcriptPath: '/fake/path2.jsonl',
+      decodeLine: decodeClaudeLine,
+      onRows: (newRows) => rows.push(...newRows),
+    });
+
+    // We should get ~262 lines (it's exactly 262 depending on boundaries)
+    // Let's just assert it's > 200 and < 400
+    expect(rows.length).toBeGreaterThan(200);
+    expect(rows.length).toBeLessThan(400);
+
+    const loadedRows = rows.length;
+
+    // now loadOlder
+    const oldRows = loadOlder('sess-2');
+    expect(oldRows.rows.length).toBe(400 - loadedRows);
+    expect(oldRows.atStart).toBe(true);
+  });
+
+  it('truncates large tool results and can fetch full', () => {
+    // Generate a huge tool result
+    const largeStr = 'A'.repeat(TRUNCATE_THRESHOLD + 100);
+    const mockJson = JSON.stringify(toolResultRecord('result-1', 'tool-1', largeStr));
+    const mockContent = Buffer.from(mockJson + '\n');
+
+    __setDeps({
+      statSync: () => ({ size: mockContent.length }),
+      openSync: () => 1,
+      readSync: (fd, buf, offset, length, position) => {
+        const slice = mockContent.slice(position, position + length);
+        slice.copy(buf);
+        return slice.length;
+      },
+      closeSync: () => {},
+      setInterval,
+      clearInterval,
+    });
+
+    const rows = [];
+    openChat('sess-3', 'viewer-1', {
+      transcriptPath: '/fake/path3.jsonl',
+      decodeLine: decodeClaudeLine,
+      onRows: (newRows) => rows.push(...newRows),
+    });
+
+    expect(rows.length).toBe(1);
+    const row = rows[0];
+    expect(row.blocks[0].truncated).toBe(true);
+    expect(row.blocks[0].content.length).toBe(TRUNCATE_THRESHOLD);
+
+    // fetchFull
+    const full = chatFetchFull('sess-3', 'tool-1');
+    expect(full).toBe(largeStr);
+  });
+
+  it('detects stale transcript', () => {
+    __setDeps({
+      statSync: (p) => {
+        if (p.endsWith('newer.jsonl')) return { mtimeMs: 200, size: 10 };
+        return { size: 0, mtimeMs: 100 };
+      },
+      readdirSync: () => ['old.jsonl', 'newer.jsonl'],
+      openSync: () => 1,
+      readSync: () => 0,
+      closeSync: () => {},
+      setInterval,
+      clearInterval,
+    });
+
+    const rows = [];
+    openChat('sess-4', 'viewer-1', {
+      transcriptPath: '/fake/old.jsonl',
+      transcriptId: 'old',
+      startedAt: new Date(150).toISOString(),
+      decodeLine: (line) => ({ decoded: line }),
+      onRows: (newRows) => rows.push(...newRows),
+    });
+
+    vi.advanceTimersByTime(500);
+
+    expect(rows).toContainEqual({ notice: true, kind: 'transcript-changed' });
   });
 });
 
@@ -166,9 +305,64 @@ describe('decodeClaudeLine', () => {
     // State should have combined both
     expect(state[msgId].blocks.length).toBe(2);
   });
-});
 
-import { sendChat, formatBody } from '../electron/services/agentChatSend.cjs';
+  it('handles cross-page tool pairing (orphan result then call)', () => {
+    const state = {};
+
+    // 1. Result arrives before call (due to loadOlder tail logic where we scan backwards but process forwards)
+    const resultRes = decodeClaudeLine(
+      JSON.stringify(toolResultRecord('orphan-1', 'tool-x', 'result content')),
+      state
+    );
+
+    expect(resultRes.orphan).toBe(true);
+    expect(resultRes.id).toBe('orphan-1');
+    expect(state.results['tool-x']).toBeDefined();
+
+    // 2. Later (or when paging up), the call is processed
+    const callRes = decodeClaudeLine(
+      JSON.stringify({
+        type: 'assistant',
+        message: {
+          id: 'msg-1',
+          content: [{ type: 'tool_use', id: 'tool-x', name: 'my_tool', input: {} }],
+        },
+      }),
+      state
+    );
+
+    expect(callRes.remove).toEqual(['orphan-1']);
+    expect(callRes.blocks[0].result.content).toBe('result content');
+  });
+
+  it('handles cross-page tool pairing (call then result via polling)', () => {
+    const state = {};
+
+    // 1. Call arrives
+    decodeClaudeLine(
+      JSON.stringify({
+        type: 'assistant',
+        message: {
+          id: 'msg-1',
+          content: [{ type: 'tool_use', id: 'tool-y', name: 'my_tool', input: {} }],
+        },
+      }),
+      state
+    );
+    expect(state.calls['tool-y']).toBe('msg-1');
+
+    // 2. Result arrives
+    const resultRes = decodeClaudeLine(
+      JSON.stringify(toolResultRecord('result-1', 'tool-y', 'result content')),
+      state
+    );
+
+    // It should re-emit the modified call row instead of an orphan
+    expect(resultRes.id).toBe('msg-1');
+    expect(resultRes.orphan).toBeUndefined();
+    expect(resultRes.blocks[0].result.content).toBe('result content');
+  });
+});
 
 describe('agentChatSend', () => {
   it('formats body with bracketed paste for multiline', () => {

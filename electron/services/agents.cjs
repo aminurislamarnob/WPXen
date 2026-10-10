@@ -1399,10 +1399,20 @@ function openChat(sessionId, viewerId) {
   agentChat.openChat(sessionId, viewerId, {
     transcriptPath,
     decodeLine,
+    transcriptId: session.transcriptId,
+    startedAt: session.startedAt,
     onRows: (rows) => {
       for (const cb of chatListeners) cb({ sessionId, rows });
     },
   });
+}
+
+function chatLoadOlder(sessionId) {
+  return agentChat.loadOlder(sessionId);
+}
+
+function chatFetchFull(sessionId, toolUseId) {
+  return agentChat.chatFetchFull(sessionId, toolUseId);
 }
 
 function closeChat(sessionId, viewerId) {
@@ -1442,6 +1452,8 @@ module.exports = {
   closeChat,
   closeAllChats,
   chatSend,
+  chatLoadOlder,
+  chatFetchFull,
   onFloatingSessionsChanged,
   resolveLaunch,
   launch,
