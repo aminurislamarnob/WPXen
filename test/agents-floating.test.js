@@ -204,6 +204,91 @@ describe('agents.launch for Start →', () => {
     }
   });
 
+  it('runs Claude with a prompt positionally (unchanged)', () => {
+    vi.useFakeTimers();
+    try {
+      agents.setConfig({ commands: { claude: 'sh --claude' } });
+      const res = agents.launch({ site: site(), agentId: 'claude', prompt: 'Fix it' });
+      expect(res.ok).toBe(true);
+      ptys[0].emitData('% ');
+      vi.advanceTimersByTime(200);
+      expect(ptys[0].write).toHaveBeenCalledWith("sh --claude 'Fix it'\r");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('runs Antigravity with a prompt using its promptFlag', () => {
+    vi.useFakeTimers();
+    try {
+      agents.setConfig({ commands: { antigravity: 'sh --agy' } });
+      const res = agents.launch({
+        site: site(),
+        agentId: 'antigravity',
+        prompt: 'Fix it',
+      });
+      expect(res.ok).toBe(true);
+      ptys[0].emitData('% ');
+      vi.advanceTimersByTime(200);
+      expect(ptys[0].write).toHaveBeenCalledWith("sh --agy -i 'Fix it'\r");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('runs Antigravity without a prompt, omitting the flag', () => {
+    vi.useFakeTimers();
+    try {
+      agents.setConfig({ commands: { antigravity: 'sh --agy' } });
+      const res = agents.launch({ site: site(), agentId: 'antigravity' });
+      expect(res.ok).toBe(true);
+      ptys[0].emitData('% ');
+      vi.advanceTimersByTime(200);
+      expect(ptys[0].write).toHaveBeenCalledWith('sh --agy\r');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('applies promptFlag even if Antigravity command is overridden in Settings', () => {
+    vi.useFakeTimers();
+    try {
+      agents.setConfig({ commands: { antigravity: 'sh --agy-override' } });
+      const res = agents.launch({
+        site: site(),
+        agentId: 'antigravity',
+        prompt: 'Fix it',
+      });
+      expect(res.ok).toBe(true);
+      ptys[0].emitData('% ');
+      vi.advanceTimersByTime(200);
+      expect(ptys[0].write).toHaveBeenCalledWith("sh --agy-override -i 'Fix it'\r");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('flags the prompt when Tasks → Start hands an issue to Antigravity', () => {
+    vi.useFakeTimers();
+    try {
+      agents.setConfig({ commands: { antigravity: 'sh --agy' } });
+      const res = agents.launch({
+        site: site(),
+        agentId: 'antigravity',
+        prompt: 'Work on issue #7:\nFix the cart',
+        issue: { repo: 'acme/shop', number: 7, url: 'u', title: 'Fix the cart' },
+      });
+      expect(res.ok).toBe(true);
+      ptys[0].emitData('% ');
+      vi.advanceTimersByTime(200);
+      expect(ptys[0].write).toHaveBeenCalledWith(
+        "sh --agy -i 'Work on issue #7: Fix the cart'\r"
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('carries the issue on the Session row', () => {
     const { sessionId } = agents.launch({
       site: site(),

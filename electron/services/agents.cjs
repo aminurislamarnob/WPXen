@@ -77,6 +77,7 @@ const REGISTRY = [
     // artifact is `antigravity -> agy (Binary)`, i.e. the thing detection
     // looks for, so it lands straight on PATH.
     installer: { kind: 'brew', name: 'antigravity-cli', cask: true },
+    promptFlag: '-i',
   },
   {
     id: 'mimo',
@@ -173,6 +174,7 @@ function effectiveRegistry() {
       name: entry.name || entry.id,
       cmd: entry.cmd,
       install: entry.install || '',
+      promptFlag: entry.promptFlag || null,
       isCustom: true,
     });
   }
@@ -326,6 +328,7 @@ function listAgents({ all = false, shell = true } = {}) {
         // Present only when a one-click install is available; the UI keys the
         // Install button off this and branches on `kind` for its wording.
         installer: a.installer ? { ...a.installer } : null,
+        promptFlag: a.promptFlag || null,
         isCustom: !!a.isCustom,
         isShell: false,
         enabled: !config.enabled || config.enabled.includes(a.id),
@@ -342,6 +345,7 @@ function listAgents({ all = false, shell = true } = {}) {
     {
       ...SHELL_AGENT,
       installer: null,
+      promptFlag: null,
       isCustom: false,
       enabled: true,
       detected: true,
@@ -854,7 +858,9 @@ function launch({
   // The Site's PHP first on PATH: a zsh wrapper for the whole shell (see
   // shellIntegration.cjs), or for other shells, on the agent's command line.
   const phpBinDir = deps.sitePhpBin(site);
-  const typed = line ? `${resolved.command} ${shellQuote(line)}` : resolved.command;
+  const typed = line
+    ? `${resolved.command} ${agent.promptFlag ? agent.promptFlag + ' ' : ''}${shellQuote(line)}`
+    : resolved.command;
   const command = shellIntegration.prefixCommandWithPhp(
     typed,
     deps.userShell(),
