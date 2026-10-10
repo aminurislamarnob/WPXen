@@ -12,13 +12,13 @@ below. Its message, in order: **a fresh Mac to a running WordPress site in one
 app** (no installing Homebrew, PHP, MySQL and phpMyAdmin one by one, no Herd
 or MAMP on top), then AI agents beside every site. New copy serves that order.
 
-| What | Where (aminurislam.me repo) |
-| --- | --- |
-| Release facts: `version`, `requires`, download + notes URLs, SEO copy, FAQ array, schema `featureList` | `app/pages/wpxen.vue` |
-| Highlights band, fresh-Mac checklist (`usualWay` / `withWpxen`), features grid, agents grid, setup steps | `app/components/Products/WPXen.vue` |
-| Machine-readable summary (`Current version: …`) | `public/llms.txt` |
-| Agent marks | `public/images/providers/*.svg` |
-| Hero screenshot | `public/images/wpxen-app-<version-dashed>.png` |
+| What                                                                                                     | Where (aminurislam.me repo)                    |
+| -------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| Release facts: `version`, `requires`, download + notes URLs, SEO copy, FAQ array, schema `featureList`   | `app/pages/wpxen.vue`                          |
+| Highlights band, fresh-Mac checklist (`usualWay` / `withWpxen`), features grid, agents grid, setup steps | `app/components/Products/WPXen.vue`            |
+| Machine-readable summary (`Current version: …`)                                                          | `public/llms.txt`                              |
+| Agent marks                                                                                              | `public/images/providers/*.svg`                |
+| Hero screenshot                                                                                          | `public/images/wpxen-app-<version-dashed>.png` |
 
 `app/pages/wpxen.vue` is the **single source of truth** for the release: every
 download URL is derived from `version`, and the component reads it through
@@ -69,7 +69,7 @@ or consciously skipped. For each one, decide where it belongs:
 - **Fresh-Mac checklist** (`withWpxen` in the component, plus the hero
   lede): must match what onboarding actually does. Re-read WPXen's
   `src/components/Onboarding.jsx` and `electron/services/setup.cjs` when a
-  release touches either. Homebrew is *opened* (its installer runs in
+  release touches either. Homebrew is _opened_ (its installer runs in
   Terminal and asks for the user's password), never "installed for you".
 - **Features grid** (`features` in the component): keep it at nine cells, a
   multiple of three, or the ruled grid leaves hanging rules. A new headline
@@ -144,8 +144,8 @@ Stop the dev server when done.
 ### 7. Commit and push
 
 Stage only the files you changed, then commit on `production` in the repo's
-style (an imperative subject naming the version, e.g. *Point the wpxen page
-at v1.5.0 and feature folder projects*, and a body explaining why) and push.
+style (an imperative subject naming the version, e.g. _Point the wpxen page
+at v1.5.0 and feature folder projects_, and a body explaining why) and push.
 Pushing `production` deploys the site, so push only when the user asked for
 it in this session; otherwise stop at the commit and say so.
 
