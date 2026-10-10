@@ -107,11 +107,43 @@ describe('decodeCodexLine', () => {
     expect(row.content).toContain('Considering the approach.');
   });
 
-  it('records usage with a real context window from token_count', () => {
+  it('records the current context, not the session total, against the real window', () => {
     const state = {};
     expect(decodeCodexLine(first('event_msg/token_count/'), state)).toBeNull();
-    expect(state.usage.totalTokens).toBe(25813);
-    expect(state.usage.limit).toBe(258400);
+    expect(state.facts.usage).toEqual({ model: null, tokens: 25813, limit: 258400 });
+
+    // A later turn: total_token_usage is cumulative across the session,
+    // last_token_usage is what the latest request actually carried.
+    decodeCodexLine(
+      JSON.stringify({
+        type: 'event_msg',
+        payload: {
+          type: 'token_count',
+          info: {
+            total_token_usage: {
+              input_tokens: 221273,
+              output_tokens: 1068,
+              total_tokens: 222341,
+            },
+            last_token_usage: {
+              input_tokens: 29657,
+              output_tokens: 85,
+              total_tokens: 29742,
+            },
+            model_context_window: 258400,
+          },
+        },
+      }),
+      state
+    );
+    expect(state.facts.usage.tokens).toBe(29742);
+  });
+
+  it('never puts the raw record on a row', () => {
+    const state = {};
+    const rows = rawLines.flatMap((l) => [decodeCodexLine(l, state) ?? []].flat());
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.some((r) => 'record' in r)).toBe(false);
   });
 
   it('ignores lifecycle and bookkeeping records', () => {

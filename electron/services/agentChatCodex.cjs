@@ -74,6 +74,8 @@ function decodeCodexLine(lineStr, state) {
 
   state.codexCalls = state.codexCalls || {};
   state.codexResults = state.codexResults || {};
+  // What the chat shows beside the rows; the only state sent to the renderer.
+  state.facts = state.facts || { tasks: {}, todos: null, usage: null };
 
   if (record.type === 'response_item') {
     if (payload.type === 'message') {
@@ -85,7 +87,6 @@ function decodeCodexLine(lineStr, state) {
         id: payload.id || record.id,
         role: payload.role,
         content: text,
-        record,
       };
     }
 
@@ -98,7 +99,6 @@ function decodeCodexLine(lineStr, state) {
         id: payload.id || record.id,
         role: 'reasoning',
         content: text,
-        record,
       };
     }
 
@@ -117,7 +117,7 @@ function decodeCodexLine(lineStr, state) {
           : (payload.input ?? payload.action ?? null);
       const toolUse = { id: callId, name: payload.name || 'tool', input };
       state.codexCalls[callId] = toolUse;
-      const row = { id: callId, role: 'tool', tool_use: toolUse, record };
+      const row = { id: callId, role: 'tool', tool_use: toolUse };
       const pending = state.codexResults[callId];
       if (pending) {
         row.result = pending.result;
@@ -145,7 +145,6 @@ function decodeCodexLine(lineStr, state) {
           role: 'tool',
           tool_use: toolUse,
           result: resultBlock,
-          record,
         };
       }
       const orphanRowId = `orphan-${callId}`;
@@ -155,7 +154,6 @@ function decodeCodexLine(lineStr, state) {
         role: 'user',
         orphan: true,
         blocks: [resultBlock],
-        record,
       };
     }
 
@@ -165,23 +163,24 @@ function decodeCodexLine(lineStr, state) {
   if (record.type === 'event_msg') {
     if (payload.type === 'token_count') {
       const info = payload.info || {};
-      const total = info.total_token_usage || {};
-      state.usage = {
-        totalTokens: total.total_tokens || 0,
-        // Rollouts carry no model name — but they do carry the real context
-        // window, so the chat view can show a true percentage with no table.
-        model: 'unknown',
+      // total_token_usage is the session's cumulative spend; what's in the
+      // context now is the latest request's, last_token_usage. Rollouts carry
+      // no model name, but they do carry the real context window.
+      const last = info.last_token_usage || info.total_token_usage || {};
+      state.facts.usage = {
+        model: null,
+        tokens: last.total_tokens || 0,
         limit: info.model_context_window || null,
       };
       return null;
     }
     if (payload.type === 'user_message' && typeof payload.message === 'string') {
       if (!payload.message) return null;
-      return { id: record.id, role: 'user', content: payload.message, record };
+      return { id: record.id, role: 'user', content: payload.message };
     }
     if (payload.type === 'agent_message' && typeof payload.message === 'string') {
       if (!payload.message) return null;
-      return { id: record.id, role: 'assistant', content: payload.message, record };
+      return { id: record.id, role: 'assistant', content: payload.message };
     }
     return null;
   }
