@@ -865,6 +865,12 @@ function registerHandlers(win, storeInstance) {
     agents.setPaneRatio(rootId, path, ratio);
   });
 
+  // Summaries in flight, by handoffId, so the dialog can cancel one.
+  const activeSummaries = new Map();
+  ipcMain.handle('agent-handoff-cancel-summary', (_e, handoffId) => {
+    activeSummaries.get(handoffId)?.cancel();
+  });
+
   ipcMain.handle('agent-handoff-prepare', (_e, sessionId) => {
     const session = agents.getSession(sessionId);
     if (!session) return { error: 'Session not found' };
@@ -881,10 +887,17 @@ function registerHandlers(win, storeInstance) {
     );
     const contextSource = transcriptPath ? 'transcript' : 'capture';
     const modes = transcriptPath ? ['focused', 'full'] : ['quick'];
+    // Only an Agent that has finished its turn can take a new prompt.
+    const status = session.tracker.snapshot().state;
+    const summarizeEnabled = status === 'idle' || status === 'done';
 
     return {
       contextSource,
-      modes,
+      modes: [...modes, 'summarized'],
+      summarizeEnabled,
+      summarizeDisabledReason: summarizeEnabled
+        ? null
+        : 'The current Agent is busy. Summarising needs it idle or done.',
       agents: detected,
       defaultAgentId: (other || detected[0])?.id || null,
     };
@@ -898,6 +911,40 @@ function registerHandlers(win, storeInstance) {
 
     const agent = agents.listAgents({ all: true }).find((a) => a.id === targetAgentId);
     if (!agent) return { error: 'Target agent not found' };
+    const globalArgs = store.get('agentPresets', {})[targetAgentId]?.args || '';
+    const launch = (handoffFile) => {
+      const res = handoff.launchTarget({
+        agents,
+        site,
+        source: session,
+        targetAgentId,
+        globalArgs,
+        handoffFile,
+      });
+      if (res?.ok) addToProjects(site.id);
+      return res;
+    };
+
+    if (mode === 'summarized') {
+      const tracker = handoff.createSummaryTracker({
+        sessionId,
+        agents,
+        onProgress: (info) => {
+          const event = { ...info };
+          if (info.phase === 'complete') {
+            const res = launch(info.filePath);
+            if (res?.ok) event.sessionId = res.sessionId;
+            else event.error = res?.error || 'Launch failed';
+          }
+          if (info.phase !== 'prompted') activeSummaries.delete(info.handoffId);
+          if (win && !win.isDestroyed())
+            win.webContents.send('agent-handoff-progress', event);
+        },
+      });
+      activeSummaries.set(tracker.handoffId, tracker);
+      tracker.start();
+      return { ok: true, handoffId: tracker.handoffId };
+    }
 
     const transcriptPath = transcripts.locateTranscript(
       session.agentId,
@@ -908,28 +955,14 @@ function registerHandlers(win, storeInstance) {
     if (!transcriptPath && !capture) return { error: 'No terminal output available' };
     const promptContent = handoff.buildPrompt({
       agentName: session.agentName,
-      title: session.title,
+      title: session.tracker.snapshot().title,
       cwd: session.cwd,
       capture,
       transcriptPath,
       mode,
     });
 
-    const handoffFile = handoff.writeHandoffFile(promptContent);
-
-    const globalArgs = store.get('agentPresets', {})[targetAgentId]?.args || '';
-
-    const res = handoff.launchTarget({
-      agents,
-      site,
-      source: session,
-      targetAgentId,
-      globalArgs,
-      handoffFile,
-    });
-
-    if (res?.ok) addToProjects(site.id);
-    return res;
+    return launch(handoff.writeHandoffFile(promptContent));
   });
 
   // ── Launch Presets (global, per-Agent) & Launch Targets (per-Site) ─────────

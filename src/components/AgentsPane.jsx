@@ -1127,7 +1127,6 @@ export default function AgentsPane() {
           onClose={() => setHandoffSession(null)}
           onComplete={(newSessionId) => {
             setHandoffSession(null);
-            // new tab will be selected via list re-render, or we can select it explicitly:
             setActiveTab(newSessionId);
           }}
         />
