@@ -2,7 +2,13 @@ import { Panel, PanelGroup } from 'react-resizable-panels';
 import ResizeHandle from '../ResizeHandle';
 import Terminal from '../Terminal';
 import { ChatView } from './ChatView';
-import { getViewMode, subscribe } from '../../lib/chatView';
+import {
+  getViewMode,
+  subscribe,
+  getReturnToChat,
+  setViewMode as setViewModeGlobal,
+  setReturnToChat,
+} from '../../lib/chatView';
 import { useEffect, useRef, useState } from 'react';
 
 export default function SplitLayout({
@@ -24,6 +30,20 @@ export default function SplitLayout({
   const [viewMode, setViewMode] = useState(
     tree.leaf ? getViewMode(tree.leaf) : 'terminal'
   );
+
+  const sessionState = sessionsById[tree?.leaf]?.state;
+  const previousState = useRef(sessionState);
+
+  useEffect(() => {
+    if (!tree.leaf) return;
+    if (previousState.current === 'needs-input' && sessionState !== 'needs-input') {
+      if (getReturnToChat(tree.leaf)) {
+        setViewModeGlobal(tree.leaf, 'chat');
+        setReturnToChat(tree.leaf, false);
+      }
+    }
+    previousState.current = sessionState;
+  }, [sessionState, tree.leaf]);
 
   useEffect(() => {
     if (!tree.leaf) return;

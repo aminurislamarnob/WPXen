@@ -10,8 +10,12 @@ import { ChatMarkdown } from './ChatMarkdown';
 import { QuestionCard } from './QuestionCard';
 import { buildAskAnswerKeys } from '../../lib/agentAsk';
 import { SubagentRow } from './SubagentRow';
+import { WaitingFallback } from './WaitingFallback';
+import * as sessionCache from '../../lib/terminal/sessionCache';
 import { ImageRef } from './ImageRef';
 import { contextMeter } from '../../lib/contextMeter';
+import { setViewMode, setReturnToChat } from '../../lib/chatView';
+import { shouldShowWaitingFallback } from '../../lib/chatRows';
 
 export function ChatView({ sessionId }) {
   const viewerId = useId();
@@ -33,6 +37,32 @@ export function ChatView({ sessionId }) {
   const [isLoadingOlder, setIsLoadingOlder] = useState(false);
 
   const foldedMessages = useMemo(() => foldToolRuns(messages), [messages]);
+
+  const [fallbackSnapshot, setFallbackSnapshot] = useState('');
+  const needsFallback = shouldShowWaitingFallback(currentSession?.state, foldedMessages, {
+    cards: !!currentSession?.ask,
+  });
+
+  useEffect(() => {
+    let active = true;
+    if (needsFallback) {
+      window.electronAPI.chatSnapshot(sessionId, 15).then((snap) => {
+        if (active) setFallbackSnapshot(snap);
+      });
+    } else {
+      setFallbackSnapshot('');
+    }
+    return () => {
+      active = false;
+    };
+  }, [needsFallback, sessionId, currentSession?.state]);
+
+  const handleSwitchToTerminal = useCallback(() => {
+    setViewMode(sessionId, 'terminal');
+    setReturnToChat(sessionId, true);
+    // The xterm is un-hidden on the next render; focus it once it's visible.
+    requestAnimationFrame(() => sessionCache.focus(sessionId));
+  }, [sessionId]);
 
   // Expose virtualizer
   const virtualizer = useVirtualizer({
@@ -478,6 +508,15 @@ export function ChatView({ sessionId }) {
             );
           })}
         </div>
+        {needsFallback && (
+          <div className="flex flex-col mt-4 mb-4 items-stretch relative z-10">
+            <WaitingFallback
+              snapshot={fallbackSnapshot}
+              onSwitch={handleSwitchToTerminal}
+            />
+          </div>
+        )}
+
         {currentSession?.state === 'working' && (
           <div className="flex flex-col mt-4 mb-4 items-start relative z-10">
             <div className="max-w-[80%] rounded-lg p-3 bg-muted text-[13px] text-muted-foreground flex items-center gap-2">

@@ -1469,6 +1469,13 @@ function chatImage(sessionId, ref) {
   return agentChat.chatImage(sessionId, ref);
 }
 
+function chatSnapshot(sessionId, lines = 15) {
+  const session = getSession(sessionId);
+  if (!session) return '';
+  const { snapshotBuffer } = require('./ansi.cjs');
+  return snapshotBuffer(session.buffer, lines);
+}
+
 module.exports = {
   SHELL_ID,
   setConfig,
@@ -1517,6 +1524,7 @@ module.exports = {
   respawnPane,
   getSession,
   getBuffer,
+  chatSnapshot,
   hasActiveSessions,
   activeSiteIds,
   stopAll,

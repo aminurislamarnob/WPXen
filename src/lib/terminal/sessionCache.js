@@ -266,6 +266,13 @@ export function fit(sessionId) {
   window.electronAPI.terminalResize(sessionId, entry.term.cols, entry.term.rows);
 }
 
+// Put keyboard focus in a live Session's xterm, e.g. after the chat view
+// hands the pane back to the terminal.
+export function focus(sessionId) {
+  const entry = cache.get(sessionId);
+  if (entry && !entry.exited) entry.term.focus();
+}
+
 export function isExited(sessionId) {
   return cache.get(sessionId)?.exited ?? false;
 }

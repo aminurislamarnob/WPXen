@@ -1,5 +1,6 @@
 const listeners = new Set();
 const state = new Map();
+const returnToChatState = new Map();
 
 export function subscribe(cb) {
   listeners.add(cb);
@@ -21,4 +22,12 @@ export function setViewMode(sessionId, mode) {
     state.set(sessionId, mode);
     notify();
   }
+}
+
+export function setReturnToChat(sessionId, value) {
+  returnToChatState.set(sessionId, value);
+}
+
+export function getReturnToChat(sessionId) {
+  return returnToChatState.get(sessionId) || false;
 }

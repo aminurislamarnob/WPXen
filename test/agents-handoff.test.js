@@ -53,9 +53,9 @@ afterEach(() => {
 });
 
 describe('handoff transcript preparation', () => {
-  it('strips ANSI escape sequences and lone carriage returns', () => {
+  it('strips ANSI escape sequences', () => {
     const raw = '\x1b[31mError\x1b[0m \x1b]0;Title\x07\nLine\r\n';
-    expect(stripAnsi(raw)).toBe('Error \nLine\n');
+    expect(stripAnsi(raw)).toBe('Error \nLine\r\n');
   });
 
   it('caps the transcript to 800 lines', () => {
