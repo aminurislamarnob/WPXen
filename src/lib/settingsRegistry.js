@@ -544,6 +544,25 @@ export const SETTINGS_ITEMS = [
       'tunnel',
     ],
   },
+  {
+    id: 'remote.hostname',
+    section: 'mobile',
+    title: 'Public hostname',
+    description: 'The hostname your Cloudflare tunnel routes at this Mac',
+    keywords: [
+      'remote',
+      'access',
+      'mobile',
+      'hostname',
+      'host',
+      'domain',
+      'cloudflare',
+      'tunnel',
+      'token',
+      'public',
+      'dns',
+    ],
+  },
 
   // ── External tools ───────────────────────────────────────────────────────
   {
