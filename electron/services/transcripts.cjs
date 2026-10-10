@@ -14,7 +14,14 @@ function __setDeps(newDeps) {
   deps = { ...deps, ...newDeps };
 }
 
-function locateClaude({ cwd, startedAt, home }) {
+const { claudeTranscriptPath } = require('./agentChatClaude.cjs');
+
+function locateClaude({ cwd, startedAt, home, transcriptId }) {
+  if (transcriptId) {
+    const pinned = claudeTranscriptPath({ home, cwd, uuid: transcriptId });
+    if (pinned && deps.existsSync(pinned)) return pinned;
+  }
+
   // Claude replaces each non-alphanumeric character with '-'
   const encoded = cwd.replace(/[^a-zA-Z0-9]/g, '-');
   const dir = path.join(home, '.claude', 'projects', encoded);
@@ -146,10 +153,10 @@ const REGISTRY = {
   antigravity: locateAntigravity,
 };
 
-function locateTranscript(agentId, cwd, startedAt) {
+function locateTranscript(agentId, cwd, startedAt, transcriptId) {
   const locator = REGISTRY[agentId];
   if (!locator) return null;
-  return locator({ cwd, startedAt, home: deps.homedir() });
+  return locator({ cwd, startedAt, home: deps.homedir(), transcriptId });
 }
 
 module.exports = {

@@ -46,6 +46,8 @@ const REGISTRY = [
     cmd: 'claude --dangerously-skip-permissions',
     install: 'npm install -g @anthropic-ai/claude-code',
     installer: { kind: 'brew', name: 'claude-code', cask: true },
+    sessionIdFlag: '--session-id',
+    resumeFlag: '--resume',
   },
   {
     // command-code installs four aliases for one entry point: cmd, cmdc,
@@ -329,6 +331,8 @@ function listAgents({ all = false, shell = true } = {}) {
         // Install button off this and branches on `kind` for its wording.
         installer: a.installer ? { ...a.installer } : null,
         promptFlag: a.promptFlag || null,
+        sessionIdFlag: a.sessionIdFlag || null,
+        resumeFlag: a.resumeFlag || null,
         isCustom: !!a.isCustom,
         isShell: false,
         enabled: !config.enabled || config.enabled.includes(a.id),
@@ -808,6 +812,7 @@ function sessionRow(s) {
     layout: !s.paneOf ? layouts.get(s.sessionId) || { leaf: s.sessionId } : null,
     handoffFrom: s.handoffFrom || null,
     handoffFile: s.handoffFile || null,
+    transcriptId: s.transcriptId || null,
     // The issue or PR Start → launched this Session for, else null.
     issue: s.issue || null,
     startedAt: s.startedAt,
@@ -868,9 +873,15 @@ function launch({
   const line = String(prompt || '')
     .replace(/\s*[\r\n]+\s*/g, ' ')
     .trim();
-  const typed = line
-    ? `${resolved.command} ${agent.promptFlag ? agent.promptFlag + ' ' : ''}${shellQuote(line)}`
-    : resolved.command;
+
+  const transcriptId = agent.sessionIdFlag ? randomUUID() : undefined;
+  let typed = resolved.command;
+  if (transcriptId) {
+    typed += ` ${agent.sessionIdFlag} ${transcriptId}`;
+  }
+  if (line) {
+    typed += ` ${agent.promptFlag ? agent.promptFlag + ' ' : ''}${shellQuote(line)}`;
+  }
 
   // The Site's PHP first on PATH: a zsh wrapper for the whole shell (see
   // shellIntegration.cjs), or for other shells, on the agent's command line.
@@ -896,6 +907,7 @@ function launch({
       paneOf,
       handoffFrom,
       handoffFile,
+      transcriptId,
     },
     failLabel: agent.name,
   });
