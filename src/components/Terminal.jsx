@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowDown, X } from 'lucide-react';
+import { ArrowDown, ArrowRightLeft, X } from 'lucide-react';
 import '@xterm/xterm/css/xterm.css';
 import { formatDropInput } from '../lib/terminal/keys';
 import * as sessionCache from '../lib/terminal/sessionCache';
@@ -25,6 +25,8 @@ export default function Terminal({
   onFocus,
   onBlur,
   isFocused,
+  isAgent,
+  onHandoff,
 }) {
   // Link clicks: plain → the action card, ⌘ / ⇧⌘ → straight to a destination.
   // `onOpenLink(url, destination)` — 'system' or 'app' — is the owner's.
@@ -154,15 +156,32 @@ export default function Terminal({
       onBlurCapture={onBlur}
     >
       <div ref={hostRef} className="h-full w-full p-2" />
-      {onClosePane && (
-        <button
-          onClick={onClosePane}
-          className="absolute right-2 top-2 z-10 flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-          aria-label="Close pane"
-          title="Close pane"
+      {((isAgent && onHandoff) || onClosePane) && (
+        <div
+          className={`absolute top-2 z-10 flex items-center gap-1 ${
+            searchOpen ? 'right-[180px]' : 'right-2'
+          }`}
         >
-          <X size={14} />
-        </button>
+          {isAgent && onHandoff && (
+            <button
+              onClick={() => onHandoff(sessionId)}
+              className="panel flex h-7 items-center justify-center gap-1.5 rounded bg-background/80 px-2 text-[12px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <ArrowRightLeft size={13} />
+              Hand Off
+            </button>
+          )}
+          {onClosePane && (
+            <button
+              onClick={onClosePane}
+              className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+              aria-label="Close pane"
+              title="Close pane"
+            >
+              <X size={14} />
+            </button>
+          )}
+        </div>
       )}
       {linkRequest && (
         <LinkActionCard

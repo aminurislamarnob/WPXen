@@ -12,6 +12,7 @@ import {
 import { ProviderIcon } from './providerIcons';
 import { Panel, PanelGroup } from 'react-resizable-panels';
 import SplitLayout from './agents/SplitLayout';
+import HandoffDialog from './agents/HandoffDialog';
 import FileExplorer from './FileExplorer';
 import CodeEditor from './CodeEditor';
 import ResizeHandle from './ResizeHandle';
@@ -111,13 +112,33 @@ export default function AgentsPane() {
   const [error, setError] = useState(null);
 
   const allSessions = useAgentSessions();
-  const tabs = useMemo(
-    () =>
-      allSessions
-        .filter((s) => s.siteId === siteId && !s.paneOf)
-        .sort((a, b) => a.startedAt - b.startedAt),
-    [allSessions, siteId]
-  );
+  const tabs = useMemo(() => {
+    const valid = allSessions.filter((s) => s.siteId === siteId && !s.paneOf);
+    const map = new Map(valid.map((s) => [s.sessionId, s]));
+    const children = new Map();
+    const roots = [];
+
+    for (const item of valid) {
+      if (item.handoffFrom && map.has(item.handoffFrom)) {
+        if (!children.has(item.handoffFrom)) children.set(item.handoffFrom, []);
+        children.get(item.handoffFrom).push(item);
+      } else {
+        roots.push(item);
+      }
+    }
+
+    roots.sort((a, b) => a.startedAt - b.startedAt);
+
+    const result = [];
+    const add = (item) => {
+      result.push(item);
+      const kids = children.get(item.sessionId) || [];
+      kids.sort((a, b) => a.startedAt - b.startedAt);
+      for (const kid of kids) add(kid);
+    };
+    for (const root of roots) add(root);
+    return result;
+  }, [allSessions, siteId]);
   const [activeTab, setActiveTab] = useState(null); // sessionId
   // The focused pane of each split tab; an unsplit tab is its own pane.
   const [focusedPaneBySession, setFocusedPaneBySession] = useState({});
@@ -153,6 +174,8 @@ export default function AgentsPane() {
 
   // The Explorer is a collapsible right sidebar: the toolbar button, ⌘⇧E, or
   // dragging its handle to the edge close it.
+  const [handoffSession, setHandoffSession] = useState(null);
+
   const explorerRef = useRef(null);
   const [explorerCollapsed, setExplorerCollapsed] = useState(readExplorerCollapsed);
   useEffect(() => {
@@ -570,6 +593,15 @@ export default function AgentsPane() {
 
     const items = [];
     if (kind === 'session') {
+      const isAgent = tabs.find((t) => t.sessionId === key)?.isAgent;
+      if (isAgent) {
+        items.push({
+          label: 'Hand Off to Another Agent…',
+          onClick: () => setHandoffSession(key),
+        });
+        items.push('separator');
+      }
+
       items.push({
         label: 'Split right',
         onClick: () => window.electronAPI.splitPane(key, 'right'),
@@ -983,6 +1015,8 @@ export default function AgentsPane() {
                       onFocusPane={paneFocus}
                       onBlurPane={paneBlur}
                       onClosePane={requestClosePane}
+                      onHandoff={setHandoffSession}
+                      sessionsById={sessionsById}
                     />
                   ) : (
                     <div className="h-full flex flex-col items-center justify-center text-center">
@@ -1087,6 +1121,17 @@ export default function AgentsPane() {
           window.electronAPI.listLaunchTargets(siteId).then((t) => setTargets(t || []))
         }
       />
+      {handoffSession && (
+        <HandoffDialog
+          sessionId={handoffSession}
+          onClose={() => setHandoffSession(null)}
+          onComplete={(newSessionId) => {
+            setHandoffSession(null);
+            // new tab will be selected via list re-render, or we can select it explicitly:
+            setActiveTab(newSessionId);
+          }}
+        />
+      )}
     </>
   );
 }

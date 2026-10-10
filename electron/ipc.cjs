@@ -863,6 +863,59 @@ function registerHandlers(win, storeInstance) {
     agents.setPaneRatio(rootId, path, ratio);
   });
 
+  ipcMain.handle('agent-handoff-prepare', (_e, sessionId) => {
+    const session = agents.getSession(sessionId);
+    if (!session) return { error: 'Session not found' };
+    const detected = agents
+      .listAgents()
+      .filter((a) => a.detected && a.id !== agents.SHELL_ID);
+    // Handing off to the same Agent is allowed (a fresh context), but the
+    // usual intent is a different one, so that's the default.
+    const other = detected.find((a) => a.id !== session.agentId);
+    return {
+      contextSource: 'capture',
+      modes: ['quick'],
+      agents: detected,
+      defaultAgentId: (other || detected[0])?.id || null,
+    };
+  });
+
+  ipcMain.handle('agent-handoff-run', (_e, { sessionId, targetAgentId, _mode }) => {
+    const session = agents.getSession(sessionId);
+    if (!session) return { error: 'Session not found' };
+    const site = findProject(session.siteId);
+    if (!site) return { error: 'Project not found' };
+
+    const agent = agents.listAgents({ all: true }).find((a) => a.id === targetAgentId);
+    if (!agent) return { error: 'Target agent not found' };
+
+    const capture = agents.getBuffer(sessionId);
+    if (!capture) return { error: 'No terminal output available' };
+
+    const handoff = require('./services/handoff.cjs');
+    const promptContent = handoff.buildPrompt({
+      agentName: session.agentName,
+      title: session.title || 'Terminal',
+      cwd: session.cwd,
+      capture,
+    });
+    const handoffFile = handoff.writeHandoffFile(promptContent);
+
+    const globalArgs = store.get('agentPresets', {})[targetAgentId]?.args || '';
+
+    const res = handoff.launchTarget({
+      agents,
+      site,
+      source: session,
+      targetAgentId,
+      globalArgs,
+      handoffFile,
+    });
+
+    if (res?.ok) addToProjects(site.id);
+    return res;
+  });
+
   // ── Launch Presets (global, per-Agent) & Launch Targets (per-Site) ─────────
   // Global default flags typed for an Agent on every launch, keyed by agentId:
   // { [agentId]: { args } }. `resolveLaunch` treats an absent/empty entry as
