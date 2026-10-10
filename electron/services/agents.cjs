@@ -993,7 +993,12 @@ function startSession({ cwd, command, meta, failLabel, phpBinDir = null }) {
     cwd,
     pty: term,
     buffer: '',
-    window: null,
+    // Every viewer of this Session's output — the desktop window is simply
+    // one of them. A Set so unsubscribing one never touches the others.
+    outputSubscribers: new Set(),
+    // The desktop window's own subscription, so re-attaching replaces it
+    // instead of stacking a second one (which would double every chunk).
+    windowUnsub: null,
     exited: false,
     exitCode: null,
     startedAt: Date.now(),
@@ -1039,10 +1044,7 @@ function startSession({ cwd, command, meta, failLabel, phpBinDir = null }) {
     if (session.buffer.length > MAX_BUFFER) {
       session.buffer = session.buffer.slice(session.buffer.length - MAX_BUFFER);
     }
-    const win = session.window;
-    if (win && !win.isDestroyed()) {
-      win.webContents.send('terminal-data', { sessionId, data });
-    }
+    emitOutputData(session, data);
   });
 
   term.onExit(({ exitCode }) => {
@@ -1050,10 +1052,7 @@ function startSession({ cwd, command, meta, failLabel, phpBinDir = null }) {
     session.exitCode = exitCode;
     session.tracker.exit(exitCode);
     deliverAlerts(session);
-    const win = session.window;
-    if (win && !win.isDestroyed()) {
-      win.webContents.send('terminal-exit', { sessionId, code: exitCode });
-    }
+    emitOutputExit(session, exitCode);
     // stop() already deleted a dismissed session; don't resurrect its row.
     if (sessions.has(sessionId)) emitChange({ immediate: true });
   });
@@ -1062,17 +1061,88 @@ function startSession({ cwd, command, meta, failLabel, phpBinDir = null }) {
   return { ok: true, sessionId };
 }
 
-// Bind a Terminal Window to its Session and replay the ring buffer (Q9). Setting
-// the window ref and sending replay happen synchronously, so no onData chunk can
-// interleave between them — live chunks that follow arrive after the replay.
+// Fan a live chunk out to every output subscriber. One throwing subscriber
+// must not break the others or the pty, so each delivery is guarded.
+function emitOutputData(session, data) {
+  const subs = session.outputSubscribers;
+  if (!subs || subs.size === 0) return;
+  for (const sub of [...subs]) {
+    try {
+      if (sub.onData) sub.onData(data);
+    } catch {}
+  }
+}
+
+// Same isolation for the exit event.
+function emitOutputExit(session, exitCode) {
+  const subs = session.outputSubscribers;
+  if (!subs || subs.size === 0) return;
+  for (const sub of [...subs]) {
+    try {
+      if (sub.onExit) sub.onExit(exitCode);
+    } catch {}
+  }
+}
+
+// Subscribe to a Session's output: one replay (ring buffer plus exited flag),
+// then every live chunk, then the exit event with its code. Generic — it
+// knows nothing about windows, phones or sockets. Returns an unsubscribe
+// function; unsubscribing never affects the Session itself.
+//
+// The replay (and the immediate exit for an already-exited Session) is sent
+// synchronously, so no live chunk can interleave before it.
+function subscribeOutput(sessionId, sinks = {}) {
+  const session = sessions.get(sessionId);
+  // No Session: nothing to replay or follow. Return a no-op unsubscribe so
+  // the return type stays a function on every path.
+  if (!session) return () => {};
+  if (!session.outputSubscribers) session.outputSubscribers = new Set();
+  const sub = {
+    onReplay: typeof sinks.onReplay === 'function' ? sinks.onReplay : null,
+    onData: typeof sinks.onData === 'function' ? sinks.onData : null,
+    onExit: typeof sinks.onExit === 'function' ? sinks.onExit : null,
+  };
+  session.outputSubscribers.add(sub);
+  try {
+    if (sub.onReplay) sub.onReplay({ data: session.buffer, exited: session.exited });
+  } catch {}
+  if (session.exited) {
+    try {
+      if (sub.onExit) sub.onExit(session.exitCode);
+    } catch {}
+  }
+  let done = false;
+  return () => {
+    if (done) return;
+    done = true;
+    session.outputSubscribers.delete(sub);
+  };
+}
+
+// Bind a Terminal Window to its Session and replay the ring buffer (Q9). The
+// window is one output subscriber: subscribing sends the replay
+// synchronously, so no onData chunk can interleave between them — live chunks
+// that follow arrive after the replay. Re-attaching replaces the window's
+// previous subscription instead of stacking a second one.
 function attach(sessionId, win) {
   const session = sessions.get(sessionId);
   if (!session) return { error: 'no session' };
-  session.window = win;
-  win.webContents.send('terminal-replay', {
-    sessionId,
-    data: session.buffer,
-    exited: session.exited,
+  try {
+    if (session.windowUnsub) session.windowUnsub();
+  } catch {}
+  session.windowUnsub = subscribeOutput(sessionId, {
+    onReplay: ({ data, exited }) => {
+      if (!win || win.isDestroyed()) return;
+      win.webContents.send('terminal-replay', { sessionId, data, exited });
+    },
+    onData: (data) => {
+      if (!win || win.isDestroyed()) return;
+      win.webContents.send('terminal-data', { sessionId, data });
+    },
+    onExit: (code) => {
+      if (!win || win.isDestroyed()) return;
+      win.webContents.send('terminal-exit', { sessionId, code });
+    },
   });
   return { ok: true };
 }
@@ -1372,6 +1442,7 @@ module.exports = {
   launch,
   launchFloating,
   attach,
+  subscribeOutput,
   write,
   setView,
   markRead,
