@@ -785,13 +785,25 @@ function registerHandlers(win, storeInstance) {
   ipcMain.on('floating-focus', (_e, focused) => {
     floatingFocused = !!focused;
   });
+
+  let agentsFocused = false;
+  ipcMain.on('agents-focus', (_e, focused) => {
+    agentsFocused = !!focused;
+  });
+
   if (win) {
     win.webContents.on('before-input-event', (event, input) => {
-      if (!floatingFocused || input.type !== 'keyDown') return;
+      if (input.type !== 'keyDown') return;
       if (!input.meta || input.control || input.alt || input.shift) return;
       if (String(input.key || '').toLowerCase() !== 'w') return;
-      event.preventDefault();
-      win.webContents.send('floating-shortcut', { key: 'w' });
+
+      if (floatingFocused) {
+        event.preventDefault();
+        win.webContents.send('floating-shortcut', { key: 'w' });
+      } else if (agentsFocused) {
+        event.preventDefault();
+        win.webContents.send('agents-shortcut', { key: 'w' });
+      }
     });
   }
   ipcMain.handle('agent-session-mark', (_e, sessionId, read) => {

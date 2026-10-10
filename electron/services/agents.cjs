@@ -1181,10 +1181,67 @@ function setPaneRatio(rootId, path, ratio) {
   emitChange({ immediate: true });
 }
 
+function removeLeaf(node, leafId) {
+  if (node.leaf === leafId) return null;
+  if (node.dir) {
+    const a = removeLeaf(node.a, leafId);
+    const b = removeLeaf(node.b, leafId);
+    if (!a && !b) return null;
+    if (!a) return b;
+    if (!b) return a;
+    return { ...node, a, b };
+  }
+  return node;
+}
+
+function firstLeaf(node) {
+  if (node.leaf) return node.leaf;
+  return firstLeaf(node.a);
+}
+
+function rewritePaneOf(node, rootId) {
+  if (node.leaf) {
+    const s = sessions.get(node.leaf);
+    if (s) s.paneOf = node.leaf === rootId ? null : rootId;
+  } else if (node.dir) {
+    rewritePaneOf(node.a, rootId);
+    rewritePaneOf(node.b, rootId);
+  }
+}
+
+function closePane(sessionId) {
+  const session = sessions.get(sessionId);
+  if (!session) return;
+  const rootId = session.paneOf || sessionId;
+  const tree = layouts.get(rootId);
+  if (tree) {
+    const newTree = removeLeaf(tree, sessionId);
+    if (!newTree) {
+      layouts.delete(rootId);
+    } else if (!newTree.dir) {
+      layouts.delete(rootId);
+      const remainingId = newTree.leaf;
+      if (remainingId !== rootId) {
+        rewritePaneOf(newTree, remainingId);
+      }
+    } else if (rootId === sessionId) {
+      const newRootId = firstLeaf(newTree);
+      layouts.delete(rootId);
+      layouts.set(newRootId, newTree);
+      rewritePaneOf(newTree, newRootId);
+    } else {
+      layouts.set(rootId, newTree);
+    }
+  }
+}
+
 // Graceful stop: SIGTERM, escalate to SIGKILL after a grace period (Q11).
 function stop(sessionId) {
   const session = sessions.get(sessionId);
   if (!session) return;
+
+  closePane(sessionId);
+
   if (!session.exited) {
     try {
       session.pty.kill('SIGTERM');

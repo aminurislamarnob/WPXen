@@ -119,3 +119,91 @@ describe('agents split layout', () => {
     expect(rootRow.layout.b.ratio).toBe(60);
   });
 });
+
+describe('pane lifecycle', () => {
+  const site = () => ({ id: 'shop', name: 'Shop', path: path.join(home, 'code') });
+
+  it('collapse at depth 1', () => {
+    const s = site();
+    const { sessionId: rootId } = agents.launch({ site: s, agentId: agents.SHELL_ID });
+    const { sessionId: childId } = agents.splitPane(rootId, 'right', s);
+
+    agents.stop(childId);
+
+    const rows = agents.listAllSessions();
+    const rootRow = rows.find((r) => r.sessionId === rootId);
+    expect(rootRow.layout).toEqual({ leaf: rootId });
+    expect(rows.find((r) => r.sessionId === childId)).toBeUndefined();
+  });
+
+  it('collapse at depth 3', () => {
+    const s = site();
+    const { sessionId: rootId } = agents.launch({ site: s, agentId: agents.SHELL_ID });
+    const { sessionId: c1 } = agents.splitPane(rootId, 'right', s);
+    const { sessionId: c2 } = agents.splitPane(c1, 'down', s);
+
+    agents.stop(c1);
+
+    const rootRow = agents.listAllSessions().find((r) => r.sessionId === rootId);
+    expect(rootRow.layout).toEqual({
+      dir: 'right',
+      ratio: 50,
+      a: { leaf: rootId },
+      b: { leaf: c2 },
+    });
+  });
+
+  it('promoting the root rewrites paneOf and moves layout', () => {
+    const s = site();
+    const { sessionId: rootId } = agents.launch({ site: s, agentId: agents.SHELL_ID });
+    const { sessionId: c1 } = agents.splitPane(rootId, 'right', s);
+    const { sessionId: c2 } = agents.splitPane(c1, 'down', s);
+
+    agents.stop(rootId);
+
+    const rows = agents.listAllSessions();
+    expect(rows.find((r) => r.sessionId === rootId)).toBeUndefined();
+
+    const newRootRow = rows.find((r) => r.sessionId === c1);
+    expect(newRootRow.paneOf).toBeNull();
+    expect(newRootRow.layout).toEqual({
+      dir: 'down',
+      ratio: 50,
+      a: { leaf: c1 },
+      b: { leaf: c2 },
+    });
+
+    const c2Row = rows.find((r) => r.sessionId === c2);
+    expect(c2Row.paneOf).toBe(c1);
+  });
+
+  it('an exited pane stays a leaf', () => {
+    const s = site();
+    const { sessionId: rootId } = agents.launch({ site: s, agentId: agents.SHELL_ID });
+    const { sessionId: c1 } = agents.splitPane(rootId, 'right', s);
+
+    ptys[1].emitExit(1); // child exited
+
+    const rows = agents.listAllSessions();
+    const childRow = rows.find((r) => r.sessionId === c1);
+    expect(childRow).toBeDefined();
+    expect(childRow.exited).toBe(true);
+    expect(rows.find((r) => r.sessionId === rootId).layout.b.leaf).toBe(c1);
+  });
+
+  it('closing the tab stops every pane', () => {
+    const s = site();
+    const { sessionId: rootId } = agents.launch({ site: s, agentId: agents.SHELL_ID });
+    const { sessionId: c1 } = agents.splitPane(rootId, 'right', s);
+
+    // UI would call destroyTab on all panes in the tree:
+    agents.stop(c1);
+    agents.stop(rootId);
+
+    expect(ptys[0].kill).toHaveBeenCalledWith('SIGTERM');
+    expect(ptys[1].kill).toHaveBeenCalledWith('SIGTERM');
+
+    const rows = agents.listAllSessions();
+    expect(rows.length).toBe(0);
+  });
+});

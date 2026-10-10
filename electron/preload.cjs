@@ -28,6 +28,7 @@ const VALID_EVENT_CHANNELS = [
   'agent-sessions-update',
   'agent-floating-sessions-update',
   'floating-shortcut',
+  'agents-shortcut',
   'agent-projects-update',
   'project-icon-changed',
   'agent-open-session',
@@ -219,6 +220,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   listFloatingSessions: () => ipcRenderer.invoke('agent-floating-sessions'),
   setFloatingView: (sessionId) => ipcRenderer.send('agent-floating-view', sessionId),
   setFloatingFocus: (focused) => ipcRenderer.send('floating-focus', !!focused),
+  setAgentsFocus: (focused) => ipcRenderer.send('agents-focus', !!focused),
 
   // Floating Workspace notes
   notesCreate: () => ipcRenderer.invoke('notes-create'),

@@ -110,6 +110,7 @@ export default function AgentsPane() {
     [allSessions, siteId]
   );
   const [activeTab, setActiveTab] = useState(null); // sessionId
+  const [activePaneId, setActivePaneId] = useState(null); // focused pane inside activeTab
   const [addMenu, setAddMenu] = useState(null); // { x, y } when the + menu is open
   const [browserMenu, setBrowserMenu] = useState(null); // { x, y } for the browser targets
   const [browserBusy, setBrowserBusy] = useState(null); // target id being resolved
@@ -204,6 +205,21 @@ export default function AgentsPane() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [toggleExplorer, activeTab, showingFile]);
+
+  useEffect(() => {
+    return window.electronAPI.on('agents-shortcut', (e) => {
+      if (e.key === 'w' && activePaneId) {
+        window.electronAPI.terminalStop(activePaneId);
+        sessionCache.dispose(activePaneId);
+      }
+    });
+  }, [activePaneId]);
+
+  useEffect(() => {
+    window.electronAPI.setAgentsFocus?.(true);
+    return () => window.electronAPI.setAgentsFocus?.(false);
+  }, []);
+
   // Hold the Explorer's pixel width as the window resizes.
   useEffect(() => {
     const panel = explorerRef.current;
@@ -428,7 +444,7 @@ export default function AgentsPane() {
     const keysToClose = tabsToClose(orderedKeys, targetKey, action);
     if (keysToClose.length === 0) return;
 
-    const sessionsById = tabs.reduce((acc, t) => {
+    const sessionsById = allSessions.reduce((acc, t) => {
       acc[t.sessionId] = t;
       return acc;
     }, {});
@@ -443,7 +459,21 @@ export default function AgentsPane() {
 
       const closingSessions = keysToClose.filter((k) => sessionKeys.includes(k));
       for (const sessionId of closingSessions) {
-        destroyTab(sessionId);
+        const session = sessionsById[sessionId];
+        if (session && session.layout) {
+          const ids = [];
+          const traverse = (node) => {
+            if (node.leaf) ids.push(node.leaf);
+            else if (node.dir) {
+              traverse(node.a);
+              traverse(node.b);
+            }
+          };
+          traverse(session.layout);
+          ids.forEach((paneId) => destroyTab(paneId));
+        } else {
+          destroyTab(sessionId);
+        }
       }
 
       const activeKeyToUse = showingFile ? activeKey : activeTab;
@@ -884,6 +914,7 @@ export default function AgentsPane() {
                       onOpenLink={handleOpenLink}
                       onExited={destroyTab}
                       onRestart={respawn}
+                      onFocusPane={setActivePaneId}
                     />
                   ) : (
                     <div className="h-full flex flex-col items-center justify-center text-center">

@@ -25,8 +25,20 @@ export function closeImpact(keys, sessionsById, dirtyKeys) {
       dirty.push(key);
     }
     const session = sessionsById[key];
-    if (session && !session.exited) {
-      running++;
+    if (session) {
+      if (!session.exited) running++;
+      if (session.layout) {
+        const traverse = (node) => {
+          if (node.leaf && node.leaf !== key) {
+            const sub = sessionsById[node.leaf];
+            if (sub && !sub.exited) running++;
+          } else if (node.dir) {
+            traverse(node.a);
+            traverse(node.b);
+          }
+        };
+        traverse(session.layout);
+      }
     }
   }
 
