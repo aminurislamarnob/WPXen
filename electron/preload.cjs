@@ -289,6 +289,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   chatClose: (sessionId, viewerId) =>
     ipcRenderer.send('agent-chat-close', sessionId, viewerId),
   chatSend: (sessionId, text) => ipcRenderer.invoke('agent-chat-send', sessionId, text),
+  chatLoadOlder: (sessionId) => ipcRenderer.invoke('agent-chat-load-older', sessionId),
+  chatFetchFull: (sessionId, toolUseId) =>
+    ipcRenderer.invoke('agent-chat-fetch-full', sessionId, toolUseId),
 
   // In-app browser. The renderer owns the <webview>; these reach its guest in
   // the main process, keyed by the browser tab's key.

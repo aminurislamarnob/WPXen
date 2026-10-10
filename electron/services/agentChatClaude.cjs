@@ -20,16 +20,60 @@ const USER_NOISE_PREFIXES = [
   '<system-reminder>',
 ];
 
+// A tool_result's content is a string or an array of text/image blocks.
+function toolResultText(content) {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content
+    .filter((b) => b.type === 'text' && typeof b.text === 'string')
+    .map((b) => b.text)
+    .join('\n');
+}
+
+// Attach results to the assistant row that made the call and re-emit that
+// row. A result whose call is on a page not loaded yet becomes an orphan row
+// until the call shows up.
+function attachToolResults(results, record, state) {
+  let out = null;
+  for (const b of results) {
+    const toolUseId = b.tool_use_id;
+    const resultBlock = {
+      type: 'tool_result',
+      content: toolResultText(b.content),
+      tool_use_id: toolUseId,
+      is_error: !!b.is_error,
+    };
+    const callRow = state.calls[toolUseId] && state[state.calls[toolUseId]];
+    const toolUseBlock = callRow?.blocks.find(
+      (x) => x.type === 'tool_use' && x.id === toolUseId
+    );
+    if (toolUseBlock) {
+      toolUseBlock.result = resultBlock;
+      out = out || { ...callRow, record };
+    } else {
+      const orphanRowId = record.uuid || `orphan-${toolUseId}`;
+      state.results[toolUseId] = { ...resultBlock, rowId: orphanRowId };
+      out = out || {
+        id: orphanRowId,
+        role: 'user',
+        orphan: true,
+        blocks: [resultBlock],
+        record,
+      };
+    }
+  }
+  return out;
+}
+
 function decodeClaudeLine(lineStr, state) {
   if (!lineStr.trim()) return null;
   let record;
   try {
     record = JSON.parse(lineStr);
   } catch {
-    return null; // Ignore invalid JSON
+    return null;
   }
 
-  // Skip bookkeeping records
   const skipTypes = [
     'attachment',
     'file-history-snapshot',
@@ -43,6 +87,9 @@ function decodeClaudeLine(lineStr, state) {
   if (skipTypes.includes(record.type)) return null;
   if (record.isMeta || record.isSynthetic || record.isCompactSummary) return null;
 
+  state.calls = state.calls || {};
+  state.results = state.results || {};
+
   if (record.type === 'user') {
     // The turn lives under message.content: a string, or an array of blocks.
     const content = record.message?.content;
@@ -50,9 +97,10 @@ function decodeClaudeLine(lineStr, state) {
       typeof content === 'string' ? [{ type: 'text', text: content }] : content;
     if (!Array.isArray(blocks)) return null;
 
-    // Tool results arrive as user records of tool_result blocks. They belong
-    // to their call, never to the user.
-    if (blocks.some((b) => b.type === 'tool_result')) return null;
+    // Tool results arrive as user records of tool_result blocks, keyed by
+    // tool_use_id. They attach to their call, never show as a user message.
+    const results = blocks.filter((b) => b.type === 'tool_result');
+    if (results.length > 0) return attachToolResults(results, record, state);
 
     const contentStr = blocks
       .filter((b) => b.type === 'text' && typeof b.text === 'string')
@@ -81,26 +129,33 @@ function decodeClaudeLine(lineStr, state) {
       };
     }
 
-    // Claude writes each content block (thinking, text, tool_use) as its own record
     if (record.message?.content) {
       state[id].blocks = state[id].blocks.concat(record.message.content);
     }
 
-    // Combine blocks into a single string for markdown rendering
+    const removeIds = [];
     let combinedContent = '';
+
     for (const block of state[id].blocks) {
       if (block.type === 'text') {
         combinedContent += block.text + '\n';
       } else if (block.type === 'tool_use') {
+        state.calls[block.id] = id;
+        if (!block.result && state.results[block.id]) {
+          block.result = state.results[block.id];
+          removeIds.push(state.results[block.id].rowId);
+        }
         combinedContent += `\`\`\`tool_use\n${JSON.stringify(block, null, 2)}\n\`\`\`\n`;
       } else if (block.type === 'thinking') {
-        // Maybe render thinking in some way
         combinedContent += `> Thinking...\n`;
       }
     }
+
     state[id].content = combinedContent.trim();
 
-    return { ...state[id] };
+    const out = { ...state[id] };
+    if (removeIds.length > 0) out.remove = removeIds;
+    return out;
   }
 
   return null;
@@ -109,4 +164,5 @@ function decodeClaudeLine(lineStr, state) {
 module.exports = {
   claudeTranscriptPath,
   decodeClaudeLine,
+  toolResultText,
 };
