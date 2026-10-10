@@ -316,7 +316,7 @@ describe('agent-chat watcher', () => {
       older.push(...page.rows);
       if (page.atStart) break;
     }
-    const callRow = older.find((r) => r.id === 'msg-call-0');
+    const callRow = older.find((r) => r.id === 'toolu_X');
     expect(callRow.result.content).toBe('done');
     expect(callRow.remove).toEqual(['r-1']);
   });
@@ -422,13 +422,36 @@ describe('decodeClaudeLine', () => {
     expect(tools.every((t) => t.result)).toBe(true);
   });
 
-  it('splits assistant messages into one row per block, merged by message id', () => {
+  it('keeps row ids stable when a message straddles a page boundary', () => {
+    // Claude writes each block of a message as its own record; Load older
+    // decodes each page with its own state.
+    const thinking = JSON.stringify({
+      type: 'assistant',
+      uuid: 'a-think',
+      message: { id: 'msg-split', content: [{ type: 'thinking', thinking: 'hm' }] },
+    });
+    const call = JSON.stringify({
+      type: 'assistant',
+      uuid: 'a-call',
+      message: {
+        id: 'msg-split',
+        content: [{ type: 'tool_use', id: 'toolu_Split', name: 'Agent', input: {} }],
+      },
+    });
+    const olderPage = [decodeClaudeLine(thinking, {})].flat();
+    const newerPage = [decodeClaudeLine(call, {})].flat();
+    const ids = [...olderPage, ...newerPage].map((r) => r.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(newerPage[0].id).toBe('toolu_Split');
+  });
+
+  it('splits assistant messages into one row per block record', () => {
     const rows = decodeFixture();
     expect(rows.filter((r) => r.role === 'assistant').map((r) => r.id)).toEqual([
-      'msg_01HealthA-1',
-      'msg_02HealthB-0',
+      'a-0002-0',
+      'a-0004-0',
     ]);
-    expect(rows.find((r) => r.id === 'msg_01HealthA-0')).toMatchObject({
+    expect(rows.find((r) => r.id === 'a-0001-0')).toMatchObject({
       role: 'reasoning',
       content: 'The routes live in the plugin bootstrap.',
     });
@@ -522,7 +545,7 @@ describe('decodeClaudeLine', () => {
     );
 
     // It should re-emit the modified call row instead of an orphan
-    expect(resultRes.id).toBe('msg-1-0');
+    expect(resultRes.id).toBe('tool-y');
     expect(resultRes.orphan).toBeUndefined();
     expect(resultRes.result.content).toBe('result content');
   });

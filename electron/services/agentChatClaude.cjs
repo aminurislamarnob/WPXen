@@ -70,14 +70,13 @@ function attachToolResults(results, record, state) {
     };
     const callRowId = state.calls[toolUseId];
     const callRow = callRowId && state[callRowId];
-    const blockIndex = callRow
-      ? callRow.blocks.findIndex((x) => x.type === 'tool_use' && x.id === toolUseId)
-      : -1;
-    if (blockIndex !== -1) {
-      const toolBlock = callRow.blocks[blockIndex];
+    const toolBlock = callRow?.blocks.find(
+      (x) => x.type === 'tool_use' && x.id === toolUseId
+    );
+    if (toolBlock) {
       toolBlock.result = resultBlock;
       out.push({
-        id: `${callRowId}-${blockIndex}`,
+        id: toolBlock.rowId,
         role: 'tool',
         tool_use: toolBlock,
         result: resultBlock,
@@ -170,17 +169,22 @@ function decodeClaudeLine(lineStr, state) {
       };
     }
 
+    // Row ids must survive Load older, which decodes each page with fresh
+    // state and so may see only part of a message: a tool call is keyed by
+    // its tool_use id, any other block by the record that carries it.
     if (record.message?.content) {
-      state[id].blocks = state[id].blocks.concat(record.message.content);
+      const tagged = record.message.content.map((b, i) => ({
+        ...b,
+        rowId: b.type === 'tool_use' ? b.id : `${record.uuid || id}-${i}`,
+      }));
+      state[id].blocks = state[id].blocks.concat(tagged);
     }
 
     const removeIds = [];
     const rows = [];
 
-    let blockIndex = 0;
     for (const block of state[id].blocks) {
-      const blockId = `${id}-${blockIndex}`;
-      blockIndex++;
+      const blockId = block.rowId;
 
       if (block.type === 'text') {
         if (block.text) {
