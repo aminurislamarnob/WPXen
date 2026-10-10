@@ -48,6 +48,10 @@ export default function MobileSection() {
   const [cfInstalling, setCfInstalling] = useState(false);
   const [cfLog, setCfLog] = useState('');
   const [verifying, setVerifying] = useState(false);
+  const [pairing, setPairing] = useState(null);
+  const [pairingError, setPairingError] = useState(null);
+  const [pairingBusy, setPairingBusy] = useState(false);
+  const [, setTick] = useState(0);
 
   const tokenSaved = status.tokenSaved === true;
   const enabled = settings['remote.enabled'] === true;
@@ -123,6 +127,36 @@ export default function MobileSection() {
       setVerifying(false);
     }
   }
+
+  async function newPairing() {
+    setPairingError(null);
+    setPairingBusy(true);
+    try {
+      const result = await window.electronAPI.newRemotePairing();
+      if (result?.ok) setPairing({ qr: result.qr, expiresAt: result.expiresAt });
+      else setPairingError(result?.error || 'Could not create a pairing code.');
+    } catch {
+      setPairingError('Could not create a pairing code.');
+    } finally {
+      setPairingBusy(false);
+    }
+  }
+
+  // Countdown for the open offer; the secret dies with it.
+  useEffect(() => {
+    if (!pairing) return undefined;
+    const timer = setInterval(() => setTick((t) => t + 1), 1000);
+    return () => clearInterval(timer);
+  }, [pairing]);
+  const pairingSecondsLeft = pairing
+    ? Math.max(0, Math.round((pairing.expiresAt - Date.now()) / 1000))
+    : 0;
+
+  const canPair =
+    enabled &&
+    status.state === 'listening' &&
+    status.verification?.state === 'ok' &&
+    hostname;
 
   const serverLine =
     status.state === 'listening'
@@ -364,6 +398,57 @@ export default function MobileSection() {
             <li>Copy the token here.</li>
           </ol>
         </div>
+      </div>
+
+      <div>
+        <SectionLabel>Pair a Device</SectionLabel>
+        <Card>
+          <div className="settings-row">
+            <div className="flex-1 min-w-0">
+              <p className="text-[13px] text-foreground">Pair a new phone or tablet</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {canPair
+                  ? 'Shows a QR code for the phone to scan, then asks you to allow it'
+                  : 'Turn Remote Access on and verify the hostname first'}
+              </p>
+              {pairingError && (
+                <p className="text-[11px] text-destructive mt-1">{pairingError}</p>
+              )}
+            </div>
+            <Button
+              variant="secondary"
+              onClick={newPairing}
+              disabled={!canPair || pairingBusy}
+            >
+              {pairing ? 'New code' : 'Pair a device'}
+            </Button>
+          </div>
+          {pairing && (
+            <div className="px-4 pb-4">
+              {pairingSecondsLeft > 0 ? (
+                <div className="flex items-start gap-4">
+                  <img
+                    src={pairing.qr}
+                    alt="Pairing QR code"
+                    className="w-44 h-44 rounded-md border border-border"
+                  />
+                  <div className="text-xs text-muted-foreground space-y-1 pt-1">
+                    <p>Scan this with WPXen Mobile.</p>
+                    <p>
+                      Expires in {Math.floor(pairingSecondsLeft / 60)}:
+                      {String(pairingSecondsLeft % 60).padStart(2, '0')} · one scan only.
+                    </p>
+                    <p>Both screens show a code — allow it only if they match.</p>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  That code expired. Make a new one to pair.
+                </p>
+              )}
+            </div>
+          )}
+        </Card>
       </div>
     </div>
   );

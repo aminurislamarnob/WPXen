@@ -2,11 +2,24 @@
 
 const http = require('http');
 const net = require('net');
-const { randomUUID } = require('crypto');
+const { randomUUID, randomBytes } = require('crypto');
 const {
   PROTOCOL_VERSION,
   HEALTH_PATH,
+  DEVICE_PATH,
+  confirmationCode,
+  pairingUrl,
+  sealFrame,
+  openFrame,
+  randomNonce,
+  PAIR_ERRORS,
+  newKeyPair,
+  keyPairFromSecret,
+  publicKeyB64,
+  encodeBase64,
+  decodeBase64,
 } = require('../../shared/remote-protocol/index.cjs');
+const QRCode = require('qrcode');
 const { saveSecret, loadSecret, hasSecret, clearSecret } = require('./secureSecrets.cjs');
 
 // Remote Access tracer (spec #136, #140): a localhost HTTP server with one
@@ -21,6 +34,34 @@ const { saveSecret, loadSecret, hasSecret, clearSecret } = require('./secureSecr
 // The Mac's stable identity, created once and kept in the store (never
 // derived per launch, or a reboot would look like a different Mac).
 const HOST_ID_KEY = 'wpxenRemoteHostId';
+
+// The Mac's long-term box keypair, Keychain-encrypted via safeStorage. Only
+// the secret half is stored (base64); the public half is derived from it on
+// every launch (after Orca e2ee-keypair.ts) — advertising a stored public key
+// that disagrees with the secret would offer a key no listener holds, and
+// silently regenerating would un-pair every device.
+const HOST_KEY_KEY = 'wpxenRemoteHostKey';
+
+// Paired devices: [{ id, name, platform, publicKey, pairedAt, lastSeen }].
+const DEVICE_KEY = 'wpxenRemoteDevices';
+
+// A pairing offer lives 5 minutes and works once: on use, on Deny and on
+// expiry it dies. Hitting the pairing rate limit kills it too.
+const OFFER_TTL_MS = 5 * 60 * 1000;
+// The Allow/Deny dialog waits 2 minutes, then the phone gets pairing_timeout.
+const PAIR_PROMPT_TIMEOUT_MS = 2 * 60 * 1000;
+// A fresh socket that never speaks the protocol is closed.
+const HANDSHAKE_TIMEOUT_MS = 10_000;
+// Failed pairing attempts (wrong secret, bad proof) are rate-limited per
+// remote address and globally; tripping either invalidates the offer.
+const PAIR_WINDOW_MS = 10 * 60 * 1000;
+const PAIR_MAX_PER_IP = 5;
+const PAIR_MAX_GLOBAL = 20;
+
+// The only phone-reachable operations in this ticket (after Orca's
+// mobile-method-allowlist pattern): ping proves the channel end to end.
+// Later tickets grow this set; anything else gets op_not_allowed.
+const ALLOWED_OPS = new Set(['ping']);
 
 // The Cloudflare tunnel token, Keychain-encrypted via safeStorage. Ciphertext
 // only in the store — never plaintext, never a setting, never logged.
@@ -66,6 +107,21 @@ const deps = {
   get fetch() {
     return 'fetch' in overrides ? overrides.fetch : fetch;
   },
+  get now() {
+    return 'now' in overrides ? overrides.now : Date.now;
+  },
+  get pairTimeoutMs() {
+    return 'pairTimeoutMs' in overrides
+      ? overrides.pairTimeoutMs
+      : PAIR_PROMPT_TIMEOUT_MS;
+  },
+  // The Allow/Deny dialog. Defaults to denying: no human, no pairing.
+  get promptPairing() {
+    return 'promptPairing' in overrides ? overrides.promptPairing : async () => 'deny';
+  },
+  get onPaired() {
+    return 'onPaired' in overrides ? overrides.onPaired : () => {};
+  },
   get getRemoteConfig() {
     return 'getRemoteConfig' in overrides
       ? overrides.getRemoteConfig
@@ -99,6 +155,16 @@ let lastVerifyKey = null;
 let lastVerifyResult = null;
 let tokenGen = 0;
 let pollTimer = null;
+// The live pairing offer ({ secret, expiresAt }) or null. `offerConsumed`
+// remembers a spent offer so reuse reports pairing_used rather than expired.
+let offer = null;
+let offerConsumed = false;
+// Pairing-failure buckets: ip -> { count, resetAt }, plus a global one.
+const failuresByIp = new Map();
+let globalFailures = { count: 0, resetAt: 0 };
+// The WebSocket server shares the localhost HTTP server's port (one `ws`
+// instance for every bound server, created lazily).
+let wss = null;
 
 function getStatus() {
   const store = deps.store;
@@ -194,12 +260,22 @@ function start({ port }) {
 
   const gen = ++generation;
   const srv = http.createServer(requestHandler);
-  // WebSocket upgrades land here in a later ticket; for now every upgrade is
-  // refused by dropping the socket — never a 101.
-  srv.on('upgrade', (_req, socket) => {
+  // Device upgrades (wss://…/wpxen-device) ride the WebSocket server; every
+  // other upgrade is refused by dropping the socket — never a 101.
+  srv.on('upgrade', (req, socket, head) => {
+    let pathname = '';
     try {
-      socket.destroy();
+      pathname = new URL(req.url || '/', 'http://127.0.0.1').pathname;
     } catch {}
+    if (pathname !== DEVICE_PATH) {
+      try {
+        socket.destroy();
+      } catch {}
+      return;
+    }
+    wsServer().handleUpgrade(req, socket, head, (ws) =>
+      wsServer().emit('connection', ws, req)
+    );
   });
   srv.on('error', (err) => {
     if (gen !== generation) return;
@@ -567,6 +643,384 @@ async function maybeVerify() {
   return verifyHostname();
 }
 
+// ─── Host keypair ────────────────────────────────────────────────────────
+
+function getHostKeypair() {
+  const store = deps.store;
+  if (!store) throw new Error('Remote Access needs a store before it can start');
+  const raw = store.get(HOST_KEY_KEY, undefined);
+  if (typeof raw === 'string' && raw) {
+    let secret = null;
+    try {
+      const b64 = loadSecret({
+        store,
+        safeStorage: deps.safeStorage ?? undefined,
+        key: HOST_KEY_KEY,
+      });
+      if (typeof b64 === 'string' && b64) secret = decodeBase64(b64);
+    } catch {
+      secret = null;
+    }
+    // A stored key that no longer decrypts is surfaced, never silently
+    // replaced: regenerating would un-pair every device (after Orca
+    // e2ee-keypair.ts).
+    if (!secret || secret.length !== 32) {
+      throw new Error('The stored host key is unreadable. Remove it and pair again.');
+    }
+    return keyPairFromSecret(secret);
+  }
+  const pair = newKeyPair();
+  saveSecret({
+    store,
+    safeStorage: deps.safeStorage ?? undefined,
+    key: HOST_KEY_KEY,
+    value: encodeBase64(pair.secretKey),
+  });
+  return pair;
+}
+
+// ─── Pairing offer ───────────────────────────────────────────────────────
+
+function offerProblem() {
+  if (offerConsumed) return 'used';
+  if (!offer) return 'expired';
+  if (deps.now() > offer.expiresAt) {
+    offer = null;
+    return 'expired';
+  }
+  return null;
+}
+
+function consumeOffer() {
+  offer = null;
+  offerConsumed = true;
+}
+
+// Render the QR the phone scans (after Orca mobile-pairing-qr.ts:
+// error correction M, quiet zone 4). The renderer shows the data URL in an
+// <img> and never sees the secret itself.
+async function offerQr(url) {
+  try {
+    return await QRCode.toDataURL(url, {
+      errorCorrectionLevel: 'M',
+      margin: 4,
+      scale: 2,
+    });
+  } catch {
+    throw new Error('Could not render the QR code.');
+  }
+}
+
+async function pairingOffer({ hostname }) {
+  if (!server) throw new Error('Remote Access must be on to pair a device.');
+  const host = (hostname || '').trim();
+  if (!host) throw new Error('Set a public hostname before pairing.');
+  const keypair = getHostKeypair();
+  const secret = randomBytes(16).toString('hex');
+  offer = { secret, expiresAt: deps.now() + OFFER_TTL_MS };
+  offerConsumed = false;
+  const url = pairingUrl({
+    version: PROTOCOL_VERSION,
+    hostId: getHostId(),
+    hostPublicKeyB64: publicKeyB64(keypair),
+    secret,
+    wssUrl: `wss://${host}${DEVICE_PATH}`,
+  });
+  return { url, qr: await offerQr(url), expiresAt: offer.expiresAt };
+}
+
+// ─── Device registry ─────────────────────────────────────────────────────
+
+function listDevices() {
+  const store = deps.store;
+  if (!store) return [];
+  const all = store.get(DEVICE_KEY, []);
+  return Array.isArray(all) ? all : [];
+}
+
+function findDevice(id) {
+  return listDevices().find((d) => d && d.id === id) || null;
+}
+
+function saveDevice(record) {
+  deps.store.set(DEVICE_KEY, [...listDevices(), record]);
+}
+
+function touchDevice(id) {
+  const store = deps.store;
+  if (!store) return;
+  store.set(
+    DEVICE_KEY,
+    listDevices().map((d) => (d && d.id === id ? { ...d, lastSeen: deps.now() } : d))
+  );
+}
+
+// ─── Pairing rate limiting ───────────────────────────────────────────────
+
+function failureBucket(map, key) {
+  const t = deps.now();
+  let bucket = map.get(key);
+  if (!bucket || t > bucket.resetAt) {
+    bucket = { count: 0, resetAt: t + PAIR_WINDOW_MS };
+    map.set(key, bucket);
+  }
+  return bucket;
+}
+
+function pairingLimited(ip) {
+  const t = deps.now();
+  if (t > globalFailures.resetAt)
+    globalFailures = { count: 0, resetAt: t + PAIR_WINDOW_MS };
+  const bucket = failureBucket(failuresByIp, ip);
+  return bucket.count >= PAIR_MAX_PER_IP || globalFailures.count >= PAIR_MAX_GLOBAL;
+}
+
+function recordPairFailure(ip) {
+  const bucket = failureBucket(failuresByIp, ip);
+  bucket.count += 1;
+  if (deps.now() > globalFailures.resetAt) {
+    globalFailures = { count: 0, resetAt: deps.now() + PAIR_WINDOW_MS };
+  }
+  globalFailures.count += 1;
+  const limited =
+    bucket.count > PAIR_MAX_PER_IP || globalFailures.count > PAIR_MAX_GLOBAL;
+  if (limited) offer = null;
+  return limited;
+}
+
+// ─── Device channel ──────────────────────────────────────────────────────
+
+function wsServer() {
+  if (!wss) {
+    const { WebSocketServer } = require('ws');
+    wss = new WebSocketServer({ noServer: true });
+    wss.on('connection', handleDeviceConnection);
+  }
+  return wss;
+}
+
+function sendWs(ws, obj) {
+  try {
+    if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(obj));
+  } catch {}
+}
+
+function drop(ws) {
+  try {
+    ws.close();
+  } catch {}
+}
+
+function handleDeviceConnection(ws, req) {
+  const ip = (req.socket && req.socket.remoteAddress) || 'unknown';
+  let device = null; // set once a sealed frame (or accept) authenticates us
+  let devicePublicKey = null;
+  let inCounter = 0;
+  let outCounter = 0;
+  const keypair = getHostKeypair();
+
+  const firstTimer = setTimeout(drop, HANDSHAKE_TIMEOUT_MS, ws);
+  ws.on('close', () => clearTimeout(firstTimer));
+
+  function sendSealed(payload) {
+    outCounter += 1;
+    const sealed = sealFrame({
+      payload,
+      senderSecret: keypair.secretKey,
+      recipientPublicKey: devicePublicKey,
+      nonce: randomNonce(),
+    });
+    sendWs(ws, {
+      v: PROTOCOL_VERSION,
+      counter: outCounter,
+      nonce: sealed.nonce,
+      box: sealed.box,
+    });
+  }
+
+  function welcome() {
+    touchDevice(device.id);
+    sendSealed({ kind: 'event', name: 'connected', payload: { deviceId: device.id } });
+  }
+
+  function onMessage(data) {
+    let msg;
+    try {
+      msg = JSON.parse(String(data));
+    } catch {
+      return drop(ws);
+    }
+    if (!msg || typeof msg !== 'object') return drop(ws);
+    clearTimeout(firstTimer);
+    if (!device && msg.type === 'pair-request') {
+      handlePair(msg).catch(() => {
+        try {
+          drop(ws);
+        } catch {}
+      });
+      return;
+    }
+    handleFrame(msg);
+  }
+
+  async function handlePair(msg) {
+    const reject = (reason, extra) => {
+      sendWs(ws, { type: 'pair-reject', reason, ...extra });
+      drop(ws);
+    };
+    if (msg.v !== PROTOCOL_VERSION) {
+      return reject(PAIR_ERRORS.versionMismatch, {
+        update: msg.v > PROTOCOL_VERSION ? 'desktop' : 'phone',
+      });
+    }
+    if (pairingLimited(ip)) {
+      offer = null;
+      return reject(PAIR_ERRORS.rateLimited);
+    }
+    const problem = offerProblem();
+    if (problem === 'used') return reject(PAIR_ERRORS.pairingUsed);
+    if (problem === 'expired') return reject(PAIR_ERRORS.pairingExpired);
+    let deviceKey;
+    try {
+      deviceKey = decodeBase64(msg.devicePublicKey);
+      if (deviceKey.length !== 32) throw new Error('bad key');
+    } catch {
+      if (recordPairFailure(ip)) return reject(PAIR_ERRORS.rateLimited);
+      return reject(PAIR_ERRORS.invalidSecret);
+    }
+    let payload;
+    try {
+      payload = openFrame({
+        nonce: msg.nonce,
+        box: msg.box,
+        senderPublicKey: deviceKey,
+        recipientSecret: keypair.secretKey,
+      });
+    } catch {
+      if (recordPairFailure(ip)) return reject(PAIR_ERRORS.rateLimited);
+      return reject(PAIR_ERRORS.invalidSecret);
+    }
+    if (!payload || payload.kind !== 'pair-request' || payload.secret !== offer.secret) {
+      if (recordPairFailure(ip)) return reject(PAIR_ERRORS.rateLimited);
+      return reject(PAIR_ERRORS.invalidSecret);
+    }
+    const hostB64 = publicKeyB64(keypair);
+    const code = confirmationCode(hostB64, msg.devicePublicKey, offer.secret);
+    let answer;
+    try {
+      answer = await Promise.race([
+        Promise.resolve()
+          .then(() =>
+            deps.promptPairing({
+              deviceName: payload.deviceName,
+              platform: payload.platform,
+              code,
+            })
+          )
+          .then(
+            (v) => v,
+            () => 'deny'
+          ),
+        new Promise((_, rejectTimeout) =>
+          setTimeout(
+            () => rejectTimeout(new Error('pairing prompt timed out')),
+            deps.pairTimeoutMs
+          )
+        ),
+      ]);
+    } catch {
+      consumeOffer();
+      return reject(PAIR_ERRORS.pairingTimeout);
+    }
+    if (answer !== 'allow') {
+      consumeOffer();
+      return reject(PAIR_ERRORS.pairingDenied);
+    }
+    const deviceId = randomUUID();
+    saveDevice({
+      id: deviceId,
+      name: String(payload.deviceName || 'Phone'),
+      platform: String(payload.platform || ''),
+      publicKey: msg.devicePublicKey,
+      pairedAt: deps.now(),
+      lastSeen: deps.now(),
+    });
+    consumeOffer();
+    const sealed = sealFrame({
+      payload: { kind: 'pair-accept', deviceId, code },
+      senderSecret: keypair.secretKey,
+      recipientPublicKey: deviceKey,
+      nonce: randomNonce(),
+    });
+    sendWs(ws, {
+      type: 'pair-accept',
+      deviceId,
+      code,
+      nonce: sealed.nonce,
+      box: sealed.box,
+    });
+    try {
+      deps.onPaired({ name: String(payload.deviceName || 'Phone') });
+    } catch {}
+    // The pairing socket stays up as this device's channel: counters start
+    // fresh, and the welcome event is its first sealed frame.
+    device = findDevice(deviceId);
+    devicePublicKey = deviceKey;
+    inCounter = 0;
+    outCounter = 0;
+    welcome();
+  }
+
+  function handleFrame(msg) {
+    if (msg.v !== PROTOCOL_VERSION) return drop(ws);
+    const known = device || findDevice(msg.deviceId);
+    // Unknown ids are dropped with no reply — the response never reveals
+    // whether the id or the key was wrong.
+    if (!known) return drop(ws);
+    if (!device) {
+      device = known;
+      try {
+        devicePublicKey = decodeBase64(known.publicKey);
+      } catch {
+        return drop(ws);
+      }
+      welcome();
+    }
+    if (typeof msg.counter !== 'number' || msg.counter !== inCounter + 1) return drop(ws);
+    let payload;
+    try {
+      payload = openFrame({
+        nonce: msg.nonce,
+        box: msg.box,
+        senderPublicKey: devicePublicKey,
+        recipientSecret: keypair.secretKey,
+      });
+    } catch {
+      return drop(ws);
+    }
+    inCounter = msg.counter;
+    if (!payload || payload.kind !== 'request' || typeof payload.id !== 'string')
+      return drop(ws);
+    if (!ALLOWED_OPS.has(payload.op)) {
+      return sendSealed({
+        kind: 'response',
+        id: payload.id,
+        error: PAIR_ERRORS.opNotAllowed,
+      });
+    }
+    if (payload.op === 'ping') {
+      return sendSealed({
+        kind: 'response',
+        id: payload.id,
+        result: { pong: true, serverTime: deps.now() },
+      });
+    }
+    return drop(ws);
+  }
+
+  ws.on('message', onMessage);
+}
+
 // Releases everything and forgets listeners. Called from before-quit; also
 // resets module state for tests. The tunnel child itself stops through
 // procman's quit path; here the poller and the server socket go.
@@ -580,10 +1034,16 @@ function dispose() {
   lastSpec = null;
   lastVerifyKey = null;
   lastVerifyResult = null;
+  offer = null;
+  offerConsumed = false;
+  failuresByIp.clear();
+  globalFailures = { count: 0, resetAt: 0 };
 }
 
 module.exports = {
   HOST_ID_KEY,
+  HOST_KEY_KEY,
+  DEVICE_KEY,
   TOKEN_KEY,
   VERIFY_REASONS,
   DEFAULT_PORT,
@@ -601,6 +1061,7 @@ module.exports = {
   startPoller,
   verifyHostname,
   maybeVerify,
+  pairingOffer,
   dispose,
   __setDeps,
 };
