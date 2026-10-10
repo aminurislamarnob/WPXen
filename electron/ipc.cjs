@@ -50,6 +50,7 @@ const browserHistory = require('./services/browserHistory.cjs');
 const settingsService = require('./services/settings.cjs');
 const externalTools = require('./services/externalTools.cjs');
 const keepAwake = require('./services/keepAwake.cjs');
+const remoteAccess = require('./services/remoteAccess.cjs');
 const handoff = require('./services/handoff.cjs');
 const transcripts = require('./services/transcripts.cjs');
 const { humanize } = require('./services/errors.cjs');
@@ -287,6 +288,13 @@ function registerHandlers(win, storeInstance) {
       'agents.notifications.suppressWhenFocused': (_v, all) =>
         applyNotificationConfig(all),
       'agents.keepAwake': (value) => keepAwake.setMode(value),
+      'remote.enabled': (value, all) => {
+        if (value) remoteAccess.start({ port: all['remote.port'] });
+        else remoteAccess.stop();
+      },
+      'remote.port': (value, all) => {
+        if (all['remote.enabled']) remoteAccess.start({ port: value });
+      },
     },
   });
   settings.migrateLegacy();
@@ -322,6 +330,29 @@ function registerHandlers(win, storeInstance) {
     subscribe: agents.onSessionsChanged,
   });
   powerMonitor.on('resume', () => keepAwake.handleResume());
+
+  // Remote Access. Subscribe before starting so the first status reaches the
+  // renderer. A start that fails asynchronously (port in use, nothing to fall
+  // back to) flips the switch back off, so Settings never claims a server
+  // that isn't running.
+  remoteAccess.__setDeps({ store });
+  remoteAccess.onStatusChange((status) => {
+    for (const w of BrowserWindow.getAllWindows()) {
+      if (!w.isDestroyed() && w.webContents) {
+        w.webContents.send('remote-access-status-update', status);
+      }
+    }
+    if (status.state === 'error' && status.actualPort == null) {
+      try {
+        if (settings.get('remote.enabled')) setSetting('remote.enabled', false);
+      } catch {}
+    }
+  });
+  if (settings.get('remote.enabled')) {
+    try {
+      remoteAccess.start({ port: settings.get('remote.port') });
+    } catch {}
+  }
 
   // Apply persisted DB credentials so MySQL operations authenticate correctly.
   mysql.setCredentials({
@@ -2787,6 +2818,10 @@ function registerHandlers(win, storeInstance) {
   // { mode, active, workingCount } — the mode lives in settings; this adds
   // whether a sleep assertion is actually held right now.
   ipcMain.handle('keep-awake-status', () => keepAwake.getStatus());
+
+  // { state, host, port, actualPort, reason } — whether it is on lives in
+  // settings; this adds whether the server is actually bound right now.
+  ipcMain.handle('remote-access-status', () => remoteAccess.getStatus());
 
   // Validated shallow patch. Always resolves — rejections come back on the
   // result so the UI can roll the control back and say why.

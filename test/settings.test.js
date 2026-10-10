@@ -403,3 +403,40 @@ describe('Tasks settings', () => {
     expect(SETTINGS['tasks.startPrompt'].default).toBe('Complete {{url}}');
   });
 });
+
+describe('Remote Access settings', () => {
+  it('is off by default, on a bounded port that avoids Orca', () => {
+    expect(SETTINGS['remote.enabled']).toMatchObject({ type: 'bool', default: false });
+    expect(SETTINGS['remote.port']).toMatchObject({
+      type: 'int',
+      default: 6780,
+      min: 1024,
+      max: 65535,
+    });
+  });
+
+  it('round-trips the switch and the port through write()', () => {
+    const store = fakeStore();
+    const s = createSettings({ store });
+    expect(s.get('remote.enabled')).toBe(false);
+    expect(s.get('remote.port')).toBe(6780);
+    expect(s.write({ 'remote.enabled': true, 'remote.port': 8080 })).toMatchObject({
+      ok: true,
+    });
+    expect(s.get('remote.enabled')).toBe(true);
+    expect(s.get('remote.port')).toBe(8080);
+  });
+
+  it('rejects a non-boolean switch and an out-of-range port, leaving the store', () => {
+    const store = fakeStore();
+    const s = createSettings({ store });
+    expect(s.write({ 'remote.enabled': 'yes' }).ok).toBe(false);
+    for (const port of [80, 70000, 1.5]) {
+      const result = s.write({ 'remote.port': port });
+      expect(result.ok, `port ${port}`).toBe(false);
+      expect(result.rejected[0]).toMatchObject({ key: 'remote.port' });
+    }
+    expect(store.get('settings.remote.enabled', undefined)).toBeUndefined();
+    expect(store.get('settings.remote.port', undefined)).toBeUndefined();
+  });
+});

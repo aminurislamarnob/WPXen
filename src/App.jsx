@@ -15,6 +15,7 @@ import GeneralSection from './components/settings/sections/GeneralSection';
 import SitesSection from './components/settings/sections/SitesSection';
 import DatabaseSection from './components/settings/sections/DatabaseSection';
 import AgentsSection from './components/settings/sections/AgentsSection';
+import MobileSection from './components/settings/sections/MobileSection';
 import ToolsSection from './components/settings/sections/ToolsSection';
 import MailSection from './components/settings/sections/MailSection';
 import ServicesSection from './components/settings/sections/ServicesSection';
@@ -150,6 +151,7 @@ export default function App() {
               <Route path="appearance" element={<AppearanceSection />} />
               <Route path="general" element={<GeneralSection />} />
               <Route path="agents" element={<AgentsSection />} />
+              <Route path="mobile" element={<MobileSection />} />
               <Route path="tools" element={<ToolsSection />} />
               <Route path="sites" element={<SitesSection />} />
               <Route path="database" element={<DatabaseSection />} />
