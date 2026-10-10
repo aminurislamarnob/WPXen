@@ -108,6 +108,29 @@ describe('locateTranscript', () => {
       const res = locateTranscript('codex', cwd, startedAt);
       expect(res).toBe(file2);
     });
+
+    it('ignores a rollout for the same cwd written before the Session started', () => {
+      const cwd = '/my/codex/cwd';
+      const now = new Date();
+      const dDir = path.join(
+        home,
+        '.codex',
+        'sessions',
+        String(now.getFullYear()),
+        String(now.getMonth() + 1).padStart(2, '0'),
+        String(now.getDate()).padStart(2, '0')
+      );
+      fs.mkdirSync(dDir, { recursive: true });
+      const file = path.join(dDir, 'rollout-old.jsonl');
+      fs.writeFileSync(
+        file,
+        JSON.stringify({ type: 'session_meta', payload: { cwd } }) + '\n'
+      );
+      const past = (now.getTime() - 60_000) / 1000;
+      fs.utimesSync(file, past, past);
+
+      expect(locateTranscript('codex', cwd, now.getTime() - 10_000)).toBeNull();
+    });
   });
 
   describe('Antigravity', () => {
