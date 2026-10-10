@@ -1,4 +1,5 @@
 import { Panel, PanelGroup } from 'react-resizable-panels';
+import { MessageSquare, TerminalSquare } from 'lucide-react';
 import ResizeHandle from '../ResizeHandle';
 import Terminal from '../Terminal';
 import { ChatView } from './ChatView';
@@ -77,6 +78,25 @@ export default function SplitLayout({
         }`}
         onClickCapture={() => onFocusPane?.(tree.leaf)}
       >
+        {sessionsById[tree.leaf]?.chat && (
+          <button
+            title={
+              viewMode === 'chat'
+                ? 'Switch to Terminal View (⌘⇧C)'
+                : 'Switch to Chat View (⌘⇧C)'
+            }
+            onClick={() =>
+              setViewModeGlobal(tree.leaf, viewMode === 'chat' ? 'terminal' : 'chat')
+            }
+            className="absolute top-2 right-2 z-20 p-1.5 rounded-md bg-background/80 border border-border text-muted-foreground opacity-70 hover:opacity-100 hover:text-foreground"
+          >
+            {viewMode === 'chat' ? (
+              <TerminalSquare size={14} />
+            ) : (
+              <MessageSquare size={14} />
+            )}
+          </button>
+        )}
         <div className={viewMode === 'chat' ? 'hidden' : 'h-full w-full'}>
           <Terminal
             sessionId={tree.leaf}
