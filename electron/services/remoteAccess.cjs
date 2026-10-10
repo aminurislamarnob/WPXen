@@ -1,11 +1,13 @@
 'use strict';
 
 const http = require('http');
+const net = require('net');
 const { randomUUID } = require('crypto');
 const {
   PROTOCOL_VERSION,
   HEALTH_PATH,
 } = require('../../shared/remote-protocol/index.cjs');
+const { saveSecret, loadSecret, hasSecret, clearSecret } = require('./secureSecrets.cjs');
 
 // Remote Access tracer (spec #136, #140): a localhost HTTP server with one
 // unauthenticated route, the health check. No tunnel, pairing or phone yet.
@@ -20,6 +22,18 @@ const {
 // derived per launch, or a reboot would look like a different Mac).
 const HOST_ID_KEY = 'wpxenRemoteHostId';
 
+// The Cloudflare tunnel token, Keychain-encrypted via safeStorage. Ciphertext
+// only in the store — never plaintext, never a setting, never logged.
+const TOKEN_KEY = 'wpxenRemoteTunnelToken';
+
+// Every hostname-verification failure the UI can name.
+const VERIFY_REASONS = ['dns', 'connection', 'wrong-server', 'wrong-port', 'timeout'];
+
+// How long a verification fetch may take before it counts as timed out, and
+// how often the tunnel child is re-checked while it should be running.
+const VERIFY_TIMEOUT_MS = 15_000;
+const TUNNEL_POLL_MS = 2000;
+
 // Deliberately not Orca's 6768, so both apps can run on the same Mac.
 const DEFAULT_PORT = 6780;
 const MIN_PORT = 1024;
@@ -28,6 +42,8 @@ const MAX_PORT = 65535;
 // Swapped in tests — vi.mock never reaches .cjs services (same seam as
 // keepAwake.cjs). The store is injected because this module must not import
 // the app's store directly (or every test would need Electron's userData).
+// procman and cloudflared resolve lazily so tests that inject fakes never
+// load the real modules (and their require chains) at all.
 const overrides = {};
 const deps = {
   get store() {
@@ -35,6 +51,25 @@ const deps = {
   },
   get randomId() {
     return 'randomId' in overrides ? overrides.randomId : randomUUID;
+  },
+  get safeStorage() {
+    return 'safeStorage' in overrides ? overrides.safeStorage : null;
+  },
+  get procman() {
+    return 'procman' in overrides ? overrides.procman : require('./procman.cjs');
+  },
+  get cloudflared() {
+    return 'cloudflared' in overrides
+      ? overrides.cloudflared
+      : require('./cloudflared.cjs');
+  },
+  get fetch() {
+    return 'fetch' in overrides ? overrides.fetch : fetch;
+  },
+  get getRemoteConfig() {
+    return 'getRemoteConfig' in overrides
+      ? overrides.getRemoteConfig
+      : () => ({ enabled: false, port: DEFAULT_PORT, hostname: '' });
   },
 };
 
@@ -47,13 +82,32 @@ function __setDeps(next) {
 let server = null; // bound http.Server, or null
 let boundPort = null;
 let status = { state: 'off', host: null, port: null, actualPort: null, reason: null };
+// The supervised tunnel child: not-configured until Remote Access is on with
+// a token saved; then starting → connected → reconnecting/error.
+let tunnel = { state: 'not-configured', reason: null };
+// The last hostname check: idle until there is a hostname to check.
+let verification = { state: 'idle', reason: null, checkedAt: null };
 const listeners = new Set();
 // Each start() mints a generation; a superseded bind's late events are
 // ignored rather than tearing down its replacement.
 let generation = 0;
+// The tunnel spec's identity (port + token generation): a changed key means
+// the child must be rebuilt. The verification key adds the hostname.
+let lastTunnelKey = null;
+let lastSpec = null;
+let lastVerifyKey = null;
+let lastVerifyResult = null;
+let tokenGen = 0;
+let pollTimer = null;
 
 function getStatus() {
-  return { ...status };
+  const store = deps.store;
+  return {
+    ...status,
+    tokenSaved: !!store && hasSecret({ store, key: TOKEN_KEY }),
+    tunnel: { ...tunnel },
+    verification: { ...verification },
+  };
 }
 
 function publish() {
@@ -212,15 +266,326 @@ function stop() {
   }
 }
 
+// ─── Tunnel token ────────────────────────────────────────────────────────
+// The token is ciphertext in the store (see secureSecrets.cjs) — never a
+// setting, never plaintext, never logged.
+
+function tokenSaved() {
+  const store = deps.store;
+  return !!store && hasSecret({ store, key: TOKEN_KEY });
+}
+
+function loadToken() {
+  const store = deps.store;
+  if (!store) return null;
+  return loadSecret({
+    store,
+    safeStorage: deps.safeStorage ?? undefined,
+    key: TOKEN_KEY,
+  });
+}
+
+async function setToken(value) {
+  const store = deps.store;
+  if (!store) throw new Error('Remote Access needs a store before it can start');
+  saveSecret({
+    store,
+    safeStorage: deps.safeStorage ?? undefined,
+    key: TOKEN_KEY,
+    value,
+  });
+  tokenGen += 1;
+  await syncTunnel();
+  await maybeVerify();
+}
+
+async function clearToken() {
+  const store = deps.store;
+  if (store) clearSecret({ store, key: TOKEN_KEY });
+  tokenGen += 1;
+  await syncTunnel();
+}
+
+// ─── Supervised tunnel ───────────────────────────────────────────────────
+
+function setTunnel(next) {
+  if (JSON.stringify(next) === JSON.stringify(tunnel)) return;
+  tunnel = next;
+  publish();
+}
+
+function setVerification(next) {
+  if (JSON.stringify(next) === JSON.stringify(verification)) return;
+  verification = next;
+  publish();
+}
+
+// A free loopback port for cloudflared's --metrics endpoint (the /ready
+// probe). Allocated by binding port 0 and releasing it; a small race, but a
+// collision just fails fast into the restart backoff.
+function freePort() {
+  return new Promise((resolve, reject) => {
+    const probe = net.createServer();
+    probe.once('error', reject);
+    probe.listen(0, '127.0.0.1', () => {
+      const port = probe.address()?.port;
+      probe.close(() => resolve(port));
+    });
+  });
+}
+
+async function checkTunnelReady() {
+  const metricsPort = lastSpec?.meta?.metricsPort;
+  if (!metricsPort) return false;
+  try {
+    const res = await deps.fetch(`http://127.0.0.1:${metricsPort}/ready`, {
+      signal: AbortSignal.timeout(2000),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+// The supervised child's name lives in cloudflared.cjs (the spec builder's
+// `name`), read off the injected module so tests never load the real chain.
+function tunnelName() {
+  return deps.cloudflared.REMOTE_TUNNEL_NAME;
+}
+
+// Bring the supervised child in line with the settings: running exactly when
+// Remote Access is on with a token saved, on the configured port.
+async function syncTunnel() {
+  const cfg = deps.getRemoteConfig();
+  const proc = deps.procman;
+  if (!cfg.enabled || !tokenSaved()) {
+    try {
+      await proc.stop(tunnelName());
+    } catch {}
+    lastTunnelKey = null;
+    lastSpec = null;
+    setTunnel({ state: 'not-configured', reason: null });
+    setVerification({ state: 'idle', reason: null, checkedAt: null });
+    lastVerifyKey = null;
+    return;
+  }
+  const cf = deps.cloudflared;
+  if (!cf.isInstalled()) {
+    setTunnel({
+      state: 'error',
+      reason: 'cloudflared is not installed. Install it below to start the tunnel.',
+    });
+    return;
+  }
+  const key = `${cfg.port}|${tokenGen}`;
+  const current = proc.status(tunnelName());
+  if (
+    key === lastTunnelKey &&
+    (current.state === 'running' || current.state === 'starting')
+  ) {
+    await refreshTunnelState();
+    return;
+  }
+  let spec;
+  try {
+    const metricsPort = await freePort();
+    const token = loadToken();
+    if (!token) {
+      setTunnel({ state: 'not-configured', reason: null });
+      return;
+    }
+    spec = cf.buildRemoteTunnelSpec({
+      bin: cf.getCloudflaredPath(),
+      token,
+      port: cfg.port,
+      metricsPort,
+      fetchImpl: deps.fetch,
+    });
+  } catch (err) {
+    setTunnel({ state: 'error', reason: err?.message || 'The tunnel failed to start.' });
+    return;
+  }
+  lastSpec = spec;
+  lastTunnelKey = key;
+  setTunnel({ state: 'starting', reason: null });
+  try {
+    await proc.start(spec);
+  } catch (err) {
+    setTunnel({ state: 'error', reason: err?.message || 'The tunnel failed to start.' });
+    return;
+  }
+  await refreshTunnelState();
+}
+
+// Re-read the child and its ready probe: the poll tick, called every
+// TUNNEL_POLL_MS in production and directly in tests.
+async function refreshTunnelState() {
+  const cfg = deps.getRemoteConfig();
+  if (!cfg.enabled || !tokenSaved()) {
+    setTunnel({ state: 'not-configured', reason: null });
+    return { ...tunnel };
+  }
+  if (!deps.cloudflared.isInstalled()) {
+    setTunnel({
+      state: 'error',
+      reason: 'cloudflared is not installed. Install it below to start the tunnel.',
+    });
+    return { ...tunnel };
+  }
+  const st = deps.procman.status(tunnelName());
+  if (st.state === 'running') {
+    setTunnel(
+      (await checkTunnelReady())
+        ? { state: 'connected', reason: null }
+        : { state: 'reconnecting', reason: null }
+    );
+  } else if (st.state === 'starting') {
+    setTunnel({ state: 'starting', reason: null });
+  } else if (st.state === 'failed') {
+    setTunnel({ state: 'error', reason: st.error || 'The tunnel failed.' });
+  } else {
+    // Stopped while still wanted: procman is converging between states.
+    setTunnel({ state: 'starting', reason: null });
+  }
+  if (tunnel.state === 'connected') {
+    await maybeVerify();
+  } else if (verification.state !== 'idle') {
+    setVerification({ state: 'idle', reason: null, checkedAt: null });
+  }
+  return { ...tunnel };
+}
+
+function startPoller() {
+  if (pollTimer) return;
+  pollTimer = setInterval(() => {
+    refreshTunnelState().catch(() => {});
+  }, TUNNEL_POLL_MS);
+  if (pollTimer.unref) pollTimer.unref();
+}
+
+function stopPoller() {
+  if (pollTimer) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+}
+
+// ─── Hostname verification ───────────────────────────────────────────────
+// Once the tunnel is connected, the public hostname must answer with this
+// Mac's health response. Each failure maps to the distinct reason the UI
+// shows, so a dashboard typo doesn't look like a dead tunnel.
+
+function classifyFetchError(err) {
+  if (err && (err.name === 'AbortError' || err.name === 'TimeoutError')) return 'timeout';
+  const code = err?.cause?.code || err?.code;
+  if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') return 'dns';
+  const message = `${err?.cause?.message || ''} ${err?.message || ''}`;
+  if (/ENOTFOUND|getaddrinfo|EAI_AGAIN|could not resolve|DNS/i.test(message))
+    return 'dns';
+  return 'connection';
+}
+
+function failVerify(key, reason) {
+  lastVerifyKey = key;
+  lastVerifyResult = { ok: false, reason };
+  setVerification({ state: 'failed', reason, checkedAt: Date.now() });
+  return lastVerifyResult;
+}
+
+async function verifyHostname() {
+  const cfg = deps.getRemoteConfig();
+  const hostname = (cfg.hostname || '').trim();
+  if (!hostname) {
+    lastVerifyKey = null;
+    setVerification({ state: 'idle', reason: null, checkedAt: null });
+    return { ok: false, reason: 'no-hostname' };
+  }
+  const key = `${hostname}|${cfg.port}|${tokenGen}`;
+  const nonce = deps.randomId();
+  const url = `https://${hostname}${HEALTH_PATH}?nonce=${encodeURIComponent(nonce)}`;
+  setVerification({ state: 'verifying', reason: null, checkedAt: null });
+  let res;
+  try {
+    res = await deps.fetch(url, { signal: AbortSignal.timeout(VERIFY_TIMEOUT_MS) });
+  } catch (err) {
+    return failVerify(key, classifyFetchError(err));
+  }
+  let body = null;
+  try {
+    body = await res.json();
+  } catch {
+    body = null;
+  }
+  // Anything that isn't WPXen's health response means the route points at
+  // the wrong port (or nothing WPXen at all): error pages, gateways, HTML.
+  if (!res.ok || !body || typeof body !== 'object') {
+    return failVerify(key, 'wrong-port');
+  }
+  const shapeOk =
+    typeof body.nonce === 'string' &&
+    typeof body.hostId === 'string' &&
+    typeof body.protocolVersion === 'number';
+  if (!shapeOk) return failVerify(key, 'wrong-port');
+  let hostId = null;
+  try {
+    hostId = getHostId();
+  } catch {
+    hostId = null;
+  }
+  // Right shape but someone else's answer: a different server or Mac.
+  if (
+    body.nonce !== nonce ||
+    body.hostId !== hostId ||
+    body.protocolVersion !== PROTOCOL_VERSION
+  ) {
+    return failVerify(key, 'wrong-server');
+  }
+  lastVerifyKey = key;
+  lastVerifyResult = { ok: true };
+  setVerification({ state: 'ok', reason: null, checkedAt: Date.now() });
+  return lastVerifyResult;
+}
+
+// Verify when the answer would be new: a changed hostname, port or token, or
+// a previous check that never ran. The Check-again button calls
+// verifyHostname() directly to force a fresh check.
+async function maybeVerify() {
+  const cfg = deps.getRemoteConfig();
+  const hostname = (cfg.hostname || '').trim();
+  if (!hostname) {
+    lastVerifyKey = null;
+    setVerification({ state: 'idle', reason: null, checkedAt: null });
+    return { ok: false, reason: 'no-hostname' };
+  }
+  const key = `${hostname}|${cfg.port}|${tokenGen}`;
+  if (
+    key === lastVerifyKey &&
+    (verification.state === 'ok' || verification.state === 'failed')
+  ) {
+    return lastVerifyResult;
+  }
+  return verifyHostname();
+}
+
 // Releases everything and forgets listeners. Called from before-quit; also
-// resets module state for tests.
+// resets module state for tests. The tunnel child itself stops through
+// procman's quit path; here the poller and the server socket go.
 function dispose() {
   stop();
+  stopPoller();
   listeners.clear();
+  tunnel = { state: 'not-configured', reason: null };
+  verification = { state: 'idle', reason: null, checkedAt: null };
+  lastTunnelKey = null;
+  lastSpec = null;
+  lastVerifyKey = null;
+  lastVerifyResult = null;
 }
 
 module.exports = {
   HOST_ID_KEY,
+  TOKEN_KEY,
+  VERIFY_REASONS,
   DEFAULT_PORT,
   MIN_PORT,
   MAX_PORT,
@@ -228,6 +593,14 @@ module.exports = {
   stop,
   getStatus,
   onStatusChange,
+  setToken,
+  clearToken,
+  tokenSaved,
+  syncTunnel,
+  refreshTunnelState,
+  startPoller,
+  verifyHostname,
+  maybeVerify,
   dispose,
   __setDeps,
 };
