@@ -211,6 +211,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('agent-session-mark', sessionId, read),
   launchAgent: (siteId, agentId, targetId) =>
     ipcRenderer.invoke('agent-launch', siteId, agentId, targetId),
+  resumeChatSession: (sessionId) => ipcRenderer.invoke('agent-resume-session', sessionId),
   splitPane: (sessionId, dir) => ipcRenderer.invoke('agent-split-pane', sessionId, dir),
   setPaneRatio: (rootId, path, ratio) =>
     ipcRenderer.invoke('agent-set-pane-ratio', rootId, path, ratio),

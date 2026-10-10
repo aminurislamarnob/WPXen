@@ -130,9 +130,15 @@ export default function AgentsPane() {
     const roots = [];
 
     for (const item of valid) {
-      if (item.handoffFrom && map.has(item.handoffFrom)) {
-        if (!children.has(item.handoffFrom)) children.set(item.handoffFrom, []);
-        children.get(item.handoffFrom).push(item);
+      // Handoff and resume children open right after their parent, in launch
+      // order — a continued conversation stays beside the session it came from.
+      const parentId =
+        (item.handoffFrom && map.has(item.handoffFrom) && item.handoffFrom) ||
+        (item.resumeFrom && map.has(item.resumeFrom) && item.resumeFrom) ||
+        null;
+      if (parentId) {
+        if (!children.has(parentId)) children.set(parentId, []);
+        children.get(parentId).push(item);
       } else {
         roots.push(item);
       }
@@ -666,13 +672,15 @@ export default function AgentsPane() {
 
   // Respawn the same Agent after its shell exited: launch a fresh Session and
   // reap the dead one. The new Session takes the end of the tab strip. In a
-  // split, the main process swaps the pane in place instead.
+  // split, the main process swaps the pane in place instead. Either way the
+  // new Session inherits the old view mode, so a chat stays a chat.
   const respawn = async (sessionId) => {
     const s = sessionsById[sessionId];
     if (s?.paneOf || s?.layout) {
       const res = await window.electronAPI.respawnPane(sessionId);
       if (res?.error) return setError(res.error);
       sessionCache.dispose(sessionId);
+      setViewMode(res.sessionId, getViewMode(sessionId));
       if (res.rootId !== (s.paneOf || sessionId)) selectSession(res.rootId);
       return;
     }
@@ -681,9 +689,21 @@ export default function AgentsPane() {
     const res = await window.electronAPI.launchAgent(siteId, tab.agentId, tab.targetId);
     if (res?.error) return setError(res.error);
     if (!res?.sessionId) return;
+    setViewMode(res.sessionId, getViewMode(sessionId));
     selectSession(res.sessionId);
     window.electronAPI.terminalStop(sessionId);
     sessionCache.dispose(sessionId);
+  };
+
+  // Resume a pinned transcript in a new Session beside the old one. Same
+  // transcriptId, so the new chat view continues the conversation — opened
+  // in chat view, ordered right after the old tab.
+  const resumeChat = async (sessionId) => {
+    const res = await window.electronAPI.resumeChatSession(sessionId);
+    if (res?.error) return setError(res.error);
+    if (!res?.sessionId) return;
+    setViewMode(res.sessionId, 'chat');
+    selectSession(res.sessionId);
   };
 
   // A file-path link Cmd+clicked in terminal output → open/focus an editor tab
@@ -1033,6 +1053,7 @@ export default function AgentsPane() {
                       onOpenLink={handleOpenLink}
                       onExited={requestClosePane}
                       onRestart={respawn}
+                      onResume={resumeChat}
                       onFocusPane={paneFocus}
                       onBlurPane={paneBlur}
                       onClosePane={requestClosePane}
