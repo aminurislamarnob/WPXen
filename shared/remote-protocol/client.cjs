@@ -19,6 +19,9 @@ function createClient({
   requestTimeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
 }) {
   let socket = null;
+  // One per dial. Lets a late close from a replaced socket be recognised and
+  // ignored, so reconnecting is not raced by the connection it replaced.
+  let generation = 0;
   let outCounter = 0;
   let inCounter = 0;
   let reqSeq = 0;
@@ -38,9 +41,19 @@ function createClient({
     pending.clear();
   }
 
-  function handleClose(code) {
+  function handleClose(gen, code) {
+    // A superseded socket's close arrives after the next dial already began;
+    // acting on it would null the new socket and fire a spurious onClose.
+    if (gen !== generation) return;
     if (closed) return;
     closed = true;
+    // The socket is spent: drop it so connect() dials a new one instead of
+    // short-circuiting on a stale reference, and reset the counters the way
+    // the server does — it counts from 1 per connection, so a reconnect that
+    // resumed at N+1 would have every frame dropped.
+    socket = null;
+    outCounter = 0;
+    inCounter = 0;
     failAll(new Error('The connection closed.'));
     // A revoked device reads 'revoked' here; every other close is ordinary
     // (disconnect-all reconnects, drops just end).
@@ -132,8 +145,12 @@ function createClient({
     close();
   }
 
+  // Dials, or resolves straight away when a socket is already up. Safe to
+  // call again after any close: the spent socket is gone and the counters
+  // restart, so one client can be reconnected for the life of the host.
   function connect() {
     if (socket) return Promise.resolve();
+    const gen = ++generation;
     return new Promise((resolve, reject) => {
       closed = false;
       const ws = new WebSocket(url);
@@ -143,10 +160,10 @@ function createClient({
         socket = ws;
         ws.onmessage = (event) => onSocketMessage(event.data ?? event);
         if (typeof ws.addEventListener === 'function') {
-          ws.addEventListener('close', (event) => handleClose(event?.code));
+          ws.addEventListener('close', (event) => handleClose(gen, event?.code));
         } else {
           ws.onclose = (event) =>
-            handleClose(typeof event === 'number' ? event : event?.code);
+            handleClose(gen, typeof event === 'number' ? event : event?.code);
         }
         ws.onerror = () => {};
         for (const cb of [...openListeners]) {
@@ -199,8 +216,7 @@ function createClient({
     try {
       socket?.close();
     } catch {}
-    socket = null;
-    handleClose();
+    handleClose(generation);
   }
 
   return { connect, request, subscribe, onOpen, onClose, close };
