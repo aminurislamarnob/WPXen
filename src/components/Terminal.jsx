@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowDown } from 'lucide-react';
 import '@xterm/xterm/css/xterm.css';
-import { shellEscape } from '../lib/terminal/keys';
+import { formatDropInput } from '../lib/terminal/keys';
 import * as sessionCache from '../lib/terminal/sessionCache';
 import TerminalSearchBar from './TerminalSearchBar';
 import LinkActionCard from './LinkActionCard';
@@ -126,7 +126,12 @@ export default function Terminal({
     }
     if (paths.length === 0) return;
     if (!sessionCache.isExited(sessionId)) {
-      window.electronAPI.terminalInput(sessionId, shellEscape(paths));
+      window.electronAPI.terminalInput(
+        sessionId,
+        formatDropInput(paths, {
+          bracketedPaste: sessionCache.isBracketedPaste(sessionId),
+        })
+      );
     }
   };
 

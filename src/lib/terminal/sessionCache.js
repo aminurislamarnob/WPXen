@@ -269,6 +269,11 @@ export function isExited(sessionId) {
   return cache.get(sessionId)?.exited ?? false;
 }
 
+// Whether the program in the terminal enabled bracketed paste (DECSET 2004).
+export function isBracketedPaste(sessionId) {
+  return cache.get(sessionId)?.term.modes.bracketedPasteMode ?? false;
+}
+
 // Fully tear down — only when the Session is closed for good.
 export function dispose(sessionId) {
   const entry = cache.get(sessionId);

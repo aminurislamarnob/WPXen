@@ -6,6 +6,8 @@ import {
   trimSelection,
   isNonTextPaste,
   shellEscape,
+  formatDropInput,
+  isImageDropPath,
 } from '../src/lib/terminal/keys.js';
 import { Utf8Base64 } from '../src/lib/terminal/utf8Base64.js';
 
@@ -140,6 +142,58 @@ describe('shellEscape', () => {
   });
   it('preserves unicode', () => {
     expect(shellEscape(['日本.txt'])).toBe("'日本.txt'");
+  });
+});
+
+describe('isImageDropPath', () => {
+  it('matches image extensions case-insensitively', () => {
+    expect(isImageDropPath('/a/shot.PNG')).toBe(true);
+    expect(isImageDropPath('/a/photo.jpeg')).toBe(true);
+  });
+  it('ignores dots in directory names', () => {
+    expect(isImageDropPath('/home/jane.png/notes')).toBe(false);
+    expect(isImageDropPath('/a/file.txt')).toBe(false);
+  });
+});
+
+describe('formatDropInput', () => {
+  const S = '\x1b[200~';
+  const E = '\x1b[201~';
+  const on = { bracketedPaste: true };
+
+  it('bracketed-pastes a safe image path raw', () => {
+    expect(formatDropInput(['/Users/me/Desktop/shot.png'], on)).toBe(
+      `${S}/Users/me/Desktop/shot.png${E}`
+    );
+  });
+  it('backslash-escapes an image path with spaces, never quotes it', () => {
+    expect(formatDropInput(['/a/Screenshot 2026 (1).png'], on)).toBe(
+      `${S}/a/Screenshot\\ 2026\\ \\(1\\).png${E}`
+    );
+  });
+  it('types non-image paths shell-escaped with a trailing space', () => {
+    expect(formatDropInput(['/a/my file.txt'], on)).toBe("'/a/my file.txt' ");
+  });
+  it('types images too when the program has no bracketed paste', () => {
+    expect(formatDropInput(['/a/shot.png'])).toBe("'/a/shot.png' ");
+  });
+  it('keeps control-byte image paths as typed input', () => {
+    expect(formatDropInput(['/a/b\nc.png'], on)).toBe("'/a/b\nc.png' ");
+  });
+  it('joins consecutive raw images without a space', () => {
+    expect(formatDropInput(['/a/1.png', '/a/2.png'], on)).toBe(
+      `${S}/a/1.png${E}${S}/a/2.png${E}`
+    );
+  });
+  it('separates an image from a following non-image path', () => {
+    expect(formatDropInput(['/a/1.png', '/a/b.txt'], on)).toBe(
+      `${S}/a/1.png${E} '/a/b.txt' `
+    );
+  });
+  it('separates an escaped image from the next image', () => {
+    expect(formatDropInput(['/a/x y.png', '/a/2.png'], on)).toBe(
+      `${S}/a/x\\ y.png${E} ${S}/a/2.png${E}`
+    );
   });
 });
 
