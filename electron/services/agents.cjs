@@ -89,6 +89,10 @@ const REGISTRY = [
     // looks for, so it lands straight on PATH.
     installer: { kind: 'brew', name: 'antigravity-cli', cask: true },
     promptFlag: '-i',
+    chat: 'antigravity',
+    // Mapped per working folder only once a conversation exists — keep
+    // locating until one shows up, like Codex.
+    lateBind: true,
   },
   {
     id: 'mimo',
@@ -1428,6 +1432,7 @@ const {
 } = require('./agentChatSend.cjs');
 const { decodeClaudeLine } = require('./agentChatClaude.cjs');
 const { decodeCodexLine } = require('./agentChatCodex.cjs');
+const { decodeAntigravityLine } = require('./agentChatAntigravity.cjs');
 const transcripts = require('./transcripts.cjs');
 
 const chatListeners = new Set();
@@ -1446,6 +1451,7 @@ function openChat(sessionId, viewerId) {
   let decodeLine = null;
   if (agent.chat === 'claude') decodeLine = decodeClaudeLine;
   else if (agent.chat === 'codex') decodeLine = decodeCodexLine;
+  else if (agent.chat === 'antigravity') decodeLine = decodeAntigravityLine;
   if (!decodeLine) return;
 
   const transcriptPath = locateChatTranscript(sessionId, session);
@@ -1457,9 +1463,21 @@ function openChat(sessionId, viewerId) {
   }
   claimedTranscripts.set(transcriptPath, sessionId);
 
+  // Antigravity re-maps the folder when a new conversation starts — the
+  // watcher reports it like a changed transcript.
+  const home = deps.homedir();
+  const relocate =
+    agent.chat === 'antigravity'
+      ? () => {
+          const convId = transcripts.antigravityConversationId(session.cwd, home);
+          return convId ? transcripts.antigravityTranscriptPath(home, convId) : null;
+        }
+      : null;
+
   agentChat.openChat(sessionId, viewerId, {
     transcriptPath,
     decodeLine,
+    relocate,
     transcriptId: session.transcriptId,
     startedAt: session.startedAt,
     // Another live Session's own transcript is never this one's successor.

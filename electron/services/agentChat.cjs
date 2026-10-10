@@ -428,6 +428,7 @@ function openChat(sessionId, viewerId, opts) {
     transcriptId,
     startedAt,
     isPinnedElsewhere = () => false,
+    relocate,
   } = opts;
 
   let watch = watches.get(sessionId);
@@ -446,6 +447,7 @@ function openChat(sessionId, viewerId, opts) {
   watch = {
     viewers: new Set([viewerId]),
     path: transcriptPath,
+    relocate: relocate || null,
     transcriptDir: path.dirname(transcriptPath),
     transcriptId: transcriptId || path.basename(transcriptPath, '.jsonl'),
     startedAtMs: startedAt ? new Date(startedAt).getTime() : Date.now(),
@@ -526,6 +528,20 @@ function openChat(sessionId, viewerId, opts) {
       if (!watch.staleNotified && checkStaleTranscript(watch)) {
         watch.staleNotified = true;
         onRows([{ notice: true, kind: 'transcript-changed' }], watch.state);
+      }
+
+      // 3b. Re-locate transcripts that move (Antigravity maps each folder to
+      // a conversation id that changes when a new conversation starts).
+      if (!watch.staleNotified && watch.relocate) {
+        try {
+          const current = watch.relocate();
+          if (current && current !== watch.path) {
+            watch.staleNotified = true;
+            onRows([{ notice: true, kind: 'transcript-changed' }], watch.state);
+          }
+        } catch {
+          // a failed re-locate is not a transcript change
+        }
       }
 
       // 4. Poll subagents: only while running or expanded, so a Session
