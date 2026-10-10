@@ -285,6 +285,23 @@ function completeLength(fd, size) {
   return 0;
 }
 
+function augmentToolRows(rows, subagents) {
+  for (const row of rows) {
+    if (row.role === 'tool' && row.tool_use) {
+      for (const sub of subagents.values()) {
+        if (sub.toolUseId === row.tool_use.id) {
+          row.subagent = {
+            agentId: sub.agentId,
+            type: sub.type,
+            description: sub.description,
+          };
+          row.subagentCount = sub.state?.toolUseCount || 0;
+        }
+      }
+    }
+  }
+}
+
 // ── Open / Close ───────────────────────────────────────────────────────────
 function openChat(sessionId, viewerId, opts) {
   const {
@@ -328,6 +345,7 @@ function openChat(sessionId, viewerId, opts) {
     staleNotified: false,
     isPinnedElsewhere,
     notStale: new Set(), // folder files ruled out as this Session's successor
+    subagents: new Map(),
     tailOffset: 0, // end of the last complete line read
   };
   watches.set(sessionId, watch);
@@ -347,22 +365,67 @@ function openChat(sessionId, viewerId, opts) {
   // Poll for new data
   const poll = () => {
     try {
+      // 1. Discover subagents
+      try {
+        const subDir = deps.path
+          ? deps.path.join(watch.transcriptDir, 'subagents')
+          : require('path').join(watch.transcriptDir, 'subagents');
+        const files = deps.readdirSync(subDir);
+        for (const f of files) {
+          if (f.endsWith('.meta.json')) {
+            const agentId = f.replace('.meta.json', '').replace('agent-', '');
+            if (!watch.subagents.has(agentId)) {
+              try {
+                const metaRaw = deps.readFileSync(
+                  require('path').join(subDir, f),
+                  'utf8'
+                );
+                const meta = JSON.parse(metaRaw);
+                watch.subagents.set(agentId, {
+                  agentId,
+                  type: meta.agentType,
+                  description: meta.description,
+                  toolUseId: meta.toolUseId,
+                  expanded: false,
+                  fd: null,
+                  fileSize: 0,
+                  tailOffset: 0,
+                  pageStart: 0,
+                  state: {},
+                  currentRows: [],
+                });
+
+                const parentRow = watch.currentRows.find(
+                  (r) =>
+                    r.role === 'tool' && r.tool_use && r.tool_use.id === meta.toolUseId
+                );
+                if (parentRow) {
+                  parentRow.subagent = {
+                    agentId,
+                    type: meta.agentType,
+                    description: meta.description,
+                  };
+                  onRows([parentRow]);
+                }
+              } catch (_e) {}
+            }
+          }
+        }
+      } catch (_e) {}
+
+      // 2. Poll parent
       const newStat = deps.statSync(watch.path);
       const newSize = newStat.size;
 
       if (newSize < watch.tailOffset) {
-        // File truncated — reset
         watch.tailOffset = 0;
         watch.state = {};
         watch.currentRows = [];
         watch.pageStart = 0;
         watch.staleNotified = false;
         onRows([{ reset: true }]);
-        return;
-      }
-
-      if (newSize > watch.tailOffset) {
-        // Read incremental data
+        // maybe close subagents too? Not needed, handled.
+      } else if (newSize > watch.tailOffset) {
         const length = newSize - watch.tailOffset;
         const buf = readRange(watch.fd, watch.tailOffset, length);
         watch.fileSize = newSize;
@@ -382,17 +445,107 @@ function openChat(sessionId, viewerId, opts) {
         }
 
         if (newRows.length > 0) {
+          augmentToolRows(newRows, watch.subagents);
           watch.currentRows.push(...newRows);
           onRows(newRows);
         }
       }
 
-      // Check for stale transcript
+      // 3. Check for stale transcript
       if (!watch.staleNotified && checkStaleTranscript(watch)) {
         watch.staleNotified = true;
         onRows([{ notice: true, kind: 'transcript-changed' }]);
       }
-    } catch {
+
+      // 4. Poll subagents
+      for (const sub of watch.subagents.values()) {
+        const parentRow = watch.currentRows.find(
+          (r) => r.role === 'tool' && r.tool_use && r.tool_use.id === sub.toolUseId
+        );
+        const running = parentRow && !parentRow.result;
+        const shouldTail = running || sub.expanded;
+
+        if (!shouldTail) {
+          if (sub.fd !== null) {
+            try {
+              deps.closeSync(sub.fd);
+            } catch {}
+            sub.fd = null;
+          }
+          continue;
+        }
+
+        const subPath = require('path').join(
+          watch.transcriptDir,
+          'subagents',
+          `agent-${sub.agentId}.jsonl`
+        );
+        if (sub.fd === null) {
+          try {
+            sub.fd = deps.openSync(subPath, 'r');
+            sub.fileSize = deps.statSync(subPath).size;
+            const { rows, pageStart, state } = tailRead(
+              sub.fd,
+              sub.fileSize,
+              watch.decodeLine
+            );
+            sub.currentRows = rows;
+            sub.pageStart = pageStart;
+            sub.state = state;
+            sub.tailOffset = sub.fileSize;
+
+            const mappedRows = rows.map((r) => ({ ...r, parentId: sub.toolUseId }));
+            if (mappedRows.length > 0) onRows(mappedRows);
+
+            if (parentRow && state.toolUseCount !== undefined) {
+              parentRow.subagentCount = state.toolUseCount;
+              onRows([parentRow]);
+            }
+          } catch (_e) {}
+        } else {
+          try {
+            const subStat = deps.statSync(subPath);
+            const subSize = subStat.size;
+            if (subSize < sub.tailOffset) {
+              sub.tailOffset = 0;
+              sub.state = {};
+              sub.currentRows = [];
+              sub.pageStart = 0;
+            } else if (subSize > sub.tailOffset) {
+              const length = subSize - sub.tailOffset;
+              const buf = readRange(sub.fd, sub.tailOffset, length);
+              sub.tailOffset = subSize;
+              sub.fileSize = subSize;
+
+              const { lines } = splitLines(buf);
+              const newRows = [];
+              for (const line of lines) {
+                if (!line.trim()) continue;
+                const row = watch.decodeLine(line, sub.state);
+                if (row) {
+                  if (Array.isArray(row)) newRows.push(...row.map(truncateRow));
+                  else newRows.push(truncateRow(row));
+                }
+              }
+
+              if (newRows.length > 0) {
+                sub.currentRows.push(...newRows);
+                const mappedRows = newRows.map((r) => ({
+                  ...r,
+                  parentId: sub.toolUseId,
+                }));
+                onRows(mappedRows);
+
+                if (parentRow && sub.state.toolUseCount !== undefined) {
+                  parentRow.subagentCount = sub.state.toolUseCount;
+                  onRows([parentRow]);
+                }
+              }
+            }
+          } catch (_e) {}
+        }
+      }
+    } catch (_e) {
       // Missing file or read error
     }
   };
@@ -453,6 +606,37 @@ function closeAllChats() {
   watches.clear();
 }
 
+function chatExpandSubagent(sessionId, agentId, expanded) {
+  const watch = watches.get(sessionId);
+  if (!watch) return;
+  const sub = watch.subagents.get(agentId);
+  if (sub) {
+    sub.expanded = expanded;
+    // We could immediately trigger a poll here to respond instantly, but poll will catch it soon.
+  }
+}
+
+function chatLoadOlderSubagent(sessionId, agentId) {
+  const watch = watches.get(sessionId);
+  if (!watch) return { rows: [], atStart: true };
+  const sub = watch.subagents.get(agentId);
+  if (!sub || sub.fd === null) return { rows: [], atStart: true };
+
+  const { rows, pageStart, atStart } = loadOlderPage(
+    sub.fd,
+    sub.pageStart,
+    watch.decodeLine
+  );
+  sub.pageStart = pageStart;
+
+  if (rows.length > 0) {
+    sub.currentRows.unshift(...rows);
+  }
+
+  const mappedRows = rows.map((r) => ({ ...r, parentId: sub.toolUseId }));
+  return { rows: mappedRows, atStart };
+}
+
 module.exports = {
   __setDeps,
   openChat,
@@ -460,6 +644,8 @@ module.exports = {
   closeAllChats,
   loadOlder,
   chatFetchFull,
+  chatExpandSubagent,
+  chatLoadOlderSubagent,
   // Exposed for testing
   MAX_PAGE_ROWS,
   MAX_PAGE_BYTES,

@@ -35,6 +35,8 @@ export function foldToolRuns(rows) {
   let currentRun = null;
 
   for (const row of rows) {
+    if (row.parentId) continue; // Nested rows are handled separately
+
     if (
       row.role === 'tool' ||
       row.role === 'tool_result' ||

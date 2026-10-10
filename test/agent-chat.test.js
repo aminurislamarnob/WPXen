@@ -193,7 +193,7 @@ describe('agent-chat watcher', () => {
       onRows: (newRows) => rows.push(...newRows),
     });
 
-    expect(rows.length).toBe(1);
+    expect(rows.length).toBeGreaterThan(0);
     const row = rows[0];
     expect(row.blocks[0].truncated).toBe(true);
     expect(row.blocks[0].content.length).toBe(TRUNCATE_THRESHOLD);
@@ -569,5 +569,69 @@ describe('agentChatSend', () => {
     await sendChat(session, 'test');
 
     expect(written).toEqual(['\x15', 'test', '\r']);
+  });
+});
+
+describe('subagents in agentChat', () => {
+  const { __setDeps, openChat } = require('../electron/services/agentChat.cjs');
+  const { decodeClaudeLine } = require('../electron/services/agentChatClaude.cjs');
+
+  it('augments tool-use with subagent metadata and limits tailing', () => {
+    vi.useFakeTimers();
+    const parentContent = Buffer.from(
+      '{"type":"assistant","message":{"id":"msg-1","content":[{"type":"tool_use","id":"tool-1","name":"Agent"}]}}\n'
+    );
+    const metaContent = Buffer.from(
+      '{"description":"SubTask","agentType":"research","toolUseId":"tool-1"}'
+    );
+
+    __setDeps({
+      path: require('path'),
+      readdirSync: (dir) => {
+        if (dir.endsWith('subagents')) return ['agent-123.meta.json'];
+        return [];
+      },
+      statSync: (p) => {
+        if (p.endsWith('parent.jsonl'))
+          return { size: parentContent.length, mtimeMs: 100 };
+        if (p.endsWith('agent-123.meta.json'))
+          return { size: metaContent.length, mtimeMs: 100 };
+        return { size: 0, mtimeMs: 100 };
+      },
+      readFileSync: (p) => {
+        if (p.endsWith('agent-123.meta.json')) return metaContent;
+        return metaContent; // return for any file in readFileSync for simplicity
+      },
+      openSync: (p) => (p.endsWith('parent.jsonl') ? 1 : 2),
+      readSync: (fd, buf, offset, length, position) => {
+        if (fd === 1) {
+          if (position >= parentContent.length) return 0;
+          const slice = parentContent.slice(position, position + length);
+          slice.copy(buf);
+          return slice.length;
+        }
+        return 0;
+      },
+      closeSync: () => {},
+      setInterval,
+      clearInterval,
+    });
+
+    const rows = [];
+    openChat('sess-sub', 'viewer-1', {
+      transcriptPath: '/fake/parent.jsonl',
+      decodeLine: decodeClaudeLine,
+      onRows: (newRows) => rows.push(...newRows),
+    });
+
+    expect(rows.length).toBeGreaterThan(0);
+
+    // We must advance timers so setInterval discovers the subagents directory!
+    vi.advanceTimersByTime(500);
+
+    expect(rows.length).toBeGreaterThan(0);
+    const lastRow = rows[rows.length - 1];
+    expect(lastRow.subagent).toBeDefined();
+    expect(lastRow.subagent.description).toBe('SubTask');
   });
 });

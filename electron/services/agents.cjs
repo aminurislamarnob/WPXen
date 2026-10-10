@@ -1429,6 +1429,14 @@ function chatFetchFull(sessionId, toolUseId) {
   return agentChat.chatFetchFull(sessionId, toolUseId);
 }
 
+function chatExpandSubagent(sessionId, parentId) {
+  return agentChat.chatExpandSubagent(sessionId, parentId);
+}
+
+function chatLoadOlderSubagent(sessionId, parentId) {
+  return agentChat.chatLoadOlderSubagent(sessionId, parentId);
+}
+
 function closeChat(sessionId, viewerId) {
   agentChat.closeChat(sessionId, viewerId);
 }
@@ -1468,6 +1476,8 @@ module.exports = {
   chatSend,
   chatLoadOlder,
   chatFetchFull,
+  chatExpandSubagent,
+  chatLoadOlderSubagent,
   onFloatingSessionsChanged,
   resolveLaunch,
   launch,
