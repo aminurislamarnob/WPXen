@@ -7,7 +7,10 @@ node_modules/
 .expo/
 dist/
 web-build/
-expo-env.d.ts
+# expo-env.d.ts is deliberately NOT ignored (the template ignores it): it is
+# what pulls in expo/types, and without it `npm run typecheck` fails on a
+# clean checkout for every `*.css` / `*.module.css` import. Expo's own header
+# in the file says to commit it.
 
 # Native
 .kotlin/

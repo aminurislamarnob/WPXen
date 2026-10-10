@@ -297,6 +297,35 @@ describe('disconnect all', () => {
     c1.client.close();
     c2.client.close();
   });
+
+  // Disconnect-all keeps the records precisely so the devices come back, so
+  // the drop has to leave their clients able to redial. The phone holds one
+  // client per host for the life of the screen.
+  it('leaves the dropped devices able to reconnect on the same client', async () => {
+    const port = remoteAccess.getStatus().actualPort;
+    const device = await pairDevice({ port, name: 'Reconnector' });
+    const client = createClient({
+      url: wsUrl(port),
+      WebSocket,
+      keys: device.keys,
+      hostPublicKey: device.hostPublicKey,
+      deviceId: device.deviceId,
+    });
+    const closed = new Promise((resolve) => client.onClose(resolve));
+    await client.connect();
+    await client.request('ping');
+
+    await remoteAccess.disconnectAll();
+    await expect(closed).resolves.toBe('closed');
+    expect(remoteAccess.listDevices()).toHaveLength(1);
+
+    // Same client, same device identity, fresh connection.
+    await client.connect();
+    await expect(client.request('ping')).resolves.toMatchObject({ pong: true });
+    await expect(client.request('ping')).resolves.toMatchObject({ pong: true });
+    expect(remoteAccess.listDevices()[0].connected).toBe(true);
+    client.close();
+  });
 });
 
 describe('last seen', () => {
