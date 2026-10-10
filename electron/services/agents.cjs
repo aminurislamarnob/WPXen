@@ -752,6 +752,11 @@ function getSession(sessionId) {
   return sessions.get(sessionId) || null;
 }
 
+function getBuffer(sessionId) {
+  const session = sessions.get(sessionId);
+  return session ? session.buffer : null;
+}
+
 // The live Sessions for a Site, oldest first — used to restore terminal tabs.
 function listSessions(siteId) {
   const out = [];
@@ -801,6 +806,8 @@ function sessionRow(s) {
     label: s.label,
     paneOf: s.paneOf || null,
     layout: !s.paneOf ? layouts.get(s.sessionId) || { leaf: s.sessionId } : null,
+    handoffFrom: s.handoffFrom || null,
+    handoffFile: s.handoffFile || null,
     // The issue or PR Start → launched this Session for, else null.
     issue: s.issue || null,
     startedAt: s.startedAt,
@@ -839,6 +846,8 @@ function launch({
   prompt = '',
   issue = null,
   paneOf = null,
+  handoffFrom = null,
+  handoffFile = null,
 }) {
   // `all` so launching by id still works for an agent hidden from the
   // launcher (e.g. a saved session being restored).
@@ -859,12 +868,15 @@ function launch({
   const line = String(prompt || '')
     .replace(/\s*[\r\n]+\s*/g, ' ')
     .trim();
+  const arg = handoffFile || line;
+  const typedArg = arg
+    ? `${agent.promptFlag ? agent.promptFlag + ' ' : ''}${shellQuote(arg)}`
+    : '';
+  const typed = typedArg ? `${resolved.command} ${typedArg}` : resolved.command;
+
   // The Site's PHP first on PATH: a zsh wrapper for the whole shell (see
   // shellIntegration.cjs), or for other shells, on the agent's command line.
   const phpBinDir = deps.sitePhpBin(site);
-  const typed = line
-    ? `${resolved.command} ${agent.promptFlag ? agent.promptFlag + ' ' : ''}${shellQuote(line)}`
-    : resolved.command;
   const command = shellIntegration.prefixCommandWithPhp(
     typed,
     deps.userShell(),
@@ -884,6 +896,8 @@ function launch({
       label: resolved.label,
       issue: issue ? cleanIssueLink(issue) : null,
       paneOf,
+      handoffFrom,
+      handoffFile,
     },
     failLabel: agent.name,
   });
@@ -1373,6 +1387,7 @@ module.exports = {
   stopTab,
   respawnPane,
   getSession,
+  getBuffer,
   hasActiveSessions,
   activeSiteIds,
   stopAll,

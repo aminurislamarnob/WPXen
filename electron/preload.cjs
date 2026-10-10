@@ -213,6 +213,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   splitPane: (sessionId, dir) => ipcRenderer.invoke('agent-split-pane', sessionId, dir),
   setPaneRatio: (rootId, path, ratio) =>
     ipcRenderer.invoke('agent-set-pane-ratio', rootId, path, ratio),
+  prepareHandoff: (sessionId) => ipcRenderer.invoke('agent-handoff-prepare', sessionId),
+  runHandoff: (params) => ipcRenderer.invoke('agent-handoff-run', params),
 
   // Floating Workspace terminals (no owning Site)
   launchFloatingTerminal: (cwd, command) =>

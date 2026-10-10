@@ -16,6 +16,8 @@ export default function SplitLayout({
   onFocusPane,
   onBlurPane,
   onClosePane,
+  onHandoff,
+  sessionsById = {},
 }) {
   // A drag fires onLayout on every frame; the main process only needs the
   // ratio it settles on.
@@ -52,6 +54,8 @@ export default function SplitLayout({
           onFocus={() => onFocusPane?.(tree.leaf)}
           onBlur={() => onBlurPane?.()}
           isFocused={isFocused}
+          isAgent={sessionsById[tree.leaf]?.isAgent}
+          onHandoff={onHandoff}
         />
       </div>
     );
@@ -72,6 +76,8 @@ export default function SplitLayout({
       onFocusPane={onFocusPane}
       onBlurPane={onBlurPane}
       onClosePane={onClosePane}
+      onHandoff={onHandoff}
+      sessionsById={sessionsById}
     />
   );
 

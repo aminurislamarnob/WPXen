@@ -863,6 +863,65 @@ function registerHandlers(win, storeInstance) {
     agents.setPaneRatio(rootId, path, ratio);
   });
 
+  ipcMain.handle('agent-handoff-prepare', (_e, sessionId) => {
+    const session = agents.getSession(sessionId);
+    if (!session) return { error: 'Session not found' };
+    const allAgents = agents.listAgents();
+    const detected = allAgents.filter(
+      (a) => a.detected && a.id !== session.agentId && a.id !== agents.SHELL_ID
+    );
+    return {
+      contextSource: 'capture',
+      modes: ['quick'],
+      agents: detected,
+    };
+  });
+
+  ipcMain.handle('agent-handoff-run', (_e, { sessionId, targetAgentId, _mode }) => {
+    const session = agents.getSession(sessionId);
+    if (!session) return { error: 'Session not found' };
+    const site = findProject(session.siteId);
+    if (!site) return { error: 'Project not found' };
+
+    const capture = agents.getBuffer(sessionId);
+    if (!capture) return { error: 'No terminal output available' };
+
+    const handoff = require('./services/handoff.cjs');
+    const promptContent = handoff.buildPrompt({
+      agentName: session.agentName,
+      title: session.title || 'Terminal',
+      cwd: session.cwd,
+      capture,
+    });
+    const handoffFile = handoff.writeHandoffFile(promptContent);
+
+    const agent = agents.listAgents({ all: true }).find((a) => a.id === targetAgentId);
+    if (!agent) return { error: 'Target agent not found' };
+
+    const globalArgs = store.get('agentPresets', {})[targetAgentId]?.args || '';
+
+    // The prompt is "read this file". The file path is passed to launch.
+    // promptFlag is handled inside launch. We just pass `prompt: handoffFile`.
+    // Wait, some agents might just take the file path.
+    // Yes, the issue says:
+    // "The target is launched with a single-line read-this-file prompt (with promptFlag where declared)"
+    // So the prompt string is just the file path, or "read this file: ...".
+    // Wait, if I just pass the file path, the agent might not know what to do if it expects a natural language prompt. But the issue says: "a single-line read-this-file prompt".
+    // I'll just pass `cat ${handoffFile}` or something? No, it says "single-line read-this-file prompt". Let's pass `Please read the context from ${handoffFile} and continue.`.
+    const res = agents.launch({
+      site,
+      agentId: targetAgentId,
+      cwdOverride: session.cwd, // inherit cwd
+      globalArgs,
+      prompt: `Please read the context from ${handoffFile} and continue.`,
+      handoffFrom: sessionId,
+      handoffFile,
+    });
+
+    if (res?.ok) addToProjects(site.id);
+    return res;
+  });
+
   // ── Launch Presets (global, per-Agent) & Launch Targets (per-Site) ─────────
   // Global default flags typed for an Agent on every launch, keyed by agentId:
   // { [agentId]: { args } }. `resolveLaunch` treats an absent/empty entry as
