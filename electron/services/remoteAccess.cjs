@@ -206,8 +206,14 @@ function stop() {
     server = null;
     boundPort = null;
   }
-  if (status.state !== 'off') {
-    status = { state: 'off', host: null, port: null, actualPort: null, reason: null };
+  // A bind that failed with nothing left running is exactly what flips the
+  // switch back off (ipc.cjs), and that flip calls us. Carry the reason onto
+  // the 'off' status or it overwrites itself in the same tick, leaving
+  // Settings saying a bare "Off" for what was "Port 6780 is in use".
+  const carried =
+    status.state === 'error' && status.actualPort == null ? status.reason : null;
+  if (status.state !== 'off' || status.reason !== carried) {
+    status = { state: 'off', host: null, port: null, actualPort: null, reason: carried };
     publish();
   }
 }
@@ -216,6 +222,9 @@ function stop() {
 // resets module state for tests.
 function dispose() {
   stop();
+  // stop() deliberately keeps a bind-failure reason; disposing forgets it,
+  // so a fresh start (or the next test) begins from a clean 'off'.
+  status = { state: 'off', host: null, port: null, actualPort: null, reason: null };
   listeners.clear();
 }
 

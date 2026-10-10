@@ -25,7 +25,9 @@ export default function MobileSection() {
       ? `Listening on ${status.host}:${status.actualPort}`
       : status.state === 'error'
         ? `Error — ${status.reason || 'the server failed to start'}`
-        : 'Off';
+        : // A bind failure switches Remote Access back off and hands the
+          // reason over with it, so the row says why rather than just "Off".
+          status.reason || 'Off';
 
   // The status row is live state, not a setting, so it answers to either
   // registry entry rather than carrying an id of its own.
@@ -70,7 +72,7 @@ export default function MobileSection() {
           {showStatus && (
             <Row title="Status" subtitle={stateLine}>
               <span
-                className={`text-xs ${status.state === 'error' ? 'text-destructive' : status.state === 'listening' ? 'text-status-running' : 'text-muted-foreground'}`}
+                className={`text-xs ${status.state === 'error' || status.reason ? 'text-destructive' : status.state === 'listening' ? 'text-status-running' : 'text-muted-foreground'}`}
               >
                 {status.state === 'listening'
                   ? 'On'
