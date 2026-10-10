@@ -51,8 +51,20 @@ const KEEP_AWAKE_LABELS = { on: 'On', agent: 'Agent', off: 'Off' };
 // settings path, so Settings and the sidebar follow.
 function keepAwakeItems(keepAwake) {
   if (!keepAwake) return [];
-  const { mode, active } = keepAwake.getStatus();
-  const state = active ? 'Active' : 'Inactive';
+  const { mode, active, reasons } = keepAwake.getStatus();
+  // The hold says why: with several reasons the tray names them all, so a
+  // lit hold is never a mystery.
+  const REASON_LABELS = {
+    always: 'always on',
+    agent: 'agent working',
+    remote: 'remote access',
+  };
+  const state =
+    active && Array.isArray(reasons) && reasons.length > 0
+      ? `Active (${reasons.map((r) => REASON_LABELS[r] || r).join(', ')})`
+      : active
+        ? 'Active'
+        : 'Inactive';
   return [
     {
       label: 'Keep Computer Awake',

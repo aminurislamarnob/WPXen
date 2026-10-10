@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Download, Loader, Smartphone } from 'lucide-react';
+import { Download, Loader, Moon, Smartphone } from 'lucide-react';
 import {
   Button,
   Card,
@@ -325,6 +325,28 @@ export default function MobileSection() {
         </Card>
         <p className="text-[11px] text-muted-foreground mt-1.5 px-1">
           Listens on 127.0.0.1 only — nothing on your network can reach it directly.
+        </p>
+      </div>
+
+      <div>
+        <SectionLabel>Staying Reachable</SectionLabel>
+        <Card>
+          <SettingsRow
+            id="remote.keepAwake"
+            visible={visible}
+            icon={<Moon size={18} className="text-muted-foreground flex-shrink-0" />}
+            title="Keep Mac awake for remote access"
+            subtitle="Hold the Mac awake while an Agent works or a phone is connected"
+          >
+            <Toggle
+              checked={settings['remote.keepAwake'] !== false}
+              onChange={(v) => setSetting('remote.keepAwake', v)}
+              label="Keep Mac awake for remote access"
+            />
+          </SettingsRow>
+        </Card>
+        <p className="text-[11px] text-muted-foreground mt-1.5 px-1">
+          Closing the lid on battery still puts the Mac to sleep. No app can prevent that.
         </p>
       </div>
 
