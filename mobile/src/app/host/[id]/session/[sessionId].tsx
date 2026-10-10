@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  AppState,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -8,20 +10,44 @@ import {
   TextInput,
   View,
   useColorScheme,
+  type LayoutChangeEvent,
 } from 'react-native';
 import { WebView, type WebViewMessageEvent } from 'react-native-webview';
 import { useLocalSearchParams } from 'expo-router';
 import { HostConnection } from '../../../../connection/manager';
 import { findHost } from '../../../../hosts/hostList';
-import { loadDeviceKeys, loadHosts } from '../../../../hosts/secureHosts';
+import {
+  loadDeviceKeys,
+  loadHosts,
+  loadTextSize,
+  saveTextSize,
+} from '../../../../hosts/secureHosts';
 import { KEY_BAR_ORDER, keyBytes, pressWithCtrlArmed, type KeyId } from '../../../../terminal/keyBar';
-import { buildTerminalHtml } from '../../../../terminal/terminalWebView';
+import { buildTerminalHtml, TERMINAL_FONT_SIZE } from '../../../../terminal/terminalWebView';
+import { decideResize, type ResizeDims } from '../../../../terminal/resizePolicy';
 
 interface Outgoing {
-  type: 'init' | 'write' | 'reset' | 'theme';
+  type: 'init' | 'write' | 'reset' | 'theme' | 'grid' | 'font-size';
   theme?: 'dark' | 'light';
   data?: string;
+  cols?: number;
+  rows?: number;
+  fontSize?: number;
 }
+
+// Phone grid from the measured frame: ~0.6 cell aspect, ~1.35 line pitch at
+// the live font size. An approximation (the document owns exact metrics),
+// clamped into the op's bounds — rotation and frame changes re-measure.
+function estimateDims(width: number, height: number, fontSize: number): ResizeDims {
+  const cols = Math.max(20, Math.min(500, Math.floor(width / (fontSize * 0.6))));
+  const rows = Math.max(8, Math.min(500, Math.floor(height / (fontSize * 1.35))));
+  return { cols, rows };
+}
+
+const KEYBOARD_SETTLE_MS = 500;
+const FONT_APPLY_MS = 150;
+const MIN_TEXT_SIZE = 10;
+const MAX_TEXT_SIZE = 20;
 
 const KEY_LABELS: Record<KeyId, string> = {
   esc: 'Esc',
@@ -42,8 +68,15 @@ export default function SessionTerminalScreen() {
   const [exited, setExited] = useState<number | null>(null);
   const [ctrlArmed, setCtrlArmed] = useState(false);
   const [loadError, setLoadError] = useState(false);
+  const [fontSize, setFontSize] = useState(TERMINAL_FONT_SIZE);
+  const [frame, setFrame] = useState<{ width: number; height: number } | null>(null);
   const connection = useRef<HostConnection | null>(null);
   const wasConnected = useRef(false);
+  const lastSentDims = useRef<ResizeDims | null>(null);
+  const reconnected = useRef(false);
+  const keyboardAt = useRef(0);
+  const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const maybeResizeRef = useRef<() => void>(() => {});
   const webView = useRef<WebView | null>(null);
   const input = useRef<TextInput | null>(null);
   const ready = useRef(false);
@@ -87,6 +120,42 @@ export default function SessionTerminalScreen() {
     }
   }, [sessionId]);
 
+  // The device actively viewing owns the pty size: fit the frame, unless
+  // covered, backgrounded, or mid-keyboard-transition (defer and retry once
+  // the keyboard settles — after Orca terminal-viewport-refit).
+  const maybeResize = useCallback(
+    (opts: { textSizeChanged?: boolean } = {}) => {
+      const measured = frame;
+      if (!measured || exited !== null) return;
+      const dims = estimateDims(measured.width, measured.height, fontSize);
+      const decision = decideResize({
+        visible: true,
+        covered: false,
+        appState: AppState.currentState,
+        keyboardTransitioning: Date.now() - keyboardAt.current < KEYBOARD_SETTLE_MS,
+        dims,
+        lastSentDims: lastSentDims.current,
+        reconnected: reconnected.current,
+        textSizeChanged: opts.textSizeChanged ?? false,
+      });
+      reconnected.current = false;
+      if (decision === 'skip') return;
+      if (decision === 'defer') {
+        if (retryTimer.current) clearTimeout(retryTimer.current);
+        retryTimer.current = setTimeout(() => maybeResizeRef.current(), 400);
+        return;
+      }
+      lastSentDims.current = dims;
+      post({ type: 'grid', cols: dims.cols, rows: dims.rows });
+      connection.current?.request('terminal.resize', { sessionId, cols: dims.cols, rows: dims.rows }).catch(() => {});
+    },
+    [frame, fontSize, exited, sessionId, post]
+  );
+
+  useEffect(() => {
+    maybeResizeRef.current = () => maybeResize();
+  }, [maybeResize]);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -97,6 +166,7 @@ export default function SessionTerminalScreen() {
         return;
       }
       if (cancelled) return;
+      setFontSize(await loadTextSize(host.id));
       const conn = new HostConnection({
         host,
         deviceId: host.id,
@@ -104,10 +174,16 @@ export default function SessionTerminalScreen() {
         onUpdate: (u) => {
           if (cancelled) return;
           // Heartbeats re-emit connected; re-attach only on entry so the
-          // replay does not reset the document every 30 seconds.
+          // replay does not reset the document every 30 seconds. A fresh
+          // entry also re-asserts the size: the desktop may have resized
+          // the pty while the socket was down.
           const entered = u.state === 'connected' && !wasConnected.current;
           wasConnected.current = u.state === 'connected';
-          if (entered) attach();
+          if (entered) {
+            reconnected.current = true;
+            attach();
+            maybeResize();
+          }
         },
       });
       connection.current = conn;
@@ -134,13 +210,40 @@ export default function SessionTerminalScreen() {
       });
       conn.start();
     })();
+    // Keyboard transitions only move height: stamp them so layout churn
+    // while the keyboard settles defers instead of resizing mid-keystroke.
+    const markKeyboard = () => {
+      keyboardAt.current = Date.now();
+    };
+    const settleKeyboard = () => {
+      keyboardAt.current = Date.now();
+      if (retryTimer.current) clearTimeout(retryTimer.current);
+      retryTimer.current = setTimeout(() => maybeResize(), 400);
+    };
+    const showSub = Keyboard.addListener('keyboardDidShow', settleKeyboard);
+    const hideSub = Keyboard.addListener('keyboardDidHide', settleKeyboard);
+    const willSub =
+      Platform.OS === 'ios' ? Keyboard.addListener('keyboardWillShow', markKeyboard) : null;
+    // Returning to the terminal re-measures: rotation, fold, or a desktop
+    // resize may have moved everything while away.
+    const appSub = AppState.addEventListener('change', (status) => {
+      if (status === 'active') {
+        reconnected.current = true;
+        maybeResize();
+      }
+    });
     return () => {
       cancelled = true;
+      showSub.remove();
+      hideSub.remove();
+      willSub?.remove();
+      appSub.remove();
+      if (retryTimer.current) clearTimeout(retryTimer.current);
       detach();
       connection.current?.stop();
       connection.current = null;
     };
-  }, [id, sessionId, attach, detach, post]);
+  }, [id, sessionId, attach, detach, post, maybeResize]);
 
   // Appearance flips re-theme the live document.
   useEffect(() => {
@@ -191,6 +294,48 @@ export default function SessionTerminalScreen() {
     [exited, sendWrite]
   );
 
+  const onFrameLayout = useCallback(
+    (event: LayoutChangeEvent) => {
+      const { width, height } = event.nativeEvent.layout;
+      setFrame((prev) => {
+        if (prev && Math.abs(prev.width - width) < 1 && Math.abs(prev.height - height) < 1) {
+          return prev;
+        }
+        return { width, height };
+      });
+    },
+    []
+  );
+
+  // Re-fit on every measured frame (open, rotation, fold). The policy drops
+  // no-op and keyboard-transition layouts.
+  useEffect(() => {
+    if (frame) maybeResize();
+  }, [frame, maybeResize]);
+
+  const changeTextSize = useCallback(
+    (delta: number) => {
+      setFontSize((current) => {
+        const next = Math.max(MIN_TEXT_SIZE, Math.min(MAX_TEXT_SIZE, current + delta));
+        if (next === current) return current;
+        loadHosts()
+          .then((hosts) => {
+            const host = findHost(hosts, id);
+            if (host) saveTextSize(host.id, next);
+          })
+          .catch(() => {});
+        // The document applies the font first; only then do cell metrics
+        // exist to re-measure against (after Orca's text-size debounce).
+        setTimeout(() => {
+          post({ type: 'font-size', fontSize: next });
+          setTimeout(() => maybeResize({ textSizeChanged: true }), FONT_APPLY_MS);
+        }, 0);
+        return next;
+      });
+    },
+    [id, maybeResize, post]
+  );
+
   if (missing) {
     return (
       <View style={styles.center}>
@@ -211,7 +356,7 @@ export default function SessionTerminalScreen() {
           <Text style={styles.exitText}>Session exited ({exited}) — read-only.</Text>
         </View>
       )}
-      <Pressable style={styles.terminal} onPress={() => input.current?.focus()}>
+      <Pressable style={styles.terminal} onPress={() => input.current?.focus()} onLayout={onFrameLayout}>
         {loadError ? (
           <View style={styles.center}>
             <Text style={styles.body}>The terminal engine failed to load.</Text>
@@ -241,6 +386,15 @@ export default function SessionTerminalScreen() {
             onChangeText={onTypedText}
             value=""
           />
+          <View style={styles.sizeRow}>
+            <Pressable style={styles.sizeKey} onPress={() => changeTextSize(-1)}>
+              <Text style={styles.keyLabel}>A−</Text>
+            </Pressable>
+            <Text style={styles.sizeLabel}>{fontSize}</Text>
+            <Pressable style={styles.sizeKey} onPress={() => changeTextSize(1)}>
+              <Text style={styles.keyLabel}>A+</Text>
+            </Pressable>
+          </View>
           <View style={styles.keyBar}>
             {KEY_BAR_ORDER.filter((key) => key !== 'ctrl-c').map((key) => (
               <Pressable key={key} style={styles.key} onPress={() => onKeyBar(key)}>
@@ -271,6 +425,9 @@ const styles = StyleSheet.create({
   exitText: { color: '#fff', fontSize: 13, textAlign: 'center' },
   terminal: { flex: 1 },
   hiddenInput: { height: 0, width: 0, opacity: 0 },
+  sizeRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8, paddingTop: 6, gap: 8, backgroundColor: '#1c1c1e' },
+  sizeKey: { paddingVertical: 6, paddingHorizontal: 12, borderRadius: 8, backgroundColor: '#2c2c2e' },
+  sizeLabel: { color: '#fff', fontSize: 12, minWidth: 20, textAlign: 'center' },
   keyBar: { flexDirection: 'row', padding: 8, gap: 6, backgroundColor: '#1c1c1e' },
   key: {
     flex: 1,

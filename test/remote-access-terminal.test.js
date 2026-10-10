@@ -139,6 +139,7 @@ beforeEach(async () => {
       projects: () => [{ id: 'shop', name: 'Shop', kind: 'site' }],
       subscribeOutput: (id, sinks) => agents.subscribeOutput(id, sinks),
       write: (id, data) => agents.write(id, data),
+      resize: (id, cols, rows) => agents.resize(id, cols, rows),
     },
   });
   remoteAccess.start({ port: 0 });
@@ -408,6 +409,47 @@ describe('terminal over the channel', () => {
     expect(terminal.events.data.length).toBeLessThanOrEqual(3);
     expect(terminal.events.data.map((e) => e.data).join('')).toBe(chunks.join(''));
     terminal.stop();
+    client.close();
+  });
+});
+
+describe('terminal size ownership', () => {
+  it('resizes the pty from the phone and rejects bad values', async () => {
+    const { sessionId } = agents.launch({ site: site(), agentId: agents.SHELL_ID });
+    const { client } = await pairedPhone();
+
+    expect(
+      await client.request('terminal.resize', { sessionId, cols: 40, rows: 10 })
+    ).toEqual({
+      ok: true,
+    });
+    expect(ptys[0].resize).toHaveBeenCalledWith(40, 10);
+
+    for (const bad of [
+      { sessionId, cols: 0, rows: 10 },
+      { sessionId, cols: 40, rows: -1 },
+      { sessionId, cols: 1.5, rows: 10 },
+      { sessionId, cols: 40, rows: 501 },
+      { sessionId, cols: '40', rows: 10 },
+    ]) {
+      await expect(client.request('terminal.resize', bad)).rejects.toThrow();
+    }
+    await expect(
+      client.request('terminal.resize', { sessionId: 'nope', cols: 40, rows: 10 })
+    ).rejects.toThrow();
+    client.close();
+  });
+
+  it('a phone resize followed by a desktop re-assert restores the desktop size', async () => {
+    const { sessionId } = agents.launch({ site: site(), agentId: agents.SHELL_ID });
+    const { client } = await pairedPhone();
+
+    await client.request('terminal.resize', { sessionId, cols: 40, rows: 10 });
+    expect(ptys[0].resize).toHaveBeenLastCalledWith(40, 10);
+
+    // What the desktop focus listener sends through the same engine path.
+    agents.resize(sessionId, 80, 24);
+    expect(ptys[0].resize).toHaveBeenLastCalledWith(80, 24);
     client.close();
   });
 });

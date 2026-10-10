@@ -74,6 +74,7 @@ const ALLOWED_OPS = new Set([
   'terminal.attach',
   'terminal.detach',
   'terminal.write',
+  'terminal.resize',
 ]);
 
 // Terminal output batches per (device, Session) so a chatty TUI doesn't send
@@ -82,6 +83,10 @@ const TERMINAL_FLUSH_MS = 20;
 const TERMINAL_BATCH_BYTES = 16 * 1024;
 // A single write frame caps at 64 KB; bigger input is rejected, not chunked.
 const TERMINAL_WRITE_MAX_BYTES = 64 * 1024;
+// Phone-driven sizes stay inside a sane grid: positive integers, bounded so
+// a corrupt frame cannot ask for a degenerate or absurd pty.
+const TERMINAL_MIN_DIM = 1;
+const TERMINAL_MAX_DIM = 500;
 
 // The Cloudflare tunnel token, Keychain-encrypted via safeStorage. Ciphertext
 // only in the store — never plaintext, never a setting, never logged.
@@ -159,6 +164,7 @@ const deps = {
       projects: () => [],
       subscribeOutput: () => () => {},
       write: () => {},
+      resize: () => {},
     };
   },
   // Batching timers, injected so tests flush deterministically.
@@ -1111,6 +1117,23 @@ function terminalWrite(sessionId, data) {
   return { ok: true };
 }
 
+function terminalResize(sessionId, cols, rows) {
+  for (const [name, value] of [
+    ['cols', cols],
+    ['rows', rows],
+  ]) {
+    if (typeof value !== 'number' || !Number.isInteger(value)) {
+      throw new Error(`Terminal ${name} must be a whole number.`);
+    }
+    if (value < TERMINAL_MIN_DIM || value > TERMINAL_MAX_DIM) {
+      throw new Error(`Terminal ${name} must be between 1 and 500.`);
+    }
+  }
+  if (!deps.sessions.get(sessionId)) throw new Error('Unknown session.');
+  deps.sessions.resize(sessionId, cols, rows);
+  return { ok: true };
+}
+
 // Tear down every terminal subscription riding one socket. Detaching never
 // stops the Session; the engine subscription just goes away with the socket.
 function detachTerminalsForWs(ws) {
@@ -1400,7 +1423,8 @@ function handleDeviceConnection(ws, req) {
     if (
       payload.op === 'terminal.attach' ||
       payload.op === 'terminal.detach' ||
-      payload.op === 'terminal.write'
+      payload.op === 'terminal.write' ||
+      payload.op === 'terminal.resize'
     ) {
       if (!device) return drop(ws);
       try {
@@ -1413,6 +1437,8 @@ function handleDeviceConnection(ws, req) {
           result = terminalAttach(device.id, targetId, sendSealed, ws);
         } else if (payload.op === 'terminal.detach') {
           result = terminalDetach(device.id, targetId);
+        } else if (payload.op === 'terminal.resize') {
+          result = terminalResize(targetId, params.cols, params.rows);
         } else {
           result = terminalWrite(targetId, params.data);
         }
