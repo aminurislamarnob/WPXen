@@ -1,6 +1,10 @@
 import { useState, useEffect } from 'react';
 
+// A transcript image, fetched from the main process by its { uuid, path } ref.
 export function ImageRef({ sessionId, refData }) {
+  // Rows are replaced on every update; key the fetch on the ref's value, not
+  // its identity, so a re-render doesn't rescan the transcript.
+  const refKey = `${refData.uuid}:${refData.path.join('.')}`;
   const [dataUrl, setDataUrl] = useState(null);
   const [error, setError] = useState(null);
   const [isOpen, setIsOpen] = useState(false);
@@ -14,7 +18,7 @@ export function ImageRef({ sessionId, refData }) {
         if (!res) {
           setError('Image not found');
         } else if (res.tooLarge) {
-          setError('Image too large (>5MB)');
+          setError('Image too large to preview (over 5 MB)');
         } else {
           setDataUrl(res);
         }
@@ -25,7 +29,8 @@ export function ImageRef({ sessionId, refData }) {
     return () => {
       cancelled = true;
     };
-  }, [sessionId, refData]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refKey is refData's value
+  }, [sessionId, refKey]);
 
   if (error) {
     return (

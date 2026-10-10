@@ -1416,8 +1416,10 @@ function openChat(sessionId, viewerId) {
           filteredRows.push(row);
         }
       }
+      // Only the facts (tasks, to-dos, usage) — never the decoder's whole
+      // state, which holds every message of the loaded pages.
       for (const cb of chatListeners)
-        cb({ sessionId, rows: filteredRows, header, state });
+        cb({ sessionId, rows: filteredRows, header, state: state?.facts });
     },
   });
 }
@@ -1453,8 +1455,7 @@ function chatSend(sessionId, text) {
 }
 
 function chatImage(sessionId, ref) {
-  const session = getSession(sessionId);
-  return agentChat.chatImage(session ? session.site : null, sessionId, ref);
+  return agentChat.chatImage(sessionId, ref);
 }
 
 module.exports = {

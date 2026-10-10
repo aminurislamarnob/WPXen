@@ -9,6 +9,7 @@ import DiffView from '../DiffView';
 import { ChatMarkdown } from './ChatMarkdown';
 import { SubagentRow } from './SubagentRow';
 import { ImageRef } from './ImageRef';
+import { contextMeter } from '../../lib/contextMeter';
 
 export function ChatView({ sessionId }) {
   const viewerId = useId();
@@ -254,25 +255,9 @@ export function ChatView({ sessionId }) {
       {headerTitle && (
         <div className="px-4 py-2 border-b border-border bg-muted/30 text-[13px] font-medium flex-none truncate flex items-center justify-between">
           <span>{headerTitle}</span>
-          {chatState?.usage && (
+          {contextMeter(chatState?.usage) && (
             <span className="text-muted-foreground font-normal">
-              {(() => {
-                const u = chatState.usage;
-                if (!u || !u.model) return null;
-                const tokens = u.totalTokens || 0;
-                let limit = null;
-                if (u.model.includes('[1m]')) limit = 1000000;
-                else if (u.model.includes('[200k]')) limit = 200000;
-                else if (
-                  u.model.includes('claude-3-opus') ||
-                  u.model.includes('claude-3-sonnet') ||
-                  u.model.includes('claude-3-haiku')
-                ) {
-                  if (u.model.includes('200k')) limit = 200000;
-                }
-                if (limit) return `${Math.round((tokens / limit) * 100)}% of context`;
-                return `${Math.round(tokens / 1000)}k tokens`;
-              })()}
+              {contextMeter(chatState.usage).label}
             </span>
           )}
         </div>
@@ -349,24 +334,16 @@ export function ChatView({ sessionId }) {
                               ) : (
                                 <div>
                                   {(() => {
-                                    const bgTaskId =
-                                      item.tool_use?.name === 'Bash' &&
-                                      item.tool_use?.input?.run_in_background
-                                        ? item.result?.backgroundTaskId
-                                        : item.tool_use?.name === 'Monitor'
-                                          ? item.result?.taskId
-                                          : null;
-                                    const taskState = bgTaskId
-                                      ? chatState?.tasks?.[bgTaskId]
+                                    const taskState = item.taskId
+                                      ? chatState?.tasks?.[item.taskId]
                                       : null;
                                     if (!taskState) return null;
                                     return (
                                       <div className="mb-2 flex items-center gap-2 text-[11px]">
                                         <span
-                                          className={`px-1.5 py-0.5 rounded font-medium ${taskState.running ? 'bg-primary/20 text-primary' : 'bg-muted-foreground/20 text-muted-foreground'}`}
+                                          className={`px-1.5 py-0.5 rounded font-medium ${taskState.status === 'running' ? 'bg-highlight/15 text-highlight' : 'bg-muted text-muted-foreground'}`}
                                         >
-                                          {taskState.status ||
-                                            (taskState.running ? 'running' : 'stopped')}
+                                          {taskState.status}
                                         </span>
                                         <code
                                           className="font-mono bg-background/50 px-1 rounded truncate flex-1"
@@ -386,6 +363,10 @@ export function ChatView({ sessionId }) {
                                     }
                                     empty="Empty"
                                     onLink={handleLink}
+                                  />
+                                  <ImageList
+                                    sessionId={sessionId}
+                                    images={item.result?.images}
                                   />
                                   {(item.result?.truncated ||
                                     (item.blocks &&
@@ -440,37 +421,11 @@ export function ChatView({ sessionId }) {
                         Assistant
                       </div>
                       <div className="text-[13px] break-words">
-                        {Array.isArray(msg.content) ? (
-                          <div className="flex flex-col gap-2">
-                            {msg.content.map((block, i) => {
-                              if (block.type === 'text') {
-                                return (
-                                  <ChatMarkdown
-                                    key={i}
-                                    text={block.text}
-                                    empty=""
-                                    onLink={handleLink}
-                                  />
-                                );
-                              } else if (block.kind === 'image') {
-                                return (
-                                  <ImageRef
-                                    key={i}
-                                    sessionId={sessionId}
-                                    refData={block.ref}
-                                  />
-                                );
-                              }
-                              return null;
-                            })}
-                          </div>
-                        ) : (
-                          <ChatMarkdown
-                            text={msg.content}
-                            empty="Empty"
-                            onLink={handleLink}
-                          />
-                        )}
+                        <ChatMarkdown
+                          text={msg.content}
+                          empty="Empty"
+                          onLink={handleLink}
+                        />
                       </div>
                     </div>
                   ) : (
@@ -483,11 +438,10 @@ export function ChatView({ sessionId }) {
                           : msg.role}
                       </div>
                       <div className="text-[13px] break-words">
-                        <ChatMarkdown
-                          text={msg.content}
-                          empty="Empty"
-                          onLink={handleLink}
-                        />
+                        {msg.content && (
+                          <ChatMarkdown text={msg.content} empty="" onLink={handleLink} />
+                        )}
+                        <ImageList sessionId={sessionId} images={msg.images} />
                       </div>
                     </div>
                   )}
@@ -523,11 +477,10 @@ export function ChatView({ sessionId }) {
 
       <div className="flex flex-col border-t border-border bg-background z-20">
         {chatState?.tasks &&
-          Object.values(chatState.tasks).filter((t) => t.running).length > 0 && (
+          Object.values(chatState.tasks).some((t) => t.status === 'running') && (
             <div className="px-4 py-2 border-b border-border bg-muted/20">
-              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-primary/10 text-primary">
-                {Object.values(chatState.tasks).filter((t) => t.running).length}{' '}
-                background tasks running
+              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-highlight/10 text-highlight">
+                {backgroundTasksLabel(chatState.tasks)}
               </span>
             </div>
           )}
@@ -539,8 +492,8 @@ export function ChatView({ sessionId }) {
               /{chatState.todos.length})
             </summary>
             <div className="mt-2 flex flex-col gap-1 max-h-[150px] overflow-y-auto">
-              {chatState.todos.map((todo) => (
-                <div key={todo.id} className="flex gap-2 items-start">
+              {chatState.todos.map((todo, i) => (
+                <div key={i} className="flex gap-2 items-start">
                   <div className="mt-0.5 flex-none">
                     {todo.status === 'completed' ? '☑' : '☐'}
                   </div>
@@ -565,6 +518,26 @@ export function ChatView({ sessionId }) {
           />
         </div>
       </div>
+    </div>
+  );
+}
+
+function backgroundTasksLabel(tasks) {
+  const n = Object.values(tasks).filter((t) => t.status === 'running').length;
+  return `${n} background task${n === 1 ? '' : 's'} running`;
+}
+
+function ImageList({ sessionId, images }) {
+  if (!images?.length) return null;
+  return (
+    <div className="mt-2 flex flex-wrap gap-2">
+      {images.map((ref) => (
+        <ImageRef
+          key={`${ref.uuid}-${ref.path.join('.')}`}
+          sessionId={sessionId}
+          refData={ref}
+        />
+      ))}
     </div>
   );
 }

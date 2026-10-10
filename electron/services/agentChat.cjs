@@ -633,78 +633,72 @@ function chatLoadOlderSubagent(sessionId, toolUseId) {
   return { rows: mappedRows, atStart };
 }
 
-async function chatImage(site, sessionId, ref) {
-  if (!ref) return null;
-  const os = require('os');
-  const path = require('path');
-  const watch = watches.get(sessionId);
-  const cwd = watch ? watch.cwd : site ? site.path : process.cwd();
+// Images are served only from this Session's own transcripts, located by a
+// record uuid and a block position — never by a path the renderer supplies.
+const IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+// Raster types only: an SVG data URL can carry script.
+const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
 
+function validImageRef(ref) {
+  return (
+    !!ref &&
+    typeof ref.uuid === 'string' &&
+    /^[\w-]{1,100}$/.test(ref.uuid) &&
+    Array.isArray(ref.path) &&
+    ref.path.length >= 1 &&
+    ref.path.length <= 2 &&
+    ref.path.every((i) => Number.isInteger(i) && i >= 0)
+  );
+}
+
+async function findRecord(file, uuid) {
+  const readline = require('readline');
+  const needle = `"uuid":"${uuid}"`;
+  const rl = readline.createInterface({
+    input: fs.createReadStream(file),
+    crlfDelay: Infinity,
+  });
   try {
-    if (ref.path) {
-      let absPath = path.resolve(ref.path);
-      const fs = require('fs');
-      if (!fs.existsSync(absPath)) return null;
-      absPath = fs.realpathSync(absPath);
-
-      const tmpReal = fs.realpathSync(os.tmpdir());
-      const claudeReal = fs.existsSync(path.join(os.homedir(), '.claude'))
-        ? fs.realpathSync(path.join(os.homedir(), '.claude'))
-        : path.join(os.homedir(), '.claude');
-      const siteReal = cwd && fs.existsSync(cwd) ? fs.realpathSync(cwd) : cwd;
-
-      const isTmp = absPath.startsWith(tmpReal);
-      const isSite = siteReal && absPath.startsWith(siteReal);
-      const isClaude = absPath.startsWith(claudeReal);
-
-      if (!isTmp && !isSite && !isClaude) return null;
-
-      const stats = fs.statSync(absPath);
-      if (stats.size > 5 * 1024 * 1024) return { tooLarge: true };
-
-      const ext = path.extname(absPath).toLowerCase();
-      let mime = 'image/png';
-      if (ext === '.jpg' || ext === '.jpeg') mime = 'image/jpeg';
-      else if (ext === '.gif') mime = 'image/gif';
-      else if (ext === '.webp') mime = 'image/webp';
-
-      const data = fs.readFileSync(absPath).toString('base64');
-      return `data:${mime};base64,${data}`;
-    }
-
-    const { claudeTranscriptPath } = require('./agentChatClaude.cjs');
-    const tPath = claudeTranscriptPath({ home: os.homedir(), cwd }, sessionId);
-
-    const fs2 = require('fs');
-    if (!fs2.existsSync(tPath)) return null;
-
-    const readline = require('readline');
-    const fileStream = fs2.createReadStream(tPath);
-    const rl = readline.createInterface({ input: fileStream, crlfDelay: Infinity });
-
     for await (const line of rl) {
-      if (line.includes(ref.recordUuid)) {
-        try {
-          const record = JSON.parse(line);
-          const rid = record.uuid || record.id || (record.message && record.message.id);
-          if (rid === ref.recordUuid) {
-            const content = record.content || (record.message && record.message.content);
-            if (content && content[ref.index] && content[ref.index].type === 'image') {
-              const source = content[ref.index].source;
-              if (source && source.data) {
-                const buf = Buffer.from(source.data, 'base64');
-                if (buf.length > 5 * 1024 * 1024) return { tooLarge: true };
-                return `data:${source.media_type || 'image/png'};base64,${source.data}`;
-              }
-            }
-          }
-        } catch {}
-      }
+      if (!line.includes(needle)) continue;
+      try {
+        const record = JSON.parse(line);
+        if (record.uuid === uuid) return record;
+      } catch {}
     }
-    return null;
-  } catch {
-    return null;
+  } finally {
+    rl.close();
   }
+  return null;
+}
+
+async function chatImage(sessionId, ref) {
+  const watch = watches.get(sessionId);
+  if (!watch || !validImageRef(ref)) return null;
+  const files = [
+    watch.path,
+    ...[...watch.subagents.values()].map((sub) =>
+      path.join(subagentDir(watch), `agent-${sub.agentId}.jsonl`)
+    ),
+  ];
+  for (const file of files) {
+    let record;
+    try {
+      record = await findRecord(file, ref.uuid);
+    } catch {
+      continue;
+    }
+    if (!record) continue;
+    let block = record.message?.content?.[ref.path[0]];
+    if (ref.path.length === 2) block = block?.content?.[ref.path[1]];
+    const source = block?.type === 'image' ? block.source : null;
+    if (source?.type !== 'base64' || typeof source.data !== 'string') return null;
+    if (!IMAGE_TYPES.has(source.media_type)) return null;
+    if (Math.floor((source.data.length * 3) / 4) > IMAGE_MAX_BYTES)
+      return { tooLarge: true };
+    return `data:${source.media_type};base64,${source.data}`;
+  }
+  return null;
 }
 
 module.exports = {
@@ -717,6 +711,7 @@ module.exports = {
   chatExpandSubagent,
   chatLoadOlderSubagent,
   chatImage,
+  IMAGE_MAX_BYTES,
   // Exposed for testing
   MAX_PAGE_ROWS,
   MAX_PAGE_BYTES,
