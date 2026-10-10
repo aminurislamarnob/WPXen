@@ -21,6 +21,7 @@ export default function SplitLayout({
   onOpenLink,
   onExited,
   onRestart,
+  onResume,
   onFocusPane,
   onBlurPane,
   onClosePane,
@@ -92,7 +93,13 @@ export default function SplitLayout({
             onHandoff={onHandoff}
           />
         </div>
-        {viewMode === 'chat' && <ChatView sessionId={tree.leaf} />}
+        {viewMode === 'chat' && (
+          <ChatView
+            sessionId={tree.leaf}
+            onRestart={() => onRestart?.(tree.leaf)}
+            onResume={() => onResume?.(tree.leaf)}
+          />
+        )}
       </div>
     );
   }
@@ -109,6 +116,7 @@ export default function SplitLayout({
       onOpenLink={onOpenLink}
       onExited={onExited}
       onRestart={onRestart}
+      onResume={onResume}
       onFocusPane={onFocusPane}
       onBlurPane={onBlurPane}
       onClosePane={onClosePane}

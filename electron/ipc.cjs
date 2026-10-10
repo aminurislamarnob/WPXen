@@ -907,6 +907,15 @@ function registerHandlers(win, storeInstance) {
     return res;
   });
 
+  ipcMain.handle('agent-resume-session', (_e, sessionId) => {
+    const old = agents.listAllSessions().find((s) => s.sessionId === sessionId);
+    if (!old) return { error: 'Session not found' };
+    const site = findProject(old.siteId);
+    if (!site) return { error: 'Project not found' };
+    const globalArgs = store.get('agentPresets', {})[old.agentId]?.args || '';
+    return agents.resumeChatSession(sessionId, { site, globalArgs });
+  });
+
   ipcMain.handle('agent-split-pane', (_e, sessionId, dir) => {
     const session = agents.getSession(sessionId);
     if (!session) return { error: 'session not found' };

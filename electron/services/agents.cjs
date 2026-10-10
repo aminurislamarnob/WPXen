@@ -828,6 +828,7 @@ function sessionRow(s) {
     layout: !s.paneOf ? layouts.get(s.sessionId) || { leaf: s.sessionId } : null,
     handoffFrom: s.handoffFrom || null,
     handoffFile: s.handoffFile || null,
+    resumeFrom: s.resumeFrom || null,
     transcriptId: s.transcriptId || null,
     chat: s.chat || null,
     ask: s.ask || null,
@@ -871,11 +872,17 @@ function launch({
   paneOf = null,
   handoffFrom = null,
   handoffFile = null,
+  // Resume a pinned transcript in a new Session: the Agent keeps appending
+  // to the same transcript file, so no fresh --session-id is typed.
+  resume = null,
+  resumeFrom = null,
 }) {
   // `all` so launching by id still works for an agent hidden from the
   // launcher (e.g. a saved session being restored).
   const agent = listAgents({ all: true }).find((a) => a.id === agentId);
   if (!agent) return { error: `Unknown agent: ${agentId}` };
+  if (resume && !agent.resumeFlag)
+    return { error: `${agent.name} does not support resuming a session` };
   // The shell is always present, so this only ever rejects a missing provider.
   if (!agent.detected) return { error: `${agent.name} is not installed` };
 
@@ -892,9 +899,11 @@ function launch({
     .replace(/\s*[\r\n]+\s*/g, ' ')
     .trim();
 
-  const transcriptId = agent.sessionIdFlag ? randomUUID() : undefined;
+  const transcriptId = resume || (agent.sessionIdFlag ? randomUUID() : undefined);
   let typed = resolved.command;
-  if (transcriptId) {
+  if (resume) {
+    typed += ` ${agent.resumeFlag} ${resume}`;
+  } else if (transcriptId) {
     typed += ` ${agent.sessionIdFlag} ${transcriptId}`;
   }
   if (line) {
@@ -925,11 +934,36 @@ function launch({
       paneOf,
       handoffFrom,
       handoffFile,
+      resumeFrom,
       transcriptId,
       chat: agent.chat || null,
       ask: agent.ask || null,
     },
     failLabel: agent.name,
+  });
+}
+
+// Resume a pinned transcript in a new Session beside the old one. The new
+// Session carries the same transcriptId, so its chat view continues the same
+// conversation. Gating on the old Session having exited is the caller's job —
+// two live Sessions must never drive one conversation — so this only checks
+// the transcript and the Agent's resumeFlag.
+function resumeChatSession(sessionId, { site, target = null, globalArgs = '' } = {}) {
+  const old = sessions.get(sessionId);
+  if (!old) return { error: 'Session not found' };
+  if (!old.transcriptId) return { error: 'No pinned transcript to resume' };
+  const agent = listAgents({ all: true }).find((a) => a.id === old.agentId);
+  if (!agent) return { error: `Unknown agent: ${old.agentId}` };
+  if (!agent.resumeFlag)
+    return { error: `${agent.name} does not support resuming a session` };
+  return launch({
+    site,
+    agentId: old.agentId,
+    target,
+    globalArgs,
+    cwd: old.cwd,
+    resume: old.transcriptId,
+    resumeFrom: old.sessionId,
   });
 }
 
@@ -1542,6 +1576,7 @@ module.exports = {
   resolveLaunch,
   launch,
   launchFloating,
+  resumeChatSession,
   attach,
   write,
   setView,

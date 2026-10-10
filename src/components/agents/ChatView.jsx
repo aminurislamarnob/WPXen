@@ -14,13 +14,18 @@ import { WaitingFallback } from './WaitingFallback';
 import * as sessionCache from '../../lib/terminal/sessionCache';
 import { ImageRef } from './ImageRef';
 import { contextMeter } from '../../lib/contextMeter';
-import { setViewMode, setReturnToChat } from '../../lib/chatView';
+import {
+  setViewMode,
+  setReturnToChat,
+  isEndedSession,
+  canResumeSession,
+} from '../../lib/chatView';
 import { useChatDraft } from '../../lib/chatDraft';
 import { shouldShowWaitingFallback } from '../../lib/chatRows';
 import { recallStep, matchFiles, matchCommands } from '../../lib/chatComplete';
 import { isImageDropPath } from '../../lib/terminal/keys';
 
-export function ChatView({ sessionId }) {
+export function ChatView({ sessionId, onRestart, onResume }) {
   const viewerId = useId();
   const rootRef = useRef(null);
   const [messages, setMessages] = useState([]);
@@ -42,26 +47,34 @@ export function ChatView({ sessionId }) {
   const isWorking = currentSession?.state === 'working';
 
   // Per-Agent model table for the picker. Hidden when the Agent has none.
-  const [agentModels, setAgentModels] = useState(null);
+  // The whole entry is kept: the exit bar also needs its resume flag.
+  const [chatAgent, setChatAgent] = useState(null);
+  const agentModels = chatAgent?.models?.length ? chatAgent.models : null;
   useEffect(() => {
     let cancelled = false;
     const agentId = currentSession?.agentId;
     if (!agentId) {
-      setAgentModels(null);
+      setChatAgent(null);
       return;
     }
     window.electronAPI
       .listAgents()
       .then((list) => {
         if (cancelled) return;
-        const entry = (list || []).find((a) => a.id === agentId);
-        setAgentModels(entry?.models?.length ? entry.models : null);
+        setChatAgent((list || []).find((a) => a.id === agentId) || null);
       })
       .catch(() => {});
     return () => {
       cancelled = true;
     };
   }, [currentSession?.agentId]);
+
+  // After the Agent exits the history stays, but the composer gives way to
+  // an exit bar. Resume needs the pinned transcript and a resume-capable
+  // Agent — and only shows once the old Session has ended, since two live
+  // Sessions must never drive one conversation.
+  const isEnded = isEndedSession(currentSession);
+  const showResume = canResumeSession(currentSession, chatAgent);
 
   // The current model is the latest assistant record's model, matched
   // against the table's aliases by substring (the record holds a full id).
@@ -784,114 +797,136 @@ export function ChatView({ sessionId }) {
           </details>
         )}
 
-        <div className="p-4 flex flex-col gap-2">
-          {mentionState && mentionMatches.length > 0 && (
-            <div className="absolute bottom-full mb-1 left-4 max-h-[200px] overflow-y-auto bg-popover text-popover-foreground border shadow-lg rounded-md z-50 text-[13px] min-w-[250px]">
-              {mentionMatches.map((m, i) => (
-                <div
-                  key={mentionState.type === 'file' ? m : m.name}
-                  className={`px-3 py-1.5 cursor-pointer flex justify-between gap-4 ${i === mentionSelected ? 'bg-accent text-accent-foreground' : 'hover:bg-muted'}`}
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    const val = mentionState.type === 'file' ? m : m.name;
-                    const before = input.substring(0, mentionState.start);
-                    const after = input.substring(
-                      mentionState.start + mentionState.query.length
-                    );
-                    setInput(before + val + ' ' + after);
-                    setMentionState(null);
-                  }}
-                >
-                  <span className="truncate">
-                    {mentionState.type === 'file' ? m : m.name}
-                  </span>
-                  {mentionState.type === 'cmd' && (
-                    <span className="opacity-50 text-xs shrink-0">{m.description}</span>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-          {attachments.length > 0 && (
-            <div className="flex flex-wrap gap-2 mb-2">
-              {attachments.map((path, i) => (
-                <div
-                  key={i}
-                  className="flex items-center gap-1 bg-muted px-2 py-1 rounded text-[11px] max-w-[200px]"
-                >
-                  <span className="truncate flex-1">{path.split(/[\\/]/).pop()}</span>
-                  <button
-                    onClick={() =>
-                      setAttachments(attachments.filter((_, idx) => idx !== i))
-                    }
-                    className="hover:text-destructive shrink-0"
-                  >
-                    ×
+        {isEnded ? (
+          <div className="p-4 border-t border-border bg-background z-20">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[12px] text-muted-foreground">
+                Session ended — history stays readable above.
+              </span>
+              <div className="flex gap-2">
+                {onRestart && (
+                  <button className="btn btn-secondary" onClick={() => onRestart()}>
+                    Respawn
                   </button>
-                </div>
-              ))}
+                )}
+                {showResume && onResume && (
+                  <button className="btn btn-primary" onClick={() => onResume()}>
+                    Resume in new Session
+                  </button>
+                )}
+              </div>
             </div>
-          )}
-          <textarea
-            className="w-full bg-background border border-input rounded-md px-3 py-2 text-[13px] focus:outline-none focus:ring-1 focus:ring-ring resize-y min-h-[60px]"
-            placeholder="Message..."
-            value={input}
-            onChange={(e) => {
-              const val = e.target.value;
-              setInput(val);
-              setRecallIndex(-1);
-
-              const caret = e.target.selectionStart;
-              const textBeforeCaret = val.substring(0, caret);
-              const match = textBeforeCaret.match(/(?:^|\s)([@/])(\S*)$/);
-              if (match) {
-                setMentionState({
-                  type: match[1] === '@' ? 'file' : 'cmd',
-                  query: match[2],
-                  start: caret - match[2].length,
-                });
-              } else {
-                setMentionState(null);
-              }
-            }}
-            onKeyDown={handleKeyDown}
-            onPaste={handlePaste}
-            onDrop={handleDrop}
-            onDragOver={(e) => e.preventDefault()}
-          />
-          <div className="flex items-center justify-between gap-2">
-            {agentModels ? (
-              <select
-                aria-label="Model"
-                value={currentModelId}
-                onChange={(e) => handleModelChange(e.target.value)}
-                className="bg-background border border-input rounded-md px-2 py-1.5 text-[12px] text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring max-w-[160px]"
-              >
-                {currentModelId === '' && <option value="">Model</option>}
-                {agentModels.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.label}
-                  </option>
-                ))}
-              </select>
-            ) : (
-              <span />
-            )}
-            {isWorking ? (
-              <button onClick={handleStop} className="btn btn-danger">
-                Stop
-              </button>
-            ) : (
-              <button
-                onClick={doSend}
-                disabled={!input.trim()}
-                className="btn btn-primary disabled:opacity-50"
-              >
-                Send
-              </button>
-            )}
           </div>
-        </div>
+        ) : (
+          <div className="p-4 flex flex-col gap-2">
+            {mentionState && mentionMatches.length > 0 && (
+              <div className="absolute bottom-full mb-1 left-4 max-h-[200px] overflow-y-auto bg-popover text-popover-foreground border shadow-lg rounded-md z-50 text-[13px] min-w-[250px]">
+                {mentionMatches.map((m, i) => (
+                  <div
+                    key={mentionState.type === 'file' ? m : m.name}
+                    className={`px-3 py-1.5 cursor-pointer flex justify-between gap-4 ${i === mentionSelected ? 'bg-accent text-accent-foreground' : 'hover:bg-muted'}`}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      const val = mentionState.type === 'file' ? m : m.name;
+                      const before = input.substring(0, mentionState.start);
+                      const after = input.substring(
+                        mentionState.start + mentionState.query.length
+                      );
+                      setInput(before + val + ' ' + after);
+                      setMentionState(null);
+                    }}
+                  >
+                    <span className="truncate">
+                      {mentionState.type === 'file' ? m : m.name}
+                    </span>
+                    {mentionState.type === 'cmd' && (
+                      <span className="opacity-50 text-xs shrink-0">{m.description}</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+            {attachments.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-2">
+                {attachments.map((path, i) => (
+                  <div
+                    key={i}
+                    className="flex items-center gap-1 bg-muted px-2 py-1 rounded text-[11px] max-w-[200px]"
+                  >
+                    <span className="truncate flex-1">{path.split(/[\\/]/).pop()}</span>
+                    <button
+                      onClick={() =>
+                        setAttachments(attachments.filter((_, idx) => idx !== i))
+                      }
+                      className="hover:text-destructive shrink-0"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <textarea
+              className="w-full bg-background border border-input rounded-md px-3 py-2 text-[13px] focus:outline-none focus:ring-1 focus:ring-ring resize-y min-h-[60px]"
+              placeholder="Message..."
+              value={input}
+              onChange={(e) => {
+                const val = e.target.value;
+                setInput(val);
+                setRecallIndex(-1);
+
+                const caret = e.target.selectionStart;
+                const textBeforeCaret = val.substring(0, caret);
+                const match = textBeforeCaret.match(/(?:^|\s)([@/])(\S*)$/);
+                if (match) {
+                  setMentionState({
+                    type: match[1] === '@' ? 'file' : 'cmd',
+                    query: match[2],
+                    start: caret - match[2].length,
+                  });
+                } else {
+                  setMentionState(null);
+                }
+              }}
+              onKeyDown={handleKeyDown}
+              onPaste={handlePaste}
+              onDrop={handleDrop}
+              onDragOver={(e) => e.preventDefault()}
+            />
+            <div className="flex items-center justify-between gap-2">
+              {agentModels ? (
+                <select
+                  aria-label="Model"
+                  value={currentModelId}
+                  onChange={(e) => handleModelChange(e.target.value)}
+                  className="bg-background border border-input rounded-md px-2 py-1.5 text-[12px] text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring max-w-[160px]"
+                >
+                  {currentModelId === '' && <option value="">Model</option>}
+                  {agentModels.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <span />
+              )}
+              {isWorking ? (
+                <button onClick={handleStop} className="btn btn-danger">
+                  Stop
+                </button>
+              ) : (
+                <button
+                  onClick={doSend}
+                  disabled={!input.trim()}
+                  className="btn btn-primary disabled:opacity-50"
+                >
+                  Send
+                </button>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
