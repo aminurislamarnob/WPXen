@@ -117,3 +117,18 @@ export function runNeedsAttention(run) {
       !item.result && (item.tool_use?.name === 'AskUserQuestion' || !!item.subagent)
   );
 }
+
+export function shouldShowWaitingFallback(status, foldedMessages) {
+  if (status !== 'needs-input') return false;
+
+  for (const msg of foldedMessages) {
+    if (msg.role === 'tool-run') {
+      for (const item of msg.items) {
+        if (item.tool_use?.name === 'AskUserQuestion' && !item.result) {
+          return false;
+        }
+      }
+    }
+  }
+  return true;
+}

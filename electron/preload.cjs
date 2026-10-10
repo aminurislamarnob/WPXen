@@ -288,6 +288,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.send('agent-chat-open', sessionId, viewerId),
   chatClose: (sessionId, viewerId) =>
     ipcRenderer.send('agent-chat-close', sessionId, viewerId),
+  chatSnapshot: (sessionId, lines) =>
+    ipcRenderer.invoke('agent-chat-snapshot', sessionId, lines),
   chatAnswer: (sessionId, groups) =>
     ipcRenderer.invoke('agent-chat-answer', sessionId, groups),
   chatSend: (sessionId, text) => ipcRenderer.invoke('agent-chat-send', sessionId, text),
