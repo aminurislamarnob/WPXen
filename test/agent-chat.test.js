@@ -316,8 +316,8 @@ describe('agent-chat watcher', () => {
       older.push(...page.rows);
       if (page.atStart) break;
     }
-    const callRow = older.find((r) => r.id === 'msg-call');
-    expect(callRow.blocks[0].result.content).toBe('done');
+    const callRow = older.find((r) => r.id === 'toolu_X');
+    expect(callRow.result.content).toBe('done');
     expect(callRow.remove).toEqual(['r-1']);
   });
 
@@ -361,8 +361,8 @@ describe('decodeClaudeLine', () => {
     const state = {};
     const rows = new Map();
     for (const line of lines) {
-      const row = decodeClaudeLine(line, state);
-      if (row) rows.set(row.id, row);
+      const out = decodeClaudeLine(line, state);
+      for (const row of [out ?? []].flat()) rows.set(row.id, row);
     }
     return [...rows.values()];
   }
@@ -382,10 +382,79 @@ describe('decodeClaudeLine', () => {
     expect(contents.join('\n')).not.toMatch(/register_rest_route|<command-name>|caveat/i);
   });
 
-  it('merges assistant records by message id', () => {
-    const assistants = decodeFixture().filter((r) => r.role === 'assistant');
-    expect(assistants.map((r) => r.id)).toEqual(['msg_01HealthA', 'msg_02HealthB']);
-    expect(assistants[0].content).toContain("I'll look at the routes first.");
+  it("takes the header title from Claude's ai-title record", () => {
+    const state = {};
+    const lines = fs
+      .readFileSync(path.join(__dirname, 'fixtures/claude-transcript.jsonl'), 'utf8')
+      .split('\n');
+    const headers = lines
+      .flatMap((l) => [decodeClaudeLine(l, state) ?? []].flat())
+      .filter((r) => r.isHeader);
+    expect(headers).toEqual([{ isHeader: true, title: 'Health check endpoint' }]);
+  });
+
+  it('renders Edit, Write and MultiEdit calls as inline diffs', () => {
+    const P = '/Users/dev/Sites/shop.test/wp-content/plugins/shop/';
+    const edits = Object.fromEntries(
+      decodeFixture()
+        .filter((r) => r.role === 'tool' && r.edit)
+        .map((r) => [r.tool_use.name, r.edit])
+    );
+    expect(edits.Edit).toEqual({
+      path: P + 'rest.php',
+      original: "register_rest_route('shop/v1', '/orders'",
+      modified: "register_rest_route('shop/v1', '/health'",
+    });
+    expect(edits.Write).toEqual({
+      path: P + 'tests/test-health.php',
+      original: '',
+      modified: '<?php\nclass Test_Health extends WP_UnitTestCase {}\n',
+    });
+    expect(edits.MultiEdit).toEqual({
+      path: P + 'shop.php',
+      original: 'Version: 1.0\n\n// routes',
+      modified: 'Version: 1.1\n\n// routes: orders, health',
+    });
+  });
+
+  it('attaches each edit result to its call', () => {
+    const tools = decodeFixture().filter((r) => r.role === 'tool');
+    expect(tools.every((t) => t.result)).toBe(true);
+  });
+
+  it('keeps row ids stable when a message straddles a page boundary', () => {
+    // Claude writes each block of a message as its own record; Load older
+    // decodes each page with its own state.
+    const thinking = JSON.stringify({
+      type: 'assistant',
+      uuid: 'a-think',
+      message: { id: 'msg-split', content: [{ type: 'thinking', thinking: 'hm' }] },
+    });
+    const call = JSON.stringify({
+      type: 'assistant',
+      uuid: 'a-call',
+      message: {
+        id: 'msg-split',
+        content: [{ type: 'tool_use', id: 'toolu_Split', name: 'Agent', input: {} }],
+      },
+    });
+    const olderPage = [decodeClaudeLine(thinking, {})].flat();
+    const newerPage = [decodeClaudeLine(call, {})].flat();
+    const ids = [...olderPage, ...newerPage].map((r) => r.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(newerPage[0].id).toBe('toolu_Split');
+  });
+
+  it('splits assistant messages into one row per block record', () => {
+    const rows = decodeFixture();
+    expect(rows.filter((r) => r.role === 'assistant').map((r) => r.id)).toEqual([
+      'a-0002-0',
+      'a-0004-0',
+    ]);
+    expect(rows.find((r) => r.id === 'a-0001-0')).toMatchObject({
+      role: 'reasoning',
+      content: 'The routes live in the plugin bootstrap.',
+    });
   });
 
   it('accumulates assistant blocks', () => {
@@ -396,12 +465,14 @@ describe('decodeClaudeLine', () => {
     let res = decodeClaudeLine(
       JSON.stringify({
         type: 'assistant',
-        message: { id: msgId, content: [{ type: 'thinking', text: 'hmmm' }] },
+        message: { id: msgId, content: [{ type: 'thinking', thinking: 'hmmm' }] },
       }),
       state
     );
 
-    expect(res.content).toContain('> Thinking...');
+    expect(res).toBeInstanceOf(Array);
+    expect(res[0].role).toBe('reasoning');
+    expect(res[0].content).toBe('hmmm');
 
     // Second block
     res = decodeClaudeLine(
@@ -412,7 +483,10 @@ describe('decodeClaudeLine', () => {
       state
     );
 
-    expect(res.content).toContain('I am claude');
+    expect(res).toBeInstanceOf(Array);
+    expect(res.length).toBe(2);
+    expect(res[1].role).toBe('assistant');
+    expect(res[1].content).toBe('I am claude');
 
     // State should have combined both
     expect(state[msgId].blocks.length).toBe(2);
@@ -443,8 +517,9 @@ describe('decodeClaudeLine', () => {
       state
     );
 
-    expect(callRes.remove).toEqual(['orphan-1']);
-    expect(callRes.blocks[0].result.content).toBe('result content');
+    expect(callRes).toBeInstanceOf(Array);
+    expect(callRes[0].remove).toEqual(['orphan-1']);
+    expect(callRes[0].result.content).toBe('result content');
   });
 
   it('handles cross-page tool pairing (call then result via polling)', () => {
@@ -470,9 +545,9 @@ describe('decodeClaudeLine', () => {
     );
 
     // It should re-emit the modified call row instead of an orphan
-    expect(resultRes.id).toBe('msg-1');
+    expect(resultRes.id).toBe('tool-y');
     expect(resultRes.orphan).toBeUndefined();
-    expect(resultRes.blocks[0].result.content).toBe('result content');
+    expect(resultRes.result.content).toBe('result content');
   });
 });
 

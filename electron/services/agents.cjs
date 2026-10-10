@@ -1407,7 +1407,16 @@ function openChat(sessionId, viewerId) {
         (s) => s.sessionId !== sessionId && !s.exited && s.transcriptId === uuid
       ),
     onRows: (rows) => {
-      for (const cb of chatListeners) cb({ sessionId, rows });
+      let header = undefined;
+      const filteredRows = [];
+      for (const row of rows) {
+        if (row.isHeader) {
+          header = row;
+        } else {
+          filteredRows.push(row);
+        }
+      }
+      for (const cb of chatListeners) cb({ sessionId, rows: filteredRows, header });
     },
   });
 }
