@@ -399,8 +399,8 @@ function registerHandlers(win, storeInstance) {
   ipcMain.handle('agent-chat-answer', (_e, sessionId, groups) => {
     return agents.chatAnswer(sessionId, groups);
   });
-  ipcMain.handle('agent-chat-send', (_e, sessionId, text) => {
-    return agents.chatSend(sessionId, text);
+  ipcMain.handle('agent-chat-send', (_e, sessionId, text, images) => {
+    return agents.chatSend(sessionId, text, images);
   });
   ipcMain.handle('agent-chat-load-older', (_e, sessionId) => {
     return agents.chatLoadOlder(sessionId);
@@ -413,6 +413,24 @@ function registerHandlers(win, storeInstance) {
   });
   ipcMain.handle('agent-chat-load-older-subagent', (_e, sessionId, parentId) => {
     return agents.chatLoadOlderSubagent(sessionId, parentId);
+  });
+  // The composer's @ and / completions, for the Session's own Site — looked
+  // up here, so the renderer never names a path.
+  ipcMain.handle('agent-chat-files', async (_e, siteId) => {
+    const site = findProject(siteId);
+    return site?.path ? files.listFiles(site.path) : [];
+  });
+  ipcMain.handle('agent-chat-commands', (_e, siteId) => {
+    const site = findProject(siteId);
+    return require('./services/chatCommands.cjs').listCommands(site?.path);
+  });
+  // A pasted or dropped image, saved to a temp file the TUI can attach.
+  ipcMain.handle('agent-chat-save-image', async (_e, bytes) => {
+    const os = require('os');
+    const fsp = require('fs/promises');
+    const p = path.join(os.tmpdir(), `wpxen-chat-image-${crypto.randomUUID()}.png`);
+    await fsp.writeFile(p, Buffer.from(bytes));
+    return p;
   });
   ipcMain.handle('agent-chat-image', (_e, sessionId, ref) => {
     return agents.chatImage(sessionId, ref);
