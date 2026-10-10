@@ -49,6 +49,7 @@ const REGISTRY = [
     sessionIdFlag: '--session-id',
     resumeFlag: '--resume',
     chat: 'claude',
+    ask: { kind: 'claude-digits' },
   },
   {
     // command-code installs four aliases for one entry point: cmd, cmdc,
@@ -335,6 +336,8 @@ function listAgents({ all = false, shell = true } = {}) {
         sessionIdFlag: a.sessionIdFlag || null,
         resumeFlag: a.resumeFlag || null,
         chat: a.chat || null,
+        // How this Agent's TUI takes a question-card answer; no key map, no cards.
+        ask: a.ask?.kind || null,
         isCustom: !!a.isCustom,
         isShell: false,
         enabled: !config.enabled || config.enabled.includes(a.id),
@@ -819,6 +822,7 @@ function sessionRow(s) {
     handoffFile: s.handoffFile || null,
     transcriptId: s.transcriptId || null,
     chat: s.chat || null,
+    ask: s.ask || null,
     // The issue or PR Start → launched this Session for, else null.
     issue: s.issue || null,
     startedAt: s.startedAt,
@@ -915,6 +919,7 @@ function launch({
       handoffFile,
       transcriptId,
       chat: agent.chat || null,
+      ask: agent.ask || null,
     },
     failLabel: agent.name,
   });
@@ -1369,7 +1374,7 @@ function stopAll() {
 }
 
 const agentChat = require('./agentChat.cjs');
-const { sendChat } = require('./agentChatSend.cjs');
+const { sendChat, sendChatAnswer } = require('./agentChatSend.cjs');
 const { decodeClaudeLine } = require('./agentChatClaude.cjs');
 const transcripts = require('./transcripts.cjs');
 
@@ -1448,6 +1453,12 @@ function closeAllChats() {
   agentChat.closeAllChats();
 }
 
+function chatAnswer(sessionId, groups) {
+  const session = getSession(sessionId);
+  if (!session) return Promise.reject(new Error('No session'));
+  return sendChatAnswer(session, groups);
+}
+
 function chatSend(sessionId, text) {
   const session = getSession(sessionId);
   if (!session) return Promise.reject(new Error('No session'));
@@ -1481,6 +1492,7 @@ module.exports = {
   closeChat,
   closeAllChats,
   chatSend,
+  chatAnswer,
   chatLoadOlder,
   chatFetchFull,
   chatExpandSubagent,

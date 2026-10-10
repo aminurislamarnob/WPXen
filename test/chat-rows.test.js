@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { foldToolRuns, subagentSummary } from '../src/lib/chatRows.js';
+import { foldToolRuns, subagentSummary, runNeedsAttention } from '../src/lib/chatRows.js';
 
 describe('foldToolRuns', () => {
   it('groups consecutive tool rows', () => {
@@ -92,6 +92,39 @@ describe('subagentSummary', () => {
   it("falls back to the call's own input for the description", () => {
     expect(subagentSummary(call({ subagent: { agentId: 'a' } })).description).toBe(
       'From input'
+    );
+  });
+});
+
+describe('runNeedsAttention', () => {
+  const run = (...items) => ({ role: 'tool-run', items });
+  const ask = (result) => ({
+    role: 'tool',
+    tool_use: { name: 'AskUserQuestion' },
+    result,
+  });
+  const agent = (result) => ({
+    role: 'tool',
+    tool_use: { name: 'Agent' },
+    subagent: { agentId: 'a' },
+    result,
+  });
+
+  it('opens a run holding an unanswered question', () => {
+    expect(
+      runNeedsAttention(run({ role: 'tool', tool_use: { name: 'Read' } }, ask()))
+    ).toBe(true);
+    expect(runNeedsAttention(run(ask({ answers: {} })))).toBe(false);
+  });
+
+  it('opens a run holding a running subagent', () => {
+    expect(runNeedsAttention(run(agent()))).toBe(true);
+    expect(runNeedsAttention(run(agent({ content: 'done' })))).toBe(false);
+  });
+
+  it('leaves ordinary runs collapsed', () => {
+    expect(runNeedsAttention(run({ role: 'tool', tool_use: { name: 'Bash' } }))).toBe(
+      false
     );
   });
 });

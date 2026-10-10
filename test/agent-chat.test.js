@@ -779,6 +779,13 @@ describe('session facts and images (#115)', () => {
     });
   });
 
+  it("carries AskUserQuestion's recorded answers on its result", () => {
+    const { rows } = decodeAll();
+    expect(rows.find((r) => r.id === 'toolu_09Ask').result.answers).toEqual({
+      'Which route path should the health check use?': '/status',
+    });
+  });
+
   it('references images by record and position, never carrying base64', () => {
     const { rows } = decodeAll();
     const pasted = rows.find((r) => r.id === 'u-0105');
