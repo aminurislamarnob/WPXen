@@ -255,6 +255,15 @@ function registerHandlers(win, storeInstance) {
   // output) back to the renderer through this window.
   browser.setWindow(win);
 
+  win.webContents.on('did-start-navigation', (e, url, isInPlace, isMainFrame) => {
+    if (isMainFrame && !isInPlace) {
+      agents.closeAllChats();
+    }
+  });
+  win.on('closed', () => {
+    agents.closeAllChats();
+  });
+
   // Bind the settings schema to the store. Side effects that used to live in
   // the save-settings ladder hang off `effects` — one place per key, run only
   // when that key actually changed.
@@ -377,6 +386,16 @@ function registerHandlers(win, storeInstance) {
   // The live Sessions for a Site — the renderer restores its terminal tabs.
   ipcMain.handle('agent-sessions', (_e, siteId) => agents.listSessions(siteId));
 
+  ipcMain.on('agent-chat-open', (_e, sessionId, viewerId) => {
+    agents.openChat(sessionId, viewerId);
+  });
+  ipcMain.on('agent-chat-close', (_e, sessionId, viewerId) => {
+    agents.closeChat(sessionId, viewerId);
+  });
+  ipcMain.handle('agent-chat-send', (_e, sessionId, text) => {
+    return agents.chatSend(sessionId, text);
+  });
+
   // ── Agents working set ("Projects") & session rows ─────────────────────────
   // The sidebar lists working-set Sites with every Session under them, live or
   // exited. Both lists are pushed on change so it never polls.
@@ -402,6 +421,10 @@ function registerHandlers(win, storeInstance) {
 
   agents.onSessionsChanged((list) => {
     if (win && !win.isDestroyed()) win.webContents.send('agent-sessions-update', list);
+  });
+
+  agents.onChatRows((data) => {
+    if (win && !win.isDestroyed()) win.webContents.send('agent-chat-rows', data);
   });
 
   ipcMain.handle('agent-projects-get', () => getProjectIds());

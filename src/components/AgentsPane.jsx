@@ -26,6 +26,7 @@ import { LAST_AGENTS_SITE_KEY, resolveLastSite } from '../lib/activityBar';
 import { useAgentSessions, setSelectedSession } from '../lib/useAgentSessions';
 import TabStrip from './agents/TabStrip';
 import TabContextMenu from './agents/TabContextMenu';
+import { getViewMode, setViewMode } from '../lib/chatView';
 import {
   tabsToClose,
   closeImpact,
@@ -599,6 +600,16 @@ export default function AgentsPane() {
           label: 'Hand Off to Another Agent…',
           onClick: () => setHandoffSession(key),
         });
+
+        const session = sessionsById[key];
+        if (session && session.chat) {
+          const currentMode = getViewMode(key);
+          const isChat = currentMode === 'chat';
+          items.push({
+            label: isChat ? 'Switch to Terminal View' : 'Switch to Chat View',
+            onClick: () => setViewMode(key, isChat ? 'terminal' : 'chat'),
+          });
+        }
         items.push('separator');
       }
 

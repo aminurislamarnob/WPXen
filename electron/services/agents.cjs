@@ -48,6 +48,7 @@ const REGISTRY = [
     installer: { kind: 'brew', name: 'claude-code', cask: true },
     sessionIdFlag: '--session-id',
     resumeFlag: '--resume',
+    chat: 'claude',
   },
   {
     // command-code installs four aliases for one entry point: cmd, cmdc,
@@ -333,6 +334,7 @@ function listAgents({ all = false, shell = true } = {}) {
         promptFlag: a.promptFlag || null,
         sessionIdFlag: a.sessionIdFlag || null,
         resumeFlag: a.resumeFlag || null,
+        chat: a.chat || null,
         isCustom: !!a.isCustom,
         isShell: false,
         enabled: !config.enabled || config.enabled.includes(a.id),
@@ -393,6 +395,9 @@ const deps = {
 
 function __setDeps(next) {
   Object.assign(deps, next);
+  if (next.setInterval || next.statSync) {
+    require('./agentChat.cjs').__setDeps(next);
+  }
 }
 
 // Builds the brew argv for an Agent's package. Pure, so the arg shape is
@@ -813,6 +818,7 @@ function sessionRow(s) {
     handoffFrom: s.handoffFrom || null,
     handoffFile: s.handoffFile || null,
     transcriptId: s.transcriptId || null,
+    chat: s.chat || null,
     // The issue or PR Start → launched this Session for, else null.
     issue: s.issue || null,
     startedAt: s.startedAt,
@@ -908,6 +914,7 @@ function launch({
       handoffFrom,
       handoffFile,
       transcriptId,
+      chat: agent.chat || null,
     },
     failLabel: agent.name,
   });
@@ -1361,6 +1368,57 @@ function stopAll() {
   for (const sessionId of [...sessions.keys()]) stop(sessionId);
 }
 
+const agentChat = require('./agentChat.cjs');
+const { sendChat } = require('./agentChatSend.cjs');
+const { decodeClaudeLine } = require('./agentChatClaude.cjs');
+const transcripts = require('./transcripts.cjs');
+
+const chatListeners = new Set();
+function onChatRows(cb) {
+  chatListeners.add(cb);
+  return () => chatListeners.delete(cb);
+}
+
+function openChat(sessionId, viewerId) {
+  const session = getSession(sessionId);
+  if (!session) return;
+  const transcriptPath = transcripts.locateTranscript(
+    session.agentId,
+    session.cwd,
+    session.startedAt,
+    session.transcriptId
+  );
+  if (!transcriptPath) return;
+
+  const agent = effectiveRegistry().find((a) => a.id === session.agentId);
+  if (!agent || !agent.chat) return;
+
+  let decodeLine = null;
+  if (agent.chat === 'claude') decodeLine = decodeClaudeLine;
+
+  agentChat.openChat(sessionId, viewerId, {
+    transcriptPath,
+    decodeLine,
+    onRows: (rows) => {
+      for (const cb of chatListeners) cb({ sessionId, rows });
+    },
+  });
+}
+
+function closeChat(sessionId, viewerId) {
+  agentChat.closeChat(sessionId, viewerId);
+}
+
+function closeAllChats() {
+  agentChat.closeAllChats();
+}
+
+function chatSend(sessionId, text) {
+  const session = getSession(sessionId);
+  if (!session) return Promise.reject(new Error('No session'));
+  return sendChat(session, text);
+}
+
 module.exports = {
   SHELL_ID,
   setConfig,
@@ -1379,6 +1437,11 @@ module.exports = {
   listAllSessions,
   listFloatingSessions,
   onSessionsChanged,
+  onChatRows,
+  openChat,
+  closeChat,
+  closeAllChats,
+  chatSend,
   onFloatingSessionsChanged,
   resolveLaunch,
   launch,
