@@ -50,3 +50,10 @@ export function nextActive(order, closedKeys, activeKey) {
 
   return remaining[0];
 }
+
+// "Don't ask again" covers ending running Sessions only. Unsaved file edits
+// always ask, the same as closing one dirty file from its X.
+export function needsBulkConfirm(impact, suppressed) {
+  if (impact.dirty.length > 0) return true;
+  return impact.running > 0 && !suppressed;
+}

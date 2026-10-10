@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { tabsToClose, closeImpact, nextActive } from '../src/lib/tabStrip';
+import {
+  tabsToClose,
+  closeImpact,
+  nextActive,
+  needsBulkConfirm,
+} from '../src/lib/tabStrip';
 
 describe('tabStrip', () => {
   const order = ['s1', 's2', 'f1', 'f2', 'b1'];
@@ -58,6 +63,21 @@ describe('tabStrip', () => {
     it('falls to the left if right is closed or at end', () => {
       expect(nextActive(order, ['b1'], 'b1')).toBe('f2');
       expect(nextActive(order, ['f1', 'f2', 'b1'], 'f1')).toBe('s2');
+    });
+  });
+
+  describe('needsBulkConfirm', () => {
+    it('asks when running Sessions would end, unless suppressed', () => {
+      expect(needsBulkConfirm({ running: 2, dirty: [] }, false)).toBe(true);
+      expect(needsBulkConfirm({ running: 2, dirty: [] }, true)).toBe(false);
+    });
+
+    it('closes silently when nothing is running or dirty', () => {
+      expect(needsBulkConfirm({ running: 0, dirty: [] }, false)).toBe(false);
+    });
+
+    it('always asks for unsaved files, even when suppressed', () => {
+      expect(needsBulkConfirm({ running: 0, dirty: ['f1'] }, true)).toBe(true);
     });
   });
 });

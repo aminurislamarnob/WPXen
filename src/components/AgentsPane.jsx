@@ -3,15 +3,11 @@ import { useParams, useLocation, useNavigate, useOutletContext } from 'react-rou
 import {
   Terminal as TerminalIcon,
   Plus,
-  X,
-  Settings2,
   Globe,
   Gauge,
   Database,
   Mail,
   Loader2,
-  PanelRight,
-  GitCompare,
 } from 'lucide-react';
 import { ProviderIcon } from './providerIcons';
 import { Panel, PanelGroup } from 'react-resizable-panels';
@@ -21,18 +17,15 @@ import CodeEditor from './CodeEditor';
 import ResizeHandle from './ResizeHandle';
 import LaunchTargetsDialog from './LaunchTargetsDialog';
 import LaunchMenu from './LaunchMenu';
-import { ConfirmDialog, Tooltip } from './ui';
-import { FileGlyph } from '../lib/fileIcons';
-import { Favicon } from './browser/BrowserToolbar';
+import { ConfirmDialog } from './ui';
 import * as sessionCache from '../lib/terminal/sessionCache';
 import * as webviewCache from '../lib/browser/webviewCache';
 import { useSettings } from '../lib/useSettings';
 import { LAST_AGENTS_SITE_KEY, resolveLastSite } from '../lib/activityBar';
-import { sessionTitle } from '../lib/agentsList';
 import { useAgentSessions, setSelectedSession } from '../lib/useAgentSessions';
 import TabStrip from './agents/TabStrip';
 import TabContextMenu from './agents/TabContextMenu';
-import { tabsToClose, closeImpact, nextActive } from '../lib/tabStrip';
+import { tabsToClose, closeImpact, nextActive, needsBulkConfirm } from '../lib/tabStrip';
 
 const CLOSE_CONFIRM_KEY = 'wpxen.terminalCloseConfirmSuppressed';
 
@@ -413,7 +406,7 @@ export default function AgentsPane() {
   const [tabMenu, setTabMenu] = useState(null);
   const [bulkCloseConfirm, setBulkCloseConfirm] = useState(null);
 
-  const handleBulkClose = (action, targetKey, targetKind) => {
+  const handleBulkClose = (action, targetKey) => {
     const sessionKeys = tabs.map((t) => t.sessionId);
     const fileKeys = openFiles.map((f) => f.key);
     const orderedKeys = [...sessionKeys, ...fileKeys];
@@ -455,10 +448,7 @@ export default function AgentsPane() {
       }
     };
 
-    if (
-      (impact.running > 0 || impact.dirty.length > 0) &&
-      localStorage.getItem(CLOSE_CONFIRM_KEY) !== '1'
-    ) {
+    if (needsBulkConfirm(impact, localStorage.getItem(CLOSE_CONFIRM_KEY) === '1')) {
       setBulkCloseConfirm({ action, targetKey, impact, performClose });
       setSuppressClose(false);
     } else {
@@ -484,22 +474,22 @@ export default function AgentsPane() {
         {
           label: 'Close',
           disabled: !canClose,
-          onClick: () => handleBulkClose('close', key, kind),
+          onClick: () => handleBulkClose('close', key),
         },
         {
           label: 'Close Others',
           disabled: !canCloseOthers,
-          onClick: () => handleBulkClose('others', key, kind),
+          onClick: () => handleBulkClose('others', key),
         },
         {
           label: 'Close Tabs to the Right',
           disabled: !canCloseRight,
-          onClick: () => handleBulkClose('right', key, kind),
+          onClick: () => handleBulkClose('right', key),
         },
         {
           label: 'Close Tabs to the Left',
           disabled: !canCloseLeft,
-          onClick: () => handleBulkClose('left', key, kind),
+          onClick: () => handleBulkClose('left', key),
         },
       ],
     });
@@ -942,14 +932,16 @@ export default function AgentsPane() {
           setBulkCloseConfirm(null);
         }}
       >
-        <label className="mt-3 flex items-center gap-2 text-[12.5px] text-muted-foreground cursor-pointer select-none">
-          <input
-            type="checkbox"
-            checked={suppressClose}
-            onChange={(e) => setSuppressClose(e.target.checked)}
-          />
-          Don&rsquo;t ask again
-        </label>
+        {(closeConfirm != null || bulkCloseConfirm?.impact.running > 0) && (
+          <label className="mt-3 flex items-center gap-2 text-[12.5px] text-muted-foreground cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={suppressClose}
+              onChange={(e) => setSuppressClose(e.target.checked)}
+            />
+            Don&rsquo;t ask again
+          </label>
+        )}
       </ConfirmDialog>
       <LaunchTargetsDialog
         open={settingsOpen}
