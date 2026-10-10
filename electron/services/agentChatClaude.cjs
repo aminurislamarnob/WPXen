@@ -8,6 +8,18 @@ function claudeTranscriptPath({ home, cwd, uuid }) {
   return path.join(home, '.claude', 'projects', encodedCwd, `${uuid}.jsonl`);
 }
 
+// User records that are the TUI talking to itself, not the user.
+const USER_NOISE_PREFIXES = [
+  '<command-name>',
+  '<command-message>',
+  '<local-command-stdout>',
+  '<local-command-caveat>',
+  '<bash-input>',
+  '<bash-stdout>',
+  '<task-notification>',
+  '<system-reminder>',
+];
+
 function decodeClaudeLine(lineStr, state) {
   if (!lineStr.trim()) return null;
   let record;
@@ -32,30 +44,23 @@ function decodeClaudeLine(lineStr, state) {
   if (record.isMeta || record.isSynthetic || record.isCompactSummary) return null;
 
   if (record.type === 'user') {
-    // Check if it's an internal command
-    const contentStr =
-      typeof record.content === 'string'
-        ? record.content
-        : JSON.stringify(record.content);
-    if (
-      typeof record.content === 'string' &&
-      (record.content.startsWith('<command-name>') ||
-        record.content.startsWith('<local-command-stdout>') ||
-        record.content.startsWith('<bash-input>') ||
-        record.content.startsWith('<task-notification>') ||
-        record.content.startsWith('<system-reminder>'))
-    ) {
-      return null;
-    }
+    // The turn lives under message.content: a string, or an array of blocks.
+    const content = record.message?.content;
+    const blocks =
+      typeof content === 'string' ? [{ type: 'text', text: content }] : content;
+    if (!Array.isArray(blocks)) return null;
 
-    // Check if it's a tool result
-    if (record.toolUseResult) {
-      // It's a tool result, probably skip or format?
-      // "Tool results arrive as user records whose content is tool_result blocks keyed by tool_use_id. The same record has a structured toolUseResult. For example, AskUserQuestion has answers there..."
-      // Let's format tool results if needed, or just skip them for now?
-      // Wait, the spec says "merge assistant records by message.id...". Does it say to skip user tool results?
-      // Let's just return them as tool result blocks for now.
-    }
+    // Tool results arrive as user records of tool_result blocks. They belong
+    // to their call, never to the user.
+    if (blocks.some((b) => b.type === 'tool_result')) return null;
+
+    const contentStr = blocks
+      .filter((b) => b.type === 'text' && typeof b.text === 'string')
+      .map((b) => b.text)
+      .join('\n')
+      .trim();
+    if (!contentStr) return null;
+    if (USER_NOISE_PREFIXES.some((p) => contentStr.startsWith(p))) return null;
 
     return {
       id: record.uuid,

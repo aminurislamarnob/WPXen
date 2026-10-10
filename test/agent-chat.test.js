@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
 import { openChat, closeAllChats, __setDeps } from '../electron/services/agentChat.cjs';
 import { decodeClaudeLine } from '../electron/services/agentChatClaude.cjs';
 
@@ -98,22 +100,41 @@ describe('decodeClaudeLine', () => {
     expect(decodeClaudeLine('{"type":"file-history-snapshot"}', state)).toBeNull();
   });
 
-  it('parses user commands', () => {
+  // Real Claude records keep the turn under `message.content`, as a string or
+  // an array of blocks; tool results arrive as user records of tool_result
+  // blocks. The fixture follows that shape.
+  function decodeFixture() {
+    const lines = fs
+      .readFileSync(path.join(__dirname, 'fixtures/claude-transcript.jsonl'), 'utf8')
+      .split('\n');
     const state = {};
-    const res = decodeClaudeLine(
-      JSON.stringify({
-        uuid: 'msg-1',
-        type: 'user',
-        content: 'hello claude',
-      }),
-      state
-    );
+    const rows = new Map();
+    for (const line of lines) {
+      const row = decodeClaudeLine(line, state);
+      if (row) rows.set(row.id, row);
+    }
+    return [...rows.values()];
+  }
 
-    expect(res).toMatchObject({
-      id: 'msg-1',
-      role: 'user',
-      content: 'hello claude',
-    });
+  it('decodes user prompts from message.content, string or text blocks', () => {
+    const users = decodeFixture().filter((r) => r.role === 'user');
+    expect(users).toEqual([
+      expect.objectContaining({ id: 'u-0003', content: 'Add a health check endpoint' }),
+      expect.objectContaining({ id: 'u-0005', content: 'Thanks, now add a test' }),
+    ]);
+  });
+
+  it('never shows tool results, meta records or slash commands as user messages', () => {
+    const contents = decodeFixture()
+      .filter((r) => r.role === 'user')
+      .map((r) => r.content);
+    expect(contents.join('\n')).not.toMatch(/register_rest_route|<command-name>|caveat/i);
+  });
+
+  it('merges assistant records by message id', () => {
+    const assistants = decodeFixture().filter((r) => r.role === 'assistant');
+    expect(assistants.map((r) => r.id)).toEqual(['msg_01HealthA', 'msg_02HealthB']);
+    expect(assistants[0].content).toContain("I'll look at the routes first.");
   });
 
   it('accumulates assistant blocks', () => {
