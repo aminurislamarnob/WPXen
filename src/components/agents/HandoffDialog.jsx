@@ -9,6 +9,7 @@ export default function HandoffDialog({ sessionId, onClose, onComplete }) {
   const [error, setError] = useState(null);
   const [targetId, setTargetId] = useState('');
   const [running, setRunning] = useState(false);
+  const [mode, setMode] = useState('focused');
 
   useEffect(() => {
     let active = true;
@@ -44,7 +45,7 @@ export default function HandoffDialog({ sessionId, onClose, onComplete }) {
       const res = await window.electronAPI.runHandoff({
         sessionId,
         targetAgentId: targetId,
-        mode: 'quick',
+        mode: data.contextSource === 'transcript' ? mode : 'quick',
       });
       if (res.error) {
         setError(res.error);
@@ -74,9 +75,52 @@ export default function HandoffDialog({ sessionId, onClose, onComplete }) {
         ) : (
           <div className="space-y-4">
             <div>
-              <p className="text-[13px] text-muted-foreground mb-2">
-                Context source: <strong>Terminal capture</strong>
+              <p className="text-[13px] text-muted-foreground mb-3">
+                Context source:{' '}
+                <strong>
+                  {data.contextSource === 'transcript'
+                    ? 'Transcript'
+                    : 'Terminal capture'}
+                </strong>
               </p>
+
+              {data.contextSource === 'transcript' && (
+                <div className="mb-4 space-y-2">
+                  <label className="flex items-start gap-2 cursor-pointer group">
+                    <input
+                      type="radio"
+                      name="mode"
+                      className="mt-1"
+                      checked={mode === 'focused'}
+                      onChange={() => setMode('focused')}
+                    />
+                    <div>
+                      <div className="text-[13px] text-foreground font-medium">
+                        Focused (Default)
+                      </div>
+                      <div className="text-[12px] text-muted-foreground">
+                        Start from the workspace and read only the transcript sections
+                        needed.
+                      </div>
+                    </div>
+                  </label>
+                  <label className="flex items-start gap-2 cursor-pointer group">
+                    <input
+                      type="radio"
+                      name="mode"
+                      className="mt-1"
+                      checked={mode === 'full'}
+                      onChange={() => setMode('full')}
+                    />
+                    <div>
+                      <div className="text-[13px] text-foreground font-medium">Full</div>
+                      <div className="text-[12px] text-muted-foreground">
+                        Read the whole transcript first.
+                      </div>
+                    </div>
+                  </label>
+                </div>
+              )}
               <label className="block text-[12.5px] text-foreground mb-1">
                 Hand off to
               </label>
