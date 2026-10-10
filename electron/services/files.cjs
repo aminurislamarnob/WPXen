@@ -172,61 +172,62 @@ function renamePath(rootPath, targetPath, newName) {
   return { path: dest };
 }
 
-const { execSync } = require('child_process');
+const { execFile } = require('child_process');
+const { promisify } = require('util');
 const listFilesCache = new Map();
+const LIST_SKIP_DIRS = new Set(['node_modules', 'vendor', '.git']);
 
-function listFiles(rootPath, { limit = 20000 } = {}) {
-  const root = path.resolve(rootPath);
-  const now = Date.now();
-  const cached = listFilesCache.get(root);
-  if (cached && now - cached.time < 30000) {
-    return cached.files;
+async function gitListFiles(root, limit) {
+  const { stdout } = await promisify(execFile)(
+    'git',
+    ['ls-files', '--cached', '--others', '--exclude-standard'],
+    { cwd: root, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 }
+  );
+  return stdout.split(/\r?\n/).filter(Boolean).slice(0, limit);
+}
+
+async function walkFiles(root, limit) {
+  const files = [];
+  const queue = [root];
+  while (queue.length > 0 && files.length < limit) {
+    const dir = queue.shift();
+    let dirents;
+    try {
+      dirents = await fs.promises.readdir(dir, { withFileTypes: true });
+    } catch {
+      continue; // inaccessible
+    }
+    for (const d of dirents) {
+      const full = path.join(dir, d.name);
+      const rel = path.relative(root, full).replace(/\\/g, '/');
+      if (d.isDirectory()) {
+        if (!LIST_SKIP_DIRS.has(d.name) && rel !== 'wp-content/uploads') queue.push(full);
+      } else if (d.isFile()) {
+        files.push(rel);
+        if (files.length >= limit) break;
+      }
+    }
   }
+  return files;
+}
+
+// Every file under a Site, for the chat composer's @ mentions: git's view
+// (tracked + untracked, minus .gitignore) in a repo, else a bounded walk.
+// Async — a large repo must not stall the main process. Cached 30 s.
+async function listFiles(rootPath, { limit = 20000 } = {}) {
+  const root = path.resolve(rootPath);
+  const cached = listFilesCache.get(root);
+  if (cached && Date.now() - cached.time < 30000) return cached.files;
 
   let files = [];
   try {
-    const isGit = fs.existsSync(path.join(root, '.git'));
-    if (isGit) {
-      const out = execSync('git ls-files --cached --others --exclude-standard', {
-        cwd: root,
-        encoding: 'utf8',
-        maxBuffer: 10 * 1024 * 1024,
-      });
-      const lines = out.split(/\r?\n/);
-      for (const line of lines) {
-        if (!line) continue;
-        files.push(line);
-        if (files.length >= limit) break;
-      }
-    } else {
-      const skipNames = new Set(['node_modules', 'vendor', '.git']);
-      const queue = [root];
-      while (queue.length > 0 && files.length < limit) {
-        const dir = queue.shift();
-        try {
-          const dirents = fs.readdirSync(dir, { withFileTypes: true });
-          for (const d of dirents) {
-            if (d.isDirectory()) {
-              if (skipNames.has(d.name)) continue;
-              const fullPath = path.join(dir, d.name);
-              const relPath = path.relative(root, fullPath).replace(/\\/g, '/');
-              if (relPath === 'wp-content/uploads') continue;
-              queue.push(fullPath);
-            } else if (d.isFile()) {
-              files.push(path.relative(root, path.join(dir, d.name)).replace(/\\/g, '/'));
-              if (files.length >= limit) break;
-            }
-          }
-        } catch {
-          // skip inaccessible
-        }
-      }
-    }
+    files = fs.existsSync(path.join(root, '.git'))
+      ? await gitListFiles(root, limit)
+      : await walkFiles(root, limit);
   } catch {
-    // fallback or ignore
+    files = await walkFiles(root, limit).catch(() => []);
   }
-
-  listFilesCache.set(root, { time: now, files });
+  listFilesCache.set(root, { time: Date.now(), files });
   return files;
 }
 

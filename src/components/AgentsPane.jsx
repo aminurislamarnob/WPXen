@@ -120,7 +120,7 @@ export default function AgentsPane() {
   }, []);
   useEffect(() => {
     if (sessionsLoaded) {
-      cleanupOrphanedDrafts(allSessions.map((s) => s.id));
+      cleanupOrphanedDrafts(allSessions.map((s) => s.sessionId));
     }
   }, [sessionsLoaded, allSessions]);
   const tabs = useMemo(() => {

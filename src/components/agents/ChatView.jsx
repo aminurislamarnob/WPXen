@@ -71,7 +71,7 @@ export function ChatView({ sessionId }) {
   useEffect(() => {
     if (currentSession?.siteId) {
       window.electronAPI
-        .listFiles(currentSession.siteId)
+        .chatFiles(currentSession.siteId)
         .then(setSiteFiles)
         .catch(() => {});
       window.electronAPI
