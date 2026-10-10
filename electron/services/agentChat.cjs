@@ -435,7 +435,7 @@ function openChat(sessionId, viewerId, opts) {
     watch.viewers.add(viewerId);
     // Replay current rows to the new viewer
     if (watch.currentRows.length > 0) {
-      onRows(watch.currentRows);
+      onRows(watch.currentRows, watch.state);
     }
     return;
   }
@@ -475,7 +475,7 @@ function openChat(sessionId, viewerId, opts) {
   watch.tailOffset = complete;
 
   if (rows.length > 0) {
-    onRows(rows);
+    onRows(rows, watch.state);
   }
 
   // Poll for new data
@@ -494,7 +494,7 @@ function openChat(sessionId, viewerId, opts) {
         watch.currentRows = [];
         watch.pageStart = 0;
         watch.staleNotified = false;
-        onRows([{ reset: true }]);
+        onRows([{ reset: true }], watch.state);
         // maybe close subagents too? Not needed, handled.
       } else if (newSize > watch.tailOffset) {
         const length = newSize - watch.tailOffset;
@@ -518,14 +518,14 @@ function openChat(sessionId, viewerId, opts) {
         if (newRows.length > 0) {
           augmentToolRows(newRows, watch.subagents);
           watch.currentRows.push(...newRows);
-          onRows(newRows);
+          onRows(newRows, watch.state);
         }
       }
 
       // 3. Check for stale transcript
       if (!watch.staleNotified && checkStaleTranscript(watch)) {
         watch.staleNotified = true;
-        onRows([{ notice: true, kind: 'transcript-changed' }]);
+        onRows([{ notice: true, kind: 'transcript-changed' }], watch.state);
       }
 
       // 4. Poll subagents: only while running or expanded, so a Session
@@ -633,6 +633,80 @@ function chatLoadOlderSubagent(sessionId, toolUseId) {
   return { rows: mappedRows, atStart };
 }
 
+async function chatImage(site, sessionId, ref) {
+  if (!ref) return null;
+  const os = require('os');
+  const path = require('path');
+  const watch = watches.get(sessionId);
+  const cwd = watch ? watch.cwd : site ? site.path : process.cwd();
+
+  try {
+    if (ref.path) {
+      let absPath = path.resolve(ref.path);
+      const fs = require('fs');
+      if (!fs.existsSync(absPath)) return null;
+      absPath = fs.realpathSync(absPath);
+
+      const tmpReal = fs.realpathSync(os.tmpdir());
+      const claudeReal = fs.existsSync(path.join(os.homedir(), '.claude'))
+        ? fs.realpathSync(path.join(os.homedir(), '.claude'))
+        : path.join(os.homedir(), '.claude');
+      const siteReal = cwd && fs.existsSync(cwd) ? fs.realpathSync(cwd) : cwd;
+
+      const isTmp = absPath.startsWith(tmpReal);
+      const isSite = siteReal && absPath.startsWith(siteReal);
+      const isClaude = absPath.startsWith(claudeReal);
+
+      if (!isTmp && !isSite && !isClaude) return null;
+
+      const stats = fs.statSync(absPath);
+      if (stats.size > 5 * 1024 * 1024) return { tooLarge: true };
+
+      const ext = path.extname(absPath).toLowerCase();
+      let mime = 'image/png';
+      if (ext === '.jpg' || ext === '.jpeg') mime = 'image/jpeg';
+      else if (ext === '.gif') mime = 'image/gif';
+      else if (ext === '.webp') mime = 'image/webp';
+
+      const data = fs.readFileSync(absPath).toString('base64');
+      return `data:${mime};base64,${data}`;
+    }
+
+    const { claudeTranscriptPath } = require('./agentChatClaude.cjs');
+    const tPath = claudeTranscriptPath({ home: os.homedir(), cwd }, sessionId);
+
+    const fs2 = require('fs');
+    if (!fs2.existsSync(tPath)) return null;
+
+    const readline = require('readline');
+    const fileStream = fs2.createReadStream(tPath);
+    const rl = readline.createInterface({ input: fileStream, crlfDelay: Infinity });
+
+    for await (const line of rl) {
+      if (line.includes(ref.recordUuid)) {
+        try {
+          const record = JSON.parse(line);
+          const rid = record.uuid || record.id || (record.message && record.message.id);
+          if (rid === ref.recordUuid) {
+            const content = record.content || (record.message && record.message.content);
+            if (content && content[ref.index] && content[ref.index].type === 'image') {
+              const source = content[ref.index].source;
+              if (source && source.data) {
+                const buf = Buffer.from(source.data, 'base64');
+                if (buf.length > 5 * 1024 * 1024) return { tooLarge: true };
+                return `data:${source.media_type || 'image/png'};base64,${source.data}`;
+              }
+            }
+          }
+        } catch {}
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 module.exports = {
   __setDeps,
   openChat,
@@ -642,6 +716,7 @@ module.exports = {
   chatFetchFull,
   chatExpandSubagent,
   chatLoadOlderSubagent,
+  chatImage,
   // Exposed for testing
   MAX_PAGE_ROWS,
   MAX_PAGE_BYTES,

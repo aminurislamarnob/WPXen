@@ -123,6 +123,7 @@ function decodeClaudeLine(lineStr, state) {
 
   state.calls = state.calls || {};
   state.results = state.results || {};
+  state.tasks = state.tasks || {};
 
   // Claude names the conversation in its own record, and renames it later.
   if (record.type === 'ai-title') {
@@ -160,7 +161,19 @@ function decodeClaudeLine(lineStr, state) {
   }
 
   if (record.type === 'assistant') {
+    if (record.message?.usage) {
+      const u = record.message.usage;
+      state.usage = {
+        totalTokens:
+          (u.input_tokens || 0) +
+          (u.cache_creation_input_tokens || 0) +
+          (u.cache_read_input_tokens || 0) +
+          (u.output_tokens || 0),
+        model: record.message.model || 'unknown',
+      };
+    }
     const id = record.message?.id || record.uuid || Math.random().toString();
+
     if (!state[id]) {
       state[id] = {
         id,
