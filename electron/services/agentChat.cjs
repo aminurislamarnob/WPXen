@@ -468,9 +468,22 @@ function openChat(sessionId, viewerId, opts) {
   };
   watches.set(sessionId, watch);
 
-  // Initial tail read
-  const complete = completeLength(fd, stat.size);
-  const { rows, pageStart, state } = tailRead(fd, complete, decodeLine);
+  // Initial tail read. A read that fails leaves no half-open watch behind
+  // (one with a viewer and no poll would never recover): undo and rethrow.
+  let complete;
+  let rows;
+  let pageStart;
+  let state;
+  try {
+    complete = completeLength(fd, stat.size);
+    ({ rows, pageStart, state } = tailRead(fd, complete, decodeLine));
+  } catch (err) {
+    watches.delete(sessionId);
+    try {
+      deps.closeSync(fd);
+    } catch {}
+    throw err;
+  }
   watch.currentRows = rows;
   watch.pageStart = pageStart;
   watch.state = state;

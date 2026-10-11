@@ -1577,7 +1577,7 @@ function openChat(sessionId, viewerId) {
         }
       : null;
 
-  agentChat.openChat(sessionId, viewerId, {
+  const opened = tryOpenChat(sessionId, viewerId, {
     transcriptPath,
     decodeLine,
     relocate,
@@ -1605,6 +1605,21 @@ function openChat(sessionId, viewerId) {
         cb({ sessionId, rows: filteredRows, header, state: state?.facts, ...atStart });
     },
   });
+  // The file can go between locating and opening it (a moved Site, a
+  // cleared conversation): keep locating instead of failing the IPC call.
+  if (!opened && (agent.lateBind || session.transcriptId)) {
+    claimedTranscripts.delete(transcriptPath);
+    pendChatLocate(sessionId, viewerId);
+  }
+}
+
+function tryOpenChat(sessionId, viewerId, opts) {
+  try {
+    agentChat.openChat(sessionId, viewerId, opts);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // One rollout drives at most one Session: the first Session to claim it.
