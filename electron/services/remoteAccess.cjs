@@ -194,6 +194,7 @@ const deps = {
       targets: () => [],
       launch: () => ({ error: 'Unavailable.' }),
       stop: () => ({ ok: true }),
+      hasTranscript: () => false,
     };
   },
   // Batching timers, injected so tests flush deterministically.
@@ -867,21 +868,21 @@ function saveDevice(record) {
   publishDevices();
 }
 
+// Called on every frame, so it must cost nothing until a write is due: the
+// store is only touched once a minute per device (every set rewrites the
+// whole data file).
 function touchDevice(id) {
   const store = deps.store;
   if (!store) return;
   const t = deps.now();
-  let wrote = false;
+  const records = readDeviceRecords();
+  const device = records.find((d) => d && d.id === id);
+  if (!device || (device.lastSeen && t - device.lastSeen < LAST_SEEN_MIN_MS)) return;
   store.set(
     DEVICE_KEY,
-    readDeviceRecords().map((d) => {
-      if (!d || d.id !== id) return d;
-      if (d.lastSeen && t - d.lastSeen < LAST_SEEN_MIN_MS) return d;
-      wrote = true;
-      return { ...d, lastSeen: t };
-    })
+    records.map((d) => (d === device ? { ...d, lastSeen: t } : d))
   );
-  if (wrote) publishDevices();
+  publishDevices();
 }
 
 function trackChannel(id, entry) {
@@ -1138,23 +1139,34 @@ function pushSessionsChanged() {
   }
 }
 
+// Whether a Session has a chat transcript yet. Rows are rebuilt on every
+// sessions push (a few a second under output), and locating can walk Codex's
+// dated folders, so a miss is rechecked at most every few seconds and a hit
+// is kept: a transcript never stops existing.
+const TRANSCRIPT_RECHECK_MS = 5000;
+const transcriptChecks = new Map(); // sessionId -> { found, at }
+
+function hasTranscriptFor(row) {
+  const t = deps.now();
+  const cached = transcriptChecks.get(row.sessionId);
+  if (cached && (cached.found || t - cached.at < TRANSCRIPT_RECHECK_MS)) {
+    return cached.found;
+  }
+  let found = false;
+  try {
+    found =
+      !!phoneSession(row.sessionId) && !!deps.sessions.hasTranscript?.(row.sessionId);
+  } catch {
+    found = false;
+  }
+  transcriptChecks.set(row.sessionId, { found, at: t });
+  return found;
+}
+
 // The phone-safe row: an allowlist of fields, never a blocklist. Local
 // filesystem paths, handoff files and environment stay in this process.
 function phoneSessionRow(row) {
-  let hasTranscript = false;
-  try {
-    const session = phoneSession(row.sessionId);
-    const transcripts = require('./transcripts.cjs');
-    hasTranscript =
-      !!session &&
-      !!transcripts.locateTranscript({
-        agentId: row.agentId,
-        cwd: session.cwd,
-        startedAt: row.startedAt,
-      });
-  } catch {
-    hasTranscript = false;
-  }
+  const hasTranscript = hasTranscriptFor(row);
   return {
     sessionId: row.sessionId,
     projectId: row.siteId,
@@ -1174,7 +1186,11 @@ function phoneSessionRow(row) {
 }
 
 function phoneSessionRows() {
-  return deps.sessions.list().map(phoneSessionRow);
+  const rows = deps.sessions.list();
+  const live = new Set(rows.map((r) => r.sessionId));
+  for (const id of transcriptChecks.keys())
+    if (!live.has(id)) transcriptChecks.delete(id);
+  return rows.map(phoneSessionRow);
 }
 
 function phoneProjects() {
@@ -1782,6 +1798,7 @@ function dispose() {
     } catch {}
   }
   terminalSubs.clear();
+  transcriptChecks.clear();
   listeners.clear();
   deviceListeners.clear();
   tunnel = { state: 'not-configured', reason: null };

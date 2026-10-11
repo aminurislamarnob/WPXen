@@ -380,6 +380,18 @@ describe('last seen', () => {
     now += 31 * 1000;
     await client.request('ping');
     expect(remoteAccess.listDevices()[0].lastSeen).toBe(pairedAt + 61 * 1000);
+
+    // Frames inside the minute never write the store at all — each write
+    // rewrites the whole data file.
+    const writes = [];
+    const set = store.set;
+    store.set = (key, value) => {
+      writes.push(key);
+      return set.call(store, key, value);
+    };
+    for (let i = 0; i < 5; i++) await client.request('ping');
+    store.set = set;
+    expect(writes).toEqual([]);
     client.close();
     socket.close();
   });

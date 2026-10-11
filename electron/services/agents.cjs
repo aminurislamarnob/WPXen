@@ -1231,6 +1231,10 @@ function attach(sessionId, win) {
   try {
     if (session.windowUnsub) session.windowUnsub();
   } catch {}
+  // The window learns a Session already ended from the replay's `exited`
+  // flag, exactly as before subscribers existed; the subscription's catch-up
+  // exit event would be a second, new message, so it is not forwarded.
+  let replaying = true;
   session.windowUnsub = subscribeOutput(sessionId, {
     onReplay: ({ data, exited }) => {
       if (!win || win.isDestroyed()) return;
@@ -1241,10 +1245,11 @@ function attach(sessionId, win) {
       win.webContents.send('terminal-data', { sessionId, data });
     },
     onExit: (code) => {
-      if (!win || win.isDestroyed()) return;
+      if (replaying || !win || win.isDestroyed()) return;
       win.webContents.send('terminal-exit', { sessionId, code });
     },
   });
+  replaying = false;
   return { ok: true };
 }
 
@@ -1664,6 +1669,26 @@ function pendChatLocate(sessionId, viewerId) {
   pending.viewers.add(viewerId);
 }
 
+// Whether a Session's chat transcript exists yet — what the phone's Session
+// list reports. The engine answers because it owns the locators and the home
+// directory they search.
+function hasChatTranscript(sessionId) {
+  const session = getSession(sessionId);
+  if (!session) return false;
+  try {
+    return !!transcripts.locateTranscript(
+      session.agentId,
+      session.cwd,
+      session.startedAt,
+      session.transcriptId,
+      null,
+      deps.homedir()
+    );
+  } catch {
+    return false;
+  }
+}
+
 function chatLoadOlder(sessionId) {
   return agentChat.loadOlder(sessionId);
 }
@@ -1770,6 +1795,7 @@ module.exports = {
   chatExpandSubagent,
   chatLoadOlderSubagent,
   chatImage,
+  hasChatTranscript,
   onFloatingSessionsChanged,
   resolveLaunch,
   launch,

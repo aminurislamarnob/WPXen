@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import WebSocket from 'ws';
 import agents from '../electron/services/agents.cjs';
+import { claudeTranscriptPath } from '../electron/services/agentChatClaude.cjs';
 import remoteAccess, { HOST_ID_KEY } from '../electron/services/remoteAccess.cjs';
 import {
   PROTOCOL_VERSION,
@@ -122,6 +123,7 @@ beforeEach(async () => {
       subscribe: agents.onSessionsChanged,
       markRead: (id, read) => agents.markRead(id, read),
       get: (id) => agents.getSession(id),
+      hasTranscript: (id) => agents.hasChatTranscript(id),
       projects: () => [{ id: 'shop', name: 'Shop', kind: 'site' }],
     },
   });
@@ -203,6 +205,33 @@ describe('sessions over the channel', () => {
       hasTranscript: false,
     });
     expect(JSON.stringify(row)).not.toContain(home);
+    client.close();
+  });
+
+  it("reports a chat transcript once the Session's own transcript exists", async () => {
+    const bin = path.join(home, 'bin');
+    fs.mkdirSync(bin);
+    fs.writeFileSync(path.join(bin, 'claude'), '#!/bin/sh\ntrue\n');
+    fs.chmodSync(path.join(bin, 'claude'), 0o755);
+    agents.__setDeps({ shellEnv: () => ({ PATH: `${bin}:/usr/bin` }) });
+    const { sessionId } = agents.launch({ site: site(), agentId: 'claude' });
+    const { client } = await pairedPhone();
+    const rowOf = async () =>
+      (await client.request('sessions.list')).sessions.find(
+        (s) => s.sessionId === sessionId
+      );
+    expect((await rowOf()).hasTranscript).toBe(false);
+
+    const { transcriptId } = agents
+      .listAllSessions()
+      .find((s) => s.sessionId === sessionId);
+    const file = claudeTranscriptPath({ home, cwd: site().path, uuid: transcriptId });
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, '{"type":"user","uuid":"u1","message":{"content":"hi"}}\n');
+    // A miss is rechecked after a few seconds, not on every push.
+    const realNow = Date.now;
+    remoteAccess.__setDeps({ now: () => realNow() + 10_000 });
+    expect((await rowOf()).hasTranscript).toBe(true);
     client.close();
   });
 

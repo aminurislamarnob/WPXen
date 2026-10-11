@@ -82,7 +82,7 @@ export default function SessionTerminalScreen() {
   const reconnected = useRef(false);
   const keyboardAt = useRef(0);
   const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const maybeResizeRef = useRef<() => void>(() => {});
+  const maybeResizeRef = useRef<(opts?: { textSizeChanged?: boolean }) => void>(() => {});
   const webView = useRef<WebView | null>(null);
   const input = useRef<TextInput | null>(null);
   const ready = useRef(false);
@@ -159,7 +159,7 @@ export default function SessionTerminalScreen() {
   );
 
   useEffect(() => {
-    maybeResizeRef.current = () => maybeResize();
+    maybeResizeRef.current = (opts) => maybeResize(opts);
   }, [maybeResize]);
 
   useEffect(() => {
@@ -188,7 +188,7 @@ export default function SessionTerminalScreen() {
           if (entered) {
             reconnected.current = true;
             attach();
-            maybeResize();
+            maybeResizeRef.current();
           }
         },
       });
@@ -224,7 +224,7 @@ export default function SessionTerminalScreen() {
     const settleKeyboard = () => {
       keyboardAt.current = Date.now();
       if (retryTimer.current) clearTimeout(retryTimer.current);
-      retryTimer.current = setTimeout(() => maybeResize(), 400);
+      retryTimer.current = setTimeout(() => maybeResizeRef.current(), 400);
     };
     const showSub = Keyboard.addListener('keyboardDidShow', settleKeyboard);
     const hideSub = Keyboard.addListener('keyboardDidHide', settleKeyboard);
@@ -235,7 +235,7 @@ export default function SessionTerminalScreen() {
     const appSub = AppState.addEventListener('change', (status) => {
       if (status === 'active') {
         reconnected.current = true;
-        maybeResize();
+        maybeResizeRef.current();
       }
     });
     return () => {
@@ -249,7 +249,11 @@ export default function SessionTerminalScreen() {
       connection.current?.stop();
       connection.current = null;
     };
-  }, [id, sessionId, attach, detach, post, maybeResize]);
+    // The connection lives as long as the screen shows this Session. Layout
+    // (the keyboard, a rotation), the text size and the exit all change
+    // maybeResize, so it is reached through its ref — depending on it here
+    // tore the socket down and replayed the terminal on every keyboard open.
+  }, [id, sessionId, attach, detach, post]);
 
   // Appearance flips re-theme the live document.
   useEffect(() => {
@@ -349,14 +353,16 @@ export default function SessionTerminalScreen() {
           .catch(() => {});
         // The document applies the font first; only then do cell metrics
         // exist to re-measure against (after Orca's text-size debounce).
+        // The ref, not this render's maybeResize: by the time the font has
+        // applied, the measurement must use the new size.
         setTimeout(() => {
           post({ type: 'font-size', fontSize: next });
-          setTimeout(() => maybeResize({ textSizeChanged: true }), FONT_APPLY_MS);
+          setTimeout(() => maybeResizeRef.current({ textSizeChanged: true }), FONT_APPLY_MS);
         }, 0);
         return next;
       });
     },
-    [id, maybeResize, post]
+    [id, post]
   );
 
   if (missing) {
