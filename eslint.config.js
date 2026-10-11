@@ -20,9 +20,12 @@ module.exports = [
   js.configs.recommended,
 
   // Electron main process + CommonJS configs (module.exports / require).
+  // The shared phone/desktop protocol is CommonJS too (Metro bundles it for
+  // React Native); it only uses universal APIs, and Node globals cover those.
   {
     files: [
       'electron/**/*.cjs',
+      'shared/**/*.cjs',
       'scripts/**/*.cjs',
       'eslint.config.js',
       'postcss.config.js',

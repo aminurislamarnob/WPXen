@@ -2,27 +2,55 @@
 
 // WPXen Mobile ↔ desktop shared protocol (spec #136).
 //
-// Plain JavaScript with JSDoc types and no Node-only or Electron APIs in this
-// half, so both the Electron main process (via require) and the React Native
-// phone app (via Metro) import the same framing, names and versions. Desktop
-// CI does not lint, format-check, test or build `mobile/`; this folder stays
-// in the root eslint/prettier run so drift fails here, not on the phone.
+// Plain JavaScript with JSDoc types and no Node-only or Electron APIs, so both
+// the Electron main process (via require) and the React Native phone app (via
+// Metro) import the same framing, names and versions. Desktop CI does not lint,
+// format-check, test or build `mobile/`; this folder stays in the root
+// eslint/prettier run so drift fails here, not on the phone.
+//
+// The frame format is documented in frames.cjs. Only tweetnacl plus the local
+// base64 helper are allowed here — no Buffer, crypto, atob or WebSocket.
 
-/**
- * A health-check answer from the desktop Remote Access server.
- *
- * @typedef {object} HealthResponse
- * @property {string} nonce the caller's `nonce` query parameter, echoed back
- * @property {string} hostId this Mac's stable identity (created once, stored)
- * @property {number} protocolVersion PROTOCOL_VERSION below
- */
+const { PROTOCOL_VERSION, HEALTH_PATH, DEVICE_PATH } = require('./protocol.cjs');
+const { encodeBase64, decodeBase64 } = require('./base64.cjs');
+const {
+  newKeyPair,
+  keyPairFromSecret,
+  publicKeyB64,
+  secretKeyB64,
+} = require('./keys.cjs');
+const { confirmationCode } = require('./confirm.cjs');
+const { PAIR_ERRORS } = require('./errors.cjs');
+const { randomNonce, sealFrame, openFrame } = require('./frames.cjs');
+const {
+  PAIRING_SCHEME,
+  pairingUrl,
+  parsePairingUrl,
+  createPairRequest,
+  openPairAccept,
+} = require('./pairing.cjs');
+const { createClient, DEFAULT_REQUEST_TIMEOUT_MS } = require('./client.cjs');
 
-// Every frame the phone and the Mac exchange carries this. A mismatch fails
-// with a reason naming which side to update, never silently.
-const PROTOCOL_VERSION = 1;
-
-// The one unauthenticated route on the localhost server. `wpxen`-prefixed so
-// a future rename can find it next to any LEGACY_* list it may one day join.
-const HEALTH_PATH = '/wpxen-health';
-
-module.exports = { PROTOCOL_VERSION, HEALTH_PATH };
+module.exports = {
+  PROTOCOL_VERSION,
+  HEALTH_PATH,
+  DEVICE_PATH,
+  encodeBase64,
+  decodeBase64,
+  newKeyPair,
+  keyPairFromSecret,
+  publicKeyB64,
+  secretKeyB64,
+  confirmationCode,
+  PAIR_ERRORS,
+  randomNonce,
+  sealFrame,
+  openFrame,
+  PAIRING_SCHEME,
+  pairingUrl,
+  parsePairingUrl,
+  createPairRequest,
+  openPairAccept,
+  createClient,
+  DEFAULT_REQUEST_TIMEOUT_MS,
+};
