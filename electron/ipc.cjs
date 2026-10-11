@@ -357,6 +357,7 @@ function registerHandlers(win, storeInstance) {
       subscribe: agents.onSessionsChanged,
       markRead: (id, read) => agents.markRead(id, read),
       get: (id) => agents.getSession(id),
+      hasTranscript: (id) => agents.hasChatTranscript(id),
       subscribeOutput: (id, sinks) => agents.subscribeOutput(id, sinks),
       write: (id, data) => agents.write(id, data),
       resize: (id, cols, rows) => agents.resize(id, cols, rows),

@@ -1142,6 +1142,25 @@ function subscribeOutput(sessionId, sinks = {}) {
   };
 }
 
+// Whether a Session's transcript exists yet — what the phone's Session list
+// reports as hasTranscript. The engine answers because it knows the Session's
+// Agent, cwd and start time. The pinned transcript id, where a Session has
+// one, lets the locator name that exact file instead of guessing by recency.
+function hasChatTranscript(sessionId) {
+  const session = sessions.get(sessionId);
+  if (!session) return false;
+  try {
+    return !!require('./transcripts.cjs').locateTranscript(
+      session.agentId,
+      session.cwd,
+      session.startedAt,
+      session.transcriptId || null
+    );
+  } catch {
+    return false;
+  }
+}
+
 // Bind a Terminal Window to its Session and replay the ring buffer (Q9). The
 // window is one output subscriber: subscribing sends the replay
 // synchronously, so no onData chunk can interleave between them — live chunks
@@ -1153,6 +1172,10 @@ function attach(sessionId, win) {
   try {
     if (session.windowUnsub) session.windowUnsub();
   } catch {}
+  // The window learns a Session already ended from the replay's `exited`
+  // flag, exactly as before subscribers existed; the subscription's catch-up
+  // exit event would be a second, new message, so it is not forwarded.
+  let replaying = true;
   session.windowUnsub = subscribeOutput(sessionId, {
     onReplay: ({ data, exited }) => {
       if (!win || win.isDestroyed()) return;
@@ -1163,10 +1186,11 @@ function attach(sessionId, win) {
       win.webContents.send('terminal-data', { sessionId, data });
     },
     onExit: (code) => {
-      if (!win || win.isDestroyed()) return;
+      if (replaying || !win || win.isDestroyed()) return;
       win.webContents.send('terminal-exit', { sessionId, code });
     },
   });
+  replaying = false;
   return { ok: true };
 }
 
@@ -1467,6 +1491,7 @@ module.exports = {
   launchForProject,
   attach,
   subscribeOutput,
+  hasChatTranscript,
   write,
   setView,
   markRead,
