@@ -953,13 +953,17 @@ function launch({
 
 // Resume a pinned transcript in a new Session beside the old one. The new
 // Session carries the same transcriptId, so its chat view continues the same
-// conversation. Gating on the old Session having exited is the caller's job —
-// two live Sessions must never drive one conversation — so this only checks
-// the transcript and the Agent's resumeFlag.
+// conversation. The exit bar only offers Resume once the old Session has
+// ended; the same gate is enforced here, beside the transcript and the
+// Agent's resumeFlag checks.
 function resumeChatSession(sessionId, { site, target = null, globalArgs = '' } = {}) {
   const old = sessions.get(sessionId);
   if (!old) return { error: 'Session not found' };
   if (!old.transcriptId) return { error: 'No pinned transcript to resume' };
+  // Two live Sessions must never drive one conversation: the old Agent has
+  // to have exited (its shell may still be up) before a second one resumes.
+  if (!old.exited && old.tracker.snapshot().state !== 'exited')
+    return { error: 'The Session is still running — resume once it has exited' };
   const agent = listAgents({ all: true }).find((a) => a.id === old.agentId);
   if (!agent) return { error: `Unknown agent: ${old.agentId}` };
   if (!agent.resumeFlag)
@@ -1457,11 +1461,12 @@ function openChat(sessionId, viewerId) {
   const transcriptPath = locateChatTranscript(sessionId, session);
   if (!transcriptPath) {
     // Agents without a session-id flag write their transcript after the
-    // first message — keep locating until one shows up.
-    if (agent.lateBind) pendChatLocate(sessionId, viewerId);
+    // first message, and a pinned transcript doesn't exist until the first
+    // prompt either — keep locating until one shows up.
+    if (agent.lateBind || session.transcriptId) pendChatLocate(sessionId, viewerId);
     return;
   }
-  claimedTranscripts.set(transcriptPath, sessionId);
+  if (!session.transcriptId) claimedTranscripts.set(transcriptPath, sessionId);
 
   // Antigravity re-maps the folder when a new conversation starts — the
   // watcher reports it like a changed transcript.
@@ -1505,15 +1510,26 @@ function openChat(sessionId, viewerId) {
 
 // One rollout drives at most one Session: the first Session to claim it.
 // Claims by other live Sessions are excluded from locating; a claim dies
-// with its Session, and a Session always reclaims its own path.
+// with its Session (or once its Agent has exited), and a Session always
+// reclaims its own path. Pinned Sessions never claim and are never blocked:
+// their transcript is theirs by construction — the --session-id they were
+// launched with, or the one a Resume continues after the old Session ended.
 const claimedTranscripts = new Map(); // transcriptPath -> sessionId
 const pendingChatLocates = new Map(); // sessionId -> { viewers: Set, timer }
 const CHAT_LOCATE_RETRY_MS = 2000;
 
+function claimHeld(owner, sessionId) {
+  if (owner === sessionId) return false;
+  const s = sessions.get(owner);
+  return !!s && !s.exited && s.tracker.snapshot().state !== 'exited';
+}
+
 function locateChatTranscript(sessionId, session) {
   const exclude = new Set();
-  for (const [transcriptPath, owner] of claimedTranscripts) {
-    if (owner !== sessionId && sessions.has(owner)) exclude.add(transcriptPath);
+  if (!session.transcriptId) {
+    for (const [transcriptPath, owner] of claimedTranscripts) {
+      if (claimHeld(owner, sessionId)) exclude.add(transcriptPath);
+    }
   }
   // Home comes from this module's deps: the transcripts module's own seam
   // is a different instance once bundled, so its homedir is not ours.
@@ -1526,8 +1542,9 @@ function locateChatTranscript(sessionId, session) {
     deps.homedir()
   );
   if (!found) return null;
+  if (session.transcriptId) return found;
   const owner = claimedTranscripts.get(found);
-  if (owner && owner !== sessionId && sessions.has(owner)) return null;
+  if (owner && claimHeld(owner, sessionId)) return null;
   return found;
 }
 

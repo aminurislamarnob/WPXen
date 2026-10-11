@@ -17,6 +17,7 @@ function fakePty() {
     resize: vi.fn(),
     kill: vi.fn(),
     emitData: (d) => handlers.data.forEach((cb) => cb(d)),
+    emitExit: (code) => handlers.exit.forEach((cb) => cb({ exitCode: code })),
   };
 }
 
@@ -87,6 +88,8 @@ describe('resume in new session', () => {
       const oldId = launchClaude();
       settleAndType(0);
       const oldRow = agents.listAllSessions().find((s) => s.sessionId === oldId);
+      // Resume continues a conversation whose Agent has exited.
+      ptys[0].emitExit(0);
       const res = agents.resumeChatSession(oldId, { site: site() });
       expect(res.ok).toBe(true);
       const typed = settleAndType(1);

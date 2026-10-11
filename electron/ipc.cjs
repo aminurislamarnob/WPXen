@@ -913,7 +913,12 @@ function registerHandlers(win, storeInstance) {
     const site = findProject(old.siteId);
     if (!site) return { error: 'Project not found' };
     const globalArgs = store.get('agentPresets', {})[old.agentId]?.args || '';
-    return agents.resumeChatSession(sessionId, { site, globalArgs });
+    // Resume with the old Session's Launch Target, as Respawn does — its flags
+    // and cwd are what the conversation ran under.
+    const target = old.targetId
+      ? (site.launchTargets || []).find((t) => t.id === old.targetId) || null
+      : null;
+    return agents.resumeChatSession(sessionId, { site, target, globalArgs });
   });
 
   ipcMain.handle('agent-split-pane', (_e, sessionId, dir) => {

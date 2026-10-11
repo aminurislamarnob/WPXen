@@ -17,9 +17,17 @@ function __setDeps(newDeps) {
 const { claudeTranscriptPath } = require('./agentChatClaude.cjs');
 
 function locateClaude({ cwd, startedAt, home, transcriptId }) {
+  // A pinned Session has exactly one transcript. Until Claude writes it (the
+  // first prompt creates the file) there is none — guessing by recency here
+  // would hand this Session a sibling's conversation from the same folder.
   if (transcriptId) {
-    const pinned = claudeTranscriptPath({ home, cwd, uuid: transcriptId });
-    if (pinned && deps.existsSync(pinned)) return pinned;
+    let pinned = null;
+    try {
+      pinned = claudeTranscriptPath({ home, cwd, uuid: transcriptId });
+    } catch {
+      return null; // the cwd is gone
+    }
+    return pinned && deps.existsSync(pinned) ? pinned : null;
   }
 
   // Claude replaces each non-alphanumeric character with '-'
