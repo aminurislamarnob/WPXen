@@ -1060,7 +1060,7 @@ function terminalKey(deviceId, sessionId) {
 }
 
 function terminalAttach(deviceId, sessionId, send, ws) {
-  if (!deps.sessions.get(sessionId)) throw new Error('Unknown session.');
+  if (!phoneSession(sessionId)) throw new Error('Unknown session.');
   terminalDetach(deviceId, sessionId);
   const sub = {
     buffer: '',
@@ -1113,7 +1113,7 @@ function terminalAttach(deviceId, sessionId, send, ws) {
 
 // Detaching only drops the subscription — the Session keeps running.
 function terminalDetach(deviceId, sessionId) {
-  if (!deps.sessions.get(sessionId)) throw new Error('Unknown session.');
+  if (!phoneSession(sessionId)) throw new Error('Unknown session.');
   const key = terminalKey(deviceId, sessionId);
   const sub = terminalSubs.get(key);
   if (!sub) return { ok: true };
@@ -1134,7 +1134,7 @@ function terminalWrite(sessionId, data) {
   if (Buffer.byteLength(data, 'utf8') > TERMINAL_WRITE_MAX_BYTES) {
     throw new Error('Terminal input is too large (max 64 KB).');
   }
-  const session = deps.sessions.get(sessionId);
+  const session = phoneSession(sessionId);
   if (!session) throw new Error('Unknown session.');
   // Exited Sessions swallow input silently — never an error, never a write.
   if (session.exited) return { ok: true };
