@@ -439,4 +439,18 @@ describe('Remote Access settings', () => {
     expect(store.get('settings.remote.enabled', undefined)).toBeUndefined();
     expect(store.get('settings.remote.port', undefined)).toBeUndefined();
   });
+
+  it('leaves the hostname blank until set, then validates it', () => {
+    expect(SETTINGS['remote.hostname']).toMatchObject({ type: 'string', default: '' });
+    const validate = SETTINGS['remote.hostname'].validate;
+    expect(validate('wpxen.example.com')).toBe(true);
+    expect(validate('https://wpxen.example.com')).toMatch(/scheme|hostname/);
+    expect(validate('wpxen.example.com/path')).toMatch(/scheme|hostname|path/);
+    const store = fakeStore();
+    const s = createSettings({ store });
+    expect(s.write({ 'remote.hostname': 'wpxen.example.com' })).toMatchObject({
+      ok: true,
+    });
+    expect(s.write({ 'remote.hostname': 'https://wpxen.example.com' }).ok).toBe(false);
+  });
 });

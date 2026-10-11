@@ -214,6 +214,20 @@ const SETTINGS = {
     min: MIN_REMOTE_PORT,
     max: MAX_REMOTE_PORT,
   },
+  // The public hostname the Cloudflare dashboard routes at this Mac. Blank
+  // until set; the tunnel token itself is never a setting (it lives
+  // Keychain-encrypted, through its own IPC handlers).
+  'remote.hostname': {
+    type: 'string',
+    default: '',
+    validate: (v) =>
+      v === '' ||
+      (/^(?=.{1,253}$)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$/i.test(
+        v
+      ) &&
+        !/^\d+\.\d+\.\d+\.\d+$/.test(v)) ||
+      'enter a hostname like wpxen.example.com, without a scheme or path',
+  },
 
   // ── Tasks (Start →) ──────────────────────────────────────────────────────
   // What Start → types to the agent and which branch it works on, rendered

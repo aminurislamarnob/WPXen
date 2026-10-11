@@ -291,9 +291,15 @@ function registerHandlers(win, storeInstance) {
       'remote.enabled': (value, all) => {
         if (value) remoteAccess.start({ port: all['remote.port'] });
         else remoteAccess.stop();
+        remoteAccess.syncTunnel().catch(() => {});
       },
       'remote.port': (value, all) => {
         if (all['remote.enabled']) remoteAccess.start({ port: value });
+        remoteAccess.syncTunnel().catch(() => {});
+        remoteAccess.maybeVerify().catch(() => {});
+      },
+      'remote.hostname': () => {
+        remoteAccess.maybeVerify().catch(() => {});
       },
     },
   });
@@ -335,7 +341,15 @@ function registerHandlers(win, storeInstance) {
   // renderer. A start that fails asynchronously (port in use, nothing to fall
   // back to) flips the switch back off, so Settings never claims a server
   // that isn't running.
-  remoteAccess.__setDeps({ store });
+  remoteAccess.__setDeps({
+    store,
+    getRemoteConfig: () => ({
+      enabled: settings.get('remote.enabled'),
+      port: settings.get('remote.port'),
+      hostname: settings.get('remote.hostname'),
+    }),
+  });
+  remoteAccess.startPoller();
   remoteAccess.onStatusChange((status) => {
     for (const w of BrowserWindow.getAllWindows()) {
       if (!w.isDestroyed() && w.webContents) {
@@ -353,6 +367,8 @@ function registerHandlers(win, storeInstance) {
       remoteAccess.start({ port: settings.get('remote.port') });
     } catch {}
   }
+  // The tunnel comes up with the app when it was left on with a token saved.
+  remoteAccess.syncTunnel().catch(() => {});
 
   // Apply persisted DB credentials so MySQL operations authenticate correctly.
   mysql.setCredentials({
@@ -2596,7 +2612,11 @@ function registerHandlers(win, storeInstance) {
   // viewer — surfaced in the UI when a service enters the 'failed' state.
   ipcMain.handle('open-service-log', async (_, name) => {
     try {
-      if (!['nginx', 'php', 'mysql', 'mailpit'].includes(name)) {
+      if (
+        !['nginx', 'php', 'mysql', 'mailpit', cloudflared.REMOTE_TUNNEL_NAME].includes(
+          name
+        )
+      ) {
         return { success: false, error: `Unknown service: ${name}` };
       }
       // PHP-FPM logs per version: open the failing one, else the active one.
@@ -2822,6 +2842,35 @@ function registerHandlers(win, storeInstance) {
   // { state, host, port, actualPort, reason } — whether it is on lives in
   // settings; this adds whether the server is actually bound right now.
   ipcMain.handle('remote-access-status', () => remoteAccess.getStatus());
+
+  // The tunnel token is Keychain-encrypted ciphertext in the store — never a
+  // setting, so it travels through its own handlers, never settings-set.
+  ipcMain.handle('remote-token-set', async (_e, token) => {
+    try {
+      await remoteAccess.setToken(token);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err?.message || 'Could not save the token.' };
+    }
+  });
+  ipcMain.handle('remote-token-clear', async () => {
+    try {
+      await remoteAccess.clearToken();
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err?.message || 'Could not remove the token.' };
+    }
+  });
+  ipcMain.handle('remote-token-status', () => ({ saved: remoteAccess.tokenSaved() }));
+  // Hostname verification, on demand (the Check-again button). Re-runs
+  // automatically on hostname, token or port change while connected.
+  ipcMain.handle('remote-verify', async () => {
+    try {
+      return await remoteAccess.verifyHostname();
+    } catch (err) {
+      return { ok: false, reason: 'connection', error: err?.message };
+    }
+  });
 
   // Validated shallow patch. Always resolves — rejections come back on the
   // result so the UI can roll the control back and say why.

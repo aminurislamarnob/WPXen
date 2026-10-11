@@ -102,4 +102,9 @@ describe('Remote Access entries', () => {
     );
     expect(visibleItems('port')).toContain('remote.port');
   });
+
+  it('finds the public hostname by its field and provider names', () => {
+    expect(visibleItems('hostname')).toContain('remote.hostname');
+    expect(visibleItems('cloudflare')).toContain('remote.hostname');
+  });
 });

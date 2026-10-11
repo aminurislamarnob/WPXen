@@ -174,6 +174,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Remote Access: { state, host, port, actualPort, reason }. Changes arrive
   // on 'remote-access-status-update'; on/off itself is the remote.enabled setting.
   getRemoteAccessStatus: () => ipcRenderer.invoke('remote-access-status'),
+  // The tunnel token travels on its own handlers — never settings-set, so it
+  // is never written to the store in plain text.
+  setRemoteToken: (token) => ipcRenderer.invoke('remote-token-set', token),
+  clearRemoteToken: () => ipcRenderer.invoke('remote-token-clear'),
+  remoteTokenStatus: () => ipcRenderer.invoke('remote-token-status'),
+  // Hostname verification, on demand (Check again in Settings → Mobile).
+  verifyRemoteHostname: () => ipcRenderer.invoke('remote-verify'),
   // Editors/terminals detected on this machine, for the settings pickers.
   listExternalTools: () => ipcRenderer.invoke('list-external-tools'),
   // Every agent including ones hidden from the launcher (settings only).
