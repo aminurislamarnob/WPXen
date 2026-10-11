@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Button, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Button, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { HostConnection, type ConnectionUpdate } from '../../connection/manager';
 import { groupSessions, statusColor, type PhoneProject, type PhoneSessionRow } from '../../sessions/grouping';
@@ -43,6 +43,12 @@ export default function HostScreen() {
   const [projects, setProjects] = useState<PhoneProject[]>([]);
   const [sessions, setSessions] = useState<PhoneSessionRow[]>([]);
   const [refreshing, setRefreshing] = useState(false);
+  const [sheetProject, setSheetProject] = useState<PhoneProject | null>(null);
+  const [sheetAgents, setSheetAgents] = useState<{ id: string; name: string }[]>([]);
+  const [sheetTargets, setSheetTargets] = useState<{ id: string; label: string }[]>([]);
+  const [sheetTargetId, setSheetTargetId] = useState<string>('webroot');
+  const [sheetBusy, setSheetBusy] = useState(false);
+  const [sheetError, setSheetError] = useState<string | null>(null);
   const connection = useRef<HostConnection | null>(null);
   const loadedOnce = useRef(false);
 
@@ -111,8 +117,65 @@ export default function HostScreen() {
     } catch {
       // Reading is best-effort; the detail still opens.
     }
-    router.push(`/host/${encodeURIComponent(id)}/session/${encodeURIComponent(session.sessionId)}`);
+    const project = projects.find((p) => p.id === session.projectId);
+    router.push({
+      pathname: '/host/[id]/session/[sessionId]',
+      params: {
+        id,
+        sessionId: session.sessionId,
+        agent: session.agentName,
+        project: project?.name ?? '',
+      },
+    });
   };
+
+  const openSheet = useCallback(
+    async (project: PhoneProject) => {
+      setSheetProject(project);
+      setSheetTargetId('webroot');
+      setSheetError(null);
+      setSheetAgents([]);
+      setSheetTargets([]);
+      try {
+        const [agentsRes, targetsRes] = await Promise.all([
+          connection.current?.request('agents.list') as Promise<{ agents: { id: string; name: string }[] }>,
+          connection.current?.request('projects.launchTargets', { projectId: project.id }) as Promise<{
+            targets: { id: string; label: string }[];
+          }>,
+        ]);
+        setSheetAgents(agentsRes.agents ?? []);
+        setSheetTargets(targetsRes.targets ?? []);
+      } catch {
+        setSheetError('Could not load agents. Check the connection and try again.');
+      }
+    },
+    []
+  );
+
+  const launchSession = useCallback(
+    async (agentId: string) => {
+      if (!sheetProject || sheetBusy) return;
+      setSheetBusy(true);
+      setSheetError(null);
+      try {
+        const result = (await connection.current?.request('sessions.launch', {
+          projectId: sheetProject.id,
+          agentId,
+          targetId: sheetTargetId === 'webroot' ? null : sheetTargetId,
+        })) as { sessionId: string };
+        setSheetProject(null);
+        router.push({
+          pathname: '/host/[id]/session/[sessionId]',
+          params: { id, sessionId: result.sessionId },
+        });
+      } catch (err) {
+        setSheetError(err instanceof Error ? err.message : 'Could not start the Session.');
+      } finally {
+        setSheetBusy(false);
+      }
+    },
+    [sheetProject, sheetBusy, sheetTargetId, id, router]
+  );
 
   const remove = () => {
     Alert.alert('Remove Mac?', `Forget ${name}? Its secrets are deleted.`, [
@@ -170,7 +233,14 @@ export default function HostScreen() {
       <View style={!live && sessions.length > 0 ? styles.dimmed : undefined}>
         {groups.map((group) => (
           <View key={group.key} style={styles.group}>
-            <Text style={styles.groupTitle}>{group.title}</Text>
+            <View style={styles.groupHeader}>
+              <Text style={styles.groupTitle}>{group.title}</Text>
+              {group.projectId && (
+                <Pressable onPress={() => openSheet(projects.find((p) => p.id === group.projectId)!)}>
+                  <Text style={styles.newButton}>+ New</Text>
+                </Pressable>
+              )}
+            </View>
             {group.sessions.length === 0 ? (
               <Text style={styles.body}>Nothing here.</Text>
             ) : (
@@ -194,6 +264,53 @@ export default function HostScreen() {
       </View>
       <View style={styles.spacer} />
       <Button title="Remove Mac" color="#c00" onPress={remove} />
+      <Modal visible={sheetProject !== null} animationType="slide" onRequestClose={() => setSheetProject(null)}>
+        <View style={styles.sheet}>
+          <Text style={styles.title}>New Session{sheetProject ? ` on ${sheetProject.name}` : ''}</Text>
+          {sheetTargets.length > 0 && (
+            <>
+              <Text style={styles.groupTitle}>Start in</Text>
+              <Pressable
+                style={styles.row}
+                onPress={() => setSheetTargetId('webroot')}
+              >
+                <Text style={styles.rowTitle}>
+                  Webroot{sheetTargetId === 'webroot' ? ' ✓' : ''}
+                </Text>
+              </Pressable>
+              {sheetTargets.map((target) => (
+                <Pressable
+                  key={target.id}
+                  style={styles.row}
+                  onPress={() => setSheetTargetId(target.id)}
+                >
+                  <Text style={styles.rowTitle}>
+                    {target.label}
+                    {sheetTargetId === target.id ? ' ✓' : ''}
+                  </Text>
+                </Pressable>
+              ))}
+            </>
+          )}
+          <Text style={styles.groupTitle}>Agent</Text>
+          {sheetAgents.length === 0 && !sheetError && (
+            <Text style={styles.body}>Loading agents…</Text>
+          )}
+          {sheetAgents.map((agent) => (
+            <Pressable
+              key={agent.id}
+              style={styles.row}
+              disabled={sheetBusy}
+              onPress={() => launchSession(agent.id)}
+            >
+              <Text style={styles.rowTitle}>{agent.name}</Text>
+            </Pressable>
+          ))}
+          {sheetError && <Text style={styles.error}>{sheetError}</Text>}
+          <View style={styles.spacer} />
+          <Button title="Cancel" onPress={() => setSheetProject(null)} />
+        </View>
+      </Modal>
     </ScrollView>
   );
 }
@@ -207,7 +324,11 @@ const styles = StyleSheet.create({
   dimmed: { opacity: 0.55 },
   dimmedText: { opacity: 0.6 },
   group: { marginTop: 16 },
+  groupHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 },
   groupTitle: { fontSize: 13, fontWeight: '700', textTransform: 'uppercase', opacity: 0.6, marginBottom: 4 },
+  newButton: { fontSize: 13, fontWeight: '600', color: '#0a7aff' },
+  error: { fontSize: 13, color: '#c00', marginTop: 8 },
+  sheet: { flex: 1, padding: 20, paddingTop: 60 },
   row: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, gap: 10 },
   dot: { width: 10, height: 10, borderRadius: 5 },
   rowText: { flex: 1 },

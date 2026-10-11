@@ -358,6 +358,27 @@ function registerHandlers(win, storeInstance) {
       subscribeOutput: (id, sinks) => agents.subscribeOutput(id, sinks),
       write: (id, data) => agents.write(id, data),
       resize: (id, cols, rows) => agents.resize(id, cols, rows),
+      listAgents: () => agents.listAgents(),
+      shellId: agents.SHELL_ID,
+      targets: (projectId) => {
+        const site = findProject(projectId);
+        if (!site) throw new Error('Project not found');
+        return (site.launchTargets || []).map((t) => ({ id: t.id, label: t.label }));
+      },
+      launch: (args) =>
+        agents.launchForProject(
+          {
+            findProject,
+            getPresetArgs: (id) => store.get('agentPresets', {})[id]?.args || '',
+            addToProjects,
+          },
+          args
+        ),
+      stop: (id) => {
+        if (!agents.getSession(id)) throw new Error('Unknown session.');
+        agents.stop(id);
+        return { ok: true };
+      },
       projects: () => {
         const byId = new Map(getProjectRecords().map((r) => [r.id, r]));
         return getProjectIds()
@@ -922,20 +943,16 @@ function registerHandlers(win, storeInstance) {
   // allowed), returning its sessionId for the renderer to attach a terminal to.
   // `targetId` (optional) selects a saved Launch Target on the Site; without it
   // the Agent runs at the webroot with its global default flags applied.
-  ipcMain.handle('agent-launch', (_e, siteId, agentId, targetId) => {
-    const site = findProject(siteId);
-    if (!site) return { error: 'Project not found' };
-    const globalArgs = store.get('agentPresets', {})[agentId]?.args || '';
-    let target = null;
-    if (targetId) {
-      target = (site.launchTargets || []).find((t) => t.id === targetId) || null;
-      if (!target) return { error: 'Launch target not found' };
-    }
-    const res = agents.launch({ site, agentId, target, globalArgs });
-    // Launching is the common way a Site joins the working set.
-    if (res?.ok) addToProjects(siteId);
-    return res;
-  });
+  ipcMain.handle('agent-launch', (_e, siteId, agentId, targetId) =>
+    agents.launchForProject(
+      {
+        findProject,
+        getPresetArgs: (id) => store.get('agentPresets', {})[id]?.args || '',
+        addToProjects,
+      },
+      { projectId: siteId, agentId, targetId }
+    )
+  );
 
   ipcMain.handle('agent-split-pane', (_e, sessionId, dir) => {
     const session = agents.getSession(sessionId);
