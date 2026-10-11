@@ -856,6 +856,11 @@ function registerHandlers(win, storeInstance) {
   // Native notifications for agent alerts (gated in agents.cjs). Clicking one
   // brings the window up on that session; the renderer navigates.
   const liveNotifications = new Set(); // keep a ref, or GC can drop the click
+  // Remote Access push rides the same approved alerts: gating (switches,
+  // suppress-when-focused, cooldown) already ran before listeners fire.
+  agents.onAlert((alert) => {
+    remoteAccess.handleSessionAlert(alert).catch(() => {});
+  });
   agents.onAlert((alert) => {
     if (!Notification.isSupported()) return;
     const site = findProject(alert.siteId);

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Button, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Button, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { registerPushToken } from '../../push/register';
 import { HostConnection, type ConnectionUpdate } from '../../connection/manager';
 import { groupSessions, statusColor, type PhoneProject, type PhoneSessionRow } from '../../sessions/grouping';
 import { findHost, removeHost } from '../../hosts/hostList';
@@ -49,6 +50,8 @@ export default function HostScreen() {
   const [sheetTargetId, setSheetTargetId] = useState<string>('webroot');
   const [sheetBusy, setSheetBusy] = useState(false);
   const [sheetError, setSheetError] = useState<string | null>(null);
+  const [pushEnabled, setPushEnabled] = useState(true);
+  const [pushKnown, setPushKnown] = useState(false);
   const connection = useRef<HostConnection | null>(null);
   const loadedOnce = useRef(false);
 
@@ -56,13 +59,18 @@ export default function HostScreen() {
     const conn = connection.current;
     if (!conn) return;
     try {
-      const [projectsRes, sessionsRes] = await Promise.all([
+      const [projectsRes, sessionsRes, pushRes] = await Promise.all([
         conn.request('projects.list') as Promise<{ projects: PhoneProject[] }>,
         conn.request('sessions.list') as Promise<{ sessions: PhoneSessionRow[] }>,
+        conn.request('device.pushState') as Promise<{ hasToken: boolean; pushEnabled: boolean }>,
       ]);
       setProjects(projectsRes.projects ?? []);
       setSessions(sessionsRes.sessions ?? []);
+      setPushEnabled(pushRes.pushEnabled !== false);
+      setPushKnown(true);
       loadedOnce.current = true;
+      // Re-register the current token whenever it may have changed.
+      registerPushToken((op, params) => conn.request(op, params)).catch(() => {});
     } catch {
       // Offline: the stale list stays under the state banner.
     }
@@ -263,6 +271,25 @@ export default function HostScreen() {
         ))}
       </View>
       <View style={styles.spacer} />
+      {pushKnown && (
+        <View style={styles.row}>
+          <View style={styles.rowText}>
+            <Text style={styles.rowTitle}>Notifications from this Mac</Text>
+            <Text style={styles.rowSub}>Push when a Session needs you or finishes</Text>
+          </View>
+          <Switch
+            value={pushEnabled}
+            onValueChange={async (value) => {
+              setPushEnabled(value);
+              try {
+                await connection.current?.request('device.setPushEnabled', { enabled: value });
+              } catch {
+                setPushEnabled(!value);
+              }
+            }}
+          />
+        </View>
+      )}
       <Button title="Remove Mac" color="#c00" onPress={remove} />
       <Modal visible={sheetProject !== null} animationType="slide" onRequestClose={() => setSheetProject(null)}>
         <View style={styles.sheet}>
