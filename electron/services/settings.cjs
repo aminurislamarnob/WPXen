@@ -214,6 +214,10 @@ const SETTINGS = {
     min: MIN_REMOTE_PORT,
     max: MAX_REMOTE_PORT,
   },
+  // Hold a sleep assertion while Remote Access is in use (an Agent working
+  // or waiting, or a device connected). On by default so arriving work
+  // doesn't find a sleeping Mac; the lid on battery still wins regardless.
+  'remote.keepAwake': { type: 'bool', default: true },
   // The public hostname the Cloudflare dashboard routes at this Mac. Blank
   // until set; the tunnel token itself is never a setting (it lives
   // Keychain-encrypted, through its own IPC handlers).

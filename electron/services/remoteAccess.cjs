@@ -194,6 +194,7 @@ const deps = {
       targets: () => [],
       launch: () => ({ error: 'Unavailable.' }),
       stop: () => ({ ok: true }),
+      hasTranscript: () => false,
     };
   },
   // Batching timers, injected so tests flush deterministically.
@@ -867,21 +868,21 @@ function saveDevice(record) {
   publishDevices();
 }
 
+// Called on every frame, so it must cost nothing until a write is due: the
+// store is only touched once a minute per device (every set rewrites the
+// whole data file).
 function touchDevice(id) {
   const store = deps.store;
   if (!store) return;
   const t = deps.now();
-  let wrote = false;
+  const records = readDeviceRecords();
+  const device = records.find((d) => d && d.id === id);
+  if (!device || (device.lastSeen && t - device.lastSeen < LAST_SEEN_MIN_MS)) return;
   store.set(
     DEVICE_KEY,
-    readDeviceRecords().map((d) => {
-      if (!d || d.id !== id) return d;
-      if (d.lastSeen && t - d.lastSeen < LAST_SEEN_MIN_MS) return d;
-      wrote = true;
-      return { ...d, lastSeen: t };
-    })
+    records.map((d) => (d === device ? { ...d, lastSeen: t } : d))
   );
-  if (wrote) publishDevices();
+  publishDevices();
 }
 
 function trackChannel(id, entry) {
@@ -1138,23 +1139,34 @@ function pushSessionsChanged() {
   }
 }
 
+// Whether a Session has a chat transcript yet. Rows are rebuilt on every
+// sessions push (a few a second under output), and locating can walk Codex's
+// dated folders, so a miss is rechecked at most every few seconds and a hit
+// is kept: a transcript never stops existing.
+const TRANSCRIPT_RECHECK_MS = 5000;
+const transcriptChecks = new Map(); // sessionId -> { found, at }
+
+function hasTranscriptFor(row) {
+  const t = deps.now();
+  const cached = transcriptChecks.get(row.sessionId);
+  if (cached && (cached.found || t - cached.at < TRANSCRIPT_RECHECK_MS)) {
+    return cached.found;
+  }
+  let found = false;
+  try {
+    found =
+      !!phoneSession(row.sessionId) && !!deps.sessions.hasTranscript?.(row.sessionId);
+  } catch {
+    found = false;
+  }
+  transcriptChecks.set(row.sessionId, { found, at: t });
+  return found;
+}
+
 // The phone-safe row: an allowlist of fields, never a blocklist. Local
 // filesystem paths, handoff files and environment stay in this process.
 function phoneSessionRow(row) {
-  let hasTranscript = false;
-  try {
-    const session = phoneSession(row.sessionId);
-    const transcripts = require('./transcripts.cjs');
-    hasTranscript =
-      !!session &&
-      !!transcripts.locateTranscript({
-        agentId: row.agentId,
-        cwd: session.cwd,
-        startedAt: row.startedAt,
-      });
-  } catch {
-    hasTranscript = false;
-  }
+  const hasTranscript = hasTranscriptFor(row);
   return {
     sessionId: row.sessionId,
     projectId: row.siteId,
@@ -1174,7 +1186,11 @@ function phoneSessionRow(row) {
 }
 
 function phoneSessionRows() {
-  return deps.sessions.list().map(phoneSessionRow);
+  const rows = deps.sessions.list();
+  const live = new Set(rows.map((r) => r.sessionId));
+  for (const id of transcriptChecks.keys())
+    if (!live.has(id)) transcriptChecks.delete(id);
+  return rows.map(phoneSessionRow);
 }
 
 function phoneProjects() {
@@ -1424,19 +1440,35 @@ function drop(ws) {
 
 function handleDeviceConnection(ws, req) {
   const ip = (req.socket && req.socket.remoteAddress) || 'unknown';
-  let device = null; // set once a sealed frame (or accept) authenticates us
+  let device = null; // set once the device's hello has been verified
   let devicePublicKey = null;
+  // This connection's binding: '<clientNonce>.<serverNonce>' (frames.cjs).
+  // Every sealed payload after the hello must carry it, so a frame captured
+  // on any other connection is refused here.
+  let channel = null;
   let inCounter = 0;
   let outCounter = 0;
-  const keypair = getHostKeypair();
+  // A host key that no longer decrypts (a reset Keychain, a copied data file)
+  // is reported by getHostKeypair, never regenerated. Thrown from here it
+  // would escape the WebSocket server's connection event and take the main
+  // process down on every phone that dials in — drop the socket instead, and
+  // let Settings → Mobile (pairingOffer) surface the error where it is read.
+  let keypair;
+  try {
+    keypair = getHostKeypair();
+  } catch (err) {
+    deps.log(`[remote-access] device connection refused: ${err?.message || err}`);
+    drop(ws);
+    return;
+  }
 
-  const firstTimer = setTimeout(drop, HANDSHAKE_TIMEOUT_MS, ws);
+  let firstTimer = setTimeout(drop, HANDSHAKE_TIMEOUT_MS, ws);
   ws.on('close', () => clearTimeout(firstTimer));
 
   function sendSealed(payload) {
     outCounter += 1;
     const sealed = sealFrame({
-      payload,
+      payload: { ...payload, ch: channel, n: outCounter },
       senderSecret: keypair.secretKey,
       recipientPublicKey: devicePublicKey,
       nonce: randomNonce(),
@@ -1517,6 +1549,10 @@ function handleDeviceConnection(ws, req) {
     }
     const hostB64 = publicKeyB64(keypair);
     const code = confirmationCode(hostB64, msg.devicePublicKey, offer.secret);
+    // One use means the first valid request: the secret dies before the
+    // dialog opens, so a second phone holding the same QR can't queue a
+    // second Allow/Deny behind it (whatever the answer, the offer is spent).
+    consumeOffer();
     let answer;
     try {
       answer = await Promise.race([
@@ -1573,13 +1609,49 @@ function handleDeviceConnection(ws, req) {
     try {
       deps.onPaired({ name: String(payload.deviceName || 'Phone') });
     } catch {}
-    // The pairing socket stays up as this device's channel: counters start
-    // fresh, and the welcome event is its first sealed frame.
-    device = findDevice(deviceId);
-    devicePublicKey = deviceKey;
-    inCounter = 0;
-    outCounter = 0;
-    trackChannel(deviceId, { ws, send: sendSealed });
+    // Pairing proves nothing about this socket's later frames: the device
+    // opens its channel with a hello like any other connection (here or on
+    // a fresh socket), and a socket that never does is closed.
+    clearTimeout(firstTimer);
+    firstTimer = setTimeout(drop, HANDSHAKE_TIMEOUT_MS, ws);
+  }
+
+  // The first frame of a device channel: a sealed hello from a paired device,
+  // counter 1. Only once it opens with that device's key is the socket
+  // tracked as the device's — connected-now, last seen, pushes, keep-awake
+  // all wait for it. An unknown id, a bad box or a replayed hello from another
+  // connection gets the same silent close.
+  function handleHello(msg) {
+    const known = findDevice(msg.deviceId);
+    if (!known || msg.counter !== 1) return drop(ws);
+    let key;
+    let payload;
+    try {
+      key = decodeBase64(known.publicKey);
+      payload = openFrame({
+        nonce: msg.nonce,
+        box: msg.box,
+        senderPublicKey: key,
+        recipientSecret: keypair.secretKey,
+      });
+    } catch {
+      return drop(ws);
+    }
+    if (
+      !payload ||
+      payload.kind !== 'hello' ||
+      payload.n !== 1 ||
+      typeof payload.clientNonce !== 'string' ||
+      !/^[A-Za-z0-9+/=]{16,64}$/.test(payload.clientNonce)
+    ) {
+      return drop(ws);
+    }
+    clearTimeout(firstTimer);
+    device = known;
+    devicePublicKey = key;
+    inCounter = 1;
+    channel = `${payload.clientNonce}.${encodeBase64(randomBytes(24))}`;
+    trackChannel(device.id, { ws, send: sendSealed });
     ensureSessionsFeed();
     welcome();
   }
@@ -1590,21 +1662,9 @@ function handleDeviceConnection(ws, req) {
 
   async function handleFrameAsync(msg) {
     if (msg.v !== PROTOCOL_VERSION) return drop(ws);
-    const known = device || findDevice(msg.deviceId);
     // Unknown ids are dropped with no reply — the response never reveals
     // whether the id or the key was wrong.
-    if (!known) return drop(ws);
-    if (!device) {
-      device = known;
-      try {
-        devicePublicKey = decodeBase64(known.publicKey);
-      } catch {
-        return drop(ws);
-      }
-      trackChannel(device.id, { ws, send: sendSealed });
-      ensureSessionsFeed();
-      welcome();
-    }
+    if (!channel) return handleHello(msg);
     if (typeof msg.counter !== 'number' || msg.counter !== inCounter + 1) return drop(ws);
     let payload;
     try {
@@ -1617,6 +1677,10 @@ function handleDeviceConnection(ws, req) {
     } catch {
       return drop(ws);
     }
+    // The sealed binding decides, not the plaintext envelope: a frame from
+    // another connection names another channel, and one moved within this
+    // connection carries the wrong sealed counter.
+    if (!payload || payload.ch !== channel || payload.n !== msg.counter) return drop(ws);
     inCounter = msg.counter;
     touchDevice(device.id);
     if (!payload || payload.kind !== 'request' || typeof payload.id !== 'string')
@@ -1746,6 +1810,7 @@ function dispose() {
     } catch {}
   }
   terminalSubs.clear();
+  transcriptChecks.clear();
   listeners.clear();
   deviceListeners.clear();
   tunnel = { state: 'not-configured', reason: null };

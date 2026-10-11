@@ -122,6 +122,7 @@ beforeEach(async () => {
       subscribe: agents.onSessionsChanged,
       markRead: (id, read) => agents.markRead(id, read),
       get: (id) => agents.getSession(id),
+      hasTranscript: (id) => agents.hasChatTranscript(id),
       projects: () => [{ id: 'shop', name: 'Shop', kind: 'site' }],
     },
   });
@@ -203,6 +204,48 @@ describe('sessions over the channel', () => {
       hasTranscript: false,
     });
     expect(JSON.stringify(row)).not.toContain(home);
+    client.close();
+  });
+
+  it('reports hasTranscript from the engine, rechecking a miss only every few seconds', async () => {
+    const { sessionId } = agents.launch({ site: site(), agentId: agents.SHELL_ID });
+    let exists = false;
+    const asked = [];
+    let clock = Date.now();
+    remoteAccess.__setDeps({
+      now: () => clock,
+      sessions: {
+        list: agents.listAllSessions,
+        subscribe: agents.onSessionsChanged,
+        markRead: (id, read) => agents.markRead(id, read),
+        get: (id) => agents.getSession(id),
+        projects: () => [{ id: 'shop', name: 'Shop', kind: 'site' }],
+        hasTranscript: (id) => {
+          asked.push(id);
+          return exists;
+        },
+      },
+    });
+    const { client } = await pairedPhone();
+    const rowOf = async () =>
+      (await client.request('sessions.list')).sessions.find(
+        (s) => s.sessionId === sessionId
+      );
+    expect((await rowOf()).hasTranscript).toBe(false);
+    expect(asked).toContain(sessionId);
+
+    // The transcript appears; a miss isn't rechecked on every push.
+    exists = true;
+    const before = asked.length;
+    expect((await rowOf()).hasTranscript).toBe(false);
+    expect(asked.length).toBe(before);
+    clock += 10_000;
+    expect((await rowOf()).hasTranscript).toBe(true);
+
+    // A hit is kept: a transcript never stops existing.
+    exists = false;
+    clock += 10_000;
+    expect((await rowOf()).hasTranscript).toBe(true);
     client.close();
   });
 

@@ -207,6 +207,17 @@ describe('desktop window attach stays byte-for-byte the same', () => {
     expect(win.webContents.send).toHaveBeenCalledTimes(3);
   });
 
+  it('attaching to an ended Session sends only the replay, as before', () => {
+    const { sessionId } = agents.launchFloating({ cwd: home });
+    ptys[0].emitData('bye\n');
+    ptys[0].emitExit(0);
+    const win = fakeWin();
+    agents.attach(sessionId, win);
+    expect(win.webContents.send.mock.calls).toEqual([
+      ['terminal-replay', { sessionId, data: 'bye\n', exited: true }],
+    ]);
+  });
+
   it('re-attach replaces the window subscription instead of doubling delivery', () => {
     const { sessionId } = agents.launchFloating({ cwd: home });
     const first = fakeWin();

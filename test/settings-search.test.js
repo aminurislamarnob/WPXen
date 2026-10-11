@@ -107,4 +107,11 @@ describe('Remote Access entries', () => {
     expect(visibleItems('hostname')).toContain('remote.hostname');
     expect(visibleItems('cloudflare')).toContain('remote.hostname');
   });
+
+  it('finds the keep-awake switch by its purpose', () => {
+    expect(visibleItems('keep awake')).toContain('remote.keepAwake');
+    expect(visibleItems('remote access')).toEqual(
+      expect.arrayContaining(['remote.enabled', 'remote.port', 'remote.keepAwake'])
+    );
+  });
 });

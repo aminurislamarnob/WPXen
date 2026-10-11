@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ctrlBytes, keyBytes, pressWithCtrlArmed } from './keyBar';
+import { ctrlBytes, keyBytes, pressWithCtrlArmed, typedTextBytes, KEY_BAR_ORDER } from './keyBar';
 
 describe('keyBytes', () => {
   it('sends Esc, Tab, Ctrl-C, arrows and Enter', () => {
@@ -11,6 +11,24 @@ describe('keyBytes', () => {
     expect(keyBytes('right')).toBe('\x1b[C');
     expect(keyBytes('left')).toBe('\x1b[D');
     expect(keyBytes('enter')).toBe('\r');
+  });
+
+  it('maps the keyboard Backspace to DEL, off the bar', () => {
+    expect(keyBytes('backspace')).toBe('\x7f');
+    expect(KEY_BAR_ORDER).not.toContain('backspace');
+  });
+});
+
+describe('typedTextBytes', () => {
+  it('sends the keyboard Return as a carriage return, like a terminal', () => {
+    expect(typedTextBytes('\n')).toBe('\r');
+    expect(typedTextBytes('yes\n')).toBe('yes\r');
+    expect(typedTextBytes('a\r\nb')).toBe('a\rb');
+  });
+
+  it('leaves other text alone', () => {
+    expect(typedTextBytes('hello')).toBe('hello');
+    expect(typedTextBytes('\t')).toBe('\t');
   });
 });
 
@@ -46,5 +64,13 @@ describe('pressWithCtrlArmed', () => {
   it('leaves unarmed input untouched', () => {
     expect(pressWithCtrlArmed({ text: 'c' }, false)).toEqual({ bytes: 'c', ctrlArmed: false });
     expect(pressWithCtrlArmed({ key: 'up' }, false)).toEqual({ bytes: '\x1b[A', ctrlArmed: false });
+  });
+
+  it('sends a typed newline as Enter', () => {
+    expect(pressWithCtrlArmed({ text: '\n' }, false)).toEqual({ bytes: '\r', ctrlArmed: false });
+    expect(pressWithCtrlArmed({ key: 'backspace' }, true)).toEqual({
+      bytes: '\x7f',
+      ctrlArmed: false,
+    });
   });
 });

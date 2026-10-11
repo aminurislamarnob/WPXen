@@ -183,7 +183,8 @@ export class HostConnection {
       if (this.stopped || this.socket !== 'open' || !this.client) return;
       const started = now();
       try {
-        await this.client.request('ping', { timeoutMs: heartbeatMs });
+        // Options are the third argument; a second one is the op's params.
+        await this.client.request('ping', {}, { timeoutMs: heartbeatMs });
         this.rttMs = now() - started;
         this.missed = 0;
         this.heartbeatLost = false;

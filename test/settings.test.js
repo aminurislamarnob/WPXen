@@ -453,4 +453,14 @@ describe('Remote Access settings', () => {
     });
     expect(s.write({ 'remote.hostname': 'https://wpxen.example.com' }).ok).toBe(false);
   });
+
+  it('keeps the Mac awake for remote access unless opted out', () => {
+    expect(SETTINGS['remote.keepAwake']).toMatchObject({ type: 'bool', default: true });
+    const store = fakeStore();
+    const s = createSettings({ store });
+    expect(s.get('remote.keepAwake')).toBe(true);
+    expect(s.write({ 'remote.keepAwake': false })).toMatchObject({ ok: true });
+    expect(s.get('remote.keepAwake')).toBe(false);
+    expect(s.write({ 'remote.keepAwake': 'yes' }).ok).toBe(false);
+  });
 });

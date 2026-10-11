@@ -119,20 +119,31 @@ describe('device list', () => {
     const off = remoteAccess.onDevicesChanged((devices) => seen.push(devices));
 
     expect(remoteAccess.listDevices()).toEqual([]);
-    const { deviceId, socket } = await pairDevice({ port });
+    const { deviceId, socket, keys, hostPublicKey } = await pairDevice({ port });
+    socket.close();
     let list = remoteAccess.listDevices();
     expect(list).toHaveLength(1);
     expect(list[0]).toMatchObject({
       id: deviceId,
       name: 'My iPhone',
       platform: 'ios',
-      // The pairing socket stays up as the device's channel.
-      connected: true,
+      connected: false,
     });
     expect(typeof list[0].pairedAt).toBe('number');
     expect(typeof list[0].lastSeen).toBe('number');
     expect(seen.length).toBeGreaterThan(0);
-    socket.close();
+
+    // The phone dials its channel; connected-now follows the live socket.
+    const client = createClient({
+      url: wsUrl(port),
+      WebSocket,
+      keys,
+      hostPublicKey,
+      deviceId,
+    });
+    await client.connect();
+    expect(remoteAccess.listDevices()[0].connected).toBe(true);
+    client.close();
     await new Promise((r) => setTimeout(r, 100));
     expect(remoteAccess.listDevices()[0].connected).toBe(false);
     off();
@@ -247,17 +258,9 @@ describe('revoke', () => {
       hostPublicKey,
       deviceId,
     });
-    const retryClosed = new Promise((resolve) => retry.onClose(resolve));
-    await retry.connect();
-    let answered = false;
-    try {
-      await retry.request('ping', { timeoutMs: 500 });
-      answered = true;
-    } catch {
-      // Rejected, as it must be: the socket is closed, not answered.
-    }
-    expect(answered).toBe(false);
-    await expect(retryClosed).resolves.toBe('closed');
+    // The hello is dropped without a reply, so the channel never opens.
+    await expect(retry.connect()).rejects.toThrow();
+    await expect(retry.request('ping', { timeoutMs: 500 })).rejects.toThrow();
     retry.close();
   });
 
@@ -377,6 +380,18 @@ describe('last seen', () => {
     now += 31 * 1000;
     await client.request('ping');
     expect(remoteAccess.listDevices()[0].lastSeen).toBe(pairedAt + 61 * 1000);
+
+    // Frames inside the minute never write the store at all — each write
+    // rewrites the whole data file.
+    const writes = [];
+    const set = store.set;
+    store.set = (key, value) => {
+      writes.push(key);
+      return set.call(store, key, value);
+    };
+    for (let i = 0; i < 5; i++) await client.request('ping');
+    store.set = set;
+    expect(writes).toEqual([]);
     client.close();
     socket.close();
   });
