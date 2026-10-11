@@ -318,6 +318,14 @@ describe('sessions over the channel', () => {
       client.request('terminal.write', { sessionId: floating.sessionId, data: 'x' })
     ).rejects.toThrow('Unknown session.');
 
+    await expect(
+      client.request('terminal.resize', {
+        sessionId: floating.sessionId,
+        cols: 80,
+        rows: 24,
+      })
+    ).rejects.toThrow('Unknown session.');
+
     // The Session itself is untouched — refusing the phone is not stopping it.
     expect(agents.listFloatingSessions()).toHaveLength(1);
     expect(agents.getSession(floating.sessionId)).not.toBeNull();

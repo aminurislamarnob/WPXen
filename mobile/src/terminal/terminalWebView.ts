@@ -10,7 +10,8 @@
 // ready, generation-guarded so a reconnect's reset drops stale queued
 // writes):
 //   RN → document: { type: 'init', theme, fontSize } | { type: 'write', data }
-//     | { type: 'reset' } | { type: 'theme', theme }
+//     | { type: 'reset' } | { type: 'theme', theme } | { type: 'grid', cols, rows }
+//     | { type: 'font-size', fontSize }
 //   document → RN: { type: 'ready' }
 
 export const XTERM_VERSION = '5.5.0';
@@ -152,6 +153,8 @@ export function buildTerminalHtml({ theme }: { theme: TerminalThemeName }): stri
     "    if (msg.type === 'write') { term.write(msg.data); return; }",
     "    if (msg.type === 'reset') { generation += 1; pending = []; term.reset(); term.clear(); return; }",
     "    if (msg.type === 'theme') { term.options.theme = currentTheme(msg.theme); return; }",
+    "    if (msg.type === 'grid') { try { term.resize(msg.cols, msg.rows); } catch (e) {} return; }",
+    "    if (msg.type === 'font-size') { term.options.fontSize = msg.fontSize; return; }",
     '  }',
     '  document.addEventListener("message", function (event) { handle(JSON.parse(event.data)); });',
     '  window.addEventListener("message", function (event) { handle(JSON.parse(event.data)); });',

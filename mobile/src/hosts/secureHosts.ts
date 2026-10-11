@@ -47,6 +47,25 @@ export async function loadDeviceKeys(deviceId: string): Promise<DeviceKeys | nul
   }
 }
 
+export async function loadTextSize(deviceId: string): Promise<number> {
+  try {
+    const raw = await SecureStore.getItemAsync(`wpxen.textSize.${deviceId}`);
+    const size = Number(raw);
+    if (Number.isInteger(size) && size >= 10 && size <= 20) return size;
+  } catch {
+    // Unset or unreadable: the default below.
+  }
+  return 13;
+}
+
+export async function saveTextSize(deviceId: string, size: number): Promise<void> {
+  try {
+    await SecureStore.setItemAsync(`wpxen.textSize.${deviceId}`, String(size));
+  } catch {
+    // Persistence is a nicety; the live size still applies.
+  }
+}
+
 // Removing a host deletes its secrets with it: keys, then the row.
 export async function deleteHostSecrets(deviceId: string): Promise<void> {
   try {

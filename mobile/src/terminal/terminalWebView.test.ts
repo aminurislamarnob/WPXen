@@ -38,7 +38,7 @@ describe('terminal WebView document', () => {
 
   it('speaks the ready/write/reset/theme contract and nothing else remote', () => {
     const html = buildTerminalHtml({ theme: 'dark' });
-    for (const type of ['init', 'write', 'reset', 'theme', 'ready']) {
+    for (const type of ['init', 'write', 'reset', 'theme', 'grid', 'font-size', 'ready']) {
       expect(html).toContain(type);
     }
     const remoteUrls = [...html.matchAll(/https?:\/\/([^/"'\s]+)/g)].map((m) => m[1]);
