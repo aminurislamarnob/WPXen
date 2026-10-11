@@ -409,6 +409,11 @@ function stop() {
     } catch {}
     server = null;
     boundPort = null;
+    // `server.close()` stops accepting new connections but leaves the
+    // established ones running, so a paired phone would stay connected to a
+    // Remote Access that reads as off. Today the tunnel dying takes those
+    // sockets with it, which is luck, not intent — drop them here.
+    closeEveryDeviceSocket();
   }
   // A bind that failed with nothing left running is exactly what flips the
   // switch back off (ipc.cjs), and that flip calls us. Carry the reason onto
@@ -938,6 +943,13 @@ async function revokeDevice(id) {
 
 // Drop every live socket. Records are kept, so the devices reconnect.
 async function disconnectAll() {
+  closeEveryDeviceSocket();
+  return { ok: true };
+}
+
+// Shared by disconnect-all and by stopping the server: an ordinary close the
+// phone may reconnect after, never the revoked code. Records are untouched.
+function closeEveryDeviceSocket() {
   for (const [id, entries] of [...deviceSockets.entries()]) {
     for (const entry of [...entries]) {
       try {
@@ -947,7 +959,6 @@ async function disconnectAll() {
     deviceSockets.delete(id);
   }
   publishDevices();
-  return { ok: true };
 }
 
 // ─── Push tokens ─────────────────────────────────────────────────────────
@@ -1069,6 +1080,20 @@ async function handleSessionAlert(alert) {
 // (list/subscribe/markRead/get/projects, injected from ipc.cjs like
 // keepAwake.watchSessions) keeps this module's tests light.
 
+// The one place the phone's idea of "a Session that exists" is defined.
+// Every operation taking a sessionId resolves through this, so the allowlist
+// cannot be talked into reaching a Session the phone may not see. Floating
+// Workspace Sessions are out of scope for Remote Access (#136) and absent
+// from `list`, so they must not be reachable by id either — ids are random
+// UUIDs, so this is scope discipline rather than a live hole, and it is the
+// kind of gap that stops being harmless as the allowlist grows.
+function phoneSession(sessionId) {
+  if (typeof sessionId !== 'string' || !sessionId) return null;
+  const session = deps.sessions.get(sessionId);
+  if (!session || session.scope === 'floating') return null;
+  return session;
+}
+
 // Pushes coalesce to a few per second: a burst of pty output must not flood
 // the socket.
 const SESSIONS_PUSH_MS = 250;
@@ -1118,7 +1143,7 @@ function pushSessionsChanged() {
 function phoneSessionRow(row) {
   let hasTranscript = false;
   try {
-    const session = deps.sessions.get(row.sessionId);
+    const session = phoneSession(row.sessionId);
     const transcripts = require('./transcripts.cjs');
     hasTranscript =
       !!session &&
@@ -1166,7 +1191,7 @@ async function dispatchSessionOp(op, params) {
   if (op === 'sessions.markRead') {
     const sessionId = params && params.sessionId;
     if (typeof sessionId !== 'string' || !sessionId) throw new Error('Unknown session.');
-    if (!deps.sessions.get(sessionId)) throw new Error('Unknown session.');
+    if (!phoneSession(sessionId)) throw new Error('Unknown session.');
     deps.sessions.markRead(sessionId);
     return { ok: true };
   }
@@ -1208,7 +1233,7 @@ async function dispatchSessionOp(op, params) {
   }
   if (op === 'sessions.stop') {
     const sessionId = params && params.sessionId;
-    if (typeof sessionId !== 'string' || !sessionId) throw new Error('Unknown session.');
+    if (!phoneSession(sessionId)) throw new Error('Unknown session.');
     return deps.sessions.stop(sessionId);
   }
   throw new Error(`Unknown operation: ${op}`);
@@ -1225,7 +1250,7 @@ function terminalKey(deviceId, sessionId) {
 }
 
 function terminalAttach(deviceId, sessionId, send, ws) {
-  if (!deps.sessions.get(sessionId)) throw new Error('Unknown session.');
+  if (!phoneSession(sessionId)) throw new Error('Unknown session.');
   terminalDetach(deviceId, sessionId);
   const sub = {
     buffer: '',
@@ -1278,7 +1303,7 @@ function terminalAttach(deviceId, sessionId, send, ws) {
 
 // Detaching only drops the subscription — the Session keeps running.
 function terminalDetach(deviceId, sessionId) {
-  if (!deps.sessions.get(sessionId)) throw new Error('Unknown session.');
+  if (!phoneSession(sessionId)) throw new Error('Unknown session.');
   const key = terminalKey(deviceId, sessionId);
   const sub = terminalSubs.get(key);
   if (!sub) return { ok: true };
@@ -1299,7 +1324,7 @@ function terminalWrite(sessionId, data) {
   if (Buffer.byteLength(data, 'utf8') > TERMINAL_WRITE_MAX_BYTES) {
     throw new Error('Terminal input is too large (max 64 KB).');
   }
-  const session = deps.sessions.get(sessionId);
+  const session = phoneSession(sessionId);
   if (!session) throw new Error('Unknown session.');
   // Exited Sessions swallow input silently — never an error, never a write.
   if (session.exited) return { ok: true };
@@ -1319,7 +1344,7 @@ function terminalResize(sessionId, cols, rows) {
       throw new Error(`Terminal ${name} must be between 1 and 500.`);
     }
   }
-  if (!deps.sessions.get(sessionId)) throw new Error('Unknown session.');
+  if (!phoneSession(sessionId)) throw new Error('Unknown session.');
   deps.sessions.resize(sessionId, cols, rows);
   return { ok: true };
 }
