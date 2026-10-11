@@ -1,18 +1,26 @@
-import { useState, useEffect, useRef, useId, useCallback } from 'react';
+import {
+  useState,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useId,
+  useCallback,
+  useMemo,
+} from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { pinnedIndexes, shouldStickToBottom } from '../../lib/chatList';
-import { foldToolRuns, runNeedsAttention } from '../../lib/chatRows';
-import { useMemo } from 'react';
+import {
+  foldToolRuns,
+  partitionChatRows,
+  prependOlder,
+  shouldShowWaitingFallback,
+  upsertRows,
+} from '../../lib/chatRows';
 import { useAgentSessions, useSelectedSession } from '../../lib/useAgentSessions';
-import DiffView from '../DiffView';
-
-import { ChatMarkdown } from './ChatMarkdown';
-import { QuestionCard } from './QuestionCard';
-import { buildAskAnswerKeys } from '../../lib/agentAsk';
-import { SubagentRow } from './SubagentRow';
+import { Button } from '../ui';
+import { ChatItem } from './ChatItems';
 import { WaitingFallback } from './WaitingFallback';
 import * as sessionCache from '../../lib/terminal/sessionCache';
-import { ImageRef } from './ImageRef';
 import { contextMeter } from '../../lib/contextMeter';
 import {
   setViewMode,
@@ -21,9 +29,16 @@ import {
   canResumeSession,
 } from '../../lib/chatView';
 import { useChatDraft } from '../../lib/chatDraft';
-import { shouldShowWaitingFallback } from '../../lib/chatRows';
-import { recallStep, matchFiles, matchCommands } from '../../lib/chatComplete';
+import {
+  applyCompletion,
+  completionTrigger,
+  matchCommands,
+  matchFiles,
+  recallKey,
+  recallStep,
+} from '../../lib/chatComplete';
 import { isImageDropPath } from '../../lib/terminal/keys';
+import { useOpenLink } from '../../lib/useOpenLink';
 
 export function ChatView({ sessionId, onRestart, onResume, headerActions }) {
   const viewerId = useId();
@@ -35,7 +50,6 @@ export function ChatView({ sessionId, onRestart, onResume, headerActions }) {
   const setInput = (text) => setDraft({ ...draft, text });
   const attachments = useMemo(() => draft.images || [], [draft.images]);
   const setAttachments = (images) => setDraft({ ...draft, images });
-  const clearInput = clearDraft;
   const [atStart, setAtStart] = useState(false);
   const [staleNotice, setStaleNotice] = useState(false);
   const [headerTitle, setHeaderTitle] = useState('');
@@ -45,6 +59,10 @@ export function ChatView({ sessionId, onRestart, onResume, headerActions }) {
   // Session rows are keyed `sessionId`; there is no `id`.
   const currentSession = sessions.find((s) => s.sessionId === sessionId);
   const isWorking = currentSession?.state === 'working';
+  const openLink = useOpenLink();
+  const siteId = currentSession?.siteId;
+  // Links follow Settings → General → Open links in, like every other link.
+  const handleLink = useCallback((url) => openLink(url, siteId), [openLink, siteId]);
 
   // Per-Agent model table for the picker. Hidden when the Agent has none.
   // The whole entry is kept: the exit bar also needs its resume flag.
@@ -87,11 +105,16 @@ export function ChatView({ sessionId, onRestart, onResume, headerActions }) {
     return found ? found.id : '';
   })();
 
-  // Track auto-scroll state
+  // Autoscroll. Whether to follow new rows is decided from the scroll
+  // position before they render; a ref, so the row subscription never has
+  // to be torn down (and the transcript re-read) when it changes.
   const scrollRef = useRef(null);
-  const [stickToBottom, setStickToBottom] = useState(true);
+  const stickRef = useRef(true);
   const [showLatestPill, setShowLatestPill] = useState(false);
   const [isLoadingOlder, setIsLoadingOlder] = useState(false);
+  const loadingOlderRef = useRef(false);
+  // Scroll position to restore once an older page has rendered above.
+  const anchorRef = useRef(null);
 
   const foldedMessages = useMemo(() => foldToolRuns(messages), [messages]);
 
@@ -104,7 +127,7 @@ export function ChatView({ sessionId, onRestart, onResume, headerActions }) {
     const arr = [];
     const reversed = [...messages].reverse();
     for (const msg of reversed) {
-      if (msg.role === 'user' && msg.content && typeof msg.content === 'string') {
+      if (msg.role === 'user' && !msg.orphan && typeof msg.content === 'string') {
         const text = msg.content.trim();
         if (text && arr[arr.length - 1] !== text) {
           arr.push(text);
@@ -118,35 +141,37 @@ export function ChatView({ sessionId, onRestart, onResume, headerActions }) {
   const [siteCommands, setSiteCommands] = useState([]);
 
   useEffect(() => {
-    if (currentSession?.siteId) {
+    if (siteId) {
       window.electronAPI
-        .chatFiles(currentSession.siteId)
+        .chatFiles(siteId)
         .then(setSiteFiles)
         .catch(() => {});
       window.electronAPI
-        .chatCommands(currentSession.siteId)
+        .chatCommands(siteId)
         .then(setSiteCommands)
         .catch(() => {});
     }
-  }, [currentSession?.siteId]);
+  }, [siteId]);
 
-  const [mentionState, setMentionState] = useState(null);
-  const mentionMatches = useMemo(() => {
-    if (!mentionState) return [];
-    if (mentionState.type === 'file')
-      return matchFiles(mentionState.query, siteFiles, 50);
-    return matchCommands(mentionState.query, siteCommands, 50);
-  }, [mentionState, siteFiles, siteCommands]);
+  const [completion, setCompletion] = useState(null);
+  const completionMatches = useMemo(() => {
+    if (!completion) return [];
+    if (completion.type === 'file') return matchFiles(completion.query, siteFiles, 50);
+    return matchCommands(completion.query, siteCommands, 50);
+  }, [completion, siteFiles, siteCommands]);
 
-  const [mentionSelected, setMentionSelected] = useState(0);
-  useEffect(() => setMentionSelected(0), [mentionState?.query]);
+  const [completionSelected, setCompletionSelected] = useState(0);
+  useEffect(() => setCompletionSelected(0), [completion?.query, completion?.type]);
 
   useEffect(() => {
     let active = true;
     if (needsFallback) {
-      window.electronAPI.chatSnapshot(sessionId, 15).then((snap) => {
-        if (active) setFallbackSnapshot(snap);
-      });
+      window.electronAPI
+        .chatSnapshot(sessionId, 15)
+        .then((snap) => {
+          if (active) setFallbackSnapshot(snap);
+        })
+        .catch(() => {});
     } else {
       setFallbackSnapshot('');
     }
@@ -162,167 +187,111 @@ export function ChatView({ sessionId, onRestart, onResume, headerActions }) {
     requestAnimationFrame(() => sessionCache.focus(sessionId));
   }, [sessionId]);
 
-  // Expose virtualizer
   const virtualizer = useVirtualizer({
     count: foldedMessages.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => 80,
     rangeExtractor: (range) => pinnedIndexes(range, { count: foldedMessages.length }),
-    onChange: (instance) => {
-      // Check if we hit top to load older
-      if (!atStart && !isLoadingOlder && instance.scrollElement) {
-        if (instance.scrollElement.scrollTop < 100) {
-          loadOlder();
-        }
-      }
-    },
   });
 
+  // "Load older" pages backwards; the rows already on screen stay where they
+  // are, so the reader isn't thrown to the top of the new page.
   const loadOlder = useCallback(async () => {
+    if (loadingOlderRef.current) return;
+    loadingOlderRef.current = true;
     setIsLoadingOlder(true);
     try {
       const res = await window.electronAPI.chatLoadOlder(sessionId);
-      if (res) {
-        setAtStart(res.atStart);
-        if (res.rows && res.rows.length > 0) {
-          setMessages((prev) => {
-            let next = [...res.rows, ...prev];
-            // loadOlder might have brought a tool call that resolves an orphan.
-            // The newer messages might need to be filtered out if `remove` is present on the new rows.
-            for (const row of res.rows) {
-              if (row.remove) {
-                next = next.filter((m) => !row.remove.includes(m.id));
-              }
-            }
-            return next;
-          });
-        }
+      if (!res) return;
+      setAtStart(!!res.atStart);
+      if (res.rows?.length) {
+        const el = scrollRef.current;
+        if (el) anchorRef.current = { height: el.scrollHeight, top: el.scrollTop };
+        setMessages((prev) => prependOlder(prev, res.rows));
       }
+    } catch {
+      // the next click tries again
     } finally {
+      loadingOlderRef.current = false;
       setIsLoadingOlder(false);
     }
   }, [sessionId]);
 
+  const loadOlderNested = useCallback(
+    async (parentId) => {
+      const res = await window.electronAPI
+        .chatLoadOlderSubagent(sessionId, parentId)
+        .catch(() => null);
+      if (res?.rows?.length) {
+        setNestedMessages((prev) => ({
+          ...prev,
+          [parentId]: prependOlder(prev[parentId] || [], res.rows),
+        }));
+      }
+      return res;
+    },
+    [sessionId]
+  );
+
   useEffect(() => {
     const api = window.electronAPI;
-    const unsub = api.on(
-      'agent-chat-rows',
-      ({ sessionId: rowSessionId, rows, header, state }) => {
-        if (rowSessionId !== sessionId) return;
+    const unsub = api.on('agent-chat-rows', (push) => {
+      if (push.sessionId !== sessionId) return;
+      const { rows, header, state } = push;
+      if (header?.title) setHeaderTitle(header.title);
+      if (state) setChatState(state);
+      if (typeof push.atStart === 'boolean') setAtStart(push.atStart);
 
-        if (header?.title) setHeaderTitle(header.title);
-        if (state) setChatState(state);
-
-        let newNestedMessages = null;
-
-        setMessages((prev) => {
-          let next = [...prev];
-          let changed = false;
-
-          for (const row of rows) {
-            if (row.parentId) {
-              if (!newNestedMessages) newNestedMessages = {};
-              if (!newNestedMessages[row.parentId]) newNestedMessages[row.parentId] = [];
-
-              const list = newNestedMessages[row.parentId];
-
-              if (row.reset) {
-                // wait, subagent reset is not supported or needed usually, but if it happens:
-                list.length = 0;
-              } else if (row.remove) {
-                // remove from nested list - we'd need to modify the actual state later
-              } else if (row.id) {
-                list.push(row);
-              }
-              continue;
-            }
-
-            if (row.reset) {
-              next = [];
-              setAtStart(false);
-              setStaleNotice(false);
-              changed = true;
-              continue;
-            }
-            if (row.notice) {
-              if (row.kind === 'transcript-changed') setStaleNotice(true);
-              continue;
-            }
-
-            if (row.remove) {
-              next = next.filter((m) => !row.remove.includes(m.id));
-              changed = true;
-            }
-
-            if (!row.id) continue;
-            changed = true;
-
-            const idx = next.findIndex((m) => m.id === row.id);
-            if (idx >= 0) {
-              next[idx] = row;
-            } else {
-              next.push(row);
-            }
-          }
-
-          if (changed) {
-            if (!stickToBottom) {
-              setShowLatestPill(true);
-            }
-          }
-          return changed ? next : prev;
-        });
-
-        if (newNestedMessages) {
-          setNestedMessages((prevNested) => {
-            let nextNested = { ...prevNested };
-            let nestedChanged = false;
-            for (const [parentId, newRows] of Object.entries(newNestedMessages)) {
-              let list = nextNested[parentId] ? [...nextNested[parentId]] : [];
-              let listChanged = false;
-
-              for (const row of newRows) {
-                if (row.reset) {
-                  list = [];
-                  listChanged = true;
-                } else if (row.remove) {
-                  list = list.filter((m) => !row.remove.includes(m.id));
-                  listChanged = true;
-                } else if (row.id) {
-                  const idx = list.findIndex((m) => m.id === row.id);
-                  if (idx >= 0) {
-                    list[idx] = row;
-                  } else {
-                    list.push(row);
-                  }
-                  listChanged = true;
-                }
-              }
-              if (listChanged) {
-                nextNested[parentId] = list;
-                nestedChanged = true;
-              }
-            }
-            return nestedChanged ? nextNested : prevNested;
-          });
-        }
+      // Split first, then apply: the nested rows must not depend on when
+      // React runs a state updater.
+      const { reset, stale, top, nested } = partitionChatRows(rows);
+      if (reset) {
+        setAtStart(false);
+        setStaleNotice(false);
       }
-    );
+      if (stale) setStaleNotice(true);
+      if (reset || top.length > 0) {
+        setMessages((prev) => upsertRows(reset ? [] : prev, top));
+        if (!stickRef.current && top.length > 0) setShowLatestPill(true);
+      }
+      const parents = Object.keys(nested);
+      if (parents.length > 0) {
+        setNestedMessages((prev) => {
+          let next = prev;
+          for (const parentId of parents) {
+            const before = prev[parentId] || [];
+            const after = upsertRows(before, nested[parentId]);
+            if (after !== before || !prev[parentId])
+              next = { ...next, [parentId]: after };
+          }
+          return next;
+        });
+      }
+    });
 
     api.chatOpen(sessionId, viewerId);
     return () => {
       api.chatClose(sessionId, viewerId);
       unsub();
     };
-  }, [sessionId, viewerId, stickToBottom]);
+  }, [sessionId, viewerId]);
 
-  // Keep at bottom on new messages if sticking
+  // Keep the older page's arrival from moving what the reader is looking at.
+  useLayoutEffect(() => {
+    const anchor = anchorRef.current;
+    const el = scrollRef.current;
+    if (!anchor || !el) return;
+    anchorRef.current = null;
+    el.scrollTop = anchor.top + (el.scrollHeight - anchor.height);
+  }, [messages]);
+
+  // Follow new and growing rows while the reader is at the bottom.
   useEffect(() => {
-    if (stickToBottom && messages.length > 0) {
+    if (stickRef.current && foldedMessages.length > 0 && !anchorRef.current) {
       virtualizer.scrollToIndex(foldedMessages.length - 1, { align: 'end' });
       setShowLatestPill(false);
     }
-  }, [messages.length, foldedMessages.length, stickToBottom, virtualizer]);
+  }, [messages, foldedMessages.length, virtualizer]);
 
   const onScroll = useCallback((e) => {
     const el = e.target;
@@ -331,25 +300,33 @@ export function ChatView({ sessionId, onRestart, onResume, headerActions }) {
       scrollHeight: el.scrollHeight,
       clientHeight: el.clientHeight,
     });
-    setStickToBottom(isAtBottom);
-    if (isAtBottom) {
-      setShowLatestPill(false);
-    }
+    stickRef.current = isAtBottom;
+    if (isAtBottom) setShowLatestPill(false);
   }, []);
+
+  const jumpToLatest = useCallback(() => {
+    stickRef.current = true;
+    if (foldedMessages.length > 0) {
+      virtualizer.scrollToIndex(foldedMessages.length - 1, { align: 'end' });
+    }
+    setShowLatestPill(false);
+  }, [foldedMessages.length, virtualizer]);
 
   const handleStop = useCallback(() => {
     if (currentSession?.state !== 'working') return;
-    window.electronAPI.chatStop(sessionId);
+    window.electronAPI.chatStop(sessionId).catch(() => {});
   }, [sessionId, currentSession?.state]);
 
   const doSend = useCallback(() => {
-    if (!input.trim()) return;
-    window.electronAPI.chatSend(sessionId, input, attachments);
-    clearInput();
-    // Force stick to bottom when user sends a message
-    setStickToBottom(true);
+    if (!input.trim() && attachments.length === 0) return;
+    window.electronAPI.chatSend(sessionId, input, attachments).catch(() => {});
+    clearDraft();
+    setRecallIndex(-1);
+    setCompletion(null);
+    // Sending is a request to see the answer: follow the bottom again.
+    stickRef.current = true;
     setShowLatestPill(false);
-  }, [sessionId, input, attachments, clearInput]);
+  }, [sessionId, input, attachments, clearDraft]);
 
   // ⌘. from the terminal: every Cmd chord bubbles out of the xterm, and
   // nothing in the app menu binds ⌘. Scoped to the focused pane via the
@@ -361,7 +338,7 @@ export function ChatView({ sessionId, onRestart, onResume, headerActions }) {
       if (rootRef.current?.contains(document.activeElement)) return;
       if (currentSession?.state !== 'working') return;
       e.preventDefault();
-      window.electronAPI.chatStop(sessionId);
+      window.electronAPI.chatStop(sessionId).catch(() => {});
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -370,7 +347,7 @@ export function ChatView({ sessionId, onRestart, onResume, headerActions }) {
   const handleModelChange = useCallback(
     (modelId) => {
       if (!modelId) return;
-      window.electronAPI.chatModel(sessionId, modelId);
+      window.electronAPI.chatModel(sessionId, modelId).catch(() => {});
     },
     [sessionId]
   );
@@ -378,36 +355,35 @@ export function ChatView({ sessionId, onRestart, onResume, headerActions }) {
   const handlePaste = async (e) => {
     const items = e.clipboardData?.items;
     if (!items) return;
-    const newAttachments = [];
-    for (const item of items) {
-      if (item.type.indexOf('image/') === 0) {
-        const file = item.getAsFile();
-        if (file) {
-          const buffer = await file.arrayBuffer();
-          const path = await window.electronAPI.chatSaveImage(buffer);
-          newAttachments.push(path);
-        }
+    const images = [...items].filter((item) => item.type.startsWith('image/'));
+    if (images.length === 0) return;
+    e.preventDefault();
+    const paths = [];
+    for (const item of images) {
+      const file = item.getAsFile();
+      if (!file) continue;
+      try {
+        paths.push(await window.electronAPI.chatSaveImage(await file.arrayBuffer()));
+      } catch {
+        // an unsaved image is just not attached
       }
     }
-    if (newAttachments.length > 0) {
-      e.preventDefault();
-      setAttachments([...attachments, ...newAttachments]);
-    }
+    if (paths.length > 0) setAttachments([...attachments, ...paths]);
   };
 
-  const handleDrop = async (e) => {
+  const handleDrop = (e) => {
     e.preventDefault();
-    const files = [...e.dataTransfer.files];
-    const newAttachments = [];
-    if (files.length > 0) {
-      const paths = files.map((f) => window.electronAPI.pathForFile(f)).filter(Boolean);
-      for (const p of paths) {
-        if (isImageDropPath(p)) newAttachments.push(p);
-      }
-    }
-    if (newAttachments.length > 0) {
-      setAttachments([...attachments, ...newAttachments]);
-    }
+    const paths = [...e.dataTransfer.files]
+      .map((f) => window.electronAPI.pathForFile(f))
+      .filter((p) => p && isImageDropPath(p));
+    if (paths.length > 0) setAttachments([...attachments, ...paths]);
+  };
+
+  const insertCompletion = (match) => {
+    if (!completion || !match) return;
+    const value = completion.type === 'file' ? match : match.name;
+    setInput(applyCompletion(input, completion, value));
+    setCompletion(null);
   };
 
   const handleKeyDown = (e) => {
@@ -419,48 +395,49 @@ export function ChatView({ sessionId, onRestart, onResume, headerActions }) {
       handleStop();
       return;
     }
-    if (mentionState) {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        setMentionState(null);
-        return;
-      }
+    if (e.nativeEvent?.isComposing) return;
+    // The completion list takes the keys only while it shows something;
+    // otherwise Enter still sends.
+    if (completion && e.key === 'Escape') {
+      e.preventDefault();
+      setCompletion(null);
+      return;
+    }
+    if (completion && completionMatches.length > 0) {
       if (e.key === 'ArrowDown') {
         e.preventDefault();
-        setMentionSelected((s) => Math.min(s + 1, mentionMatches.length - 1));
+        setCompletionSelected((s) => Math.min(s + 1, completionMatches.length - 1));
         return;
       }
       if (e.key === 'ArrowUp') {
         e.preventDefault();
-        setMentionSelected((s) => Math.max(s - 1, 0));
+        setCompletionSelected((s) => Math.max(s - 1, 0));
         return;
       }
       if (e.key === 'Enter' || e.key === 'Tab') {
         e.preventDefault();
-        const match = mentionMatches[mentionSelected];
-        if (match) {
-          const val = mentionState.type === 'file' ? match : match.name;
-          const before = input.substring(0, mentionState.start);
-          const after = input.substring(mentionState.start + mentionState.query.length);
-          setInput(before + val + ' ' + after);
-          setMentionState(null);
-        }
+        insertCompletion(completionMatches[completionSelected]);
         return;
       }
     }
-    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-      const caret = e.target.selectionStart;
-      const isFirstLine = !input.substring(0, caret).includes('\n');
-      if (e.key === 'ArrowUp' && !isFirstLine) return;
-
-      const dir = e.key === 'ArrowUp' ? 1 : -1;
-      const { index: nextIdx, text } = recallStep(history, recallIndex, dir);
-      if (nextIdx !== recallIndex) {
+    if (
+      (e.key === 'ArrowUp' || e.key === 'ArrowDown') &&
+      recallKey({
+        key: e.key,
+        text: input,
+        caret: e.target.selectionStart,
+        recalling: recallIndex >= 0,
+      })
+    ) {
+      const { index, text } = recallStep(
+        history,
+        recallIndex,
+        e.key === 'ArrowUp' ? 1 : -1
+      );
+      if (index !== recallIndex) {
         e.preventDefault();
-        setRecallIndex(nextIdx);
-        if (text !== null) setInput(text);
-        else clearInput();
-        setRecallIndex(-1);
+        setRecallIndex(index);
+        setInput(text ?? '');
       }
       return;
     }
@@ -470,49 +447,65 @@ export function ChatView({ sessionId, onRestart, onResume, headerActions }) {
     }
   };
 
-  const handleLink = useCallback((url) => {
-    window.electronAPI.openSiteInBrowser(url);
-  }, []);
-
-  const fetchFull = async (msgId, toolUseId) => {
-    const content = await window.electronAPI.chatFetchFull(sessionId, toolUseId);
-    if (content) {
+  const fetchFull = useCallback(
+    async (msgId, toolUseId) => {
+      const content = await window.electronAPI
+        .chatFetchFull(sessionId, toolUseId)
+        .catch(() => null);
+      if (!content) return;
       setMessages((prev) =>
         prev.map((m) => {
           if (m.id !== msgId) return m;
           const next = { ...m };
-          if (
-            next.role === 'tool' &&
-            next.result &&
-            next.result.tool_use_id === toolUseId
-          ) {
+          if (next.role === 'tool' && next.result?.tool_use_id === toolUseId) {
             next.result = { ...next.result, content, truncated: false };
           } else if (next.blocks) {
-            next.blocks = next.blocks.map((b) => {
-              if (b.type === 'tool_result' && b.tool_use_id === toolUseId) {
-                return { ...b, content, truncated: false };
-              }
-              return b;
-            });
+            next.blocks = next.blocks.map((b) =>
+              b.type === 'tool_result' && b.tool_use_id === toolUseId
+                ? { ...b, content, truncated: false }
+                : b
+            );
           }
           return next;
         })
       );
-    }
-  };
+    },
+    [sessionId]
+  );
+
+  const ctx = useMemo(
+    () => ({
+      sessionId,
+      ask: currentSession?.ask || null,
+      tasks: chatState?.tasks,
+      nested: nestedMessages,
+      onLink: handleLink,
+      onFetchFull: fetchFull,
+      loadOlderNested,
+    }),
+    [
+      sessionId,
+      currentSession?.ask,
+      chatState?.tasks,
+      nestedMessages,
+      handleLink,
+      fetchFull,
+      loadOlderNested,
+    ]
+  );
+
+  const meter = contextMeter(chatState?.usage);
 
   return (
     <div
       ref={rootRef}
       className="flex flex-col h-full bg-background text-foreground relative"
     >
-      {(headerTitle || headerActions) && (
+      {(headerTitle || headerActions || meter) && (
         <div className="px-4 py-1 border-b border-border bg-tertiary text-[13px] font-medium flex-none flex items-center gap-3">
           <span className="flex-1 truncate">{headerTitle}</span>
-          {contextMeter(chatState?.usage) && (
-            <span className="text-muted-foreground font-normal">
-              {contextMeter(chatState.usage).label}
-            </span>
+          {meter && (
+            <span className="text-muted-foreground font-normal">{meter.label}</span>
           )}
           {headerActions}
         </div>
@@ -521,6 +514,18 @@ export function ChatView({ sessionId, onRestart, onResume, headerActions }) {
         {staleNotice && (
           <div className="text-center p-2 mb-4 bg-destructive/10 text-destructive text-[12px] rounded">
             Transcript changed — reopen chat
+          </div>
+        )}
+        {!atStart && foldedMessages.length > 0 && (
+          <div className="mb-4 flex justify-center">
+            <Button variant="ghost" onClick={loadOlder} disabled={isLoadingOlder}>
+              {isLoadingOlder ? 'Loading…' : 'Load older'}
+            </Button>
+          </div>
+        )}
+        {foldedMessages.length === 0 && !staleNotice && (
+          <div className="py-10 text-center text-[13px] text-muted-foreground">
+            No messages yet. Send a prompt to start.
           </div>
         )}
         <div
@@ -545,188 +550,9 @@ export function ChatView({ sessionId, onRestart, onResume, headerActions }) {
                   width: '100%',
                   transform: `translateY(${virtualRow.start}px)`,
                 }}
-                className={`flex flex-col mb-4 ${msg.role === 'user' && !msg.orphan ? 'items-end' : 'items-start'}`}
+                className="pb-4"
               >
-                <div
-                  className={`max-w-[80%] rounded-lg p-3 ${
-                    msg.role === 'user' && !msg.orphan
-                      ? 'bg-primary text-primary-foreground'
-                      : 'bg-muted'
-                  }`}
-                >
-                  {msg.role === 'tool-run' ? (
-                    <div>
-                      <div className="font-semibold text-[11px] mb-1 opacity-70">
-                        Tool Run
-                      </div>
-                      <details className="text-[13px]" open={runNeedsAttention(msg)}>
-                        <summary className="cursor-pointer font-medium">
-                          {msg.summary}
-                        </summary>
-                        <div className="mt-2 pl-2 border-l border-border/50 flex flex-col gap-2">
-                          {msg.items.map((item) => (
-                            <div
-                              key={item.id}
-                              className="text-[12px] bg-background/30 p-2 rounded"
-                            >
-                              {item.subagent ? (
-                                <SubagentRow
-                                  item={item}
-                                  nestedMessages={nestedMessages[item.tool_use?.id]}
-                                  sessionId={sessionId}
-                                />
-                              ) : item.edit ? (
-                                <div>
-                                  <div className="font-mono text-[10px] mb-1">
-                                    {item.edit.path}
-                                  </div>
-                                  <DiffView
-                                    name={item.edit.path}
-                                    original={item.edit.original}
-                                    modified={item.edit.modified}
-                                  />
-                                </div>
-                              ) : (
-                                <div>
-                                  {(() => {
-                                    // Only Agents with a key map get a card;
-                                    // otherwise it stays a plain tool row.
-                                    if (
-                                      item.tool_use?.name === 'AskUserQuestion' &&
-                                      currentSession?.ask
-                                    ) {
-                                      return (
-                                        <QuestionCard
-                                          sessionId={sessionId}
-                                          toolUseId={item.tool_use.id}
-                                          prompt={item.tool_use.input}
-                                          recorded={item.result?.answers}
-                                          onSubmit={(selections) =>
-                                            window.electronAPI.chatAnswer(
-                                              sessionId,
-                                              buildAskAnswerKeys(
-                                                item.tool_use.input,
-                                                selections,
-                                                currentSession.ask
-                                              )
-                                            )
-                                          }
-                                        />
-                                      );
-                                    }
-
-                                    const taskState = item.taskId
-                                      ? chatState?.tasks?.[item.taskId]
-                                      : null;
-                                    if (!taskState) return null;
-                                    return (
-                                      <div className="mb-2 flex items-center gap-2 text-[11px]">
-                                        <span
-                                          className={`px-1.5 py-0.5 rounded font-medium ${taskState.status === 'running' ? 'bg-highlight/15 text-highlight' : 'bg-muted text-muted-foreground'}`}
-                                        >
-                                          {taskState.status}
-                                        </span>
-                                        <code
-                                          className="font-mono bg-background/50 px-1 rounded truncate flex-1"
-                                          title={taskState.command}
-                                        >
-                                          {taskState.command}
-                                        </code>
-                                      </div>
-                                    );
-                                  })()}
-                                  <ChatMarkdown
-                                    text={
-                                      item.content ||
-                                      (item.tool_use
-                                        ? `\`\`\`json\n${JSON.stringify(item.tool_use, null, 2)}\n\`\`\``
-                                        : '')
-                                    }
-                                    empty="Empty"
-                                    onLink={handleLink}
-                                  />
-                                  <ImageList
-                                    sessionId={sessionId}
-                                    images={item.result?.images}
-                                  />
-                                  {(item.result?.truncated ||
-                                    (item.blocks &&
-                                      item.blocks.some((b) => b.truncated))) && (
-                                    <div className="mt-2 text-[11px] text-muted-foreground bg-background/50 p-2 rounded">
-                                      Output truncated.{' '}
-                                      <button
-                                        onClick={() =>
-                                          fetchFull(
-                                            item.id,
-                                            item.tool_use?.id ||
-                                              item.blocks?.[0]?.tool_use_id
-                                          )
-                                        }
-                                        className="underline hover:text-foreground"
-                                      >
-                                        Show full output
-                                      </button>
-                                    </div>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      </details>
-                    </div>
-                  ) : msg.role === 'reasoning' ? (
-                    <div>
-                      {msg.content ? (
-                        <details>
-                          <summary className="cursor-pointer font-semibold text-[11px] opacity-70 text-muted-foreground/80">
-                            Thinking
-                          </summary>
-                          <div className="text-[13px] italic opacity-80 break-words mt-1 pl-2 border-l border-border/50">
-                            <ChatMarkdown
-                              text={msg.content}
-                              empty="Empty"
-                              onLink={handleLink}
-                            />
-                          </div>
-                        </details>
-                      ) : (
-                        <div className="font-semibold text-[11px] opacity-70 text-muted-foreground/80">
-                          Thought
-                        </div>
-                      )}
-                    </div>
-                  ) : msg.role === 'assistant' ? (
-                    <div>
-                      <div className="font-semibold text-[11px] mb-1 opacity-70">
-                        Assistant
-                      </div>
-                      <div className="text-[13px] break-words">
-                        <ChatMarkdown
-                          text={msg.content}
-                          empty="Empty"
-                          onLink={handleLink}
-                        />
-                      </div>
-                    </div>
-                  ) : (
-                    <div>
-                      <div className="font-semibold text-[11px] mb-1 opacity-70">
-                        {msg.role === 'user'
-                          ? msg.orphan
-                            ? 'Orphan Result'
-                            : 'You'
-                          : msg.role}
-                      </div>
-                      <div className="text-[13px] break-words">
-                        {msg.content && (
-                          <ChatMarkdown text={msg.content} empty="" onLink={handleLink} />
-                        )}
-                        <ImageList sessionId={sessionId} images={msg.images} />
-                      </div>
-                    </div>
-                  )}
-                </div>
+                <ChatItem msg={msg} ctx={ctx} />
               </div>
             );
           })}
@@ -740,11 +566,11 @@ export function ChatView({ sessionId, onRestart, onResume, headerActions }) {
           </div>
         )}
 
-        {currentSession?.state === 'working' && (
+        {isWorking && (
           <div className="flex flex-col mt-4 mb-4 items-start relative z-10">
             <div className="max-w-[80%] rounded-lg p-3 bg-muted text-[13px] text-muted-foreground flex items-center gap-2">
               <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-              Working...
+              Working…
             </div>
           </div>
         )}
@@ -752,13 +578,8 @@ export function ChatView({ sessionId, onRestart, onResume, headerActions }) {
 
       {showLatestPill && (
         <button
-          onClick={() => {
-            setStickToBottom(true);
-            if (messages.length > 0) {
-              virtualizer.scrollToIndex(messages.length - 1, { align: 'end' });
-            }
-            setShowLatestPill(false);
-          }}
+          type="button"
+          onClick={jumpToLatest}
           className="absolute bottom-20 left-1/2 -translate-x-1/2 bg-accent text-accent-foreground px-3 py-1.5 rounded-full text-[12px] shadow-md hover:bg-accent/80 transition-colors z-10"
         >
           Jump to latest
@@ -788,7 +609,7 @@ export function ChatView({ sessionId, onRestart, onResume, headerActions }) {
                     {todo.status === 'completed' ? '☑' : '☐'}
                   </div>
                   <div
-                    className={`flex-1 ${todo.status === 'completed' ? 'line-through opacity-50' : ''}`}
+                    className={`flex-1 ${todo.status === 'completed' ? 'line-through opacity-50' : todo.status === 'in_progress' ? 'font-medium' : ''}`}
                   >
                     {todo.content}
                   </div>
@@ -806,42 +627,38 @@ export function ChatView({ sessionId, onRestart, onResume, headerActions }) {
               </span>
               <div className="flex gap-2">
                 {onRestart && (
-                  <button className="btn btn-secondary" onClick={() => onRestart()}>
+                  <Button variant="secondary" onClick={() => onRestart()}>
                     Respawn
-                  </button>
+                  </Button>
                 )}
                 {showResume && onResume && (
-                  <button className="btn btn-primary" onClick={() => onResume()}>
+                  <Button variant="primary" onClick={() => onResume()}>
                     Resume in new Session
-                  </button>
+                  </Button>
                 )}
               </div>
             </div>
           </div>
         ) : (
-          <div className="p-4 flex flex-col gap-2">
-            {mentionState && mentionMatches.length > 0 && (
-              <div className="absolute bottom-full mb-1 left-4 max-h-[200px] overflow-y-auto bg-popover text-popover-foreground border shadow-lg rounded-md z-50 text-[13px] min-w-[250px]">
-                {mentionMatches.map((m, i) => (
+          <div className="relative p-4 flex flex-col gap-2">
+            {completion && completionMatches.length > 0 && (
+              <div className="panel-menu absolute bottom-full left-4 mb-1 max-h-[200px] min-w-[250px] max-w-[calc(100%-2rem)] overflow-y-auto p-1 z-50">
+                {completionMatches.map((m, i) => (
                   <div
-                    key={mentionState.type === 'file' ? m : m.name}
-                    className={`px-3 py-1.5 cursor-pointer flex justify-between gap-4 ${i === mentionSelected ? 'bg-accent text-accent-foreground' : 'hover:bg-muted'}`}
+                    key={completion.type === 'file' ? m : m.name}
+                    className={`panel-item cursor-pointer justify-between gap-4 ${i === completionSelected ? 'bg-accent' : ''}`}
                     onMouseDown={(e) => {
                       e.preventDefault();
-                      const val = mentionState.type === 'file' ? m : m.name;
-                      const before = input.substring(0, mentionState.start);
-                      const after = input.substring(
-                        mentionState.start + mentionState.query.length
-                      );
-                      setInput(before + val + ' ' + after);
-                      setMentionState(null);
+                      insertCompletion(m);
                     }}
                   >
                     <span className="truncate">
-                      {mentionState.type === 'file' ? m : m.name}
+                      {completion.type === 'file' ? m : m.name}
                     </span>
-                    {mentionState.type === 'cmd' && (
-                      <span className="opacity-50 text-xs shrink-0">{m.description}</span>
+                    {completion.type === 'cmd' && (
+                      <span className="shrink-0 text-[11px] text-muted-foreground">
+                        {m.description}
+                      </span>
                     )}
                   </div>
                 ))}
@@ -856,6 +673,8 @@ export function ChatView({ sessionId, onRestart, onResume, headerActions }) {
                   >
                     <span className="truncate flex-1">{path.split(/[\\/]/).pop()}</span>
                     <button
+                      type="button"
+                      aria-label="Remove image"
                       onClick={() =>
                         setAttachments(attachments.filter((_, idx) => idx !== i))
                       }
@@ -869,27 +688,16 @@ export function ChatView({ sessionId, onRestart, onResume, headerActions }) {
             )}
             <textarea
               className="w-full bg-background border border-input rounded-md px-3 py-2 text-[13px] focus:outline-none focus:ring-1 focus:ring-ring resize-y min-h-[60px]"
-              placeholder="Message..."
+              placeholder="Message…"
               value={input}
               onChange={(e) => {
                 const val = e.target.value;
                 setInput(val);
                 setRecallIndex(-1);
-
-                const caret = e.target.selectionStart;
-                const textBeforeCaret = val.substring(0, caret);
-                const match = textBeforeCaret.match(/(?:^|\s)([@/])(\S*)$/);
-                if (match) {
-                  setMentionState({
-                    type: match[1] === '@' ? 'file' : 'cmd',
-                    query: match[2],
-                    start: caret - match[2].length,
-                  });
-                } else {
-                  setMentionState(null);
-                }
+                setCompletion(completionTrigger(val, e.target.selectionStart));
               }}
               onKeyDown={handleKeyDown}
+              onBlur={() => setCompletion(null)}
               onPaste={handlePaste}
               onDrop={handleDrop}
               onDragOver={(e) => e.preventDefault()}
@@ -913,17 +721,17 @@ export function ChatView({ sessionId, onRestart, onResume, headerActions }) {
                 <span />
               )}
               {isWorking ? (
-                <button onClick={handleStop} className="btn btn-danger">
+                <Button variant="danger" onClick={handleStop}>
                   Stop
-                </button>
+                </Button>
               ) : (
-                <button
+                <Button
+                  variant="primary"
                   onClick={doSend}
-                  disabled={!input.trim()}
-                  className="btn btn-primary disabled:opacity-50"
+                  disabled={!input.trim() && attachments.length === 0}
                 >
                   Send
-                </button>
+                </Button>
               )}
             </div>
           </div>
@@ -936,19 +744,4 @@ export function ChatView({ sessionId, onRestart, onResume, headerActions }) {
 function backgroundTasksLabel(tasks) {
   const n = Object.values(tasks).filter((t) => t.status === 'running').length;
   return `${n} background task${n === 1 ? '' : 's'} running`;
-}
-
-function ImageList({ sessionId, images }) {
-  if (!images?.length) return null;
-  return (
-    <div className="mt-2 flex flex-wrap gap-2">
-      {images.map((ref) => (
-        <ImageRef
-          key={`${ref.uuid}-${ref.path.join('.')}`}
-          sessionId={sessionId}
-          refData={ref}
-        />
-      ))}
-    </div>
-  );
 }

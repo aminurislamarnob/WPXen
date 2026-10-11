@@ -1,5 +1,15 @@
 import { describe, it, expect } from 'vitest';
-import { foldToolRuns, subagentSummary, runNeedsAttention } from '../src/lib/chatRows.js';
+import {
+  foldToolRuns,
+  subagentSummary,
+  runNeedsAttention,
+  toolLabel,
+  toolTarget,
+  reasoningLabel,
+  partitionChatRows,
+  upsertRows,
+  prependOlder,
+} from '../src/lib/chatRows.js';
 
 describe('foldToolRuns', () => {
   it('groups consecutive tool rows', () => {
@@ -126,5 +136,88 @@ describe('runNeedsAttention', () => {
     expect(runNeedsAttention(run({ role: 'tool', tool_use: { name: 'Bash' } }))).toBe(
       false
     );
+  });
+});
+
+describe('tool rows', () => {
+  it('shows MCP tools as server · tool', () => {
+    expect(toolLabel('mcp__github__create_issue')).toBe('github · create_issue');
+    expect(toolLabel('Read')).toBe('Read');
+  });
+
+  it("takes the target from the call's input", () => {
+    expect(toolTarget({ name: 'Read', input: { file_path: '/site/a.php' } })).toBe(
+      '/site/a.php'
+    );
+    expect(
+      toolTarget({ name: 'Bash', input: { command: 'npm test\nnpm run lint' } })
+    ).toBe('npm test');
+    expect(toolTarget({ name: 'Grep', input: { pattern: 'add_action' } })).toBe(
+      'add_action'
+    );
+    expect(toolTarget({ name: 'WebFetch', input: { url: 'https://x.test' } })).toBe(
+      'https://x.test'
+    );
+    // Codex sends its arguments as a JSON string; Antigravity names keys its way.
+    expect(
+      toolTarget({ name: 'shell', input: JSON.stringify({ command: ['ls', '-la'] }) })
+    ).toBe('ls -la');
+    expect(toolTarget({ name: 'view_file', input: { AbsolutePath: '/s/b.js' } })).toBe(
+      '/s/b.js'
+    );
+    expect(toolTarget({ name: 'TaskList', input: {} })).toBeNull();
+  });
+});
+
+describe('reasoningLabel', () => {
+  it('says how long the thought took when Claude timed it', () => {
+    expect(reasoningLabel({ durationMs: 3200 })).toBe('Thought for 3s');
+    expect(reasoningLabel({ durationMs: 200 })).toBe('Thought for 1s');
+    expect(reasoningLabel({ durationMs: 95_000 })).toBe('Thought for 1m 35s');
+    expect(reasoningLabel({ durationMs: null })).toBe('Thought');
+  });
+});
+
+describe('applying pushes', () => {
+  it('splits nested rows, resets and the stale notice out of a push', () => {
+    const parts = partitionChatRows([
+      { id: 'a', role: 'assistant' },
+      { id: 'n1', role: 'assistant', parentId: 'toolu_A' },
+      { notice: true, kind: 'transcript-changed' },
+    ]);
+    expect(parts.top.map((r) => r.id)).toEqual(['a']);
+    expect(parts.nested.toolu_A.map((r) => r.id)).toEqual(['n1']);
+    expect(parts.stale).toBe(true);
+    expect(partitionChatRows([{ id: 'x' }, { reset: true }, { id: 'y' }])).toMatchObject({
+      reset: true,
+      top: [{ id: 'y' }],
+    });
+  });
+
+  it('upserts by id and drops orphans a call has claimed', () => {
+    const list = [
+      { id: 'orphan-1', orphan: true },
+      { id: 'u', role: 'user' },
+    ];
+    const next = upsertRows(list, [{ id: 'call-1', role: 'tool', remove: ['orphan-1'] }]);
+    expect(next.map((r) => r.id)).toEqual(['u', 'call-1']);
+    expect(upsertRows(next, [])).toBe(next);
+  });
+
+  it('prepends an older page without duplicating rows already shown', () => {
+    const list = [
+      { id: 'b', v: 'new' },
+      { id: 'orphan-c', orphan: true },
+    ];
+    const next = prependOlder(list, [
+      { id: 'a' },
+      { id: 'b', v: 'old' },
+      { id: 'c', remove: ['orphan-c'] },
+    ]);
+    expect(next).toEqual([
+      { id: 'a' },
+      { id: 'c', remove: ['orphan-c'] },
+      { id: 'b', v: 'new' },
+    ]);
   });
 });
