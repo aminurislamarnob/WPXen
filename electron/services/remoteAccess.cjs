@@ -1448,7 +1448,19 @@ function handleDeviceConnection(ws, req) {
   let channel = null;
   let inCounter = 0;
   let outCounter = 0;
-  const keypair = getHostKeypair();
+  // A host key that no longer decrypts (a reset Keychain, a copied data file)
+  // is reported by getHostKeypair, never regenerated. Thrown from here it
+  // would escape the WebSocket server's connection event and take the main
+  // process down on every phone that dials in — drop the socket instead, and
+  // let Settings → Mobile (pairingOffer) surface the error where it is read.
+  let keypair;
+  try {
+    keypair = getHostKeypair();
+  } catch (err) {
+    deps.log(`[remote-access] device connection refused: ${err?.message || err}`);
+    drop(ws);
+    return;
+  }
 
   let firstTimer = setTimeout(drop, HANDSHAKE_TIMEOUT_MS, ws);
   ws.on('close', () => clearTimeout(firstTimer));

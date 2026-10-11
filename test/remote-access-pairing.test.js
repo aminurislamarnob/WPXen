@@ -3,7 +3,10 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import WebSocket from 'ws';
-import remoteAccess, { HOST_ID_KEY } from '../electron/services/remoteAccess.cjs';
+import remoteAccess, {
+  HOST_ID_KEY,
+  HOST_KEY_KEY,
+} from '../electron/services/remoteAccess.cjs';
 import {
   PROTOCOL_VERSION,
   PAIR_ERRORS,
@@ -725,6 +728,35 @@ describe('encrypted channel', () => {
     // under its own wpxen-prefixed entry.
     expect(Object.keys(store.data).some((k) => k.startsWith('wpxen'))).toBe(true);
     expect(raw).not.toMatch(/"secretKey"|"secret"/);
+  });
+
+  it('drops a device socket when the host key no longer decrypts, and stays up', async () => {
+    const port = listen();
+    // A stored key the Keychain can no longer open: never regenerated (that
+    // would un-pair every phone), so every dial must be refused — without
+    // the throw escaping the connection event and taking the app down.
+    store.set(HOST_KEY_KEY, 'ciphertext-from-another-keychain');
+    const logs = [];
+    remoteAccess.__setDeps({
+      log: (line) => logs.push(line),
+      safeStorage: {
+        isEncryptionAvailable: () => true,
+        encryptString: () => Buffer.from('x'),
+        decryptString: () => {
+          throw new Error('The data could not be decrypted.');
+        },
+      },
+    });
+    const socket = new WebSocket(wsUrl(port));
+    const closed = new Promise((resolve) => socket.on('close', resolve));
+    socket.on('error', () => {});
+    await closed;
+    expect(logs.join('\n')).toMatch(/unreadable/);
+    // The server is still serving: a health check answers as before.
+    const res = await fetch(`http://127.0.0.1:${port}/wpxen-health?nonce=n1`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ nonce: 'n1', hostId: 'test-host-id' });
+    expect(remoteAccess.getStatus().state).toBe('listening');
   });
 });
 
