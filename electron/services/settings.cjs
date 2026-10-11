@@ -3,6 +3,11 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const {
+  DEFAULT_PORT: DEFAULT_REMOTE_PORT,
+  MIN_PORT: MIN_REMOTE_PORT,
+  MAX_PORT: MAX_REMOTE_PORT,
+} = require('./remoteAccess.cjs');
 
 // `~` and `~/…` against the home directory; anything else unchanged.
 function expandHome(p) {
@@ -197,6 +202,17 @@ const SETTINGS = {
             a.cmd.trim().length > 0
         )) ||
       'each agent needs a slug id and a command',
+  },
+
+  // ── Remote Access ────────────────────────────────────────────────────────
+  // Off until the user opts in: nothing on the Mac is reachable until then
+  // (services/remoteAccess.cjs). The port deliberately avoids Orca's 6768.
+  'remote.enabled': { type: 'bool', default: false },
+  'remote.port': {
+    type: 'int',
+    default: DEFAULT_REMOTE_PORT,
+    min: MIN_REMOTE_PORT,
+    max: MAX_REMOTE_PORT,
   },
 
   // ── Tasks (Start →) ──────────────────────────────────────────────────────

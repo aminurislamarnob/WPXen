@@ -119,6 +119,7 @@
     "files": [
       "dist/**/*",
       "electron/**/*",
+      "shared/**/*",
       "assets/**/*",
       "package.json"
     ],
