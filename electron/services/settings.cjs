@@ -3,6 +3,11 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const {
+  DEFAULT_PORT: DEFAULT_REMOTE_PORT,
+  MIN_PORT: MIN_REMOTE_PORT,
+  MAX_PORT: MAX_REMOTE_PORT,
+} = require('./remoteAccess.cjs');
 
 // `~` and `~/…` against the home directory; anything else unchanged.
 function expandHome(p) {
@@ -197,6 +202,35 @@ const SETTINGS = {
             a.cmd.trim().length > 0
         )) ||
       'each agent needs a slug id and a command',
+  },
+
+  // ── Remote Access ────────────────────────────────────────────────────────
+  // Off until the user opts in: nothing on the Mac is reachable until then
+  // (services/remoteAccess.cjs). The port deliberately avoids Orca's 6768.
+  'remote.enabled': { type: 'bool', default: false },
+  'remote.port': {
+    type: 'int',
+    default: DEFAULT_REMOTE_PORT,
+    min: MIN_REMOTE_PORT,
+    max: MAX_REMOTE_PORT,
+  },
+  // Hold a sleep assertion while Remote Access is in use (an Agent working
+  // or waiting, or a device connected). On by default so arriving work
+  // doesn't find a sleeping Mac; the lid on battery still wins regardless.
+  'remote.keepAwake': { type: 'bool', default: true },
+  // The public hostname the Cloudflare dashboard routes at this Mac. Blank
+  // until set; the tunnel token itself is never a setting (it lives
+  // Keychain-encrypted, through its own IPC handlers).
+  'remote.hostname': {
+    type: 'string',
+    default: '',
+    validate: (v) =>
+      v === '' ||
+      (/^(?=.{1,253}$)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$/i.test(
+        v
+      ) &&
+        !/^\d+\.\d+\.\d+\.\d+$/.test(v)) ||
+      'enter a hostname like wpxen.example.com, without a scheme or path',
   },
 
   // ── Tasks (Start →) ──────────────────────────────────────────────────────

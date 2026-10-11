@@ -15,9 +15,9 @@ export function keepAwakeMode(value) {
   return KEEP_AWAKE_MODES.find((m) => m.value === value) || KEEP_AWAKE_MODES[2];
 }
 
-const INITIAL = { mode: 'off', active: false, workingCount: 0 };
+const INITIAL = { mode: 'off', active: false, workingCount: 0, reasons: [] };
 
-// { mode, active, workingCount }, kept current by the main-process broadcast.
+// { mode, active, workingCount, reasons }, kept current by the main-process broadcast.
 export function useKeepAwakeStatus() {
   const [status, setStatus] = useState(INITIAL);
 

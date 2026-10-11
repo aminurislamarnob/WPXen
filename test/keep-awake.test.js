@@ -77,6 +77,7 @@ describe('modes', () => {
       mode: 'off',
       active: false,
       workingCount: 0,
+      reasons: [],
     });
     expect(spawn).not.toHaveBeenCalled();
     expect(blocker.start).not.toHaveBeenCalled();
@@ -92,7 +93,12 @@ describe('modes', () => {
     );
     expect(liveCaffeinate()).toBe(1);
     expect(blocker.held.size).toBe(0);
-    expect(keepAwake.getStatus()).toEqual({ mode: 'on', active: true, workingCount: 0 });
+    expect(keepAwake.getStatus()).toEqual({
+      mode: 'on',
+      active: true,
+      workingCount: 0,
+      reasons: ['always'],
+    });
   });
 
   it('switching back to Off releases the hold', async () => {
@@ -112,6 +118,7 @@ describe('modes', () => {
       mode: 'agent',
       active: false,
       workingCount: 0,
+      reasons: [],
     });
   });
 
@@ -174,7 +181,12 @@ describe('fallback', () => {
     keepAwake.__setDeps({ powerSaveBlocker: undefined });
     keepAwake.setMode('on');
     await tick();
-    expect(keepAwake.getStatus()).toEqual({ mode: 'on', active: false, workingCount: 0 });
+    expect(keepAwake.getStatus()).toEqual({
+      mode: 'on',
+      active: false,
+      workingCount: 0,
+      reasons: ['always'],
+    });
   });
 });
 
@@ -277,15 +289,17 @@ describe('status publishing', () => {
     keepAwake.setMode('off');
     await tick();
     expect(statuses).toEqual([
-      { mode: 'on', active: true, workingCount: 0 },
-      { mode: 'off', active: false, workingCount: 0 },
+      { mode: 'on', active: true, workingCount: 0, reasons: ['always'] },
+      { mode: 'off', active: false, workingCount: 0, reasons: [] },
     ]);
   });
 
   it('publishes the mode change even when nothing is held', async () => {
     keepAwake.setMode('agent');
     await tick();
-    expect(statuses).toEqual([{ mode: 'agent', active: false, workingCount: 0 }]);
+    expect(statuses).toEqual([
+      { mode: 'agent', active: false, workingCount: 0, reasons: [] },
+    ]);
   });
 });
 
@@ -335,6 +349,7 @@ describe('Agent mode', () => {
       mode: 'agent',
       active: true,
       workingCount: 1,
+      reasons: ['agent'],
     });
   });
 
@@ -349,6 +364,7 @@ describe('Agent mode', () => {
         mode: 'agent',
         active: false,
         workingCount: 0,
+        reasons: [],
       });
     }
   );
@@ -399,6 +415,7 @@ describe('Agent mode', () => {
       mode: 'agent',
       active: false,
       workingCount: 0,
+      reasons: [],
     });
   });
 
@@ -458,5 +475,115 @@ describe('Agent mode', () => {
     await tick();
     keepAwake.dispose();
     expect(notify).toBeNull();
+  });
+});
+
+describe('remote access reason', () => {
+  let sessions;
+  let notify;
+
+  const session = (over = {}) => ({
+    sessionId: 's1',
+    isAgent: true,
+    state: 'working',
+    exited: false,
+    lastOutputAt: Date.now(),
+    ...over,
+  });
+
+  function watch(initial) {
+    sessions = initial;
+    keepAwake.watchSessions({
+      list: () => sessions,
+      subscribe: (cb) => {
+        notify = cb;
+        return () => {
+          notify = null;
+        };
+      },
+    });
+  }
+
+  async function change(next) {
+    sessions = next;
+    notify?.(next);
+    await tick();
+  }
+
+  function setRemote(over = {}) {
+    keepAwake.setRemote({ enabled: true, connectedDevices: 0, ...over });
+  }
+
+  it('holds for a working Session with Remote Access on, mode off', async () => {
+    watch([session()]);
+    setRemote();
+    await tick();
+    expect(liveCaffeinate()).toBe(1);
+    expect(keepAwake.getStatus()).toMatchObject({ active: true, reasons: ['remote'] });
+  });
+
+  it('holds for needs-input, unlike Agent mode', async () => {
+    watch([session({ state: 'needs-input' })]);
+    setRemote();
+    await tick();
+    expect(liveCaffeinate()).toBe(1);
+    expect(keepAwake.getStatus().reasons).toEqual(['remote']);
+  });
+
+  it('holds for a connected device while every Session idles', async () => {
+    watch([session({ state: 'idle' })]);
+    setRemote({ connectedDevices: 1 });
+    await tick();
+    expect(liveCaffeinate()).toBe(1);
+  });
+
+  it('releases when nothing remote is going on', async () => {
+    watch([session({ state: 'idle' })]);
+    setRemote();
+    await tick();
+    expect(liveCaffeinate()).toBe(0);
+    expect(keepAwake.getStatus().reasons).toEqual([]);
+  });
+
+  it('never holds when the remote reason is disabled', async () => {
+    watch([session()]);
+    keepAwake.setRemote({ enabled: false, connectedDevices: 3 });
+    await tick();
+    expect(spawn).not.toHaveBeenCalled();
+    expect(keepAwake.getStatus().active).toBe(false);
+  });
+
+  it('holds only one assertion with mode on and remote together', async () => {
+    watch([session()]);
+    keepAwake.setMode('on');
+    setRemote();
+    await tick();
+    expect(spawn).toHaveBeenCalledTimes(1);
+    expect(liveCaffeinate()).toBe(1);
+    expect(keepAwake.getStatus().reasons).toEqual(['always', 'remote']);
+  });
+
+  it('applies the stale cutoff to remote-counted Sessions', async () => {
+    watch([session()]);
+    setRemote();
+    await tick();
+    expect(liveCaffeinate()).toBe(1);
+    await vi.advanceTimersByTimeAsync(keepAwake.STALE_AFTER_MS + 1);
+    expect(liveCaffeinate()).toBe(0);
+  });
+
+  it('ignores shells and exited Sessions for the remote count', async () => {
+    watch([session({ isAgent: false }), session({ exited: true })]);
+    setRemote();
+    await tick();
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('publishes reason changes', async () => {
+    watch([session({ state: 'idle' })]);
+    setRemote();
+    await tick();
+    await change([session()]);
+    expect(statuses.at(-1)).toMatchObject({ active: true, reasons: ['remote'] });
   });
 });

@@ -85,10 +85,18 @@ export default function Terminal({
     const ro = new ResizeObserver(() => sessionCache.fit(sessionId));
     ro.observe(host);
 
+    // A phone may have resized the pty while this window was unfocused.
+    // xterm's fit is a no-op when its own grid didn't change, but fit()
+    // still pushes the desktop cols/rows to the pty explicitly, so focusing
+    // the Mac always takes the size back with no manual step.
+    const refitOnFocus = () => sessionCache.fit(sessionId);
+    window.addEventListener('focus', refitOnFocus);
+
     return () => {
       writeParsed.dispose();
       scrolled.dispose();
       ro.disconnect();
+      window.removeEventListener('focus', refitOnFocus);
       sessionCache.detach(sessionId);
       searchAddonRef.current = null;
       termRef.current = null;

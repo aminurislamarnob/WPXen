@@ -50,6 +50,7 @@ const browserHistory = require('./services/browserHistory.cjs');
 const settingsService = require('./services/settings.cjs');
 const externalTools = require('./services/externalTools.cjs');
 const keepAwake = require('./services/keepAwake.cjs');
+const remoteAccess = require('./services/remoteAccess.cjs');
 const handoff = require('./services/handoff.cjs');
 const transcripts = require('./services/transcripts.cjs');
 const { humanize } = require('./services/errors.cjs');
@@ -287,6 +288,21 @@ function registerHandlers(win, storeInstance) {
       'agents.notifications.suppressWhenFocused': (_v, all) =>
         applyNotificationConfig(all),
       'agents.keepAwake': (value) => keepAwake.setMode(value),
+      'remote.enabled': (value, all) => {
+        if (value) remoteAccess.start({ port: all['remote.port'] });
+        else remoteAccess.stop();
+        remoteAccess.syncTunnel().catch(() => {});
+        applyRemoteReason();
+      },
+      'remote.port': (value, all) => {
+        if (all['remote.enabled']) remoteAccess.start({ port: value });
+        remoteAccess.syncTunnel().catch(() => {});
+        remoteAccess.maybeVerify().catch(() => {});
+      },
+      'remote.hostname': () => {
+        remoteAccess.maybeVerify().catch(() => {});
+      },
+      'remote.keepAwake': () => applyRemoteReason(),
     },
   });
   settings.migrateLegacy();
@@ -322,6 +338,126 @@ function registerHandlers(win, storeInstance) {
     subscribe: agents.onSessionsChanged,
   });
   powerMonitor.on('resume', () => keepAwake.handleResume());
+
+  // Remote Access. Subscribe before starting so the first status reaches the
+  // renderer. A start that fails asynchronously (port in use, nothing to fall
+  // back to) flips the switch back off, so Settings never claims a server
+  // that isn't running.
+  remoteAccess.__setDeps({
+    store,
+    getRemoteConfig: () => ({
+      enabled: settings.get('remote.enabled'),
+      port: settings.get('remote.port'),
+      hostname: settings.get('remote.hostname'),
+    }),
+    // The Session engine, narrowed to what the phone may reach (read-only;
+    // the engine itself is never changed for Remote Access).
+    sessions: {
+      list: agents.listAllSessions,
+      subscribe: agents.onSessionsChanged,
+      markRead: (id, read) => agents.markRead(id, read),
+      get: (id) => agents.getSession(id),
+      hasTranscript: (id) => agents.hasChatTranscript(id),
+      subscribeOutput: (id, sinks) => agents.subscribeOutput(id, sinks),
+      write: (id, data) => agents.write(id, data),
+      resize: (id, cols, rows) => agents.resize(id, cols, rows),
+      listAgents: () => agents.listAgents(),
+      shellId: agents.SHELL_ID,
+      targets: (projectId) => {
+        const site = findProject(projectId);
+        if (!site) throw new Error('Project not found');
+        return (site.launchTargets || []).map((t) => ({ id: t.id, label: t.label }));
+      },
+      launch: (args) =>
+        agents.launchForProject(
+          {
+            findProject,
+            getPresetArgs: (id) => store.get('agentPresets', {})[id]?.args || '',
+            addToProjects,
+          },
+          args
+        ),
+      stop: (id) => {
+        if (!agents.getSession(id)) throw new Error('Unknown session.');
+        agents.stop(id);
+        return { ok: true };
+      },
+      projects: () => {
+        const byId = new Map(getProjectRecords().map((r) => [r.id, r]));
+        return getProjectIds()
+          .map((id) => byId.get(id))
+          .filter(Boolean)
+          .map((r) => ({ id: r.id, name: r.name, kind: r.kind }));
+      },
+    },
+    // Pairing approval: bring the window up, ask Allow/Deny with the
+    // confirmation code, defaulting to Deny. The service times the wait out.
+    promptPairing: async ({ deviceName, platform, code }) => {
+      try {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.show();
+          mainWindow.focus();
+        }
+        const { response } = await dialog.showMessageBox(mainWindow, {
+          type: 'question',
+          buttons: ['Allow', 'Deny'],
+          defaultId: 1,
+          cancelId: 1,
+          message: `Pair ${deviceName} (${platform})?`,
+          detail: `Code: ${code}\n\nOnly allow the phone in your hand — check the code matches.`,
+        });
+        return response === 0 ? 'allow' : 'deny';
+      } catch {
+        return 'deny';
+      }
+    },
+    onPaired: ({ name }) => {
+      try {
+        if (!Notification.isSupported()) return;
+        new Notification({ title: 'New device paired', body: name }).show();
+      } catch {}
+    },
+  });
+  remoteAccess.startPoller();
+  remoteAccess.onStatusChange((status) => {
+    for (const w of BrowserWindow.getAllWindows()) {
+      if (!w.isDestroyed() && w.webContents) {
+        w.webContents.send('remote-access-status-update', status);
+      }
+    }
+    if (status.state === 'error' && status.actualPort == null) {
+      try {
+        if (settings.get('remote.enabled')) setSetting('remote.enabled', false);
+      } catch {}
+    }
+  });
+  remoteAccess.onDevicesChanged((devices) => {
+    for (const w of BrowserWindow.getAllWindows()) {
+      if (!w.isDestroyed() && w.webContents) {
+        w.webContents.send('remote-devices-update', devices);
+      }
+    }
+    applyRemoteReason();
+  });
+  if (settings.get('remote.enabled')) {
+    try {
+      remoteAccess.start({ port: settings.get('remote.port') });
+    } catch {}
+  }
+  // The tunnel comes up with the app when it was left on with a token saved.
+  remoteAccess.syncTunnel().catch(() => {});
+  // The keep-awake remote reason follows Remote Access, its setting, and the
+  // connected devices. Session changes already re-run the hold decision
+  // through watchSessions; the first evaluation happens here.
+  function applyRemoteReason() {
+    try {
+      keepAwake.setRemote({
+        enabled: settings.get('remote.enabled') && settings.get('remote.keepAwake'),
+        connectedDevices: remoteAccess.listDevices().filter((d) => d.connected).length,
+      });
+    } catch {}
+  }
+  applyRemoteReason();
 
   // Apply persisted DB credentials so MySQL operations authenticate correctly.
   mysql.setCredentials({
@@ -736,6 +872,11 @@ function registerHandlers(win, storeInstance) {
   // Native notifications for agent alerts (gated in agents.cjs). Clicking one
   // brings the window up on that session; the renderer navigates.
   const liveNotifications = new Set(); // keep a ref, or GC can drop the click
+  // Remote Access push rides the same approved alerts: gating (switches,
+  // suppress-when-focused, cooldown) already ran before listeners fire.
+  agents.onAlert((alert) => {
+    remoteAccess.handleSessionAlert(alert).catch(() => {});
+  });
   agents.onAlert((alert) => {
     if (!Notification.isSupported()) return;
     const site = findProject(alert.siteId);
@@ -823,20 +964,16 @@ function registerHandlers(win, storeInstance) {
   // allowed), returning its sessionId for the renderer to attach a terminal to.
   // `targetId` (optional) selects a saved Launch Target on the Site; without it
   // the Agent runs at the webroot with its global default flags applied.
-  ipcMain.handle('agent-launch', (_e, siteId, agentId, targetId) => {
-    const site = findProject(siteId);
-    if (!site) return { error: 'Project not found' };
-    const globalArgs = store.get('agentPresets', {})[agentId]?.args || '';
-    let target = null;
-    if (targetId) {
-      target = (site.launchTargets || []).find((t) => t.id === targetId) || null;
-      if (!target) return { error: 'Launch target not found' };
-    }
-    const res = agents.launch({ site, agentId, target, globalArgs });
-    // Launching is the common way a Site joins the working set.
-    if (res?.ok) addToProjects(siteId);
-    return res;
-  });
+  ipcMain.handle('agent-launch', (_e, siteId, agentId, targetId) =>
+    agents.launchForProject(
+      {
+        findProject,
+        getPresetArgs: (id) => store.get('agentPresets', {})[id]?.args || '',
+        addToProjects,
+      },
+      { projectId: siteId, agentId, targetId }
+    )
+  );
 
   ipcMain.handle('agent-split-pane', (_e, sessionId, dir) => {
     const session = agents.getSession(sessionId);
@@ -2565,7 +2702,11 @@ function registerHandlers(win, storeInstance) {
   // viewer — surfaced in the UI when a service enters the 'failed' state.
   ipcMain.handle('open-service-log', async (_, name) => {
     try {
-      if (!['nginx', 'php', 'mysql', 'mailpit'].includes(name)) {
+      if (
+        !['nginx', 'php', 'mysql', 'mailpit', cloudflared.REMOTE_TUNNEL_NAME].includes(
+          name
+        )
+      ) {
         return { success: false, error: `Unknown service: ${name}` };
       }
       // PHP-FPM logs per version: open the failing one, else the active one.
@@ -2787,6 +2928,75 @@ function registerHandlers(win, storeInstance) {
   // { mode, active, workingCount } — the mode lives in settings; this adds
   // whether a sleep assertion is actually held right now.
   ipcMain.handle('keep-awake-status', () => keepAwake.getStatus());
+
+  // { state, host, port, actualPort, reason } — whether it is on lives in
+  // settings; this adds whether the server is actually bound right now.
+  ipcMain.handle('remote-access-status', () => remoteAccess.getStatus());
+
+  // The tunnel token is Keychain-encrypted ciphertext in the store — never a
+  // setting, so it travels through its own handlers, never settings-set.
+  ipcMain.handle('remote-token-set', async (_e, token) => {
+    try {
+      await remoteAccess.setToken(token);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err?.message || 'Could not save the token.' };
+    }
+  });
+  ipcMain.handle('remote-token-clear', async () => {
+    try {
+      await remoteAccess.clearToken();
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err?.message || 'Could not remove the token.' };
+    }
+  });
+  ipcMain.handle('remote-token-status', () => ({ saved: remoteAccess.tokenSaved() }));
+  // Hostname verification, on demand (the Check-again button). Re-runs
+  // automatically on hostname, token or port change while connected.
+  ipcMain.handle('remote-verify', async () => {
+    try {
+      return await remoteAccess.verifyHostname();
+    } catch (err) {
+      return { ok: false, reason: 'connection', error: err?.message };
+    }
+  });
+  // Pairing offer: a QR data URL the phone scans, plus its expiry. The
+  // renderer shows the image and never sees the secret itself.
+  ipcMain.handle('remote-pairing-new', async () => {
+    try {
+      const offer = await remoteAccess.pairingOffer({
+        hostname: settings.get('remote.hostname'),
+      });
+      return { ok: true, qr: offer.qr, expiresAt: offer.expiresAt };
+    } catch (err) {
+      return { ok: false, error: err?.message || 'Could not create a pairing offer.' };
+    }
+  });
+  // Paired devices: list, rename, revoke, disconnect-all. Revoke and rename
+  // validate in the service and report back for the UI to say why.
+  ipcMain.handle('remote-devices-list', () => remoteAccess.listDevices());
+  ipcMain.handle('remote-device-rename', async (_e, id, name) => {
+    try {
+      return await remoteAccess.renameDevice(id, name);
+    } catch (err) {
+      return { ok: false, error: err?.message || 'Could not rename the device.' };
+    }
+  });
+  ipcMain.handle('remote-device-revoke', async (_e, id) => {
+    try {
+      return await remoteAccess.revokeDevice(id);
+    } catch (err) {
+      return { ok: false, error: err?.message || 'Could not revoke the device.' };
+    }
+  });
+  ipcMain.handle('remote-devices-disconnect', async () => {
+    try {
+      return await remoteAccess.disconnectAll();
+    } catch (err) {
+      return { ok: false, error: err?.message || 'Could not disconnect the devices.' };
+    }
+  });
 
   // Validated shallow patch. Always resolves — rejections come back on the
   // result so the UI can roll the control back and say why.
