@@ -6,7 +6,7 @@
 // APIs: tweetnacl plus the local helpers only.
 
 const { sealFrame, openFrame, randomNonce } = require('./frames.cjs');
-const { PROTOCOL_VERSION } = require('./protocol.cjs');
+const { PROTOCOL_VERSION, CLOSE_REVOKED } = require('./protocol.cjs');
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
 
@@ -41,7 +41,7 @@ function createClient({
     pending.clear();
   }
 
-  function handleClose(gen) {
+  function handleClose(gen, code) {
     // A superseded socket's close arrives after the next dial already began;
     // acting on it would null the new socket and fire a spurious onClose.
     if (gen !== generation) return;
@@ -55,9 +55,12 @@ function createClient({
     outCounter = 0;
     inCounter = 0;
     failAll(new Error('The connection closed.'));
+    // A revoked device reads 'revoked' here; every other close is ordinary
+    // (disconnect-all reconnects, drops just end).
+    const status = code === CLOSE_REVOKED ? 'revoked' : 'closed';
     for (const cb of [...closeListeners]) {
       try {
-        cb();
+        cb(status);
       } catch {}
     }
   }
@@ -156,7 +159,12 @@ function createClient({
       ws.onopen = () => {
         socket = ws;
         ws.onmessage = (event) => onSocketMessage(event.data ?? event);
-        ws.onclose = () => handleClose(gen);
+        if (typeof ws.addEventListener === 'function') {
+          ws.addEventListener('close', (event) => handleClose(gen, event?.code));
+        } else {
+          ws.onclose = (event) =>
+            handleClose(gen, typeof event === 'number' ? event : event?.code);
+        }
         ws.onerror = () => {};
         for (const cb of [...openListeners]) {
           try {

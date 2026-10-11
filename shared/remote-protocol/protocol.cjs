@@ -12,4 +12,16 @@ const HEALTH_PATH = '/wpxen-health';
 // phone dials it as wss://<hostname>/wpxen-device through the tunnel.
 const DEVICE_PATH = '/wpxen-device';
 
-module.exports = { PROTOCOL_VERSION, HEALTH_PATH, DEVICE_PATH };
+// Application close codes (4000–4999): a revoked phone reads `revoked` off
+// the shared client half; disconnect-all is an ordinary close that may
+// reconnect.
+const CLOSE_REVOKED = 4401;
+const CLOSE_DISCONNECT_ALL = 4402;
+
+module.exports = {
+  PROTOCOL_VERSION,
+  HEALTH_PATH,
+  DEVICE_PATH,
+  CLOSE_REVOKED,
+  CLOSE_DISCONNECT_ALL,
+};

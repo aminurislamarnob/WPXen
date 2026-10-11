@@ -37,6 +37,7 @@ const VALID_EVENT_CHANNELS = [
   'settings-updated',
   'keep-awake-status-update',
   'remote-access-status-update',
+  'remote-devices-update',
 ];
 
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -183,6 +184,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   verifyRemoteHostname: () => ipcRenderer.invoke('remote-verify'),
   // Pairing offer for Settings → Mobile (QR data URL + expiry).
   newRemotePairing: () => ipcRenderer.invoke('remote-pairing-new'),
+  // Paired devices: list, rename, revoke, disconnect-all.
+  listRemoteDevices: () => ipcRenderer.invoke('remote-devices-list'),
+  renameRemoteDevice: (id, name) => ipcRenderer.invoke('remote-device-rename', id, name),
+  revokeRemoteDevice: (id) => ipcRenderer.invoke('remote-device-revoke', id),
+  disconnectRemoteDevices: () => ipcRenderer.invoke('remote-devices-disconnect'),
   // Editors/terminals detected on this machine, for the settings pickers.
   listExternalTools: () => ipcRenderer.invoke('list-external-tools'),
   // Every agent including ones hidden from the launcher (settings only).
