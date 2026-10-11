@@ -90,6 +90,36 @@ describe('agent-chat watcher', () => {
     ]);
   });
 
+  it('leaves no half-open watch when the first read fails', () => {
+    const content = Buffer.from('line1\n');
+    let failRead = true;
+    __setDeps({
+      statSync: () => ({ size: content.length, mtimeMs: 100 }),
+      openSync: () => 1,
+      readSync: (fd, buf, offset, length, position) => {
+        if (failRead) throw new Error('EIO');
+        const slice = content.slice(position, position + length);
+        slice.copy(buf);
+        return slice.length;
+      },
+      closeSync: () => {},
+      setInterval,
+      clearInterval,
+    });
+    const opts = (rows) => ({
+      transcriptPath: '/fake/path.jsonl',
+      decodeLine: (line) => ({ decoded: line }),
+      onRows: (newRows) => rows.push(...newRows),
+    });
+    expect(() => openChat('sess-io', 'viewer-1', opts([]))).toThrow('EIO');
+
+    // The retry opens a real watch, rather than joining a dead one.
+    failRead = false;
+    const rows = [];
+    openChat('sess-io', 'viewer-1', opts(rows));
+    expect(rows).toEqual([{ decoded: 'line1' }]);
+  });
+
   it('resets when file truncates', () => {
     let mockSize = 10;
     let mockContent = Buffer.from('line1\n');
