@@ -1424,19 +1424,23 @@ function drop(ws) {
 
 function handleDeviceConnection(ws, req) {
   const ip = (req.socket && req.socket.remoteAddress) || 'unknown';
-  let device = null; // set once a sealed frame (or accept) authenticates us
+  let device = null; // set once the device's hello has been verified
   let devicePublicKey = null;
+  // This connection's binding: '<clientNonce>.<serverNonce>' (frames.cjs).
+  // Every sealed payload after the hello must carry it, so a frame captured
+  // on any other connection is refused here.
+  let channel = null;
   let inCounter = 0;
   let outCounter = 0;
   const keypair = getHostKeypair();
 
-  const firstTimer = setTimeout(drop, HANDSHAKE_TIMEOUT_MS, ws);
+  let firstTimer = setTimeout(drop, HANDSHAKE_TIMEOUT_MS, ws);
   ws.on('close', () => clearTimeout(firstTimer));
 
   function sendSealed(payload) {
     outCounter += 1;
     const sealed = sealFrame({
-      payload,
+      payload: { ...payload, ch: channel, n: outCounter },
       senderSecret: keypair.secretKey,
       recipientPublicKey: devicePublicKey,
       nonce: randomNonce(),
@@ -1517,6 +1521,10 @@ function handleDeviceConnection(ws, req) {
     }
     const hostB64 = publicKeyB64(keypair);
     const code = confirmationCode(hostB64, msg.devicePublicKey, offer.secret);
+    // One use means the first valid request: the secret dies before the
+    // dialog opens, so a second phone holding the same QR can't queue a
+    // second Allow/Deny behind it (whatever the answer, the offer is spent).
+    consumeOffer();
     let answer;
     try {
       answer = await Promise.race([
@@ -1573,13 +1581,49 @@ function handleDeviceConnection(ws, req) {
     try {
       deps.onPaired({ name: String(payload.deviceName || 'Phone') });
     } catch {}
-    // The pairing socket stays up as this device's channel: counters start
-    // fresh, and the welcome event is its first sealed frame.
-    device = findDevice(deviceId);
-    devicePublicKey = deviceKey;
-    inCounter = 0;
-    outCounter = 0;
-    trackChannel(deviceId, { ws, send: sendSealed });
+    // Pairing proves nothing about this socket's later frames: the device
+    // opens its channel with a hello like any other connection (here or on
+    // a fresh socket), and a socket that never does is closed.
+    clearTimeout(firstTimer);
+    firstTimer = setTimeout(drop, HANDSHAKE_TIMEOUT_MS, ws);
+  }
+
+  // The first frame of a device channel: a sealed hello from a paired device,
+  // counter 1. Only once it opens with that device's key is the socket
+  // tracked as the device's — connected-now, last seen, pushes, keep-awake
+  // all wait for it. An unknown id, a bad box or a replayed hello from another
+  // connection gets the same silent close.
+  function handleHello(msg) {
+    const known = findDevice(msg.deviceId);
+    if (!known || msg.counter !== 1) return drop(ws);
+    let key;
+    let payload;
+    try {
+      key = decodeBase64(known.publicKey);
+      payload = openFrame({
+        nonce: msg.nonce,
+        box: msg.box,
+        senderPublicKey: key,
+        recipientSecret: keypair.secretKey,
+      });
+    } catch {
+      return drop(ws);
+    }
+    if (
+      !payload ||
+      payload.kind !== 'hello' ||
+      payload.n !== 1 ||
+      typeof payload.clientNonce !== 'string' ||
+      !/^[A-Za-z0-9+/=]{16,64}$/.test(payload.clientNonce)
+    ) {
+      return drop(ws);
+    }
+    clearTimeout(firstTimer);
+    device = known;
+    devicePublicKey = key;
+    inCounter = 1;
+    channel = `${payload.clientNonce}.${encodeBase64(randomBytes(24))}`;
+    trackChannel(device.id, { ws, send: sendSealed });
     ensureSessionsFeed();
     welcome();
   }
@@ -1590,21 +1634,9 @@ function handleDeviceConnection(ws, req) {
 
   async function handleFrameAsync(msg) {
     if (msg.v !== PROTOCOL_VERSION) return drop(ws);
-    const known = device || findDevice(msg.deviceId);
     // Unknown ids are dropped with no reply — the response never reveals
     // whether the id or the key was wrong.
-    if (!known) return drop(ws);
-    if (!device) {
-      device = known;
-      try {
-        devicePublicKey = decodeBase64(known.publicKey);
-      } catch {
-        return drop(ws);
-      }
-      trackChannel(device.id, { ws, send: sendSealed });
-      ensureSessionsFeed();
-      welcome();
-    }
+    if (!channel) return handleHello(msg);
     if (typeof msg.counter !== 'number' || msg.counter !== inCounter + 1) return drop(ws);
     let payload;
     try {
@@ -1617,6 +1649,10 @@ function handleDeviceConnection(ws, req) {
     } catch {
       return drop(ws);
     }
+    // The sealed binding decides, not the plaintext envelope: a frame from
+    // another connection names another channel, and one moved within this
+    // connection carries the wrong sealed counter.
+    if (!payload || payload.ch !== channel || payload.n !== msg.counter) return drop(ws);
     inCounter = msg.counter;
     touchDevice(device.id);
     if (!payload || payload.kind !== 'request' || typeof payload.id !== 'string')
