@@ -66,7 +66,12 @@ const PAIR_MAX_GLOBAL = 20;
 // The only phone-reachable operations in this ticket (after Orca's
 // mobile-method-allowlist pattern): ping proves the channel end to end.
 // Later tickets grow this set; anything else gets op_not_allowed.
-const ALLOWED_OPS = new Set(['ping']);
+const ALLOWED_OPS = new Set([
+  'ping',
+  'projects.list',
+  'sessions.list',
+  'sessions.markRead',
+]);
 
 // The Cloudflare tunnel token, Keychain-encrypted via safeStorage. Ciphertext
 // only in the store — never plaintext, never a setting, never logged.
@@ -131,6 +136,18 @@ const deps = {
     return 'getRemoteConfig' in overrides
       ? overrides.getRemoteConfig
       : () => ({ enabled: false, port: DEFAULT_PORT, hostname: '' });
+  },
+  // The Session engine, narrowed to what the phone may reach (injected from
+  // ipc.cjs; safe no-op defaults keep unit tests light).
+  get sessions() {
+    if ('sessions' in overrides) return overrides.sessions;
+    return {
+      list: () => [],
+      subscribe: () => () => {},
+      markRead: () => {},
+      get: () => null,
+      projects: () => [],
+    };
   },
 };
 
@@ -747,9 +764,11 @@ async function pairingOffer({ hostname }) {
 
 // ─── Device registry ─────────────────────────────────────────────────────
 
-// Live sockets by device id. The source of the connected-now indicator;
-// revoking or disconnecting closes these first.
-const deviceSockets = new Map(); // deviceId -> Set(ws)
+// Live channels by device id. Each entry carries its socket plus its sealed
+// sender (counters live per connection), so pushes fan out without lookups.
+// The source of the connected-now indicator; revoking or disconnecting closes
+// these first.
+const deviceSockets = new Map(); // deviceId -> Set({ ws, send })
 const deviceListeners = new Set();
 
 function readDeviceRecords() {
@@ -813,13 +832,13 @@ function touchDevice(id) {
   if (wrote) publishDevices();
 }
 
-function trackSocket(id, ws) {
+function trackChannel(id, entry) {
   if (!deviceSockets.has(id)) deviceSockets.set(id, new Set());
-  deviceSockets.get(id).add(ws);
-  ws.on('close', () => {
+  deviceSockets.get(id).add(entry);
+  entry.ws.on('close', () => {
     const set = deviceSockets.get(id);
     if (!set) return;
-    set.delete(ws);
+    set.delete(entry);
     if (set.size === 0) deviceSockets.delete(id);
     publishDevices();
   });
@@ -854,9 +873,9 @@ async function revokeDevice(id) {
     throw new Error('Unknown device.');
   const sockets = deviceSockets.get(id);
   if (sockets) {
-    for (const ws of [...sockets]) {
+    for (const entry of [...sockets]) {
       try {
-        ws.close(CLOSE_REVOKED, 'revoked');
+        entry.ws.close(CLOSE_REVOKED, 'revoked');
       } catch {}
     }
     deviceSockets.delete(id);
@@ -878,15 +897,138 @@ async function disconnectAll() {
 // Shared by disconnect-all and by stopping the server: an ordinary close the
 // phone may reconnect after, never the revoked code. Records are untouched.
 function closeEveryDeviceSocket() {
-  for (const [id, sockets] of [...deviceSockets.entries()]) {
-    for (const ws of [...sockets]) {
+  for (const [id, entries] of [...deviceSockets.entries()]) {
+    for (const entry of [...entries]) {
       try {
-        ws.close(CLOSE_DISCONNECT_ALL, 'disconnecting');
+        entry.ws.close(CLOSE_DISCONNECT_ALL, 'disconnecting');
       } catch {}
     }
     deviceSockets.delete(id);
   }
   publishDevices();
+}
+
+// ─── Sessions for the phone ──────────────────────────────────────────────
+// The Session engine is read here, never changed. The narrow `sessions` dep
+// (list/subscribe/markRead/get/projects, injected from ipc.cjs like
+// keepAwake.watchSessions) keeps this module's tests light.
+
+// The one place the phone's idea of "a Session that exists" is defined.
+// Every operation taking a sessionId resolves through this, so the allowlist
+// cannot be talked into reaching a Session the phone may not see. Floating
+// Workspace Sessions are out of scope for Remote Access (#136) and absent
+// from `list`, so they must not be reachable by id either — ids are random
+// UUIDs, so this is scope discipline rather than a live hole, and it is the
+// kind of gap that stops being harmless as the allowlist grows.
+function phoneSession(sessionId) {
+  if (typeof sessionId !== 'string' || !sessionId) return null;
+  const session = deps.sessions.get(sessionId);
+  if (!session || session.scope === 'floating') return null;
+  return session;
+}
+
+// Pushes coalesce to a few per second: a burst of pty output must not flood
+// the socket.
+const SESSIONS_PUSH_MS = 250;
+let sessionsPushTimer = null;
+let sessionsUnsub = null;
+
+function ensureSessionsFeed() {
+  if (sessionsUnsub) return;
+  try {
+    sessionsUnsub = deps.sessions.subscribe(() => scheduleSessionsPush());
+  } catch {
+    sessionsUnsub = null;
+  }
+}
+
+function scheduleSessionsPush() {
+  if (sessionsPushTimer) return;
+  sessionsPushTimer = setTimeout(() => {
+    sessionsPushTimer = null;
+    pushSessionsChanged();
+  }, SESSIONS_PUSH_MS);
+  if (sessionsPushTimer.unref) sessionsPushTimer.unref();
+}
+
+function pushSessionsChanged() {
+  let rows;
+  try {
+    rows = phoneSessionRows();
+  } catch {
+    return;
+  }
+  for (const entries of deviceSockets.values()) {
+    for (const entry of [...entries]) {
+      try {
+        entry.send({
+          kind: 'event',
+          name: 'sessions.changed',
+          payload: { sessions: rows },
+        });
+      } catch {}
+    }
+  }
+}
+
+// The phone-safe row: an allowlist of fields, never a blocklist. Local
+// filesystem paths, handoff files and environment stay in this process.
+function phoneSessionRow(row) {
+  let hasTranscript = false;
+  try {
+    const session = phoneSession(row.sessionId);
+    const transcripts = require('./transcripts.cjs');
+    hasTranscript =
+      !!session &&
+      !!transcripts.locateTranscript({
+        agentId: row.agentId,
+        cwd: session.cwd,
+        startedAt: row.startedAt,
+      });
+  } catch {
+    hasTranscript = false;
+  }
+  return {
+    sessionId: row.sessionId,
+    projectId: row.siteId,
+    agentId: row.agentId,
+    agentName: row.agentName,
+    label: row.label,
+    title: row.title,
+    state: row.state,
+    unread: row.unread,
+    exited: row.exited,
+    exitCode: row.exitCode,
+    startedAt: row.startedAt,
+    changedAt: row.changedAt,
+    paneOf: row.paneOf,
+    hasTranscript,
+  };
+}
+
+function phoneSessionRows() {
+  return deps.sessions.list().map(phoneSessionRow);
+}
+
+function phoneProjects() {
+  return deps.sessions.projects().map((p) => ({ id: p.id, name: p.name, kind: p.kind }));
+}
+
+async function dispatchSessionOp(op, params) {
+  if (op === 'projects.list') {
+    return { projects: phoneProjects() };
+  }
+  if (op === 'sessions.list') {
+    return { sessions: phoneSessionRows() };
+  }
+  if (op === 'sessions.markRead') {
+    const sessionId = params && params.sessionId;
+    if (typeof sessionId !== 'string' || !sessionId) throw new Error('Unknown session.');
+    if (!phoneSession(sessionId)) throw new Error('Unknown session.');
+    deps.sessions.markRead(sessionId);
+    return { ok: true };
+  }
+  throw new Error(`Unknown operation: ${op}`);
 }
 
 // ─── Pairing rate limiting ───────────────────────────────────────────────
@@ -1102,11 +1244,16 @@ function handleDeviceConnection(ws, req) {
     devicePublicKey = deviceKey;
     inCounter = 0;
     outCounter = 0;
-    trackSocket(deviceId, ws);
+    trackChannel(deviceId, { ws, send: sendSealed });
+    ensureSessionsFeed();
     welcome();
   }
 
   function handleFrame(msg) {
+    handleFrameAsync(msg).catch(() => drop(ws));
+  }
+
+  async function handleFrameAsync(msg) {
     if (msg.v !== PROTOCOL_VERSION) return drop(ws);
     const known = device || findDevice(msg.deviceId);
     // Unknown ids are dropped with no reply — the response never reveals
@@ -1119,7 +1266,8 @@ function handleDeviceConnection(ws, req) {
       } catch {
         return drop(ws);
       }
-      trackSocket(device.id, ws);
+      trackChannel(device.id, { ws, send: sendSealed });
+      ensureSessionsFeed();
       welcome();
     }
     if (typeof msg.counter !== 'number' || msg.counter !== inCounter + 1) return drop(ws);
@@ -1152,7 +1300,16 @@ function handleDeviceConnection(ws, req) {
         result: { pong: true, serverTime: deps.now() },
       });
     }
-    return drop(ws);
+    try {
+      const result = await dispatchSessionOp(payload.op, payload.params);
+      return sendSealed({ kind: 'response', id: payload.id, result });
+    } catch (err) {
+      return sendSealed({
+        kind: 'response',
+        id: payload.id,
+        error: err?.message || 'Failed.',
+      });
+    }
   }
 
   ws.on('message', onMessage);
@@ -1167,10 +1324,20 @@ function dispose() {
   // stop() deliberately keeps a bind-failure reason; disposing forgets it,
   // so a fresh start (or the next test) begins from a clean 'off'.
   status = { state: 'off', host: null, port: null, actualPort: null, reason: null };
-  for (const sockets of deviceSockets.values()) {
-    for (const ws of [...sockets]) {
+  if (sessionsPushTimer) {
+    clearTimeout(sessionsPushTimer);
+    sessionsPushTimer = null;
+  }
+  if (sessionsUnsub) {
+    try {
+      sessionsUnsub();
+    } catch {}
+    sessionsUnsub = null;
+  }
+  for (const entries of deviceSockets.values()) {
+    for (const entry of [...entries]) {
       try {
-        ws.close();
+        entry.ws.close();
       } catch {}
     }
   }

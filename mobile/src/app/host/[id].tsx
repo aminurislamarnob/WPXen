@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
-import { Alert, Button, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Alert, Button, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { HostConnection, type ConnectionUpdate } from '../../connection/manager';
+import { groupSessions, statusColor, type PhoneProject, type PhoneSessionRow } from '../../sessions/grouping';
 import { findHost, removeHost } from '../../hosts/hostList';
 import { deleteHostSecrets, loadDeviceKeys, loadHosts, saveHosts } from '../../hosts/secureHosts';
 
@@ -25,6 +26,13 @@ function stateLabel(update: ConnectionUpdate | null, lastSeen: number | null): s
   }
 }
 
+function sessionSubtitle(session: PhoneSessionRow): string {
+  const title = session.title || session.label || session.agentName;
+  if (session.exited) return `${title} · exited ${session.exitCode ?? ''}`.trim();
+  const pane = session.paneOf ? ' · pane' : '';
+  return `${session.agentName} · ${title}${pane}`;
+}
+
 export default function HostScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -32,8 +40,27 @@ export default function HostScreen() {
   const [name, setName] = useState('Mac');
   const [lastSeen, setLastSeen] = useState<number | null>(null);
   const [missing, setMissing] = useState(false);
-
+  const [projects, setProjects] = useState<PhoneProject[]>([]);
+  const [sessions, setSessions] = useState<PhoneSessionRow[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
   const connection = useRef<HostConnection | null>(null);
+  const loadedOnce = useRef(false);
+
+  const loadLists = useCallback(async () => {
+    const conn = connection.current;
+    if (!conn) return;
+    try {
+      const [projectsRes, sessionsRes] = await Promise.all([
+        conn.request('projects.list') as Promise<{ projects: PhoneProject[] }>,
+        conn.request('sessions.list') as Promise<{ sessions: PhoneSessionRow[] }>,
+      ]);
+      setProjects(projectsRes.projects ?? []);
+      setSessions(sessionsRes.sessions ?? []);
+      loadedOnce.current = true;
+    } catch {
+      // Offline: the stale list stays under the state banner.
+    }
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -57,13 +84,18 @@ export default function HostScreen() {
         deviceId: host.id,
         keys,
         onUpdate: (u) => {
-          if (!cancelled) {
-            setUpdate(u);
-            if (u.lastSeenAt != null) setLastSeen(u.lastSeenAt);
-          }
+          if (cancelled) return;
+          setUpdate(u);
+          if (u.lastSeenAt != null) setLastSeen(u.lastSeenAt);
+          if (u.state === 'connected' && !loadedOnce.current) loadLists();
         },
       });
       connection.current = conn;
+      conn.subscribe('sessions.changed', (payload) => {
+        if (cancelled) return;
+        const rows = (payload as { sessions?: PhoneSessionRow[] })?.sessions;
+        if (Array.isArray(rows)) setSessions(rows);
+      });
       conn.start();
     })();
     return () => {
@@ -71,7 +103,16 @@ export default function HostScreen() {
       connection.current?.stop();
       connection.current = null;
     };
-  }, [id]);
+  }, [id, loadLists]);
+
+  const openSession = async (session: PhoneSessionRow) => {
+    try {
+      await connection.current?.request('sessions.markRead', { sessionId: session.sessionId });
+    } catch {
+      // Reading is best-effort; the detail still opens.
+    }
+    router.push(`/host/${encodeURIComponent(id)}/session/${encodeURIComponent(session.sessionId)}`);
+  };
 
   const remove = () => {
     Alert.alert('Remove Mac?', `Forget ${name}? Its secrets are deleted.`, [
@@ -98,8 +139,23 @@ export default function HostScreen() {
     );
   }
 
+  const live = update?.state === 'connected';
+  const groups = groupSessions(projects, sessions);
+
   return (
-    <View style={styles.container}>
+    <ScrollView
+      style={styles.container}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={async () => {
+            setRefreshing(true);
+            await loadLists();
+            setRefreshing(false);
+          }}
+        />
+      }
+    >
       <Text style={styles.title}>{name}</Text>
       <Text style={styles.state}>{stateLabel(update, lastSeen)}</Text>
       {update?.state === 'connected' && update.rttMs != null && (
@@ -108,16 +164,55 @@ export default function HostScreen() {
       {update?.state === 'revoked' && (
         <Text style={styles.body}>This device was removed from WPXen. Pair again from Settings → Mobile.</Text>
       )}
+      {!live && sessions.length > 0 && (
+        <Text style={styles.stale}>Showing the last synced list — reconnecting.</Text>
+      )}
+      <View style={!live && sessions.length > 0 ? styles.dimmed : undefined}>
+        {groups.map((group) => (
+          <View key={group.key} style={styles.group}>
+            <Text style={styles.groupTitle}>{group.title}</Text>
+            {group.sessions.length === 0 ? (
+              <Text style={styles.body}>Nothing here.</Text>
+            ) : (
+              group.sessions.map((session) => (
+                <Pressable key={session.sessionId} style={styles.row} onPress={() => openSession(session)}>
+                  <View style={[styles.dot, { backgroundColor: statusColor(session.state) }]} />
+                  <View style={styles.rowText}>
+                    <Text style={[styles.rowTitle, session.exited && styles.dimmedText]} numberOfLines={1}>
+                      {session.title || session.label || session.agentName}
+                    </Text>
+                    <Text style={styles.rowSub} numberOfLines={1}>
+                      {sessionSubtitle(session)}
+                    </Text>
+                  </View>
+                  {session.unread && <View style={styles.unread} />}
+                </Pressable>
+              ))
+            )}
+          </View>
+        ))}
+      </View>
       <View style={styles.spacer} />
       <Button title="Remove Mac" color="#c00" onPress={remove} />
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 16, gap: 8 },
+  container: { flex: 1, padding: 16 },
   title: { fontSize: 22, fontWeight: '700' },
-  state: { fontSize: 16, fontWeight: '500' },
-  body: { fontSize: 14, opacity: 0.7 },
-  spacer: { flex: 1 },
+  state: { fontSize: 16, fontWeight: '500', marginTop: 2 },
+  body: { fontSize: 14, opacity: 0.7, marginTop: 4 },
+  stale: { fontSize: 13, opacity: 0.7, marginTop: 8, fontStyle: 'italic' },
+  dimmed: { opacity: 0.55 },
+  dimmedText: { opacity: 0.6 },
+  group: { marginTop: 16 },
+  groupTitle: { fontSize: 13, fontWeight: '700', textTransform: 'uppercase', opacity: 0.6, marginBottom: 4 },
+  row: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, gap: 10 },
+  dot: { width: 10, height: 10, borderRadius: 5 },
+  rowText: { flex: 1 },
+  rowTitle: { fontSize: 15, fontWeight: '500' },
+  rowSub: { fontSize: 13, opacity: 0.6, marginTop: 1 },
+  unread: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#0a7aff' },
+  spacer: { height: 24 },
 });

@@ -54,6 +54,33 @@ export class HostConnection {
       ...args,
     };
     this.lastSeenAt = args.host.lastSeen;
+    // The channel exists before any socket does, so screens can subscribe
+    // to events and queue nothing until connect() lands.
+    const { host, deviceId, keys, socketCtor = WebSocket } = this.args;
+    this.client = createClient({
+      url: host.url,
+      WebSocket: socketCtor,
+      keys: { publicKey: decodeBase64(keys.publicKey), secretKey: decodeBase64(keys.secretKey) },
+      hostPublicKey: decodeBase64(host.hostPublicKey),
+      deviceId,
+    });
+    this.client.onClose((status: 'revoked' | 'closed') => {
+      this.socket = 'closed';
+      this.closeStatus = status;
+      this.stopHeartbeat();
+      this.emit();
+      if (!this.stopped) this.loop();
+    });
+  }
+
+  request(op: string, params?: Record<string, unknown>): Promise<unknown> {
+    if (!this.client) throw new Error('Not connected.');
+    return this.client.request(op, params);
+  }
+
+  subscribe(event: string, cb: (payload: unknown) => void): () => void {
+    if (!this.client) return () => {};
+    return this.client.subscribe(event, cb);
   }
 
   private emit(): void {
@@ -93,7 +120,6 @@ export class HostConnection {
     } catch {
       // Ignore.
     }
-    this.client = null;
     this.socket = 'closed';
   }
 
@@ -129,22 +155,9 @@ export class HostConnection {
   }
 
   private async connectOnce(): Promise<void> {
-    const { host, deviceId, keys, socketCtor = WebSocket, now = Date.now } = this.args;
-    const client = createClient({
-      url: host.url,
-      WebSocket: socketCtor,
-      keys: { publicKey: decodeBase64(keys.publicKey), secretKey: decodeBase64(keys.secretKey) },
-      hostPublicKey: decodeBase64(host.hostPublicKey),
-      deviceId,
-    });
-    this.client = client;
-    client.onClose((status: 'revoked' | 'closed') => {
-      this.socket = 'closed';
-      this.closeStatus = status;
-      this.stopHeartbeat();
-      this.emit();
-      if (!this.stopped) this.loop();
-    });
+    const { now = Date.now } = this.args;
+    const client = this.client;
+    if (!client) return;
     try {
       await client.connect();
     } catch {
