@@ -75,3 +75,39 @@ export function recallStep(history, index, dir) {
     return { index: history.length - 1, text: history[history.length - 1] };
   return { index: nextIndex, text: history[nextIndex] };
 }
+
+// What the caret is completing, or null. `@` mentions a Site file anywhere
+// after whitespace; `/` names a command only at the start of the prompt,
+// where Claude reads one — a path typed mid-sentence is not a command.
+export function completionTrigger(text, caret) {
+  const before = String(text || '').slice(0, caret);
+  const command = /^\/(\S*)$/.exec(before);
+  if (command) return { type: 'cmd', query: command[1], start: 1 };
+  const mention = /(?:^|\s)@(\S*)$/.exec(before);
+  if (mention)
+    return { type: 'file', query: mention[1], start: caret - mention[1].length };
+  return null;
+}
+
+// The prompt with a chosen completion in place of what was typed. Commands
+// carry their own leading slash, so the typed one is replaced, not doubled.
+export function applyCompletion(text, trigger, value) {
+  const head = trigger.type === 'cmd' ? '' : text.slice(0, trigger.start);
+  const tail = text.slice(trigger.start + trigger.query.length);
+  return `${head}${value} ${tail.replace(/^ /, '')}`;
+}
+
+// Whether ↑/↓ steps prompt recall instead of moving the caret: ↑ from an
+// empty composer (or while already recalling) on the first line, ↓ only
+// while recalling and on the last line — so multi-line editing still works.
+export function recallKey({ key, text, caret, recalling }) {
+  const value = String(text || '');
+  if (key === 'ArrowUp') {
+    if (!recalling && value !== '') return false;
+    return !value.slice(0, caret).includes('\n');
+  }
+  if (key === 'ArrowDown') {
+    return recalling && !value.slice(caret).includes('\n');
+  }
+  return false;
+}

@@ -436,7 +436,7 @@ function openChat(sessionId, viewerId, opts) {
     watch.viewers.add(viewerId);
     // Replay current rows to the new viewer
     if (watch.currentRows.length > 0) {
-      onRows(watch.currentRows, watch.state);
+      onRows(watch.currentRows, watch.state, { atStart: watch.pageStart <= 0 });
     }
     return;
   }
@@ -476,8 +476,10 @@ function openChat(sessionId, viewerId, opts) {
   watch.state = state;
   watch.tailOffset = complete;
 
+  // `atStart`: the first page already reaches the top of the file, so the
+  // chat offers no "Load older".
   if (rows.length > 0) {
-    onRows(rows, watch.state);
+    onRows(rows, watch.state, { atStart: pageStart <= 0 });
   }
 
   // Poll for new data

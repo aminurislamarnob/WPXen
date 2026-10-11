@@ -1,9 +1,8 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef, useMemo } from 'react';
 import { Markdown } from '../tasks/markdown';
 import { HighlightStyle } from '@codemirror/language';
-import { highlightCode } from '@lezer/highlight';
-import { languageFor } from '../../lib/editorLanguage';
 import { highlightSpecs } from '../../lib/editorTheme';
+import { highlightSegments } from '../../lib/chatHighlight';
 import { themeName, onThemeChange } from '../../lib/theme';
 
 const styleCache = new Map();
@@ -14,61 +13,45 @@ function getSharedHighlightStyle(appearance) {
   return styleCache.get(appearance);
 }
 
+// Assistant markdown with code blocks highlighted statically in the editor's
+// palette — no CodeMirror instance per block. Each block remembers which
+// appearance coloured it: the class names belong to that appearance's style,
+// so a light/dark flip re-highlights rather than leaving classes no rule
+// matches any more.
 export function ChatMarkdown({ text, onLink, empty }) {
   const containerRef = useRef(null);
   const [appearance, setAppearance] = useState(themeName);
   useEffect(() => onThemeChange(setAppearance), []);
   const style = useMemo(() => getSharedHighlightStyle(appearance), [appearance]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!containerRef.current) return;
-    const blocks = containerRef.current.querySelectorAll('pre code[class^="language-"]');
-    if (blocks.length === 0) return;
-
+    const blocks = containerRef.current.querySelectorAll('pre code[class*="language-"]');
     for (const code of blocks) {
-      if (code.dataset.highlighted) continue;
-      code.dataset.highlighted = 'true';
-      const langMatch = code.className.match(/language-([a-zA-Z0-9_+-]+)/);
-      if (!langMatch) continue;
-      const extList = languageFor(`file.${langMatch[1]}`);
-      if (!extList || extList.length === 0) continue;
-
-      let parser = null;
-      for (const ext of extList) {
-        if (ext.language && ext.language.parser) {
-          parser = ext.language.parser;
-          break;
-        }
-      }
-      if (!parser) continue;
-
-      const source = code.textContent;
-      let fragment = document.createDocumentFragment();
-      const putText = (t, classes) => {
-        if (!t) return;
-        if (classes) {
-          const span = document.createElement('span');
-          span.className = classes;
-          span.textContent = t;
-          fragment.appendChild(span);
-        } else {
-          fragment.appendChild(document.createTextNode(t));
-        }
-      };
-      const putBreak = () => {
-        fragment.appendChild(document.createTextNode('\n'));
-      };
-
+      if (code.dataset.highlighted === appearance) continue;
+      const lang = /language-([\w+-]+)/.exec(code.className)?.[1];
+      let segments = null;
       try {
-        const tree = parser.parse(source);
-        highlightCode(source, tree, style, putText, putBreak);
-        code.innerHTML = '';
-        code.appendChild(fragment);
+        segments = highlightSegments(code.textContent, lang, style);
       } catch {
-        // parser failed
+        segments = null; // a parser failure leaves the block plain
       }
+      code.dataset.highlighted = appearance;
+      if (!segments) continue;
+      const fragment = document.createDocumentFragment();
+      for (const { text: part, classes } of segments) {
+        if (!classes) {
+          fragment.appendChild(document.createTextNode(part));
+          continue;
+        }
+        const span = document.createElement('span');
+        span.className = classes;
+        span.textContent = part;
+        fragment.appendChild(span);
+      }
+      code.replaceChildren(fragment);
     }
-  }, [text, style]);
+  }, [text, style, appearance]);
 
   return (
     <div ref={containerRef}>

@@ -49,6 +49,9 @@ export default function SplitLayout({
 
   useEffect(() => {
     if (!tree.leaf) return;
+    // A respawned pane keeps its place in the tree with a new Session: read
+    // that Session's view now, not on the next change.
+    setViewMode(getViewMode(tree.leaf));
     return subscribe(() => {
       setViewMode(getViewMode(tree.leaf));
     });

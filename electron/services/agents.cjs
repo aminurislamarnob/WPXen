@@ -1490,7 +1490,7 @@ function openChat(sessionId, viewerId) {
       [...sessions.values()].some(
         (s) => s.sessionId !== sessionId && !s.exited && s.transcriptId === uuid
       ),
-    onRows: (rows, state) => {
+    onRows: (rows, state, page) => {
       let header = undefined;
       const filteredRows = [];
       for (const row of rows) {
@@ -1502,8 +1502,9 @@ function openChat(sessionId, viewerId) {
       }
       // Only the facts (tasks, to-dos, usage) — never the decoder's whole
       // state, which holds every message of the loaded pages.
+      const atStart = typeof page?.atStart === 'boolean' ? { atStart: page.atStart } : {};
       for (const cb of chatListeners)
-        cb({ sessionId, rows: filteredRows, header, state: state?.facts });
+        cb({ sessionId, rows: filteredRows, header, state: state?.facts, ...atStart });
     },
   });
 }
