@@ -299,6 +299,24 @@ describe('sessions over the channel', () => {
     client.close();
   });
 
+  // Absent from the list is not the same as out of reach: every op takes a
+  // sessionId, so one that resolves a Session the list hides would hand the
+  // phone a Floating Workspace terminal.
+  it('refuses a floating Session by id, not just in the list', async () => {
+    const floating = agents.launchFloating({ cwd: home });
+    expect(floating.sessionId).toBeTruthy();
+    const { client } = await pairedPhone();
+
+    await expect(
+      client.request('sessions.markRead', { sessionId: floating.sessionId })
+    ).rejects.toThrow('Unknown session.');
+
+    // The Session itself is untouched — refusing the phone is not stopping it.
+    expect(agents.listFloatingSessions()).toHaveLength(1);
+    expect(agents.getSession(floating.sessionId)).not.toBeNull();
+    client.close();
+  });
+
   it('rejects unknown ops and unknown sessions on markRead', async () => {
     const { client } = await pairedPhone();
     await expect(client.request('sessions.launch')).rejects.toThrow('op_not_allowed');

@@ -326,6 +326,32 @@ describe('disconnect all', () => {
     expect(remoteAccess.listDevices()[0].connected).toBe(true);
     client.close();
   });
+
+  // Turning Remote Access off closes the port, but `server.close()` leaves
+  // established sockets running — a phone would stay connected to a Remote
+  // Access that reads as off.
+  it('stopping the server drops connected devices but keeps the records', async () => {
+    const port = remoteAccess.getStatus().actualPort;
+    const device = await pairDevice({ port, name: 'Stopper' });
+    const client = createClient({
+      url: wsUrl(port),
+      WebSocket,
+      keys: device.keys,
+      hostPublicKey: device.hostPublicKey,
+      deviceId: device.deviceId,
+    });
+    const closed = new Promise((resolve) => client.onClose(resolve));
+    await client.connect();
+    await client.request('ping');
+    expect(remoteAccess.listDevices()[0].connected).toBe(true);
+
+    remoteAccess.stop();
+
+    await expect(closed).resolves.toBe('closed');
+    expect(remoteAccess.listDevices()).toHaveLength(1);
+    expect(remoteAccess.listDevices()[0].connected).toBe(false);
+    client.close();
+  });
 });
 
 describe('last seen', () => {
