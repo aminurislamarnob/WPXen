@@ -64,8 +64,14 @@ export default function MobileSection() {
   useEffect(() => {
     refreshInstallState();
     const onInstallLog = (data) => data && setCfLog(data.line);
-    window.electronAPI.on('cloudflared-install-progress', onInstallLog);
-    return () => window.electronAPI.off('cloudflared-install-progress');
+    // `on` returns an unsubscribe for this listener alone. `off(channel)` is
+    // removeAllListeners, which would also silence the Sites page's own
+    // install progress while a share tunnel is installing.
+    const offInstallLog = window.electronAPI.on(
+      'cloudflared-install-progress',
+      onInstallLog
+    );
+    return offInstallLog;
   }, [refreshInstallState]);
 
   async function saveToken() {
