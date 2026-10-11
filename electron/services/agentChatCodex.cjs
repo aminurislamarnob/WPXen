@@ -60,6 +60,35 @@ function summaryText(summary) {
   return parts.length > 0 ? parts.join('\n') : null;
 }
 
+// Codex keeps its plan with update_plan: { plan: [{ step, status }] }, the
+// arguments arriving as a JSON string. It is the to-do checklist Claude's
+// TodoWrite is, so it folds into the same snapshot (after Orca's
+// normalizeNativeChatTaskList).
+function planTodos(input) {
+  let value = input;
+  if (typeof value === 'string') {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  if (!value || !Array.isArray(value.plan)) return null;
+  const todos = [];
+  for (const item of value.plan) {
+    const content = item && typeof item.step === 'string' ? item.step.trim() : '';
+    if (!content) continue;
+    const status =
+      item.status === 'in_progress' || item.status === 'inProgress'
+        ? 'in_progress'
+        : item.status === 'completed'
+          ? 'completed'
+          : 'pending';
+    todos.push({ content, status });
+  }
+  return value.plan.length > 0 && todos.length === 0 ? null : todos;
+}
+
 function decodeCodexLine(lineStr, state) {
   if (!lineStr || !lineStr.trim()) return null;
   let record;
@@ -117,6 +146,10 @@ function decodeCodexLine(lineStr, state) {
           : (payload.input ?? payload.action ?? null);
       const toolUse = { id: callId, name: payload.name || 'tool', input };
       state.codexCalls[callId] = toolUse;
+      if (toolUse.name === 'update_plan') {
+        const todos = planTodos(input);
+        if (todos) state.facts.todos = todos;
+      }
       const row = { id: callId, role: 'tool', tool_use: toolUse };
       const pending = state.codexResults[callId];
       if (pending) {

@@ -1,4 +1,5 @@
-// Tool name -> summary kind. Claude Code's names, then Antigravity's.
+// Tool name -> summary kind. Claude Code's names, then Antigravity's and
+// Codex's.
 const TOOL_KINDS = {
   Read: 'read',
   NotebookRead: 'read',
@@ -13,6 +14,11 @@ const TOOL_KINDS = {
   view_file: 'read',
   bash: 'bash',
   run_command: 'bash',
+  // Codex
+  shell: 'bash',
+  local_shell: 'bash',
+  exec_command: 'bash',
+  apply_patch: 'edit',
   replace: 'edit',
   replace_file_content: 'edit',
   write_to_file: 'edit',

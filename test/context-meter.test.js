@@ -2,23 +2,25 @@ import { describe, it, expect } from 'vitest';
 import { contextMeter } from '../src/lib/contextMeter.js';
 
 describe('contextMeter', () => {
-  it('shows a percentage for known models', () => {
-    expect(contextMeter({ model: 'claude-opus-5-5', tokens: 620_000 })).toEqual({
+  it('shows a percentage when the model id names its window', () => {
+    expect(contextMeter({ model: 'claude-opus-5-5[1m]', tokens: 620_000 })).toEqual({
       label: '62% of context',
       percent: 62,
     });
-    expect(contextMeter({ model: 'claude-haiku-4-5', tokens: 50_000 }).label).toBe(
-      '25% of context'
+    expect(contextMeter({ model: 'Claude-Sonnet-5-5[1M]', tokens: 10_000 }).percent).toBe(
+      1
     );
   });
 
-  it('matches dated or suffixed ids by their model prefix', () => {
-    expect(contextMeter({ model: 'claude-sonnet-5-5[1m]', tokens: 10_000 }).percent).toBe(
-      1
-    );
+  it('shows a raw token count for a bare model name, never a guessed window', () => {
+    // A bare name runs 1M first-party and 200k through a gateway.
+    expect(contextMeter({ model: 'claude-opus-5-5', tokens: 251_255 })).toEqual({
+      label: '251k tokens',
+      percent: null,
+    });
     expect(
-      contextMeter({ model: 'claude-haiku-4-5-20251001', tokens: 20_000 }).percent
-    ).toBe(10);
+      contextMeter({ model: 'claude-haiku-4-5', tokens: 50_000 }).percent
+    ).toBeNull();
   });
 
   it('falls back to a raw token count for unknown models', () => {
