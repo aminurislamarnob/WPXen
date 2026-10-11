@@ -979,6 +979,29 @@ function resumeChatSession(sessionId, { site, target = null, globalArgs = '' } =
   });
 }
 
+// One launch path for the desktop New-session menu and the phone, so the two
+// can never drift: resolve the Project, apply its Launch Preset flags and the
+// chosen Launch Target, launch, and join the working set. Store-adjacent
+// pieces (lookup, presets, working set) arrive as arguments; the engine stays
+// store-free.
+function launchForProject(
+  { findProject, getPresetArgs, addToProjects },
+  { projectId, agentId, targetId = null }
+) {
+  const site = findProject(projectId);
+  if (!site) return { error: 'Project not found' };
+  const globalArgs = getPresetArgs(agentId) || '';
+  let target = null;
+  if (targetId) {
+    target = (site.launchTargets || []).find((t) => t.id === targetId) || null;
+    if (!target) return { error: 'Launch target not found' };
+  }
+  const res = launch({ site, agentId, target, globalArgs });
+  // Launching is the common way a Site joins the working set.
+  if (res?.ok) addToProjects(projectId);
+  return res;
+}
+
 // A Floating Workspace terminal: a plain shell in `cwd`, owned by no Site. It
 // runs on the same pty engine (ring buffer, status tracking, reaped on quit)
 // but stays out of everything that means "a Site's Sessions" — the Projects
@@ -1071,7 +1094,12 @@ function startSession({ cwd, command, meta, failLabel, phpBinDir = null }) {
     cwd,
     pty: term,
     buffer: '',
-    window: null,
+    // Every viewer of this Session's output — the desktop window is simply
+    // one of them. A Set so unsubscribing one never touches the others.
+    outputSubscribers: new Set(),
+    // The desktop window's own subscription, so re-attaching replaces it
+    // instead of stacking a second one (which would double every chunk).
+    windowUnsub: null,
     exited: false,
     exitCode: null,
     startedAt: Date.now(),
@@ -1117,10 +1145,7 @@ function startSession({ cwd, command, meta, failLabel, phpBinDir = null }) {
     if (session.buffer.length > MAX_BUFFER) {
       session.buffer = session.buffer.slice(session.buffer.length - MAX_BUFFER);
     }
-    const win = session.window;
-    if (win && !win.isDestroyed()) {
-      win.webContents.send('terminal-data', { sessionId, data });
-    }
+    emitOutputData(session, data);
   });
 
   term.onExit(({ exitCode }) => {
@@ -1128,10 +1153,7 @@ function startSession({ cwd, command, meta, failLabel, phpBinDir = null }) {
     session.exitCode = exitCode;
     session.tracker.exit(exitCode);
     deliverAlerts(session);
-    const win = session.window;
-    if (win && !win.isDestroyed()) {
-      win.webContents.send('terminal-exit', { sessionId, code: exitCode });
-    }
+    emitOutputExit(session, exitCode);
     // stop() already deleted a dismissed session; don't resurrect its row.
     if (sessions.has(sessionId)) emitChange({ immediate: true });
   });
@@ -1140,18 +1162,113 @@ function startSession({ cwd, command, meta, failLabel, phpBinDir = null }) {
   return { ok: true, sessionId };
 }
 
-// Bind a Terminal Window to its Session and replay the ring buffer (Q9). Setting
-// the window ref and sending replay happen synchronously, so no onData chunk can
-// interleave between them — live chunks that follow arrive after the replay.
+// Fan a live chunk out to every output subscriber. One throwing subscriber
+// must not break the others or the pty, so each delivery is guarded.
+function emitOutputData(session, data) {
+  const subs = session.outputSubscribers;
+  if (!subs || subs.size === 0) return;
+  for (const sub of [...subs]) {
+    try {
+      if (sub.onData) sub.onData(data);
+    } catch {}
+  }
+}
+
+// Same isolation for the exit event.
+function emitOutputExit(session, exitCode) {
+  const subs = session.outputSubscribers;
+  if (!subs || subs.size === 0) return;
+  for (const sub of [...subs]) {
+    try {
+      if (sub.onExit) sub.onExit(exitCode);
+    } catch {}
+  }
+}
+
+// Subscribe to a Session's output: one replay (ring buffer plus exited flag),
+// then every live chunk, then the exit event with its code. Generic — it
+// knows nothing about windows, phones or sockets. Returns an unsubscribe
+// function; unsubscribing never affects the Session itself.
+//
+// The replay (and the immediate exit for an already-exited Session) is sent
+// synchronously, so no live chunk can interleave before it.
+function subscribeOutput(sessionId, sinks = {}) {
+  const session = sessions.get(sessionId);
+  // No Session: nothing to replay or follow. Return a no-op unsubscribe so
+  // the return type stays a function on every path.
+  if (!session) return () => {};
+  if (!session.outputSubscribers) session.outputSubscribers = new Set();
+  const sub = {
+    onReplay: typeof sinks.onReplay === 'function' ? sinks.onReplay : null,
+    onData: typeof sinks.onData === 'function' ? sinks.onData : null,
+    onExit: typeof sinks.onExit === 'function' ? sinks.onExit : null,
+  };
+  session.outputSubscribers.add(sub);
+  try {
+    if (sub.onReplay) sub.onReplay({ data: session.buffer, exited: session.exited });
+  } catch {}
+  if (session.exited) {
+    try {
+      if (sub.onExit) sub.onExit(session.exitCode);
+    } catch {}
+  }
+  let done = false;
+  return () => {
+    if (done) return;
+    done = true;
+    session.outputSubscribers.delete(sub);
+  };
+}
+
+// Whether a Session's transcript exists yet — what the phone's Session list
+// reports as hasTranscript. The engine answers because it knows the Session's
+// Agent, cwd and start time. The pinned transcript id, where a Session has
+// one, lets the locator name that exact file instead of guessing by recency.
+function hasChatTranscript(sessionId) {
+  const session = sessions.get(sessionId);
+  if (!session) return false;
+  try {
+    return !!require('./transcripts.cjs').locateTranscript(
+      session.agentId,
+      session.cwd,
+      session.startedAt,
+      session.transcriptId || null
+    );
+  } catch {
+    return false;
+  }
+}
+
+// Bind a Terminal Window to its Session and replay the ring buffer (Q9). The
+// window is one output subscriber: subscribing sends the replay
+// synchronously, so no onData chunk can interleave between them — live chunks
+// that follow arrive after the replay. Re-attaching replaces the window's
+// previous subscription instead of stacking a second one.
 function attach(sessionId, win) {
   const session = sessions.get(sessionId);
   if (!session) return { error: 'no session' };
-  session.window = win;
-  win.webContents.send('terminal-replay', {
-    sessionId,
-    data: session.buffer,
-    exited: session.exited,
+  try {
+    if (session.windowUnsub) session.windowUnsub();
+  } catch {}
+  // The window learns a Session already ended from the replay's `exited`
+  // flag, exactly as before subscribers existed; the subscription's catch-up
+  // exit event would be a second, new message, so it is not forwarded.
+  let replaying = true;
+  session.windowUnsub = subscribeOutput(sessionId, {
+    onReplay: ({ data, exited }) => {
+      if (!win || win.isDestroyed()) return;
+      win.webContents.send('terminal-replay', { sessionId, data, exited });
+    },
+    onData: (data) => {
+      if (!win || win.isDestroyed()) return;
+      win.webContents.send('terminal-data', { sessionId, data });
+    },
+    onExit: (code) => {
+      if (replaying || !win || win.isDestroyed()) return;
+      win.webContents.send('terminal-exit', { sessionId, code });
+    },
   });
+  replaying = false;
   return { ok: true };
 }
 
@@ -1697,7 +1814,10 @@ module.exports = {
   launch,
   launchFloating,
   resumeChatSession,
+  launchForProject,
   attach,
+  subscribeOutput,
+  hasChatTranscript,
   write,
   setView,
   markRead,

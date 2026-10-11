@@ -98,3 +98,27 @@ describe('agents chat view default', () => {
     expect(found.map((i) => i.id)).toContain('agents.chatViewDefault');
   });
 });
+
+describe('Remote Access entries', () => {
+  it('finds the Mobile settings by feature, section and field names', () => {
+    expect(visibleItems('remote access')).toEqual(
+      expect.arrayContaining(['remote.enabled', 'remote.port'])
+    );
+    expect(visibleItems('mobile')).toEqual(
+      expect.arrayContaining(['remote.enabled', 'remote.port'])
+    );
+    expect(visibleItems('port')).toContain('remote.port');
+  });
+
+  it('finds the public hostname by its field and provider names', () => {
+    expect(visibleItems('hostname')).toContain('remote.hostname');
+    expect(visibleItems('cloudflare')).toContain('remote.hostname');
+  });
+
+  it('finds the keep-awake switch by its purpose', () => {
+    expect(visibleItems('keep awake')).toContain('remote.keepAwake');
+    expect(visibleItems('remote access')).toEqual(
+      expect.arrayContaining(['remote.enabled', 'remote.port', 'remote.keepAwake'])
+    );
+  });
+});
