@@ -8,6 +8,7 @@ import {
   shellEscape,
   formatDropInput,
   isImageDropPath,
+  imagePastePath,
 } from '../src/lib/terminal/keys.js';
 import { Utf8Base64 } from '../src/lib/terminal/utf8Base64.js';
 
@@ -204,6 +205,22 @@ describe('formatDropInput', () => {
     expect(formatDropInput(['/a/x y.png', '/a/2.png'], on)).toBe(
       `${S}/a/x\\ y.png${E} ${S}/a/2.png${E}`
     );
+  });
+});
+
+// The chat composer frames each attachment itself (the serialiser wraps the
+// path), so it escapes through the same rule a terminal drop uses.
+describe('imagePastePath', () => {
+  it('leaves a safe path alone', () => {
+    expect(imagePastePath('/tmp/wpxen-chat-image-7f3a.png')).toBe(
+      '/tmp/wpxen-chat-image-7f3a.png'
+    );
+  });
+  it('backslash-escapes spaces and shell metacharacters, never quotes', () => {
+    expect(
+      imagePastePath('/Users/me/Desktop/Screenshot 2026-10-11 at 10.00.00.png')
+    ).toBe('/Users/me/Desktop/Screenshot\\ 2026-10-11\\ at\\ 10.00.00.png');
+    expect(imagePastePath('/a/x (1).png')).toBe('/a/x\\ \\(1\\).png');
   });
 });
 

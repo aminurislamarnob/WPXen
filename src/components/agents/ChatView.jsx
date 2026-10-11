@@ -37,7 +37,7 @@ import {
   recallKey,
   recallStep,
 } from '../../lib/chatComplete';
-import { isImageDropPath } from '../../lib/terminal/keys';
+import { imagePastePath, isImageDropPath } from '../../lib/terminal/keys';
 import { useOpenLink } from '../../lib/useOpenLink';
 
 export function ChatView({ sessionId, onRestart, onResume, headerActions }) {
@@ -319,7 +319,10 @@ export function ChatView({ sessionId, onRestart, onResume, headerActions }) {
 
   const doSend = useCallback(() => {
     if (!input.trim() && attachments.length === 0) return;
-    window.electronAPI.chatSend(sessionId, input, attachments).catch(() => {});
+    // Each attachment goes into the TUI as a paste frame; a dropped path with
+    // spaces is escaped the way a terminal drop escapes it, or Codex splits it.
+    const images = attachments.map(imagePastePath);
+    window.electronAPI.chatSend(sessionId, input, images).catch(() => {});
     clearDraft();
     setRecallIndex(-1);
     setCompletion(null);
