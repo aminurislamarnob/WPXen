@@ -19,8 +19,9 @@ import {
 const hostKeys = newKeyPair();
 
 // Stands in for the Mac: opens every frame, enforces the per-connection
-// counter the real server enforces, and answers `ping`. Records what it saw
-// so a test can assert the counters restarted rather than resumed.
+// counter and channel binding the real server enforces, answers the hello
+// with the connected event and `ping` with pong. Records what it saw so a
+// test can assert the counters restarted rather than resumed.
 function fakeMac() {
   const wss = new WebSocketServer({ port: 0, host: '127.0.0.1' });
   const seen = []; // one array of counters per connection
@@ -32,7 +33,25 @@ function fakeMac() {
     seen.push(counters);
     let inCounter = 0;
     let outCounter = 0;
+    let channel = null;
     let devicePublicKey = null;
+    const send = (payload) => {
+      outCounter += 1;
+      const sealed = sealFrame({
+        payload: { ...payload, ch: channel, n: outCounter },
+        senderSecret: hostKeys.secretKey,
+        recipientPublicKey: devicePublicKey,
+        nonce: randomNonce(),
+      });
+      ws.send(
+        JSON.stringify({
+          v: PROTOCOL_VERSION,
+          counter: outCounter,
+          nonce: sealed.nonce,
+          box: sealed.box,
+        })
+      );
+    };
     ws.on('message', (raw) => {
       const outer = JSON.parse(String(raw));
       counters.push(outer.counter);
@@ -49,21 +68,15 @@ function fakeMac() {
         senderPublicKey: devicePublicKey,
         recipientSecret: hostKeys.secretKey,
       });
-      outCounter += 1;
-      const sealed = sealFrame({
-        payload: { kind: 'response', id: payload.id, result: { pong: true } },
-        senderSecret: hostKeys.secretKey,
-        recipientPublicKey: devicePublicKey,
-        nonce: randomNonce(),
-      });
-      ws.send(
-        JSON.stringify({
-          v: PROTOCOL_VERSION,
-          counter: outCounter,
-          nonce: sealed.nonce,
-          box: sealed.box,
-        })
-      );
+      if (payload.n !== outer.counter) return ws.close();
+      if (!channel) {
+        if (payload.kind !== 'hello') return ws.close();
+        channel = `${payload.clientNonce}.mac-${seen.length}`;
+        send({ kind: 'event', name: 'connected', payload: { deviceId: 'device-1' } });
+        return;
+      }
+      if (payload.ch !== channel) return ws.close();
+      send({ kind: 'response', id: payload.id, result: { pong: true } });
     });
   });
   // The device key is fixed per test run; the handshake that would carry it
@@ -141,10 +154,11 @@ describe('createClient connection lifecycle', () => {
     expect(await client.request('ping')).toMatchObject({ pong: true });
     expect(await client.request('ping')).toMatchObject({ pong: true });
 
+    // Each connection opens with its hello (1), then counts on from there.
     const perConnection = mac.counters();
     expect(perConnection).toHaveLength(2);
-    expect(perConnection[0]).toEqual([1]);
-    expect(perConnection[1]).toEqual([1, 2]);
+    expect(perConnection[0]).toEqual([1, 2]);
+    expect(perConnection[1]).toEqual([1, 2, 3]);
     client.close();
   });
 

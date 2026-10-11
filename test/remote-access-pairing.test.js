@@ -15,7 +15,9 @@ import {
   openPairAccept,
   createClient,
   decodeBase64,
+  encodeBase64,
   sealFrame,
+  openFrame,
   randomNonce,
 } from '../shared/remote-protocol/index.cjs';
 
@@ -232,6 +234,33 @@ describe('pairing offer', () => {
   });
 });
 
+describe('one use', () => {
+  it('spends the secret on the first valid request, before the dialog answers', async () => {
+    promptBehavior = 'silent';
+    const port = listen();
+    const offer = await remoteAccess.pairingOffer({ hostname: HOSTNAME });
+    const parsed = parsePairingUrl(offer.url);
+    const hostPublicKey = decodeBase64(parsed.hostPublicKeyB64);
+    const attempt = () =>
+      rawAttempt({ port, keys: newKeyPair(), secret: parsed.secret, hostPublicKey });
+
+    // The first phone's request opens the dialog, which nobody answers yet.
+    const first = attempt();
+    while (promptCalls.length === 0) await new Promise((r) => setTimeout(r, 10));
+    // A second phone with the same QR is refused outright — no second dialog.
+    const second = await attempt();
+    expect(second.reply).toMatchObject({
+      type: 'pair-reject',
+      reason: PAIR_ERRORS.pairingUsed,
+    });
+    expect(promptCalls).toHaveLength(1);
+    second.socket.close();
+    const { socket, reply } = await first;
+    expect(reply).toMatchObject({ reason: PAIR_ERRORS.pairingTimeout });
+    socket.close();
+  });
+});
+
 describe('confirmation code', () => {
   it('matches on both sides, and a swapped key changes it', () => {
     const host = newKeyPair();
@@ -349,6 +378,52 @@ describe('encrypted channel', () => {
     return { rawSocket, messages, closed };
   }
 
+  async function nextMessage(messages, count) {
+    const deadline = Date.now() + 2000;
+    while (messages.length < count && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    return messages[count - 1];
+  }
+
+  // A device channel opened by hand, frame by frame, so a test can capture
+  // and replay what crosses the wire.
+  async function rawChannel({ port, deviceId, keys, hostPublicKey }) {
+    const sock = await attackedSocket(port);
+    const hello = sealedFrame({
+      deviceId,
+      counter: 1,
+      payload: { kind: 'hello', n: 1, clientNonce: encodeBase64(randomNonce()) },
+      secret: keys.secretKey,
+      recipientPublicKey: hostPublicKey,
+    });
+    sock.rawSocket.send(hello);
+    const welcome = JSON.parse(await nextMessage(sock.messages, 1));
+    const { ch } = openFrame({
+      nonce: welcome.nonce,
+      box: welcome.box,
+      senderPublicKey: hostPublicKey,
+      recipientSecret: keys.secretKey,
+    });
+    const frame = (n, extra = {}) =>
+      sealedFrame({
+        deviceId,
+        counter: n,
+        payload: {
+          kind: 'request',
+          id: `r${n}`,
+          op: 'ping',
+          params: {},
+          ch,
+          n,
+          ...extra,
+        },
+        secret: keys.secretKey,
+        recipientPublicKey: hostPublicKey,
+      });
+    return { ...sock, hello, ch, frame };
+  }
+
   it('round-trips ping encrypted; the wire carries no plaintext JSON', async () => {
     const { client, events, deviceId } = await pairedClient();
     const result = await client.request('ping');
@@ -361,86 +436,122 @@ describe('encrypted channel', () => {
 
   it('rejects replayed, reordered, tampered and undecryptable frames', async () => {
     const { deviceId, keys, hostPublicKey, port } = await pairedClient();
-    const ping = { kind: 'request', id: 'r1', op: 'ping', params: {} };
+    const device = { port, deviceId, keys, hostPublicKey };
 
     // Replay: a valid frame, then its identical twin.
     {
-      const { rawSocket, messages, closed } = await attackedSocket(port);
-      const wire = sealedFrame({
-        deviceId,
-        counter: 1,
-        payload: ping,
-        secret: keys.secretKey,
-        recipientPublicKey: hostPublicKey,
-      });
+      const chan = await rawChannel(device);
+      const wire = chan.frame(2);
       // The wire carries no plaintext JSON: the result is sealed inside.
       expect(wire).not.toContain('pong');
-      rawSocket.send(wire);
-      await new Promise((resolve) => {
-        const timer = setInterval(() => {
-          if (messages.length > 0) {
-            clearInterval(timer);
-            resolve();
-          }
-        }, 10);
-      });
-      expect(messages[0]).not.toContain('pong');
-      rawSocket.send(wire);
-      await closed;
-      expect(rawSocket.readyState).toBe(WebSocket.CLOSED);
+      chan.rawSocket.send(wire);
+      expect(await nextMessage(chan.messages, 2)).not.toContain('pong');
+      chan.rawSocket.send(wire);
+      await chan.closed;
+      expect(chan.rawSocket.readyState).toBe(WebSocket.CLOSED);
     }
 
-    // Reorder: counter 2 before 1.
+    // Reorder: counter 3 before 2.
     {
-      const { rawSocket, closed } = await attackedSocket(port);
-      rawSocket.send(
-        sealedFrame({
-          deviceId,
-          counter: 2,
-          payload: ping,
-          secret: keys.secretKey,
-          recipientPublicKey: hostPublicKey,
-        })
-      );
-      await closed;
-      expect(rawSocket.readyState).toBe(WebSocket.CLOSED);
+      const chan = await rawChannel(device);
+      chan.rawSocket.send(chan.frame(3));
+      await chan.closed;
+      expect(chan.messages).toHaveLength(1); // the welcome, nothing for 3
     }
 
     // Tampered: one flipped character in the box.
     {
-      const { rawSocket, closed } = await attackedSocket(port);
-      const wire = JSON.parse(
-        sealedFrame({
-          deviceId,
-          counter: 1,
-          payload: ping,
-          secret: keys.secretKey,
-          recipientPublicKey: hostPublicKey,
-        })
-      );
+      const chan = await rawChannel(device);
+      const wire = JSON.parse(chan.frame(2));
       wire.box =
         wire.box.slice(0, 10) + (wire.box[10] === 'A' ? 'B' : 'A') + wire.box.slice(11);
-      rawSocket.send(JSON.stringify(wire));
-      await closed;
-      expect(rawSocket.readyState).toBe(WebSocket.CLOSED);
+      chan.rawSocket.send(JSON.stringify(wire));
+      await chan.closed;
+      expect(chan.messages).toHaveLength(1);
     }
 
     // Undecryptable: a box sealed to nobody here.
     {
-      const { rawSocket, closed } = await attackedSocket(port);
+      const chan = await rawChannel(device);
       const stranger = newKeyPair();
-      rawSocket.send(
+      chan.rawSocket.send(
         sealedFrame({
           deviceId,
-          counter: 1,
-          payload: ping,
+          counter: 2,
+          payload: {
+            kind: 'request',
+            id: 'r2',
+            op: 'ping',
+            params: {},
+            ch: chan.ch,
+            n: 2,
+          },
           secret: stranger.secretKey,
           recipientPublicKey: stranger.publicKey,
         })
       );
-      await closed;
-      expect(rawSocket.readyState).toBe(WebSocket.CLOSED);
+      await chan.closed;
+      expect(chan.messages).toHaveLength(1);
     }
+  });
+
+  it('refuses a frame captured on one connection and replayed on another', async () => {
+    const { deviceId, keys, hostPublicKey, port } = await pairedClient();
+    const device = { port, deviceId, keys, hostPublicKey };
+
+    // The phone's real connection: hello, then a request the Mac answers.
+    const original = await rawChannel(device);
+    const captured = original.frame(2);
+    original.rawSocket.send(captured);
+    expect(JSON.parse(await nextMessage(original.messages, 2)).counter).toBe(2);
+    original.rawSocket.close();
+
+    // Someone in the path dials again with the captured frame as the first.
+    {
+      const sock = await attackedSocket(port);
+      sock.rawSocket.send(JSON.stringify({ ...JSON.parse(captured), counter: 1 }));
+      await sock.closed;
+      expect(sock.messages).toEqual([]);
+    }
+
+    // Or replays the captured hello too: the Mac opens a fresh channel, and
+    // the request still names the old one.
+    {
+      const sock = await attackedSocket(port);
+      sock.rawSocket.send(original.hello);
+      await nextMessage(sock.messages, 1); // a welcome sealed to the phone
+      sock.rawSocket.send(captured);
+      await sock.closed;
+      expect(sock.messages).toHaveLength(1);
+    }
+
+    // Moving a frame inside its own connection: the sealed counter disagrees
+    // with the envelope's.
+    {
+      const chan = await rawChannel(device);
+      const wire = JSON.parse(chan.frame(2));
+      chan.rawSocket.send(chan.frame(2));
+      await nextMessage(chan.messages, 2);
+      chan.rawSocket.send(JSON.stringify({ ...wire, counter: 3 }));
+      await chan.closed;
+      expect(chan.messages).toHaveLength(2);
+    }
+  });
+
+  it('tracks a socket as the device only once its hello opens', async () => {
+    const { deviceId, client } = await pairedClient();
+    client.close();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(remoteAccess.listDevices()[0].connected).toBe(false);
+
+    // A known id with a counter but no verifiable box.
+    const sock = await attackedSocket(remoteAccess.getStatus().actualPort);
+    sock.rawSocket.send(
+      JSON.stringify({ v: PROTOCOL_VERSION, deviceId, counter: 1, nonce: '', box: '' })
+    );
+    await sock.closed;
+    expect(sock.messages).toEqual([]);
+    expect(remoteAccess.listDevices()[0].connected).toBe(false);
   });
 
   it('drops unknown device ids without answering', async () => {
@@ -470,8 +581,50 @@ describe('encrypted channel', () => {
   });
 
   it('times out a request nothing answers, through an injected socket', async () => {
-    // The constructor takes any WebSocket implementation — this black hole
-    // stands in for a connection whose server went quiet.
+    // The constructor takes any WebSocket implementation. This one opens the
+    // channel properly — it answers the hello — and then goes quiet, like a
+    // server that stopped answering mid-session.
+    const host = newKeyPair();
+    const keys = newKeyPair();
+    class GoesQuiet {
+      static OPEN = 1;
+      constructor() {
+        this.readyState = 1;
+        queueMicrotask(() => this.onopen?.());
+      }
+      send(raw) {
+        const outer = JSON.parse(raw);
+        if (outer.counter !== 1) return;
+        const { clientNonce } = openFrame({
+          nonce: outer.nonce,
+          box: outer.box,
+          senderPublicKey: keys.publicKey,
+          recipientSecret: host.secretKey,
+        });
+        const sealed = sealFrame({
+          payload: { kind: 'event', name: 'connected', ch: `${clientNonce}.q`, n: 1 },
+          senderSecret: host.secretKey,
+          recipientPublicKey: keys.publicKey,
+        });
+        const data = JSON.stringify({ v: PROTOCOL_VERSION, counter: 1, ...sealed });
+        queueMicrotask(() => this.onmessage?.({ data }));
+      }
+      close() {}
+    }
+    const client = createClient({
+      url: 'ws://127.0.0.1:1',
+      WebSocket: GoesQuiet,
+      keys,
+      hostPublicKey: host.publicKey,
+      deviceId: 'd',
+      requestTimeoutMs: 30,
+    });
+    await client.connect();
+    await expect(client.request('ping')).rejects.toThrow(/timed out/);
+    client.close();
+  });
+
+  it('gives up on a server that accepts the socket but never opens the channel', async () => {
     class BlackHole {
       static OPEN = 1;
       constructor() {
@@ -481,18 +634,15 @@ describe('encrypted channel', () => {
       send() {}
       close() {}
     }
-    const keys = newKeyPair();
     const client = createClient({
       url: 'ws://127.0.0.1:1',
       WebSocket: BlackHole,
-      keys,
+      keys: newKeyPair(),
       hostPublicKey: newKeyPair().publicKey,
       deviceId: 'd',
       requestTimeoutMs: 30,
     });
-    await client.connect();
-    await expect(client.request('ping')).rejects.toThrow(/timed out/);
-    client.close();
+    await expect(client.connect()).rejects.toThrow(/connect/);
   });
 
   it('fails a version mismatch naming which side to update', async () => {
