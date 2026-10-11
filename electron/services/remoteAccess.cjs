@@ -1160,7 +1160,7 @@ function terminalResize(sessionId, cols, rows) {
       throw new Error(`Terminal ${name} must be between 1 and 500.`);
     }
   }
-  if (!deps.sessions.get(sessionId)) throw new Error('Unknown session.');
+  if (!phoneSession(sessionId)) throw new Error('Unknown session.');
   deps.sessions.resize(sessionId, cols, rows);
   return { ok: true };
 }
