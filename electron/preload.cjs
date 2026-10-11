@@ -27,6 +27,7 @@ const VALID_EVENT_CHANNELS = [
   'terminal-exit',
   'agent-sessions-update',
   'agent-floating-sessions-update',
+  'agent-chat-rows',
   'floating-shortcut',
   'agents-shortcut',
   'agent-projects-update',
@@ -210,6 +211,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('agent-session-mark', sessionId, read),
   launchAgent: (siteId, agentId, targetId) =>
     ipcRenderer.invoke('agent-launch', siteId, agentId, targetId),
+  resumeChatSession: (sessionId) => ipcRenderer.invoke('agent-resume-session', sessionId),
   splitPane: (sessionId, dir) => ipcRenderer.invoke('agent-split-pane', sessionId, dir),
   setPaneRatio: (rootId, path, ratio) =>
     ipcRenderer.invoke('agent-set-pane-ratio', rootId, path, ratio),
@@ -283,6 +285,30 @@ contextBridge.exposeInMainWorld('electronAPI', {
   terminalStop: (sessionId) => ipcRenderer.invoke('terminal-stop', sessionId),
   terminalStopTab: (sessionId) => ipcRenderer.invoke('terminal-stop-tab', sessionId),
   respawnPane: (sessionId) => ipcRenderer.invoke('agent-respawn-pane', sessionId),
+  chatOpen: (sessionId, viewerId) =>
+    ipcRenderer.send('agent-chat-open', sessionId, viewerId),
+  chatClose: (sessionId, viewerId) =>
+    ipcRenderer.send('agent-chat-close', sessionId, viewerId),
+  chatSnapshot: (sessionId, lines) =>
+    ipcRenderer.invoke('agent-chat-snapshot', sessionId, lines),
+  chatAnswer: (sessionId, groups) =>
+    ipcRenderer.invoke('agent-chat-answer', sessionId, groups),
+  chatSend: (sessionId, text, images) =>
+    ipcRenderer.invoke('agent-chat-send', sessionId, text, images),
+  chatStop: (sessionId) => ipcRenderer.invoke('agent-chat-stop', sessionId),
+  chatModel: (sessionId, modelId) =>
+    ipcRenderer.invoke('agent-chat-model', sessionId, modelId),
+  chatSaveImage: (bytes) => ipcRenderer.invoke('agent-chat-save-image', bytes),
+  chatFiles: (siteId) => ipcRenderer.invoke('agent-chat-files', siteId),
+  chatCommands: (siteId) => ipcRenderer.invoke('agent-chat-commands', siteId),
+  chatLoadOlder: (sessionId) => ipcRenderer.invoke('agent-chat-load-older', sessionId),
+  chatFetchFull: (sessionId, toolUseId) =>
+    ipcRenderer.invoke('agent-chat-fetch-full', sessionId, toolUseId),
+  chatExpandSubagent: (sessionId, toolUseId, expanded) =>
+    ipcRenderer.invoke('agent-chat-expand-subagent', sessionId, toolUseId, expanded),
+  chatLoadOlderSubagent: (sessionId, parentId) =>
+    ipcRenderer.invoke('agent-chat-load-older-subagent', sessionId, parentId),
+  chatImage: (sessionId, ref) => ipcRenderer.invoke('agent-chat-image', sessionId, ref),
 
   // In-app browser. The renderer owns the <webview>; these reach its guest in
   // the main process, keyed by the browser tab's key.

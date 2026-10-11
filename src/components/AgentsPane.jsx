@@ -25,7 +25,9 @@ import { useSettings } from '../lib/useSettings';
 import { LAST_AGENTS_SITE_KEY, resolveLastSite } from '../lib/activityBar';
 import { useAgentSessions, setSelectedSession } from '../lib/useAgentSessions';
 import TabStrip from './agents/TabStrip';
+import { cleanupOrphanedDrafts } from '../lib/chatDraft';
 import TabContextMenu from './agents/TabContextMenu';
+import { getViewMode, setViewMode } from '../lib/chatView';
 import {
   tabsToClose,
   closeImpact,
@@ -112,6 +114,34 @@ export default function AgentsPane() {
   const [error, setError] = useState(null);
 
   const allSessions = useAgentSessions();
+  const [sessionsLoaded, setSessionsLoaded] = useState(false);
+  useEffect(() => {
+    window.electronAPI.listAllSessions().then(() => setSessionsLoaded(true));
+  }, []);
+  useEffect(() => {
+    if (sessionsLoaded) {
+      cleanupOrphanedDrafts(allSessions.map((s) => s.sessionId));
+    }
+  }, [sessionsLoaded, allSessions]);
+
+  // "Open Claude Sessions in chat view": a chat-capable Session row seen for
+  // the first time starts in chat view. Rows present at the initial load are
+  // existing Sessions and keep their mode, whatever the setting.
+  const chatDefaultSeenRef = useRef(null);
+  useEffect(() => {
+    if (!sessionsLoaded) return;
+    if (chatDefaultSeenRef.current === null) {
+      chatDefaultSeenRef.current = new Set(allSessions.map((s) => s.sessionId));
+      return;
+    }
+    for (const s of allSessions) {
+      if (!chatDefaultSeenRef.current.has(s.sessionId)) {
+        chatDefaultSeenRef.current.add(s.sessionId);
+        if (s.chat && settings['agents.chatViewDefault'])
+          setViewMode(s.sessionId, 'chat');
+      }
+    }
+  }, [allSessions, sessionsLoaded, settings]);
   const tabs = useMemo(() => {
     const valid = allSessions.filter((s) => s.siteId === siteId && !s.paneOf);
     const map = new Map(valid.map((s) => [s.sessionId, s]));
@@ -119,9 +149,15 @@ export default function AgentsPane() {
     const roots = [];
 
     for (const item of valid) {
-      if (item.handoffFrom && map.has(item.handoffFrom)) {
-        if (!children.has(item.handoffFrom)) children.set(item.handoffFrom, []);
-        children.get(item.handoffFrom).push(item);
+      // Handoff and resume children open right after their parent, in launch
+      // order — a continued conversation stays beside the session it came from.
+      const parentId =
+        (item.handoffFrom && map.has(item.handoffFrom) && item.handoffFrom) ||
+        (item.resumeFrom && map.has(item.resumeFrom) && item.resumeFrom) ||
+        null;
+      if (parentId) {
+        if (!children.has(parentId)) children.set(parentId, []);
+        children.get(parentId).push(item);
       } else {
         roots.push(item);
       }
@@ -238,6 +274,23 @@ export default function AgentsPane() {
         toggleExplorer();
         return;
       }
+      // ⌘⇧C flips the focused pane between terminal and chat view. Every ⌘
+      // chord bubbles out of the xterm, and the chat composer never stops
+      // ⌘ chords, so this fires from either side.
+      if (
+        e.metaKey &&
+        e.shiftKey &&
+        !e.ctrlKey &&
+        !e.altKey &&
+        e.key.toLowerCase() === 'c'
+      ) {
+        const id = focusedPaneId;
+        if (id && sessionsById[id]?.chat && !showingFile) {
+          e.preventDefault();
+          setViewMode(id, getViewMode(id) === 'chat' ? 'terminal' : 'chat');
+        }
+        return;
+      }
       if (e.metaKey && !e.ctrlKey && !e.altKey && e.key.toLowerCase() === 'd') {
         e.preventDefault();
         const dir = e.shiftKey ? 'down' : 'right';
@@ -265,7 +318,7 @@ export default function AgentsPane() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [toggleExplorer, activeTab, showingFile, focusedPaneId, allSessions]);
+  }, [toggleExplorer, activeTab, showingFile, focusedPaneId, allSessions, sessionsById]);
 
   // ⌘W belongs to the app menu (Close Window), so the main process only
   // forwards it while a terminal pane here has focus — see paneFocus below.
@@ -599,6 +652,16 @@ export default function AgentsPane() {
           label: 'Hand Off to Another Agent…',
           onClick: () => setHandoffSession(key),
         });
+
+        const session = sessionsById[key];
+        if (session && session.chat) {
+          const currentMode = getViewMode(key);
+          const isChat = currentMode === 'chat';
+          items.push({
+            label: isChat ? 'Switch to Terminal View' : 'Switch to Chat View',
+            onClick: () => setViewMode(key, isChat ? 'terminal' : 'chat'),
+          });
+        }
         items.push('separator');
       }
 
@@ -645,13 +708,15 @@ export default function AgentsPane() {
 
   // Respawn the same Agent after its shell exited: launch a fresh Session and
   // reap the dead one. The new Session takes the end of the tab strip. In a
-  // split, the main process swaps the pane in place instead.
+  // split, the main process swaps the pane in place instead. Either way the
+  // new Session inherits the old view mode, so a chat stays a chat.
   const respawn = async (sessionId) => {
     const s = sessionsById[sessionId];
     if (s?.paneOf || s?.layout) {
       const res = await window.electronAPI.respawnPane(sessionId);
       if (res?.error) return setError(res.error);
       sessionCache.dispose(sessionId);
+      setViewMode(res.sessionId, getViewMode(sessionId));
       if (res.rootId !== (s.paneOf || sessionId)) selectSession(res.rootId);
       return;
     }
@@ -660,9 +725,21 @@ export default function AgentsPane() {
     const res = await window.electronAPI.launchAgent(siteId, tab.agentId, tab.targetId);
     if (res?.error) return setError(res.error);
     if (!res?.sessionId) return;
+    setViewMode(res.sessionId, getViewMode(sessionId));
     selectSession(res.sessionId);
     window.electronAPI.terminalStop(sessionId);
     sessionCache.dispose(sessionId);
+  };
+
+  // Resume a pinned transcript in a new Session beside the old one. Same
+  // transcriptId, so the new chat view continues the conversation — opened
+  // in chat view, ordered right after the old tab.
+  const resumeChat = async (sessionId) => {
+    const res = await window.electronAPI.resumeChatSession(sessionId);
+    if (res?.error) return setError(res.error);
+    if (!res?.sessionId) return;
+    setViewMode(res.sessionId, 'chat');
+    selectSession(res.sessionId);
   };
 
   // A file-path link Cmd+clicked in terminal output → open/focus an editor tab
@@ -1012,6 +1089,7 @@ export default function AgentsPane() {
                       onOpenLink={handleOpenLink}
                       onExited={requestClosePane}
                       onRestart={respawn}
+                      onResume={resumeChat}
                       onFocusPane={paneFocus}
                       onBlurPane={paneBlur}
                       onClosePane={requestClosePane}

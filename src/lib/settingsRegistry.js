@@ -411,6 +411,13 @@ export const SETTINGS_ITEMS = [
     ],
   },
   {
+    id: 'agents.chatViewDefault',
+    section: 'agents',
+    title: 'Open Claude Sessions in chat view',
+    description: 'New Claude Code Sessions start in chat view, not the terminal',
+    keywords: ['agents', 'chat', 'transcript', 'view', 'claude', 'default'],
+  },
+  {
     id: 'agents.notifications.enabled',
     section: 'agents',
     title: 'Agent notifications',
