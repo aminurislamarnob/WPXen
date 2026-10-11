@@ -155,6 +155,35 @@ describe('decodeCodexLine', () => {
   });
 });
 
+describe('codex plan to-dos', () => {
+  it('folds update_plan into the to-do checklist', () => {
+    const state = {};
+    const line = JSON.stringify({
+      timestamp: '2026-10-08T18:09:05.000Z',
+      type: 'response_item',
+      payload: {
+        type: 'function_call',
+        name: 'update_plan',
+        call_id: 'call_plan1',
+        arguments: JSON.stringify({
+          explanation: 'Fix then test',
+          plan: [
+            { step: 'Reproduce the bug', status: 'completed' },
+            { step: 'Patch the coupon path', status: 'in_progress' },
+            { step: 'Add a regression test', status: 'pending' },
+          ],
+        }),
+      },
+    });
+    decodeCodexLine(line, state);
+    expect(state.facts.todos).toEqual([
+      { content: 'Reproduce the bug', status: 'completed' },
+      { content: 'Patch the coupon path', status: 'in_progress' },
+      { content: 'Add a regression test', status: 'pending' },
+    ]);
+  });
+});
+
 describe('codex chat binding (engine)', () => {
   let home;
   let bin;

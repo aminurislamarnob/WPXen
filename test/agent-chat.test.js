@@ -977,3 +977,55 @@ describe('chatImage (#115)', () => {
     });
   });
 });
+
+// Current Claude Code (2.1.x) records, in the shapes real transcripts carry:
+// TaskCreate/TaskUpdate to-dos, a background task completed through a queued
+// <task-notification> attachment, Stop's interrupt notice, thinking timing.
+describe('Claude Code 2.1 transcripts', () => {
+  function decodeAll() {
+    const state = {};
+    const rows = new Map();
+    const lines = fs
+      .readFileSync(path.join(__dirname, 'fixtures/claude-2.1-transcript.jsonl'), 'utf8')
+      .split('\n');
+    for (const line of lines) {
+      for (const row of [decodeClaudeLine(line, state) ?? []].flat()) {
+        if (row.id) rows.set(row.id, row);
+      }
+    }
+    return { state, rows: [...rows.values()] };
+  }
+
+  it('folds TaskCreate and TaskUpdate into the to-do checklist', () => {
+    expect(decodeAll().state.facts.todos).toEqual([
+      { content: 'Reproduce the checkout bug', status: 'in_progress' },
+    ]);
+  });
+
+  it('completes a background task from a queued task-notification attachment', () => {
+    expect(decodeAll().state.facts.tasks.bk7q2m9xa).toMatchObject({
+      command: 'npm test -- checkout',
+      status: 'completed',
+    });
+  });
+
+  it("shows Stop's interrupt notice as a status row, not a user message", () => {
+    const { rows } = decodeAll();
+    expect(rows.find((r) => r.id === 'u-7')).toEqual({
+      id: 'u-7',
+      role: 'status',
+      content: 'Interrupted',
+    });
+    const users = rows.filter((r) => r.role === 'user' && !r.orphan);
+    expect(users.map((r) => r.content)).toEqual([
+      'Plan the checkout fix',
+      'Carry on with the test',
+    ]);
+  });
+
+  it('times a thinking block from the record that started the request', () => {
+    const reasoning = decodeAll().rows.find((r) => r.role === 'reasoning');
+    // Prompt at :16.000, thinking record written at :19.200.
+    expect(reasoning.durationMs).toBe(3200);
+  });
+});

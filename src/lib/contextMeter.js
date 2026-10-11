@@ -1,33 +1,24 @@
-// Context windows by model id prefix, in tokens. Longest prefix wins, so a
-// dated or suffixed id (claude-haiku-4-5-20251001, claude-sonnet-5-5[1m])
-// still finds its model. Add new models here.
-const CONTEXT_WINDOWS = {
-  'claude-fable-5-1': 1_000_000,
-  'claude-fable-5': 1_000_000,
-  'claude-opus-5-5': 1_000_000,
-  'claude-opus-5': 1_000_000,
-  'claude-opus-4-8': 1_000_000,
-  'claude-opus-4-7': 1_000_000,
-  'claude-opus-4-6': 1_000_000,
-  'claude-sonnet-5-5': 1_000_000,
-  'claude-sonnet-5': 1_000_000,
-  'claude-sonnet-4-6': 1_000_000,
-  'claude-haiku-4-5': 200_000,
+// Context windows the model id itself names, by suffix. A bare name says
+// nothing: the same model runs 1M first-party and 200k through a gateway, so
+// guessing would show a confidently wrong percentage (after Orca's
+// claudeContextWindowHint). Add a suffix here only when it fixes the window.
+const CONTEXT_WINDOW_SUFFIXES = {
+  '[1m]': 1_000_000,
 };
 
 function contextWindowFor(model) {
-  let best = null;
-  for (const prefix of Object.keys(CONTEXT_WINDOWS)) {
-    if (model.startsWith(prefix) && (!best || prefix.length > best.length)) best = prefix;
+  const id = String(model).trim().toLowerCase();
+  for (const [suffix, window] of Object.entries(CONTEXT_WINDOW_SUFFIXES)) {
+    if (id.endsWith(suffix)) return window;
   }
-  return best ? CONTEXT_WINDOWS[best] : null;
+  return null;
 }
 
-// The chat header's meter: "62% of context" for a known model, otherwise
-// the raw count ("48k tokens").
+// The chat header's meter: "62% of context" when the window is known (the
+// Agent reports it, like Codex, or the model id names it), otherwise the raw
+// count ("48k tokens").
 export function contextMeter(usage) {
   if (!usage || typeof usage.tokens !== 'number') return null;
-  // An Agent that reports its own window (Codex) beats the table.
   const limit = usage.limit || (usage.model ? contextWindowFor(usage.model) : null);
   if (!limit)
     return { label: `${Math.round(usage.tokens / 1000)}k tokens`, percent: null };
