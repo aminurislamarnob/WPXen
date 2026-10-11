@@ -340,6 +340,11 @@ function stop() {
     } catch {}
     server = null;
     boundPort = null;
+    // `server.close()` stops accepting new connections but leaves the
+    // established ones running, so a paired phone would stay connected to a
+    // Remote Access that reads as off. Today the tunnel dying takes those
+    // sockets with it, which is luck, not intent — drop them here.
+    closeEveryDeviceSocket();
   }
   // A bind that failed with nothing left running is exactly what flips the
   // switch back off (ipc.cjs), and that flip calls us. Carry the reason onto
@@ -866,6 +871,13 @@ async function revokeDevice(id) {
 
 // Drop every live socket. Records are kept, so the devices reconnect.
 async function disconnectAll() {
+  closeEveryDeviceSocket();
+  return { ok: true };
+}
+
+// Shared by disconnect-all and by stopping the server: an ordinary close the
+// phone may reconnect after, never the revoked code. Records are untouched.
+function closeEveryDeviceSocket() {
   for (const [id, sockets] of [...deviceSockets.entries()]) {
     for (const ws of [...sockets]) {
       try {
@@ -875,7 +887,6 @@ async function disconnectAll() {
     deviceSockets.delete(id);
   }
   publishDevices();
-  return { ok: true };
 }
 
 // ─── Pairing rate limiting ───────────────────────────────────────────────
