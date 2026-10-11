@@ -326,9 +326,15 @@ describe('sessions over the channel', () => {
       })
     ).rejects.toThrow('Unknown session.');
 
+    // Stop is the one that would destroy work rather than just expose it.
+    await expect(
+      client.request('sessions.stop', { sessionId: floating.sessionId })
+    ).rejects.toThrow('Unknown session.');
+
     // The Session itself is untouched — refusing the phone is not stopping it.
     expect(agents.listFloatingSessions()).toHaveLength(1);
     expect(agents.getSession(floating.sessionId)).not.toBeNull();
+    expect(agents.getSession(floating.sessionId).exited).toBe(false);
     client.close();
   });
 

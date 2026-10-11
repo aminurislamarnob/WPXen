@@ -1099,7 +1099,7 @@ async function dispatchSessionOp(op, params) {
   }
   if (op === 'sessions.stop') {
     const sessionId = params && params.sessionId;
-    if (typeof sessionId !== 'string' || !sessionId) throw new Error('Unknown session.');
+    if (!phoneSession(sessionId)) throw new Error('Unknown session.');
     return deps.sessions.stop(sessionId);
   }
   throw new Error(`Unknown operation: ${op}`);
