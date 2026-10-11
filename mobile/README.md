@@ -1,6 +1,6 @@
 # WPXen Mobile
 
-The native companion app for WPXen Remote Access (iOS and Android, Expo + React Native + TypeScript). Pair it with your Mac and see that it is connected. Sessions arrive in later tickets.
+The native companion app for WPXen Remote Access (iOS and Android, Expo + React Native + TypeScript). Pair it with your Mac, see your Projects and Sessions live, open a Session's terminal and type into it, start or stop Sessions, and get a push when one needs you.
 
 ## Run it against a dev WPXen
 
@@ -14,6 +14,6 @@ The phone reaches the Mac over its own Cloudflare tunnel; everything is end-to-e
 
 - `npm run typecheck` — `tsc --noEmit`
 - `npm run lint` — `expo lint`
-- `npm run test` — `vitest run` (pure modules only: backoff, connection state, host list)
+- `npm run test` — `vitest run` (pure modules only: backoff, connection state, host list, grouping, key bar, resize policy, terminal document)
 
 The root desktop gate (`lint`, `format:check`, `test`, `build:renderer`) ignores `mobile/` and runs only there.

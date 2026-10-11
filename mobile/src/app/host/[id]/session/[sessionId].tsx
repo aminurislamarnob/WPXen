@@ -59,6 +59,7 @@ const KEY_LABELS: Record<KeyId, string> = {
   left: '←',
   right: '→',
   enter: 'Enter',
+  backspace: '⌫',
 };
 
 export default function SessionTerminalScreen() {
@@ -413,6 +414,11 @@ export default function SessionTerminalScreen() {
             autoCorrect={false}
             multiline
             onChangeText={onTypedText}
+            // The field is always empty, so Backspace never changes its text:
+            // it only arrives as a key press, and the TUI needs its DEL byte.
+            onKeyPress={(e) => {
+              if (e.nativeEvent.key === 'Backspace') onKeyBar('backspace');
+            }}
             value=""
           />
           <View style={styles.sizeRow}>
