@@ -355,6 +355,8 @@ function registerHandlers(win, storeInstance) {
       subscribe: agents.onSessionsChanged,
       markRead: (id, read) => agents.markRead(id, read),
       get: (id) => agents.getSession(id),
+      subscribeOutput: (id, sinks) => agents.subscribeOutput(id, sinks),
+      write: (id, data) => agents.write(id, data),
       projects: () => {
         const byId = new Map(getProjectRecords().map((r) => [r.id, r]));
         return getProjectIds()
