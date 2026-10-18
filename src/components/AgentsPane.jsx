@@ -164,6 +164,9 @@ export default function AgentsPane() {
   // which of the two kinds is on screen; activeTab / activeKey each remember
   // their own last pick so switching back lands where it was.
   const [view, setView] = useState('session'); // 'session' | 'file'
+  // Declared up here, not beside its first effect: the keydown effect's deps
+  // read it during render, and a later `const` is still in its dead zone.
+  const showingFile = view === 'file' && openFiles.some((f) => f.key === activeKey);
   const [dirtyKeys, setDirtyKeys] = useState([]); // file tabs with unsaved edits
   // Per-browser-tab chrome state, fed by the webview's own events. The pages
   // themselves live in webviewCache, not here.
@@ -487,7 +490,6 @@ export default function AgentsPane() {
 
   // Tell the sidebar which Session is on screen — none while a file or
   // browser tab covers the terminal, so its output still counts as unread.
-  const showingFile = view === 'file' && openFiles.some((f) => f.key === activeKey);
   useEffect(() => {
     setSelectedSession(siteId && !showingFile ? focusedPaneId : null);
   }, [siteId, focusedPaneId, showingFile]);
