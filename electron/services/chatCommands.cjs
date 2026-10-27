@@ -2,20 +2,82 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
-const BUILT_IN_COMMANDS = [
-  { name: '/clear', description: 'Clear the context and start a new conversation' },
-  { name: '/compact', description: 'Compact the context' },
-  { name: '/model', description: 'Change the model' },
-  { name: '/review', description: 'Review code' },
-  { name: '/bug', description: 'Report a bug' },
-  { name: '/help', description: 'Show help' },
-  { name: '/exit', description: 'Exit the conversation' },
-  { name: '/history', description: 'Show history' },
-  { name: '/resume', description: 'Resume a conversation' },
-  { name: '/goal', description: 'Set an overarching goal' },
-  { name: '/schedule', description: 'Schedule a recurring task' },
-  { name: '/plan', description: 'Plan step by step' },
+// Each Agent's own built-in commands — the CLIs publish no machine-readable
+// catalog, so these are curated (ported from Orca's
+// native-chat-slash-commands.ts). An Agent without a list gets the commands
+// every TUI here has.
+const COMMON_COMMANDS = [
+  { name: '/clear', description: 'Clear the conversation' },
+  { name: '/help', description: 'Show available commands' },
 ];
+
+const CLAUDE_COMMANDS = [
+  { name: '/clear', description: 'Clear conversation history' },
+  { name: '/compact', description: 'Summarize and compact the conversation' },
+  { name: '/init', description: 'Initialize a CLAUDE.md' },
+  // The chat's own model picker sends /model.
+  { name: '/model', description: 'Change the model' },
+  { name: '/review', description: 'Review the current changes' },
+  { name: '/help', description: 'Show available commands' },
+];
+
+const CODEX_COMMANDS = [
+  ['model', 'Choose the model and reasoning effort'],
+  ['ide', 'Include IDE context'],
+  ['permissions', 'Choose what Codex is allowed to do'],
+  ['keymap', 'Remap TUI shortcuts'],
+  ['vim', 'Toggle Vim mode'],
+  ['experimental', 'Toggle experimental features'],
+  ['approve', 'Approve one auto-review retry'],
+  ['memories', 'Configure memory use'],
+  ['skills', 'Manage and use skills'],
+  ['import', 'Import setup from Claude Code'],
+  ['hooks', 'View lifecycle hooks'],
+  ['review', 'Review the current changes'],
+  ['rename', 'Rename the current thread'],
+  ['new', 'Start a new chat'],
+  ['archive', 'Archive this session and exit'],
+  ['delete', 'Delete this session and exit'],
+  ['resume', 'Resume a saved chat'],
+  ['fork', 'Fork the current chat'],
+  ['app', 'Continue in Codex Desktop'],
+  ['init', 'Create an AGENTS.md file'],
+  ['compact', 'Compact the conversation'],
+  ['plan', 'Switch to Plan mode'],
+  ['goal', 'Set or view the goal'],
+  ['agent', 'Switch the active agent thread'],
+  ['side', 'Start a side conversation'],
+  ['copy', 'Copy the last response as markdown'],
+  ['raw', 'Toggle raw scrollback mode'],
+  ['diff', 'Show the working diff'],
+  ['mention', 'Mention a file'],
+  ['status', 'Show session configuration and usage'],
+  ['usage', 'View account usage'],
+  ['title', 'Configure the terminal title'],
+  ['statusline', 'Configure the status line'],
+  ['theme', 'Choose a syntax highlighting theme'],
+  ['pets', 'Choose or hide the terminal pet'],
+  ['mcp', 'List configured MCP tools'],
+  ['plugins', 'Browse plugins'],
+  ['logout', 'Log out of Codex'],
+  ['exit', 'Exit Codex'],
+  ['feedback', 'Send logs to maintainers'],
+  ['ps', 'List background terminals'],
+  ['stop', 'Stop all background terminals'],
+  ['clear', 'Clear the terminal and start a new chat'],
+  ['personality', 'Choose a communication style'],
+  ['subagents', 'Switch the active agent thread'],
+].map(([name, description]) => ({ name: `/${name}`, description }));
+
+// Per chat kind (the registry's `chat`): its built-ins, and the config
+// folders — under home and under the Site — whose commands/ and skills/
+// it reads. Only an Agent's own folders: Claude never lists Antigravity's
+// commands and the other way round.
+const AGENT_COMMANDS = {
+  claude: { builtIn: CLAUDE_COMMANDS, dirs: ['.claude'] },
+  codex: { builtIn: CODEX_COMMANDS, dirs: [] },
+  antigravity: { builtIn: COMMON_COMMANDS, dirs: ['.gemini/antigravity-cli'] },
+};
 
 function readFrontmatterName(filePath) {
   try {
@@ -51,17 +113,12 @@ function findCustom(dir, ext = '.md') {
   return results;
 }
 
-function listCommands(rootPath) {
-  const commands = [...BUILT_IN_COMMANDS];
+function listCommands(rootPath, agent, { home = os.homedir() } = {}) {
+  const entry = AGENT_COMMANDS[agent] || { builtIn: COMMON_COMMANDS, dirs: [] };
+  const commands = [...entry.builtIn];
 
-  const searchDirs = [
-    path.join(os.homedir(), '.claude'),
-    path.join(os.homedir(), '.gemini', 'antigravity-cli'),
-  ];
-  if (rootPath) {
-    searchDirs.push(path.join(rootPath, '.claude'));
-    searchDirs.push(path.join(rootPath, '.gemini', 'antigravity-cli'));
-  }
+  const searchDirs = entry.dirs.map((d) => path.join(home, d));
+  if (rootPath) searchDirs.push(...entry.dirs.map((d) => path.join(rootPath, d)));
 
   for (const base of searchDirs) {
     // Custom commands

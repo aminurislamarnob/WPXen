@@ -426,9 +426,10 @@ function registerHandlers(win, storeInstance) {
     const site = findProject(siteId);
     return site?.path ? files.listFiles(site.path) : [];
   });
-  ipcMain.handle('agent-chat-commands', (_e, siteId) => {
+  // `agent` is the Session's chat kind: each Agent lists its own commands.
+  ipcMain.handle('agent-chat-commands', (_e, siteId, agent) => {
     const site = findProject(siteId);
-    return require('./services/chatCommands.cjs').listCommands(site?.path);
+    return require('./services/chatCommands.cjs').listCommands(site?.path, agent);
   });
   // A pasted image, saved to a temp file the TUI can attach; removed once
   // its Session is gone (agents.stop).

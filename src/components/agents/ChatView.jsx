@@ -140,6 +140,8 @@ export function ChatView({ sessionId, onRestart, onResume, headerActions }) {
   const [siteFiles, setSiteFiles] = useState([]);
   const [siteCommands, setSiteCommands] = useState([]);
 
+  // `/` lists this Agent's own commands (its chat kind), `@` the Site's files.
+  const chatKind = currentSession?.chat;
   useEffect(() => {
     if (siteId) {
       window.electronAPI
@@ -147,11 +149,11 @@ export function ChatView({ sessionId, onRestart, onResume, headerActions }) {
         .then(setSiteFiles)
         .catch(() => {});
       window.electronAPI
-        .chatCommands(siteId)
+        .chatCommands(siteId, chatKind)
         .then(setSiteCommands)
         .catch(() => {});
     }
-  }, [siteId]);
+  }, [siteId, chatKind]);
 
   const [completion, setCompletion] = useState(null);
   const completionMatches = useMemo(() => {
