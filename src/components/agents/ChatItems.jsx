@@ -83,7 +83,9 @@ function ResultText({ result, onFetchFull }) {
       )}
       {result.truncated && onFetchFull && (
         <div className="mt-1 text-[11px] text-muted-foreground">
-          Output truncated.{' '}
+          {result.fullBytes
+            ? `Showing the first part of ${Math.ceil(result.fullBytes / 1024)} KB.`
+            : 'Output truncated.'}{' '}
           <button
             type="button"
             onClick={onFetchFull}

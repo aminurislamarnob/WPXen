@@ -1434,9 +1434,18 @@ const {
   chatStop,
   chatCommand,
 } = require('./agentChatSend.cjs');
-const { decodeClaudeLine } = require('./agentChatClaude.cjs');
-const { decodeCodexLine } = require('./agentChatCodex.cjs');
-const { decodeAntigravityLine } = require('./agentChatAntigravity.cjs');
+// Each chat-capable Agent's transcript decoder: how a line becomes rows, and
+// where a tool result's full text lives for "Show full output".
+const CHAT_DECODERS = (() => {
+  const claude = require('./agentChatClaude.cjs');
+  const codex = require('./agentChatCodex.cjs');
+  const antigravity = require('./agentChatAntigravity.cjs');
+  return {
+    claude: { ...claude, decodeLine: claude.decodeClaudeLine },
+    codex: { ...codex, decodeLine: codex.decodeCodexLine },
+    antigravity: { ...antigravity, decodeLine: antigravity.decodeAntigravityLine },
+  };
+})();
 const transcripts = require('./transcripts.cjs');
 
 const chatListeners = new Set();
@@ -1452,11 +1461,9 @@ function openChat(sessionId, viewerId) {
   const agent = effectiveRegistry().find((a) => a.id === session.agentId);
   if (!agent || !agent.chat) return;
 
-  let decodeLine = null;
-  if (agent.chat === 'claude') decodeLine = decodeClaudeLine;
-  else if (agent.chat === 'codex') decodeLine = decodeCodexLine;
-  else if (agent.chat === 'antigravity') decodeLine = decodeAntigravityLine;
-  if (!decodeLine) return;
+  const decoder = CHAT_DECODERS[agent.chat];
+  if (!decoder) return;
+  const { decodeLine } = decoder;
 
   const transcriptPath = locateChatTranscript(sessionId, session);
   if (!transcriptPath) {
@@ -1482,6 +1489,8 @@ function openChat(sessionId, viewerId) {
   const opened = tryOpenChat(sessionId, viewerId, {
     transcriptPath,
     decodeLine,
+    findToolResult: decoder.findToolResult,
+    toolResultNeedle: decoder.toolResultNeedle,
     relocate,
     transcriptId: session.transcriptId,
     startedAt: session.startedAt,

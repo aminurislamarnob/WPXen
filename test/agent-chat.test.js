@@ -1059,3 +1059,119 @@ describe('Claude Code 2.1 transcripts', () => {
     expect(reasoning.durationMs).toBe(3200);
   });
 });
+
+// A paired call carries its result on `result` (and Claude's call block on
+// `tool_use.result`): both used to cross IPC whole.
+describe('tool results over the cap (#112)', () => {
+  const agentChat = require('../electron/services/agentChat.cjs');
+  const claude = require('../electron/services/agentChatClaude.cjs');
+  const codex = require('../electron/services/agentChatCodex.cjs');
+  const antigravity = require('../electron/services/agentChatAntigravity.cjs');
+  const os = require('node:os');
+  let dir;
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wpxen-cap-'));
+    agentChat.__setDeps({
+      statSync: fs.statSync,
+      openSync: fs.openSync,
+      readSync: fs.readSync,
+      closeSync: fs.closeSync,
+      readdirSync: fs.readdirSync,
+      setInterval: () => 0,
+      clearInterval: () => {},
+    });
+  });
+  afterEach(() => {
+    agentChat.closeAllChats();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  function open(sessionId, file, decoder, decodeLine) {
+    const rows = [];
+    agentChat.openChat(sessionId, 'v', {
+      transcriptPath: file,
+      decodeLine,
+      findToolResult: decoder.findToolResult,
+      toolResultNeedle: decoder.toolResultNeedle,
+      onRows: (r) => rows.push(...r),
+    });
+    return rows;
+  }
+
+  function expectCapped(row, full) {
+    expect(row.result.truncated).toBe(true);
+    expect(row.result.content).toBe(full.slice(0, agentChat.TRUNCATE_THRESHOLD));
+    expect(row.result.fullBytes).toBe(Buffer.byteLength(full));
+    expect(row.tool_use.result).toBeUndefined();
+    expect(JSON.stringify(row).length).toBeLessThan(2 * agentChat.TRUNCATE_THRESHOLD);
+  }
+
+  it('Claude: a ~50 KB Bash result is capped once and fetched in full', () => {
+    const file = path.join(__dirname, 'fixtures', 'claude-large-result.jsonl');
+    const records = fs
+      .readFileSync(file, 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => JSON.parse(l));
+    const full = records[1].message.content[0].content;
+    expect(full.length).toBeGreaterThan(40 * 1024);
+
+    const rows = open('cap-claude', file, claude, claude.decodeClaudeLine);
+    const call = rows.filter((r) => r.role === 'tool').at(-1);
+    expectCapped(call, full);
+    // The call's first row was emitted before its result was decoded; the
+    // decoder pairing it later must not reach a row already handed over.
+    expect(rows.every((r) => !r.tool_use?.result)).toBe(true);
+    expect(agentChat.chatFetchFull('cap-claude', call.tool_use.id)).toBe(full);
+  });
+
+  it('Codex: a large function_call_output is capped and fetched in full', () => {
+    const full = 'row of output\n'.repeat(4000);
+    const lines = fs
+      .readFileSync(path.join(__dirname, 'fixtures', 'codex-rollout-0.100.jsonl'), 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => {
+        const r = JSON.parse(l);
+        if (r.payload?.type === 'function_call_output') r.payload.output = full;
+        return JSON.stringify(r);
+      });
+    const file = path.join(dir, 'rollout-cap.jsonl');
+    fs.writeFileSync(file, lines.join('\n') + '\n');
+
+    const rows = open('cap-codex', file, codex, codex.decodeCodexLine);
+    const call = rows.filter((r) => r.role === 'tool').at(-1);
+    expectCapped(call, full);
+    expect(agentChat.chatFetchFull('cap-codex', call.tool_use.id)).toBe(full);
+  });
+
+  it('Antigravity: a large result step is capped and fetched in full', () => {
+    const full = 'listing line\n'.repeat(4000);
+    const recs = [
+      {
+        step_index: 4,
+        source: 'MODEL',
+        type: 'PLANNER_RESPONSE',
+        status: 'DONE',
+        created_at: '2026-10-24T05:43:04Z',
+        tool_calls: [{ name: 'run_command', args: { CommandLine: '"ls -R"' } }],
+      },
+      {
+        step_index: 5,
+        source: 'MODEL',
+        type: 'GENERIC',
+        status: 'DONE',
+        created_at: '2026-10-24T05:43:05Z',
+        content: full,
+      },
+    ];
+    const file = path.join(dir, 'transcript.jsonl');
+    fs.writeFileSync(file, recs.map((r) => JSON.stringify(r)).join('\n') + '\n');
+
+    const rows = open('cap-agy', file, antigravity, antigravity.decodeAntigravityLine);
+    const call = rows.filter((r) => r.role === 'tool').at(-1);
+    expectCapped(call, full);
+    expect(agentChat.chatFetchFull('cap-agy', call.tool_use.id)).toBe(full);
+  });
+});

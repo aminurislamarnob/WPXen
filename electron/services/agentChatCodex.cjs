@@ -255,6 +255,21 @@ function decodeCodexLine(lineStr, state, { fallbackId } = {}) {
   return null;
 }
 
+// The full text of one call's output, for "Show full output".
+function findToolResult(record, callId) {
+  const payload = record?.type === 'response_item' ? record.payload : null;
+  if (
+    !payload ||
+    (payload.type !== 'function_call_output' &&
+      payload.type !== 'custom_tool_call_output') ||
+    payload.call_id !== callId
+  ) {
+    return null;
+  }
+  return messageText(payload.output ?? payload.content);
+}
+
 module.exports = {
   decodeCodexLine,
+  findToolResult,
 };

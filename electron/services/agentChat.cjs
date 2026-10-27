@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { toolResultText } = require('./agentChatClaude.cjs');
+const claudeDecoder = require('./agentChatClaude.cjs');
 
 let deps = {
   statSync: fs.statSync,
@@ -22,7 +22,9 @@ const POLL_INTERVAL = 400;
 const PAGE_CHUNK = 64 * 1024; // 64 KB read chunks
 const MAX_PAGE_ROWS = 200;
 const MAX_PAGE_BYTES = 2 * 1024 * 1024; // 2 MB
-const TRUNCATE_THRESHOLD = 4096; // tool result text cap
+// A tool result's head: what crosses IPC until the reader asks for the rest
+// (Orca's structured-path cap, agent-session-item-wire-form.ts:21).
+const TRUNCATE_THRESHOLD = 16 * 1024;
 const FETCH_FULL_CAP = 1 * 1024 * 1024; // 1 MB cap for fetch-full
 
 // ── Watches ────────────────────────────────────────────────────────────────
@@ -75,28 +77,63 @@ function decodeLines(lines, state, decodeLine, file) {
   return rows;
 }
 
-// Truncate tool results in a decoded row, marking truncated ones.
+// A result over the cap, cut to its head and marked so the chat offers
+// "Show full output". `fullBytes` says how much there is.
+function truncateResult(result) {
+  if (
+    !result ||
+    typeof result.content !== 'string' ||
+    result.content.length <= TRUNCATE_THRESHOLD
+  ) {
+    return result;
+  }
+  return {
+    ...result,
+    content: result.content.slice(0, TRUNCATE_THRESHOLD),
+    truncated: true,
+    fullBytes: Buffer.byteLength(result.content),
+  };
+}
+
+// Cap every tool result a row carries before it crosses IPC: a paired call's
+// `result`, and an orphan's tool_result blocks. Decoders keep the result on
+// the call block too (`tool_use.result`, Claude's pairing state); the row
+// sends it once, on `result`. The call block is always copied: it is the
+// decoder's own object, and a result decoded later in the same page would
+// otherwise land on a row already emitted. Never mutates decoder state.
 function truncateRow(row) {
-  if (!row || !row.blocks) return row;
-  let changed = false;
-  const blocks = row.blocks.map((b) => {
-    if (
-      b.type === 'tool_result' &&
-      typeof b.content === 'string' &&
-      b.content.length > TRUNCATE_THRESHOLD
-    ) {
-      changed = true;
-      return {
-        ...b,
-        content: b.content.slice(0, TRUNCATE_THRESHOLD),
-        truncated: true,
-        fullRef: { toolUseId: b.tool_use_id },
-      };
+  if (!row || typeof row !== 'object') return row;
+  let next = row;
+  const copy = () => {
+    if (next === row) next = { ...row };
+  };
+  if (row.tool_use && typeof row.tool_use === 'object') {
+    copy();
+    const toolUse = { ...row.tool_use };
+    delete toolUse.result;
+    next.tool_use = toolUse;
+  }
+  if (row.result) {
+    const capped = truncateResult(row.result);
+    if (capped !== row.result) {
+      copy();
+      next.result = capped;
     }
-    return b;
-  });
-  if (!changed) return row;
-  return { ...row, blocks };
+  }
+  if (Array.isArray(row.blocks)) {
+    let changed = false;
+    const blocks = row.blocks.map((b) => {
+      if (b?.type !== 'tool_result') return b;
+      const capped = truncateResult(b);
+      if (capped !== b) changed = true;
+      return capped;
+    });
+    if (changed) {
+      copy();
+      next.blocks = blocks;
+    }
+  }
+  return next;
 }
 
 // ── Page reads ─────────────────────────────────────────────────────────────
@@ -165,42 +202,44 @@ function loadOlderPage(fd, pageStart, decodeLine, file, results = {}) {
 }
 
 // ── Fetch full tool result ─────────────────────────────────────────────────
-function fetchFull(fd, fileSize, toolUseId) {
-  // Scan the entire file for the tool result with this tool_use_id
+// Each decoder knows where its results live: `findToolResult(record, id)`
+// returns a result's full text or null, and `toolResultNeedle(id)` a string
+// every line holding it contains, so the scan parses only those lines. The
+// last match wins: a re-reported step is the complete one.
+function fetchFull(fd, fileSize, toolUseId, decoder = claudeDecoder) {
+  if (typeof toolUseId !== 'string' || !toolUseId) return null;
+  const find = decoder.findToolResult || claudeDecoder.findToolResult;
+  const needle = decoder.toolResultNeedle
+    ? decoder.toolResultNeedle(toolUseId)
+    : toolUseId;
   let cursor = 0;
   let partial = Buffer.alloc(0);
+  let found = null;
 
   while (cursor < fileSize) {
     const chunkLen = Math.min(PAGE_CHUNK, fileSize - cursor);
     const buf = readRange(fd, cursor, chunkLen);
-    cursor += chunkLen;
+    if (buf.length === 0) break;
+    cursor += buf.length;
 
     const combined = Buffer.concat([partial, buf]);
     const { lines, partial: remainder } = splitLines(combined);
     partial = remainder;
 
     for (const { text: line } of lines) {
-      if (!line.trim()) continue;
+      if (needle && !line.includes(needle)) continue;
       let record;
       try {
         record = JSON.parse(line);
       } catch {
         continue;
       }
-      // Look for tool_result blocks
-      if (record.type !== 'user' || !Array.isArray(record.message?.content)) continue;
-      const block = record.message.content.find(
-        (b) => b.type === 'tool_result' && b.tool_use_id === toolUseId
-      );
-      if (block) {
-        const content = toolResultText(block.content);
-        return content.length > FETCH_FULL_CAP
-          ? content.slice(0, FETCH_FULL_CAP)
-          : content;
-      }
+      const content = find(record, toolUseId);
+      if (typeof content === 'string') found = content;
     }
   }
-  return null;
+  if (found === null) return null;
+  return found.length > FETCH_FULL_CAP ? found.slice(0, FETCH_FULL_CAP) : found;
 }
 
 // ── Stale transcript detection ─────────────────────────────────────────────
@@ -407,6 +446,10 @@ function openChat(sessionId, viewerId, opts) {
     transcriptPath,
     onRows,
     decodeLine,
+    // { findToolResult, toolResultNeedle } for "Show full output"; Claude's
+    // when absent.
+    findToolResult,
+    toolResultNeedle,
     onNotice,
     transcriptId,
     startedAt,
@@ -438,6 +481,7 @@ function openChat(sessionId, viewerId, opts) {
     fd,
     fileSize: stat.size,
     decodeLine,
+    resultDecoder: findToolResult ? { findToolResult, toolResultNeedle } : claudeDecoder,
     onRows,
     onNotice,
     currentRows: [],
@@ -572,7 +616,7 @@ function loadOlder(sessionId) {
 function chatFetchFull(sessionId, toolUseId) {
   const watch = watches.get(sessionId);
   if (!watch) return null;
-  return fetchFull(watch.fd, watch.fileSize, toolUseId);
+  return fetchFull(watch.fd, watch.fileSize, toolUseId, watch.resultDecoder);
 }
 
 function closeChat(sessionId, viewerId) {

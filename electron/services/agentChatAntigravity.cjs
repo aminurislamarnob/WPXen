@@ -152,6 +152,7 @@ function decodeAntigravityLine(lineStr, state) {
       };
     }
 
+    resultBlock.tool_use_id = `agy-${step}-result`;
     return {
       id: `agy-${step}-result`,
       role: 'tool',
@@ -172,6 +173,35 @@ function decodeAntigravityLine(lineStr, state) {
   return null;
 }
 
+// Antigravity results carry no call id: a call `agy-<step>-<i>` is answered
+// by step <step> + 1 + i, an unpaired result `agy-<step>-result` is its own
+// step. The step a result id points at, or null.
+function resultStep(toolUseId) {
+  const call = /^agy-(\d+)-(\d+)$/.exec(String(toolUseId));
+  if (call) return Number(call[1]) + 1 + Number(call[2]);
+  const own = /^agy-(\d+)-result$/.exec(String(toolUseId));
+  return own ? Number(own[1]) : null;
+}
+
+// The full text of one result step, for "Show full output".
+function findToolResult(record, toolUseId) {
+  const step = resultStep(toolUseId);
+  if (step === null || record?.step_index !== step) return null;
+  if (record.type === 'PLANNER_RESPONSE' || typeof record.content !== 'string') {
+    return null;
+  }
+  return resultContent(record);
+}
+
+// Lines worth parsing (a prefilter; findToolResult checks the step exactly):
+// the transcript writes records compactly.
+function toolResultNeedle(toolUseId) {
+  const step = resultStep(toolUseId);
+  return step === null ? null : `"step_index":${step}`;
+}
+
 module.exports = {
   decodeAntigravityLine,
+  findToolResult,
+  toolResultNeedle,
 };

@@ -427,8 +427,19 @@ function decodeRecord(record, state) {
   return null;
 }
 
+// The full text of one tool result, for "Show full output": a user record's
+// tool_result block keyed by tool_use_id.
+function findToolResult(record, toolUseId) {
+  if (record?.type !== 'user' || !Array.isArray(record.message?.content)) return null;
+  const block = record.message.content.find(
+    (b) => b?.type === 'tool_result' && b.tool_use_id === toolUseId
+  );
+  return block ? toolResultText(block.content) : null;
+}
+
 module.exports = {
   claudeTranscriptPath,
   decodeClaudeLine,
+  findToolResult,
   toolResultText,
 };
