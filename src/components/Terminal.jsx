@@ -7,6 +7,7 @@ import TerminalSearchBar from './TerminalSearchBar';
 import LinkActionCard from './LinkActionCard';
 import { useSettings } from '../lib/useSettings';
 import { resolveLinkClick } from '../lib/terminal/linkActions';
+import { subscribeRefitOnFocus } from '../lib/terminal/refitOnFocus';
 
 // Embedded view over a cached main-process Session (by sessionId). The xterm
 // instance lives in sessionCache and is re-parented here on mount, so switching
@@ -85,18 +86,15 @@ export default function Terminal({
     const ro = new ResizeObserver(() => sessionCache.fit(sessionId));
     ro.observe(host);
 
-    // A phone may have resized the pty while this window was unfocused.
-    // xterm's fit is a no-op when its own grid didn't change, but fit()
-    // still pushes the desktop cols/rows to the pty explicitly, so focusing
-    // the Mac always takes the size back with no manual step.
-    const refitOnFocus = () => sessionCache.fit(sessionId);
-    window.addEventListener('focus', refitOnFocus);
+    // A phone may have resized the pty while this window was unfocused;
+    // focusing the Mac takes the size back (lib/terminal/refitOnFocus.js).
+    const stopRefitOnFocus = subscribeRefitOnFocus(window, sessionId, sessionCache.fit);
 
     return () => {
       writeParsed.dispose();
       scrolled.dispose();
       ro.disconnect();
-      window.removeEventListener('focus', refitOnFocus);
+      stopRefitOnFocus();
       sessionCache.detach(sessionId);
       searchAddonRef.current = null;
       termRef.current = null;

@@ -13,7 +13,7 @@ import {
   type LayoutChangeEvent,
 } from 'react-native';
 import { WebView, type WebViewMessageEvent } from 'react-native-webview';
-import { useLocalSearchParams } from 'expo-router';
+import { useIsFocused, useLocalSearchParams } from 'expo-router';
 import { Alert } from 'react-native';
 import { HostConnection } from '../../../../connection/manager';
 import { findHost } from '../../../../hosts/hostList';
@@ -26,7 +26,15 @@ import {
 } from '../../../../hosts/secureHosts';
 import { KEY_BAR_ORDER, keyBytes, pressWithCtrlArmed, type KeyId } from '../../../../terminal/keyBar';
 import { buildTerminalHtml, TERMINAL_FONT_SIZE } from '../../../../terminal/terminalWebView';
-import { decideResize, type ResizeDims } from '../../../../terminal/resizePolicy';
+import {
+  INITIAL_FRAME_REFIT,
+  clearsRefitFlags,
+  decideResize,
+  keyboardEvents,
+  reduceFrameRefit,
+  type FrameRefitEvent,
+  type ResizeDims,
+} from '../../../../terminal/resizePolicy';
 import { BACKGROUND_GRACE_MS, stepBackgroundGrace, type GracePhase } from '../../../../terminal/backgroundGrace';
 
 interface Outgoing {
@@ -47,7 +55,6 @@ function estimateDims(width: number, height: number, fontSize: number): ResizeDi
   return { cols, rows };
 }
 
-const KEYBOARD_SETTLE_MS = 500;
 const FONT_APPLY_MS = 150;
 const MIN_TEXT_SIZE = 10;
 const MAX_TEXT_SIZE = 20;
@@ -83,8 +90,13 @@ export default function SessionTerminalScreen() {
   const wasConnected = useRef(false);
   const lastSentDims = useRef<ResizeDims | null>(null);
   const reconnected = useRef(false);
-  const keyboardAt = useRef(0);
-  const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // A text-size refit that hasn't gone out yet (deferred under the keyboard).
+  const textSizePending = useRef(false);
+  // Frame and keyboard, for when a refit may go out (resizePolicy.ts).
+  const frameRefit = useRef(INITIAL_FRAME_REFIT);
+  // Real visibility: this screen is the focused route and the engine loaded.
+  const isFocused = useIsFocused();
+  const visibleRef = useRef(isFocused);
   const maybeResizeRef = useRef<(opts?: { textSizeChanged?: boolean }) => void>(() => {});
   const webView = useRef<WebView | null>(null);
   const input = useRef<TextInput | null>(null);
@@ -133,36 +145,45 @@ export default function SessionTerminalScreen() {
     }
   }, [sessionId]);
 
+  const refitEvent = useCallback((event: FrameRefitEvent): boolean => {
+    const next = reduceFrameRefit(frameRefit.current, event);
+    frameRefit.current = next.state;
+    return next.shouldRefit;
+  }, []);
+
   // The device actively viewing owns the pty size: fit the frame, unless
-  // covered, backgrounded, or mid-keyboard-transition (defer and retry once
-  // the keyboard settles — after Orca terminal-viewport-refit).
+  // not visible, covered (the engine failed to load), backgrounded, or the
+  // keyboard is up — then the refit is held and flushed once the keyboard
+  // closes (after Orca terminal-viewport-refit). The reconnect and text-size
+  // flags survive until a resize actually goes out.
   const maybeResize = useCallback(
     (opts: { textSizeChanged?: boolean } = {}) => {
       const measured = frame;
+      if (opts.textSizeChanged) textSizePending.current = true;
       if (!measured || exited !== null) return;
       const dims = estimateDims(measured.width, measured.height, fontSize);
       const decision = decideResize({
-        visible: true,
-        covered: false,
+        visible: visibleRef.current,
+        covered: loadError,
         appState: AppState.currentState,
-        keyboardTransitioning: Date.now() - keyboardAt.current < KEYBOARD_SETTLE_MS,
+        keyboardTransitioning: frameRefit.current.keyboardVisible,
         dims,
         lastSentDims: lastSentDims.current,
         reconnected: reconnected.current,
-        textSizeChanged: opts.textSizeChanged ?? false,
+        textSizeChanged: textSizePending.current,
       });
-      reconnected.current = false;
-      if (decision === 'skip') return;
       if (decision === 'defer') {
-        if (retryTimer.current) clearTimeout(retryTimer.current);
-        retryTimer.current = setTimeout(() => maybeResizeRef.current(), 400);
+        refitEvent({ type: 'refit-deferred' });
         return;
       }
+      if (!clearsRefitFlags(decision)) return;
+      reconnected.current = false;
+      textSizePending.current = false;
       lastSentDims.current = dims;
       post({ type: 'grid', cols: dims.cols, rows: dims.rows });
       connection.current?.request('terminal.resize', { sessionId, cols: dims.cols, rows: dims.rows }).catch(() => {});
     },
-    [frame, fontSize, exited, sessionId, post]
+    [frame, fontSize, exited, loadError, sessionId, post, refitEvent]
   );
 
   useEffect(() => {
@@ -229,20 +250,15 @@ export default function SessionTerminalScreen() {
       });
       conn.start();
     })();
-    // Keyboard transitions only move height: stamp them so layout churn
-    // while the keyboard settles defers instead of resizing mid-keystroke.
-    const markKeyboard = () => {
-      keyboardAt.current = Date.now();
-    };
-    const settleKeyboard = () => {
-      keyboardAt.current = Date.now();
-      if (retryTimer.current) clearTimeout(retryTimer.current);
-      retryTimer.current = setTimeout(() => maybeResizeRef.current(), 400);
-    };
-    const showSub = Keyboard.addListener('keyboardDidShow', settleKeyboard);
-    const hideSub = Keyboard.addListener('keyboardDidHide', settleKeyboard);
-    const willSub =
-      Platform.OS === 'ios' ? Keyboard.addListener('keyboardWillShow', markKeyboard) : null;
+    // The keyboard taking height holds refits until it closes; iOS's Will
+    // events arrive before the frame moves, Android only has Did events.
+    const keyboard = keyboardEvents(Platform.OS);
+    const showSub = Keyboard.addListener(keyboard.show, () => {
+      refitEvent({ type: 'keyboard-visibility', visible: true });
+    });
+    const hideSub = Keyboard.addListener(keyboard.hide, () => {
+      if (refitEvent({ type: 'keyboard-visibility', visible: false })) maybeResizeRef.current();
+    });
     // Returning to the terminal re-measures: rotation, fold, or a desktop
     // resize may have moved everything while away.
     const applyGrace = (event: Parameters<typeof stepBackgroundGrace>[1]) => {
@@ -276,9 +292,7 @@ export default function SessionTerminalScreen() {
       cancelled = true;
       showSub.remove();
       hideSub.remove();
-      willSub?.remove();
       appSub.remove();
-      if (retryTimer.current) clearTimeout(retryTimer.current);
       if (graceTimer.current) clearTimeout(graceTimer.current);
       detach();
       connection.current?.stop();
@@ -288,7 +302,17 @@ export default function SessionTerminalScreen() {
     // (the keyboard, a rotation), the text size and the exit all change
     // maybeResize, so it is reached through its ref — depending on it here
     // tore the socket down and replayed the terminal on every keyboard open.
-  }, [id, sessionId, attach, detach, post]);
+  }, [id, sessionId, attach, detach, post, refitEvent]);
+
+  // Coming back to this screen re-asserts the size (another route may have
+  // been on top); leaving it stops refits.
+  useEffect(() => {
+    visibleRef.current = isFocused;
+    if (isFocused) {
+      reconnected.current = true;
+      maybeResizeRef.current();
+    }
+  }, [isFocused]);
 
   // Appearance flips re-theme the live document.
   useEffect(() => {
@@ -369,11 +393,13 @@ export default function SessionTerminalScreen() {
     []
   );
 
-  // Re-fit on every measured frame (open, rotation, fold). The policy drops
-  // no-op and keyboard-transition layouts.
+  // Re-fit on every measured frame (open, rotation, fold); one that the
+  // keyboard caused is held until it closes.
   useEffect(() => {
-    if (frame) maybeResize();
-  }, [frame, maybeResize]);
+    if (frame && refitEvent({ type: 'frame', width: frame.width, height: frame.height })) {
+      maybeResizeRef.current();
+    }
+  }, [frame, refitEvent]);
 
   const changeTextSize = useCallback(
     (delta: number) => {

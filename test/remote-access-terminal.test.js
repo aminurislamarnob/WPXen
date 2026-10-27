@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import WebSocket from 'ws';
 import agents from '../electron/services/agents.cjs';
+import { subscribeRefitOnFocus } from '../src/lib/terminal/refitOnFocus.js';
 import remoteAccess, { HOST_ID_KEY } from '../electron/services/remoteAccess.cjs';
 import {
   PROTOCOL_VERSION,
@@ -447,9 +448,24 @@ describe('terminal size ownership', () => {
     await client.request('terminal.resize', { sessionId, cols: 40, rows: 10 });
     expect(ptys[0].resize).toHaveBeenLastCalledWith(40, 10);
 
-    // What the desktop focus listener sends through the same engine path.
-    agents.resize(sessionId, 80, 24);
+    // The listener Terminal.jsx installs, on a stand-in window: focusing it
+    // runs the fit, whose terminalResize IPC lands in agents.resize with the
+    // desktop's grid (80×24 here).
+    const win = new EventTarget();
+    const fits = [];
+    const stop = subscribeRefitOnFocus(win, sessionId, (id) => {
+      fits.push(id);
+      agents.resize(id, 80, 24);
+    });
+    win.dispatchEvent(new Event('focus'));
+    expect(fits).toEqual([sessionId]);
     expect(ptys[0].resize).toHaveBeenLastCalledWith(80, 24);
+    // Unmounting the terminal removes it: a later focus refits nothing.
+    stop();
+    await client.request('terminal.resize', { sessionId, cols: 40, rows: 10 });
+    win.dispatchEvent(new Event('focus'));
+    expect(fits).toEqual([sessionId]);
+    expect(ptys[0].resize).toHaveBeenLastCalledWith(40, 10);
     client.close();
   });
 });

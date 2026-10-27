@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { decideResize, type ResizeInput } from './resizePolicy';
+import {
+  INITIAL_FRAME_REFIT,
+  clearsRefitFlags,
+  decideResize,
+  keyboardEvents,
+  reduceFrameRefit,
+  type FrameRefitEvent,
+  type ResizeInput,
+} from './resizePolicy';
 
 const base: ResizeInput = {
   visible: true,
@@ -52,5 +60,74 @@ describe('decideResize', () => {
     expect(
       decideResize({ ...base, covered: true, keyboardTransitioning: true })
     ).toBe('skip');
+  });
+});
+
+describe('frame refit while the keyboard is up', () => {
+  function run(events: FrameRefitEvent[]) {
+    let state = INITIAL_FRAME_REFIT;
+    return events.map((event) => {
+      const next = reduceFrameRefit(state, event);
+      state = next.state;
+      return next.shouldRefit;
+    });
+  }
+
+  it('refits a frame change with the keyboard closed', () => {
+    expect(run([{ type: 'frame', width: 390, height: 600 }, { type: 'frame', width: 390, height: 600 }])).toEqual([true, false]);
+  });
+
+  it('holds frame changes while the keyboard is visible and flushes once on close', () => {
+    expect(
+      run([
+        { type: 'frame', width: 390, height: 600 },
+        { type: 'keyboard-visibility', visible: true },
+        { type: 'frame', width: 390, height: 320 },
+        { type: 'frame', width: 390, height: 300 },
+        { type: 'keyboard-visibility', visible: false },
+        { type: 'frame', width: 390, height: 300 },
+      ])
+    ).toEqual([true, false, false, false, true, false]);
+  });
+
+  it('a refit deferred with the keyboard up lands when it closes', () => {
+    expect(
+      run([
+        { type: 'keyboard-visibility', visible: true },
+        { type: 'refit-deferred' },
+        { type: 'keyboard-visibility', visible: false },
+      ])
+    ).toEqual([false, false, true]);
+  });
+
+  it('refits a width-only change (rotation, split view)', () => {
+    expect(
+      run([
+        { type: 'frame', width: 390, height: 600 },
+        { type: 'frame', width: 700, height: 600 },
+      ])
+    ).toEqual([true, true]);
+  });
+
+  it('closing a keyboard with nothing held refits nothing', () => {
+    expect(
+      run([
+        { type: 'keyboard-visibility', visible: true },
+        { type: 'keyboard-visibility', visible: false },
+      ])
+    ).toEqual([false, false]);
+  });
+});
+
+describe('refit flags and keyboard events', () => {
+  it('keeps the reconnect flag through a deferred or skipped refit', () => {
+    expect(clearsRefitFlags('defer')).toBe(false);
+    expect(clearsRefitFlags('skip')).toBe(false);
+    expect(clearsRefitFlags('send')).toBe(true);
+  });
+
+  it('listens to Will events on iOS and Did events on Android', () => {
+    expect(keyboardEvents('ios')).toEqual({ show: 'keyboardWillShow', hide: 'keyboardWillHide' });
+    expect(keyboardEvents('android')).toEqual({ show: 'keyboardDidShow', hide: 'keyboardDidHide' });
   });
 });
