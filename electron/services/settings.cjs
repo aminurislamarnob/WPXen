@@ -165,6 +165,9 @@ const SETTINGS = {
       Object.values(v).every((c) => typeof c === 'string') ||
       'each command must be a string',
   },
+  // New chat-capable Sessions start in chat view instead of the terminal.
+  // Off by default: the terminal stays the landing view until asked.
+  'agents.chatViewDefault': { type: 'bool', default: false },
   // Native notifications when an agent session finishes (or crashes), needs
   // input, or rings the terminal bell — see agentStatus.cjs createNotifier.
   'agents.notifications.enabled': { type: 'bool', default: true },

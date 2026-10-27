@@ -1,3 +1,5 @@
+const { stripAnsi } = require('./ansi.cjs');
+
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -8,16 +10,6 @@ const HANDOFF_FILE_PREFIX = 'wpxen-handoff-';
 // Strip CSI (Control Sequence Introducer) \x1b[...
 // OSC (Operating System Command) \x1b]... either \x07 or \x1b\\
 // and lone \r
-function stripAnsi(text) {
-  // Matches OSC up to ST (\x1b\\) or BEL (\x07)
-  // eslint-disable-next-line no-control-regex
-  const oscRegex = /\x1b\](?:.*?(?:\x1b\\|\x07))/g;
-  // Matches CSI
-  // eslint-disable-next-line no-control-regex
-  const csiRegex = /\x1b\[[0-?]*[ -/]*[@-~]/g;
-
-  return text.replace(oscRegex, '').replace(csiRegex, '').replace(/\r/g, ''); // strip lone \r
-}
 
 // A fence longer than any backtick run inside, so the content can't close it.
 function markdownFenceFor(content) {
@@ -31,7 +23,7 @@ function markdownFenceFor(content) {
 const CAPTURE_MAX_LINES = 800;
 
 function boundedCapture(capture) {
-  const lines = stripAnsi(capture).split('\n');
+  const lines = stripAnsi(capture).replace(/\r/g, '').split('\n');
   return lines.slice(-CAPTURE_MAX_LINES).join('\n');
 }
 
