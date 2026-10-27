@@ -1681,6 +1681,15 @@ function handleDeviceConnection(ws, req) {
     // dialog opens, so a second phone holding the same QR can't queue a
     // second Allow/Deny behind it (whatever the answer, the offer is spent).
     consumeOffer();
+    // The dialog lives exactly as long as the request: it is opened with an
+    // AbortSignal (ipc.cjs passes it to dialog.showMessageBox) and aborted on
+    // the prompt timeout or when the phone's socket closes, so no stale
+    // Allow/Deny lingers on the Mac for a phone that already gave up — and an
+    // Allow clicked after the socket is gone stores nothing.
+    const controller = new AbortController();
+    const abortPrompt = () => controller.abort();
+    ws.once('close', abortPrompt);
+    let promptTimer = null;
     let answer;
     try {
       answer = await Promise.race([
@@ -1690,26 +1699,41 @@ function handleDeviceConnection(ws, req) {
               deviceName,
               platform,
               code,
+              signal: controller.signal,
             })
           )
           .then(
             (v) => v,
             () => 'deny'
           ),
-        new Promise((_, rejectTimeout) =>
-          setTimeout(
-            () => rejectTimeout(new Error('pairing prompt timed out')),
-            deps.pairTimeoutMs
-          )
-        ),
+        new Promise((_, rejectTimeout) => {
+          promptTimer = setTimeout(() => {
+            controller.abort();
+            rejectTimeout(new Error('pairing prompt timed out'));
+          }, deps.pairTimeoutMs);
+        }),
+        new Promise((_, rejectClosed) => {
+          controller.signal.addEventListener('abort', () =>
+            rejectClosed(new Error('pairing prompt aborted'))
+          );
+        }),
       ]);
     } catch {
       consumeOffer();
       return reject(PAIR_ERRORS.pairingTimeout);
+    } finally {
+      clearTimeout(promptTimer);
+      ws.off('close', abortPrompt);
     }
     if (answer !== 'allow') {
       consumeOffer();
       return reject(PAIR_ERRORS.pairingDenied);
+    }
+    // Allowed, but the phone is gone (or going): there is nobody to hand a
+    // device id to, so there is no device.
+    if (controller.signal.aborted || ws.readyState !== ws.OPEN) {
+      consumeOffer();
+      return;
     }
     const deviceId = randomUUID();
     saveDevice({

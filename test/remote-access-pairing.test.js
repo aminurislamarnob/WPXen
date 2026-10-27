@@ -264,6 +264,70 @@ describe('one use', () => {
   });
 });
 
+describe('the Allow/Deny dialog lives as long as the request', () => {
+  // A held prompt: resolves when the test says, records the signal it got.
+  function heldPrompt() {
+    let answer;
+    const seen = {};
+    remoteAccess.__setDeps({
+      promptPairing: (info) => {
+        seen.signal = info.signal;
+        return new Promise((resolve) => {
+          answer = resolve;
+        });
+      },
+    });
+    return { seen, answer: (v) => answer(v) };
+  }
+
+  async function startPairing(port) {
+    const keys = newKeyPair();
+    const offer = await remoteAccess.pairingOffer({ hostname: HOSTNAME });
+    const parsed = parsePairingUrl(offer.url);
+    const { message } = createPairRequest({
+      secret: parsed.secret,
+      deviceName: 'Phone',
+      platform: 'ios',
+      keys,
+      hostPublicKey: decodeBase64(parsed.hostPublicKeyB64),
+      version: PROTOCOL_VERSION,
+    });
+    const socket = new WebSocket(wsUrl(port));
+    await new Promise((resolve) => socket.on('open', resolve));
+    socket.send(JSON.stringify(message));
+    return socket;
+  }
+
+  async function until(fn) {
+    const deadline = Date.now() + 2000;
+    while (!fn() && Date.now() < deadline) await new Promise((r) => setTimeout(r, 10));
+  }
+
+  it('aborts the dialog when the phone hangs up, and a late Allow stores nothing', async () => {
+    const prompt = heldPrompt();
+    const socket = await startPairing(listen());
+    await until(() => prompt.seen.signal);
+    expect(prompt.seen.signal.aborted).toBe(false);
+    socket.close();
+    await until(() => prompt.seen.signal.aborted);
+    expect(prompt.seen.signal.aborted).toBe(true);
+    prompt.answer('allow');
+    await new Promise((r) => setTimeout(r, 50));
+    expect(remoteAccess.listDevices()).toEqual([]);
+    expect(paired).toEqual([]);
+  });
+
+  it('aborts the dialog when the prompt times out', async () => {
+    const prompt = heldPrompt();
+    const socket = await startPairing(listen());
+    await until(() => prompt.seen.signal);
+    // pairTimeoutMs is 500 in these tests.
+    await until(() => prompt.seen.signal.aborted);
+    expect(prompt.seen.signal.aborted).toBe(true);
+    socket.close();
+  });
+});
+
 describe('confirmation code', () => {
   it('matches on both sides, and a swapped key changes it', () => {
     const host = newKeyPair();

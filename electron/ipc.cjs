@@ -392,7 +392,7 @@ function registerHandlers(win, storeInstance) {
     },
     // Pairing approval: bring the window up, ask Allow/Deny with the
     // confirmation code, defaulting to Deny. The service times the wait out.
-    promptPairing: async ({ deviceName, platform, code }) => {
+    promptPairing: async ({ deviceName, platform, code, signal }) => {
       try {
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.show();
@@ -405,6 +405,9 @@ function registerHandlers(win, storeInstance) {
           cancelId: 1,
           message: `Pair ${deviceName} (${platform})?`,
           detail: `Code: ${code}\n\nOnly allow the phone in your hand — check the code matches.`,
+          // Closes the dialog when the request times out or the phone hangs
+          // up (remoteAccess.cjs aborts it).
+          signal,
         });
         return response === 0 ? 'allow' : 'deny';
       } catch {
