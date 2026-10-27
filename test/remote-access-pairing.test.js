@@ -710,6 +710,90 @@ describe('encrypted channel', () => {
   });
 });
 
+describe('limits before auth', () => {
+  async function openSocket(port, headers) {
+    const socket = new WebSocket(wsUrl(port), headers ? { headers } : undefined);
+    socket.on('error', () => {});
+    const closed = new Promise((resolve) => socket.on('close', (code) => resolve(code)));
+    await new Promise((resolve, reject) => {
+      socket.on('open', resolve);
+      socket.on('unexpected-response', reject);
+    });
+    return { socket, closed };
+  }
+
+  it('refuses a message over 1 MiB before reading it (ws allows 100 MiB)', async () => {
+    const port = listen();
+    const { socket, closed } = await openSocket(port);
+    socket.send(
+      JSON.stringify({ type: 'pair-request', pad: 'x'.repeat(2 * 1024 * 1024) })
+    );
+    // 1009: Message Too Big — refused by the server's maxPayload, not parsed.
+    expect(await closed).toBe(1009);
+  });
+
+  it('holds at most 128 device sockets', async () => {
+    const port = listen();
+    const open = [];
+    for (let i = 0; i < 128; i++) open.push(await openSocket(port));
+    const extra = await openSocket(port);
+    expect(await extra.closed).toBe(1013);
+    for (const { socket } of open) socket.terminate();
+  });
+
+  it('strips control and bidi characters from the name and platform, capped at 64', async () => {
+    const port = listen();
+    const keys = newKeyPair();
+    const { reply } = await pairPhone({
+      port,
+      keys,
+      deviceName: '\u202eenohPi s\u2019kraM\u0007\n' + 'x'.repeat(100),
+      platform: 'ios\u200b\u0000',
+    });
+    expect(reply.type).toBe('pair-accept');
+    const shown = promptCalls[0];
+    for (const ch of ['\u202e', '\u0007', '\n'])
+      expect(shown.deviceName).not.toContain(ch);
+    expect(shown.deviceName.length).toBe(64);
+    expect(shown.platform).toBe('ios');
+    const [stored] = remoteAccess.listDevices();
+    expect(stored.name).toBe(shown.deviceName);
+    expect(stored.platform).toBe('ios');
+    // Nothing printable left falls back to the default label.
+    expect(remoteAccess.sanitizeDeviceLabel('\u202e\u200b', 'Phone')).toBe('Phone');
+  });
+
+  it('charges failed attempts to the caller behind the tunnel, not to loopback', async () => {
+    // Every phone reaches the server through cloudflared on 127.0.0.1, so
+    // a per-address limit on the socket address was one shared bucket.
+    const port = listen();
+    const offer = await remoteAccess.pairingOffer({ hostname: HOSTNAME });
+    const parsed = parsePairingUrl(offer.url);
+    const attempt = async (ip) => {
+      const { message } = createPairRequest({
+        secret: 'wrong-secret',
+        deviceName: 'Guesser',
+        platform: 'ios',
+        keys: newKeyPair(),
+        hostPublicKey: decodeBase64(parsed.hostPublicKeyB64),
+        version: PROTOCOL_VERSION,
+      });
+      const { socket } = await openSocket(port, { 'Cf-Connecting-Ip': ip });
+      const reply = await new Promise((resolve) => {
+        socket.on('message', (data) => resolve(JSON.parse(data.toString())));
+        socket.send(JSON.stringify(message));
+      });
+      socket.close();
+      return reply.reason;
+    };
+    for (let i = 0; i < 5; i++) {
+      expect(await attempt('203.0.113.5')).toBe(PAIR_ERRORS.invalidSecret);
+    }
+    // Another phone, another address: not locked out by the first one.
+    expect(await attempt('198.51.100.7')).toBe(PAIR_ERRORS.invalidSecret);
+  });
+});
+
 describe('shared module portability guard', () => {
   it('uses no electron or Node-only APIs in the client path', () => {
     const dir = join(

@@ -72,6 +72,19 @@ const PAIR_WINDOW_MS = 10 * 60 * 1000;
 const PAIR_MAX_PER_IP = 5;
 const PAIR_MAX_GLOBAL = 20;
 
+// Limits that hold before anyone has authenticated (after Orca's
+// ws-transport.ts): the largest message a socket may send (ws's own default
+// is 100 MiB, buffered before a byte is checked), how many device sockets
+// may be open at once, and how many raw TCP connections — pre-upgrade — the
+// HTTP server holds. A 64 KB terminal.write sealed and JSON-escaped stays
+// well under the payload cap.
+const MAX_PAYLOAD_BYTES = 1024 * 1024;
+const MAX_DEVICE_SOCKETS = 128;
+const MAX_TCP_CONNECTIONS = MAX_DEVICE_SOCKETS * 2;
+// Device names and platforms come from the phone and are shown in the
+// Allow/Deny dialog and the device list (after Orca's device-key-proof.ts).
+const MAX_DEVICE_LABEL = 64;
+
 // The only phone-reachable operations in this ticket (after Orca's
 // mobile-method-allowlist pattern): ping proves the channel end to end.
 // Later tickets grow this set; anything else gets op_not_allowed.
@@ -375,9 +388,16 @@ function start({ port }) {
       } catch {}
       return;
     }
-    wsServer().handleUpgrade(req, socket, head, (ws) =>
-      wsServer().emit('connection', ws, req)
-    );
+    wsServer().handleUpgrade(req, socket, head, (ws) => {
+      if (wsServer().clients.size > MAX_DEVICE_SOCKETS) {
+        // Try Again Later, then the cut (after Orca's
+        // rejectNodeWebSocketOverCapacity).
+        ws.on('error', () => {});
+        cutSocket(ws, 1013, 'Maximum connections reached');
+        return;
+      }
+      wsServer().emit('connection', ws, req);
+    });
   });
   srv.on('error', (err) => {
     if (gen !== generation) return;
@@ -423,6 +443,7 @@ function start({ port }) {
     };
     publish();
   });
+  srv.maxConnections = MAX_TCP_CONNECTIONS;
   srv.listen(port, '127.0.0.1');
   return getStatus();
 }
@@ -1462,7 +1483,7 @@ function recordPairFailure(ip) {
 function wsServer() {
   if (!wss) {
     const { WebSocketServer } = require('ws');
-    wss = new WebSocketServer({ noServer: true });
+    wss = new WebSocketServer({ noServer: true, maxPayload: MAX_PAYLOAD_BYTES });
     wss.on('connection', handleDeviceConnection);
   }
   return wss;
@@ -1510,6 +1531,33 @@ function startHeartbeat(ws) {
   ws.on('close', () => clearInterval(timer));
 }
 
+// Remove control, format (bidi overrides, zero-width) and line/paragraph
+// separators, collapse whitespace, cap the length (after Orca's
+// sanitizeDeviceLabel) — so one phone cannot dress itself up as another in
+// the Allow/Deny dialog or the device list.
+function sanitizeDeviceLabel(value, fallback) {
+  if (typeof value !== 'string') return fallback;
+  const cleaned = value
+    .replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, MAX_DEVICE_LABEL);
+  return cleaned.length > 0 ? cleaned : fallback;
+}
+
+// Who to charge a failed pairing attempt to. The server listens on
+// 127.0.0.1 only and every phone arrives through cloudflared, so the socket
+// address is always loopback: keyed on it, the per-address limit was really
+// one global bucket, and one guesser locked every phone out. Cloudflare sets
+// Cf-Connecting-Ip to the real client address at its edge, overwriting any
+// value the client sent; a local caller without it falls back to the socket.
+function clientAddress(req) {
+  const header = req.headers && req.headers['cf-connecting-ip'];
+  const value = Array.isArray(header) ? header[0] : header;
+  if (typeof value === 'string' && net.isIP(value.trim())) return value.trim();
+  return (req.socket && req.socket.remoteAddress) || 'unknown';
+}
+
 function handleDeviceConnection(ws, req) {
   // A protocol violation on the wire (a reserved opcode, an unmasked frame,
   // invalid UTF-8, an oversized message) surfaces as an 'error' event on the
@@ -1517,7 +1565,7 @@ function handleDeviceConnection(ws, req) {
   // it instead — an uncaught exception in the main process, from anyone who
   // can reach the hostname, before any authentication.
   ws.on('error', () => {});
-  const ip = (req.socket && req.socket.remoteAddress) || 'unknown';
+  const ip = clientAddress(req);
   // This connection's channel (shared handshake.cjs): 'new' until a hello,
   // 'auth' once the ready is out and the phone's auth frame is due, 'open'
   // once it opened. `device` is set only at 'open' — nothing about a device
@@ -1623,6 +1671,8 @@ function handleDeviceConnection(ws, req) {
     }
     const hostB64 = publicKeyB64(keypair);
     const code = confirmationCode(hostB64, msg.devicePublicKey, offer.secret);
+    const deviceName = sanitizeDeviceLabel(payload.deviceName, 'Phone');
+    const platform = sanitizeDeviceLabel(payload.platform, '');
     // One use means the first valid request: the secret dies before the
     // dialog opens, so a second phone holding the same QR can't queue a
     // second Allow/Deny behind it (whatever the answer, the offer is spent).
@@ -1633,8 +1683,8 @@ function handleDeviceConnection(ws, req) {
         Promise.resolve()
           .then(() =>
             deps.promptPairing({
-              deviceName: payload.deviceName,
-              platform: payload.platform,
+              deviceName,
+              platform,
               code,
             })
           )
@@ -1660,8 +1710,8 @@ function handleDeviceConnection(ws, req) {
     const deviceId = randomUUID();
     saveDevice({
       id: deviceId,
-      name: String(payload.deviceName || 'Phone'),
-      platform: String(payload.platform || ''),
+      name: deviceName,
+      platform,
       publicKey: msg.devicePublicKey,
       pairedAt: deps.now(),
       lastSeen: deps.now(),
@@ -1681,7 +1731,7 @@ function handleDeviceConnection(ws, req) {
       box: sealed.box,
     });
     try {
-      deps.onPaired({ name: String(payload.deviceName || 'Phone') });
+      deps.onPaired({ name: deviceName });
     } catch {}
     // Pairing proves nothing about this socket's later frames: the device
     // opens its channel with a hello like any other connection (here or on
@@ -1901,6 +1951,9 @@ module.exports = {
   DEVICE_KEY,
   TOKEN_KEY,
   VERIFY_REASONS,
+  MAX_PAYLOAD_BYTES,
+  MAX_DEVICE_SOCKETS,
+  sanitizeDeviceLabel,
   DEFAULT_PORT,
   MIN_PORT,
   MAX_PORT,
