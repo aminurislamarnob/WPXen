@@ -30,6 +30,16 @@ describe('contextMeter', () => {
     });
   });
 
+  it("takes the window from the session's model id when the record's is bare", () => {
+    expect(
+      contextMeter({
+        model: 'claude-opus-5-5',
+        contextModel: 'claude-opus-5-5[1m]',
+        tokens: 310_000,
+      })
+    ).toEqual({ label: '31% of context', percent: 31 });
+  });
+
   it('prefers a context window the Agent reports itself', () => {
     expect(contextMeter({ model: null, tokens: 29_742, limit: 258_400 })).toEqual({
       label: '12% of context',

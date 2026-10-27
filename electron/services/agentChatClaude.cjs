@@ -166,6 +166,16 @@ function noteAttachment(attachment, facts) {
     attachment.prompt.trimStart().startsWith(TASK_NOTIFICATION_MARKER)
   ) {
     noteTaskNotification(attachment.prompt, facts);
+  } else if (attachment.type === 'model') {
+    // The model the session runs, with the window suffix the assistant
+    // records drop: identity.modelId is "claude-opus-5-5[1m]" where
+    // message.model says "claude-opus-5-5". Written at session start and
+    // on /model, so usually far above the newest page (see FACT_MARKERS).
+    const modelId = attachment.identity?.modelId;
+    if (typeof modelId === 'string' && modelId) {
+      facts.contextModel = modelId;
+      if (facts.usage) facts.usage.contextModel = modelId;
+    }
   } else if (attachment.type === 'task_status' && attachment.taskId) {
     if (typeof attachment.status !== 'string') return;
     // A task started before the loaded pages is known only from here.
@@ -185,7 +195,7 @@ function initFacts(state) {
 
 // Strings only fact-bearing records contain, for the engine's scan of the
 // lines above the first page (agentChat scanFacts).
-const FACT_MARKERS = ['"type":"task_status"', TASK_NOTIFICATION_MARKER];
+const FACT_MARKERS = ['"type":"task_status"', '"type":"model"', TASK_NOTIFICATION_MARKER];
 
 // The facts-only pass over one of those lines: attachments and
 // <task-notification> turns, never rows.
@@ -401,6 +411,7 @@ function decodeRecord(record, state) {
     if (u && record.message.model && record.message.model !== '<synthetic>') {
       state.facts.usage = {
         model: record.message.model,
+        contextModel: state.facts.contextModel ?? null,
         tokens:
           (u.input_tokens || 0) +
           (u.cache_creation_input_tokens || 0) +

@@ -889,6 +889,7 @@ describe('session facts and images (#115)', () => {
   it('records the latest usage and model', () => {
     expect(decodeAll().state.facts.usage).toEqual({
       model: 'claude-opus-5-5',
+      contextModel: null,
       tokens: 2 + 1000 + 50000 + 50,
     });
   });
@@ -1475,5 +1476,102 @@ describe('session facts without rows (#115)', () => {
     open([taskStatus('b2old', 'running'), filler(300)].join('\n'));
     expect(pushes[0].rows.some((r) => r.id === 'att-b2old')).toBe(false);
     expect(lastFacts().tasks.b2old).toMatchObject({ status: 'running' });
+  });
+});
+
+// Claude Code's assistant records name the bare model; the context window
+// is only in the session's `model` attachment (#115).
+describe('Claude context window from the model attachment (#115)', () => {
+  const agentChat = require('../electron/services/agentChat.cjs');
+  const claude = require('../electron/services/agentChatClaude.cjs');
+  const { contextMeter } = require('../src/lib/contextMeter.js');
+  const os = require('node:os');
+  // Real shape (Claude Code 2.1), text as Claude writes it.
+  const modelAttachment = (modelId) =>
+    JSON.stringify({
+      parentUuid: null,
+      isSidechain: false,
+      attachment: {
+        type: 'model',
+        identity: {
+          modelId,
+          marketingName: 'Opus 5.5 (1M context)',
+          knowledgeCutoff: 'June 2026',
+        },
+        text: `You are powered by the model named Opus 5.5 (1M context). The exact model ID is ${modelId}.`,
+      },
+      type: 'attachment',
+      uuid: 'att-model',
+      timestamp: '2026-10-20T08:00:00.000Z',
+    });
+  const assistant = (uuid, tokens) =>
+    JSON.stringify({
+      type: 'assistant',
+      uuid,
+      message: {
+        model: 'claude-opus-5-5',
+        id: `msg-${uuid}`,
+        role: 'assistant',
+        content: [{ type: 'text', text: 'Done.' }],
+        usage: {
+          input_tokens: 2,
+          cache_creation_input_tokens: 0,
+          cache_read_input_tokens: tokens,
+          output_tokens: 0,
+        },
+      },
+    });
+
+  it('shows a percentage once the attachment names a [1m] window', () => {
+    const state = {};
+    claude.decodeClaudeLine(modelAttachment('claude-opus-5-5[1m]'), state);
+    claude.decodeClaudeLine(assistant('a1', 249_998), state);
+    expect(state.facts.usage.contextModel).toBe('claude-opus-5-5[1m]');
+    expect(contextMeter(state.facts.usage)).toEqual({
+      label: '25% of context',
+      percent: 25,
+    });
+  });
+
+  it('finds an attachment written far above the newest page', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wpxen-model-'));
+    try {
+      agentChat.__setDeps({
+        statSync: fs.statSync,
+        openSync: fs.openSync,
+        readSync: fs.readSync,
+        closeSync: fs.closeSync,
+        readdirSync: fs.readdirSync,
+        setInterval: () => 0,
+        clearInterval: () => {},
+      });
+      const file = path.join(dir, 't.jsonl');
+      const later = Array.from({ length: 300 }, (_, i) => assistant(`a${i}`, 500_000));
+      fs.writeFileSync(
+        file,
+        [modelAttachment('claude-opus-5-5[1m]'), ...later].join('\n') + '\n'
+      );
+      let facts = null;
+      agentChat.openChat('model', 'v', {
+        transcriptPath: file,
+        decodeLine: claude.decodeClaudeLine,
+        factScan: { markers: claude.FACT_MARKERS, noteFacts: claude.noteFacts },
+        onRows: (_rows, state) => (facts = state?.facts ?? facts),
+      });
+      expect(contextMeter(facts.usage).percent).toBe(50);
+    } finally {
+      agentChat.closeAllChats();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps a raw count when the attachment names no window', () => {
+    const state = {};
+    claude.decodeClaudeLine(modelAttachment('claude-opus-5-5'), state);
+    claude.decodeClaudeLine(assistant('a1', 100_000), state);
+    expect(contextMeter(state.facts.usage)).toEqual({
+      label: '100k tokens',
+      percent: null,
+    });
   });
 });

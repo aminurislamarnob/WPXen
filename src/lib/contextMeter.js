@@ -15,11 +15,16 @@ function contextWindowFor(model) {
 }
 
 // The chat header's meter: "62% of context" when the window is known (the
-// Agent reports it, like Codex, or the model id names it), otherwise the raw
-// count ("48k tokens").
+// Agent reports it, like Codex, or a model id names it), otherwise the raw
+// count ("48k tokens"). Claude's assistant records name the bare model
+// ("claude-opus-5-5"); the window rides on the session's `model` attachment
+// ("claude-opus-5-5[1m]"), which the decoder passes as `contextModel`.
 export function contextMeter(usage) {
   if (!usage || typeof usage.tokens !== 'number') return null;
-  const limit = usage.limit || (usage.model ? contextWindowFor(usage.model) : null);
+  const limit =
+    usage.limit ||
+    (usage.contextModel ? contextWindowFor(usage.contextModel) : null) ||
+    (usage.model ? contextWindowFor(usage.model) : null);
   if (!limit)
     return { label: `${Math.round(usage.tokens / 1000)}k tokens`, percent: null };
   const percent = Math.round((usage.tokens / limit) * 100);
