@@ -28,6 +28,15 @@ export function setReturnToChat(sessionId, value) {
   returnToChatState.set(sessionId, value);
 }
 
+// The user's own toggle (the pane button, ⌘⇧C, the tab menu). "Waiting in
+// terminal" sends the pane to the terminal and returns it to chat once the
+// prompt is answered; a manual choice since then wins, so the pending
+// return is dropped.
+export function toggleViewMode(sessionId) {
+  returnToChatState.delete(sessionId);
+  setViewMode(sessionId, getViewMode(sessionId) === 'chat' ? 'terminal' : 'chat');
+}
+
 export function getReturnToChat(sessionId) {
   return returnToChatState.get(sessionId) || false;
 }

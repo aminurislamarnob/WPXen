@@ -9,6 +9,7 @@ import {
   getReturnToChat,
   setViewMode as setViewModeGlobal,
   setReturnToChat,
+  toggleViewMode,
 } from '../../lib/chatView';
 import { useEffect, useRef, useState } from 'react';
 
@@ -84,9 +85,7 @@ export default function SplitLayout({
         aria-label={
           viewMode === 'chat' ? 'Switch to terminal view' : 'Switch to chat view'
         }
-        onClick={() =>
-          setViewModeGlobal(tree.leaf, viewMode === 'chat' ? 'terminal' : 'chat')
-        }
+        onClick={() => toggleViewMode(tree.leaf)}
         className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
       >
         {viewMode === 'chat' ? <TerminalSquare size={14} /> : <MessageSquare size={14} />}

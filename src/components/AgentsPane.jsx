@@ -27,7 +27,12 @@ import { useAgentSessions, setSelectedSession } from '../lib/useAgentSessions';
 import TabStrip from './agents/TabStrip';
 import { cleanupOrphanedDrafts } from '../lib/chatDraft';
 import TabContextMenu from './agents/TabContextMenu';
-import { getViewMode, opensInChatByDefault, setViewMode } from '../lib/chatView';
+import {
+  getViewMode,
+  opensInChatByDefault,
+  setViewMode,
+  toggleViewMode,
+} from '../lib/chatView';
 import {
   tabsToClose,
   closeImpact,
@@ -286,7 +291,7 @@ export default function AgentsPane() {
         const id = focusedPaneId;
         if (id && sessionsById[id]?.chat && !showingFile) {
           e.preventDefault();
-          setViewMode(id, getViewMode(id) === 'chat' ? 'terminal' : 'chat');
+          toggleViewMode(id);
         }
         return;
       }
@@ -658,7 +663,7 @@ export default function AgentsPane() {
           const isChat = currentMode === 'chat';
           items.push({
             label: isChat ? 'Switch to Terminal View' : 'Switch to Chat View',
-            onClick: () => setViewMode(key, isChat ? 'terminal' : 'chat'),
+            onClick: () => toggleViewMode(key),
           });
         }
         items.push('separator');

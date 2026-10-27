@@ -3,6 +3,11 @@ import {
   isEndedSession,
   canResumeSession,
   opensInChatByDefault,
+  getReturnToChat,
+  getViewMode,
+  setReturnToChat,
+  setViewMode,
+  toggleViewMode,
 } from '../src/lib/chatView.js';
 
 // The exit bar gates on these: Respawn whenever the Session ended, Resume
@@ -65,5 +70,25 @@ describe('opensInChatByDefault (#121)', () => {
     expect(opensInChatByDefault({ chat: 'codex' }, on)).toBe(false);
     expect(opensInChatByDefault({ chat: 'antigravity' }, on)).toBe(false);
     expect(opensInChatByDefault({ chat: null }, on)).toBe(false);
+  });
+});
+
+describe('toggleViewMode', () => {
+  it('flips the view', () => {
+    setViewMode('t1', 'chat');
+    toggleViewMode('t1');
+    expect(getViewMode('t1')).toBe('terminal');
+    toggleViewMode('t1');
+    expect(getViewMode('t1')).toBe('chat');
+  });
+
+  it("drops a pending return to chat: the user's own choice wins", () => {
+    // "Waiting in terminal" switched the pane and asked to come back.
+    setViewMode('t2', 'terminal');
+    setReturnToChat('t2', true);
+    toggleViewMode('t2');
+    toggleViewMode('t2');
+    expect(getViewMode('t2')).toBe('terminal');
+    expect(getReturnToChat('t2')).toBe(false);
   });
 });
