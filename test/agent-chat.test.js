@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   openChat,
+  closeChat,
   closeAllChats,
   loadOlder,
   chatFetchFull,
@@ -1655,5 +1656,52 @@ describe('Claude context window from the model attachment (#115)', () => {
       label: '100k tokens',
       percent: null,
     });
+  });
+});
+
+describe('closeChat', () => {
+  it('keeps the watch for a remaining viewer and tears it down at zero', () => {
+    const content = Buffer.from(JSON.stringify(userRecord('u-1', 'hello')) + '\n');
+    let intervals = 0;
+    let cleared = 0;
+    let closed = 0;
+    __setDeps({
+      statSync: () => ({ size: content.length, mtimeMs: 1 }),
+      openSync: () => 7,
+      readSync: (fd, buf, offset, length, position) => {
+        const slice = content.slice(position, position + length);
+        slice.copy(buf, offset);
+        return slice.length;
+      },
+      closeSync: () => closed++,
+      readdirSync: () => [],
+      setInterval: () => ++intervals,
+      clearInterval: () => cleared++,
+    });
+    const seen = { a: [], b: [] };
+    const open = (viewer) =>
+      openChat('sess-close', viewer, {
+        transcriptPath: '/fake/close.jsonl',
+        decodeLine: decodeClaudeLine,
+        onRows: (rows) => seen[viewer].push(...rows),
+      });
+    open('a');
+    open('b');
+    // One watch for both viewers; the second got the rows replayed.
+    expect(intervals).toBe(1);
+    expect(seen.b.map((r) => r.id)).toEqual(['u-1']);
+
+    closeChat('sess-close', 'a');
+    expect(cleared).toBe(0);
+    expect(closed).toBe(0);
+
+    closeChat('sess-close', 'b');
+    expect(cleared).toBe(1);
+    expect(closed).toBe(1);
+    expect(loadOlder('sess-close')).toEqual({ rows: [], atStart: true });
+
+    // A later open reads the transcript afresh.
+    open('a');
+    expect(intervals).toBe(2);
   });
 });

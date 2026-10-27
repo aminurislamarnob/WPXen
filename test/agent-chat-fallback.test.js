@@ -1,4 +1,8 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import agents from '../electron/services/agents.cjs';
 import { snapshotBuffer } from '../electron/services/ansi.cjs';
 import { shouldShowWaitingFallback } from '../src/lib/chatRows.js';
 
@@ -96,5 +100,59 @@ describe('shouldShowWaitingFallback — only the latest row counts', () => {
     expect(shouldShowWaitingFallback('needs-input', messages, { cards: false })).toBe(
       true
     );
+  });
+});
+
+// What "Waiting in terminal" shows: the last lines of the Session's own pty
+// output, read through agents.chatSnapshot.
+describe('agents.chatSnapshot', () => {
+  let home;
+  let pty;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    home = fs.mkdtempSync(path.join(os.tmpdir(), 'wpxen-snap-'));
+    const bin = path.join(home, 'bin');
+    fs.mkdirSync(bin);
+    fs.writeFileSync(path.join(bin, 'codex'), '#!/bin/sh\ntrue\n');
+    fs.chmodSync(path.join(bin, 'codex'), 0o755);
+    agents.__setDeps({
+      spawnPty: () => {
+        const handlers = { data: [], exit: [] };
+        pty = {
+          onData: (cb) => handlers.data.push(cb),
+          onExit: (cb) => handlers.exit.push(cb),
+          write: vi.fn(),
+          resize: vi.fn(),
+          kill: vi.fn(),
+          emit: (d) => handlers.data.forEach((cb) => cb(d)),
+        };
+        return pty;
+      },
+      shellEnv: () => ({ PATH: `${bin}:/usr/bin` }),
+      userShell: () => '/bin/zsh',
+      homedir: () => home,
+      sitePhpBin: () => null,
+    });
+  });
+  afterEach(() => {
+    agents.stopAll();
+    vi.useRealTimers();
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+
+  it("returns the last lines of the Session's output, ANSI stripped", () => {
+    const res = agents.launch({ site: { id: 'site-1', path: home }, agentId: 'codex' });
+    expect(res.ok).toBe(true);
+    pty.emit('% ');
+    vi.advanceTimersByTime(500);
+    pty.emit('Working\r\n\x1b[1mAllow this command?\x1b[0m\r\n  1. Yes\r\n  2. No\r\n');
+    expect(agents.chatSnapshot(res.sessionId, 3)).toBe(
+      'Allow this command?\n1. Yes\n2. No'
+    );
+  });
+
+  it('is empty for a Session that does not exist', () => {
+    expect(agents.chatSnapshot('no-such-session', 5)).toBe('');
   });
 });

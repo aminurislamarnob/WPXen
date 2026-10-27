@@ -3,7 +3,11 @@ import {
   sendChatAnswer,
   NATIVE_CHAT_QUESTION_STEP_MS,
 } from '../electron/services/agentChatSend.cjs';
-import { buildAskAnswerKeys, askAnswerStatus } from '../src/lib/agentAsk.js';
+import {
+  buildAskAnswerKeys,
+  askAnswerStatus,
+  formatAskAnswer,
+} from '../src/lib/agentAsk.js';
 
 describe('AskUserQuestion keys', () => {
   it('buildAskAnswerKeys generates digits for single-select', () => {
@@ -123,5 +127,55 @@ describe('askAnswerStatus', () => {
   it('never flags a mismatch for an answer given in the terminal', () => {
     const recorded = { 'Which route?': '/status', 'Which checks?': 'db' };
     expect(askAnswerStatus(prompt, recorded, null).every((q) => !q.mismatch)).toBe(true);
+  });
+});
+
+// A card with two questions (Claude Code shows one tab per question, then a
+// Submit tab): the shape AskUserQuestion records for it.
+describe('a two-question card', () => {
+  const prompt = {
+    questions: [
+      {
+        question: 'Which route path should the health check use?',
+        header: 'Route',
+        multiSelect: false,
+        options: [{ label: '/health' }, { label: '/status' }],
+      },
+      {
+        question: 'Which checks should it run?',
+        header: 'Checks',
+        multiSelect: true,
+        options: [{ label: 'Database' }, { label: 'Cache' }, { label: 'Queue' }],
+      },
+    ],
+  };
+  const selections = [{ indices: [1] }, { indices: [0, 2] }];
+
+  it('answers each tab in turn and submits once at the end', () => {
+    expect(buildAskAnswerKeys(prompt, selections, 'claude-digits')).toEqual([
+      { raw: '2' }, // picks /status, which moves to the next tab
+      { raw: '1' },
+      { raw: '3' },
+      { raw: '\x1b[C' }, // leaves the multi-select tab for Submit
+      { raw: '\r' },
+    ]);
+  });
+
+  it('skips a question left blank with a tab step', () => {
+    expect(
+      buildAskAnswerKeys(prompt, [{ indices: [] }, { indices: [1] }], 'claude-digits')
+    ).toEqual([{ raw: '\x1b[C' }, { raw: '2' }, { raw: '\x1b[C' }, { raw: '\r' }]);
+  });
+
+  it('formats and checks the answer per question', () => {
+    expect(formatAskAnswer(prompt, selections)).toBe('/status\nDatabase, Queue');
+    const recorded = {
+      'Which route path should the health check use?': '/status',
+      'Which checks should it run?': 'Database, Cache',
+    };
+    expect(askAnswerStatus(prompt, recorded, selections)).toEqual([
+      { answer: '/status', mismatch: false },
+      { answer: 'Database, Cache', mismatch: true, sent: 'Database, Queue' },
+    ]);
   });
 });
