@@ -1027,6 +1027,18 @@ describe('chatImage (#115)', () => {
     expect(url).toMatch(/^data:image\/png;base64,iVBORw0KGgo/);
   });
 
+  it('reads an indexed image record by its offset, never rescanning the file', async () => {
+    open();
+    const scan = vi.spyOn(fs, 'createReadStream');
+    try {
+      const url = await chat.chatImage('sess-img', { uuid: 'u-0105', path: [1] });
+      expect(url).toMatch(/^data:image\/png;base64,iVBORw0KGgo/);
+      expect(scan).not.toHaveBeenCalled();
+    } finally {
+      scan.mockRestore();
+    }
+  });
+
   it('serves an image inside a tool result', async () => {
     open();
     const url = await chat.chatImage('sess-img', { uuid: 'u-0106', path: [0, 0] });

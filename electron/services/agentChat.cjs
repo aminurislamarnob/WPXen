@@ -74,7 +74,7 @@ function transcriptFallbackId(file, offset) {
 // its state, and { fallbackId } for a record with no id of its own. A line
 // over MAX_LINE_BYTES (`oversized` from a page read, or a long one the live
 // tail just read) is a placeholder instead.
-function decodeLines(lines, state, decodeLine, file) {
+function decodeLines(lines, state, decodeLine, file, imageIndex = null) {
   const rows = [];
   for (const { offset, text, oversized } of lines) {
     const fallbackId = transcriptFallbackId(file, offset);
@@ -89,9 +89,28 @@ function decodeLines(lines, state, decodeLine, file) {
     }
     if (!text.trim()) continue;
     const row = decodeLine(text, state, { fallbackId });
-    if (row) rows.push(...[row].flat().map(truncateRow));
+    if (!row) continue;
+    const decoded = [row].flat();
+    if (imageIndex) indexImages(imageIndex, decoded, file, offset);
+    rows.push(...decoded.map(truncateRow));
   }
   return rows;
+}
+
+// Where each image-bearing record sits: rows reference an image by its
+// record's uuid, so chatImage reads that one line instead of scanning the
+// transcript for it.
+function indexImages(index, rows, file, offset) {
+  for (const row of rows) {
+    const refs = [
+      ...(row.images || []),
+      ...(row.result?.images || []),
+      ...(row.blocks || []).flatMap((b) => b?.images || []),
+    ];
+    for (const ref of refs) {
+      if (ref && typeof ref.uuid === 'string') index.set(ref.uuid, { file, offset });
+    }
+  }
 }
 
 // Characters never outnumber UTF-8 bytes, so most lines skip the count.
@@ -284,12 +303,12 @@ function scanFacts(fd, end, { markers, noteFacts }, state) {
 
 // The newest page. Returns { rows, pageStart, state }. `factScan`
 // ({ markers, noteFacts }) seeds the state from the lines above the page.
-function tailRead(fd, fileSize, decodeLine, file, factScan = null) {
+function tailRead(fd, fileSize, decodeLine, file, factScan = null, imageIndex = null) {
   if (fileSize === 0) return { rows: [], pageStart: 0, state: {} };
   const { lines, pageStart } = readPageLines(fd, fileSize);
   const state = {};
   if (factScan) scanFacts(fd, pageStart, factScan, state);
-  const rows = decodeLines(lines, state, decodeLine, file);
+  const rows = decodeLines(lines, state, decodeLine, file, imageIndex);
   return { rows, pageStart, state };
 }
 
@@ -305,10 +324,10 @@ function factsKey(state) {
 // ── Older page ─────────────────────────────────────────────────────────────
 // `results` holds the orphan tool results newer pages already decoded, so a
 // call paged in here picks its result up.
-function loadOlderPage(fd, pageStart, decodeLine, file, results = {}) {
+function loadOlderPage(fd, pageStart, decodeLine, file, results = {}, imageIndex = null) {
   if (pageStart <= 0) return { rows: [], pageStart: 0, atStart: true };
   const { lines, pageStart: newPageStart } = readPageLines(fd, pageStart);
-  const rows = decodeLines(lines, { results }, decodeLine, file);
+  const rows = decodeLines(lines, { results }, decodeLine, file, imageIndex);
   return { rows, pageStart: newPageStart, atStart: newPageStart <= 0 };
 }
 
@@ -602,7 +621,9 @@ function pollSubagent(watch, sub) {
         sub.fd,
         complete,
         watch.decodeLine,
-        subPath
+        subPath,
+        null,
+        watch.imageIndex
       );
       sub.currentRows = rows;
       sub.pageStart = pageStart;
@@ -619,7 +640,9 @@ function pollSubagent(watch, sub) {
       const buf = readRange(sub.fd, sub.tailOffset, size - sub.tailOffset);
       const { lines, partial } = splitLines(buf, sub.tailOffset);
       sub.tailOffset += buf.length - partial.length;
-      newRows.push(...decodeLines(lines, sub.state, watch.decodeLine, subPath));
+      newRows.push(
+        ...decodeLines(lines, sub.state, watch.decodeLine, subPath, watch.imageIndex)
+      );
       sub.currentRows.push(...newRows);
     }
     // Reopened: the renderer may hold none of the rows (a remounted chat).
@@ -684,6 +707,8 @@ function openChat(sessionId, viewerId, opts) {
     isPinnedElsewhere,
     notStale: new Set(), // folder files ruled out as this Session's successor
     subagents: new Map(),
+    // record uuid -> { file, offset } for every image a decoded row refers to
+    imageIndex: new Map(),
     tailOffset: 0, // end of the last complete line read
   };
   watches.set(sessionId, watch);
@@ -701,7 +726,8 @@ function openChat(sessionId, viewerId, opts) {
       complete,
       decodeLine,
       transcriptPath,
-      factScan
+      factScan,
+      watch.imageIndex
     ));
   } catch (err) {
     watches.delete(sessionId);
@@ -749,7 +775,13 @@ function openChat(sessionId, viewerId, opts) {
         // whole on the next poll.
         const { lines, partial } = splitLines(buf, watch.tailOffset);
         watch.tailOffset += buf.length - partial.length;
-        const newRows = decodeLines(lines, watch.state, watch.decodeLine, watch.path);
+        const newRows = decodeLines(
+          lines,
+          watch.state,
+          watch.decodeLine,
+          watch.path,
+          watch.imageIndex
+        );
 
         // A record can move the facts and render nothing — a
         // <task-notification>, a task_status attachment — so the facts
@@ -807,7 +839,8 @@ function loadOlder(sessionId) {
     watch.pageStart,
     watch.decodeLine,
     watch.path,
-    watch.state.results
+    watch.state.results,
+    watch.imageIndex
   );
   watch.pageStart = pageStart;
 
@@ -889,7 +922,9 @@ function chatLoadOlderSubagent(sessionId, toolUseId) {
     sub.fd,
     sub.pageStart,
     watch.decodeLine,
-    subagentPath(watch, sub)
+    subagentPath(watch, sub),
+    {},
+    watch.imageIndex
   );
   sub.pageStart = pageStart;
 
@@ -940,19 +975,58 @@ async function findRecord(file, uuid) {
   return null;
 }
 
+// The record on the line starting at `offset`, if it is the one with this
+// uuid: a read of that one line, capped like any transcript line.
+function recordAt(file, offset, uuid) {
+  let fd = null;
+  try {
+    fd = deps.openSync(file, 'r');
+    const parts = [];
+    let pos = offset;
+    let total = 0;
+    while (total <= MAX_LINE_BYTES) {
+      const buf = readRange(fd, pos, PAGE_CHUNK);
+      if (buf.length === 0) break;
+      const nl = buf.indexOf(0x0a);
+      parts.push(nl === -1 ? buf : buf.subarray(0, nl));
+      total += buf.length;
+      if (nl !== -1) break;
+      pos += buf.length;
+    }
+    const record = JSON.parse(Buffer.concat(parts).toString('utf8'));
+    return record?.uuid === uuid ? record : null;
+  } catch {
+    return null;
+  } finally {
+    if (fd !== null) {
+      try {
+        deps.closeSync(fd);
+      } catch {}
+    }
+  }
+}
+
 async function chatImage(sessionId, ref) {
   const watch = watches.get(sessionId);
   if (!watch || !validImageRef(ref)) return null;
-  const files = [
-    watch.path,
-    ...[...watch.subagents.values()].map((sub) => subagentPath(watch, sub)),
-  ];
+  // Every image a row shows was indexed as its record was decoded; the scan
+  // below is only for a ref the index doesn't know.
+  const known = watch.imageIndex.get(ref.uuid);
+  const indexed = known ? recordAt(known.file, known.offset, ref.uuid) : null;
+  const files = indexed
+    ? [null]
+    : [
+        watch.path,
+        ...[...watch.subagents.values()].map((sub) => subagentPath(watch, sub)),
+      ];
   for (const file of files) {
-    let record;
-    try {
-      record = await findRecord(file, ref.uuid);
-    } catch {
-      continue;
+    let record = indexed;
+    if (!record) {
+      try {
+        record = await findRecord(file, ref.uuid);
+      } catch {
+        continue;
+      }
     }
     if (!record) continue;
     let block = record.message?.content?.[ref.path[0]];
