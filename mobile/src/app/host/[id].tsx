@@ -4,6 +4,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { registerPushToken, type PushRegistration } from '../../push/register';
 import { registrationNote } from '../../push/registration';
 import { HostConnection, type ConnectionUpdate } from '../../connection/manager';
+import { classifyConnection } from '../../connection/health';
 import { groupSessions, statusColor, type PhoneProject, type PhoneSessionRow } from '../../sessions/grouping';
 import { findHost, removeHost } from '../../hosts/hostList';
 import { INITIAL_LIST_SYNC, reduceListSync, type ListSyncEvent } from '../../sessions/listSync';
@@ -17,26 +18,13 @@ import {
 
 function stateLabel(update: ConnectionUpdate | null, lastSeen: number | null): string {
   if (!update) return 'Connecting…';
-  switch (update.state) {
-    case 'connected':
-      return 'Connected';
-    case 'reconnecting':
-      return 'Reconnecting…';
-    case 'offline': {
-      const at = update.lastSeenAt ?? lastSeen;
-      if (at == null) return 'Mac offline';
-      const minutes = Math.max(0, Math.round((Date.now() - at) / 60000));
-      return minutes < 1 ? 'Mac offline (last seen just now)' : `Mac offline (last seen ${minutes} min ago)`;
-    }
-    case 'asleep':
-      return 'Mac asleep';
-    case 'revoked':
-      return 'Removed from WPXen';
-    case 'auth-failed':
-      return 'Pairing invalid — re-pair';
-    case 'update-required':
-      return update.update === 'desktop' ? 'Update WPXen on the Mac' : 'Update WPXen Mobile';
-  }
+  return classifyConnection({
+    state: update.state,
+    attempts: update.attempts,
+    lastConnectedAt: update.lastSeenAt ?? lastSeen,
+    now: Date.now(),
+    update: update.update,
+  }).label;
 }
 
 function sessionSubtitle(session: PhoneSessionRow): string {

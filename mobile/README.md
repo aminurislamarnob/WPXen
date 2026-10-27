@@ -25,7 +25,7 @@ No project id is committed — `app.config.js` reads `EAS_PROJECT_ID`. Without i
 - `postinstall` — bundles xterm.js (the desktop's version, pinned in `package.json`) into `src/terminal/terminalEngine.generated.ts`, which the terminal WebView inlines. It is gitignored; `npm install` / `npm ci` rebuild it. The terminal page loads nothing from the network.
 - `npm run typecheck` — `tsc --noEmit`
 - `npm run lint` — `expo lint`
-- `npm run test` — `vitest run` (pure modules only: backoff, connection state, host list, grouping, list sync, push registration, key bar, resize policy, terminal document, Metro and app config)
+- `npm run test` — `vitest run` (pure modules only: backoff, connection state and health, dial policy, network-change nudges, host list, grouping, list sync, push registration, key bar, resize policy, terminal document, Metro and app config)
 - `npm run bundle:check` — bundles the app with Metro (`expo export --platform ios` into a temp dir) and fails if any import can't be resolved. Typecheck and vitest resolve through Node and miss this.
 
 The root desktop gate (`lint`, `format:check`, `test`, `build:renderer`) ignores `mobile/`; CI runs the four scripts above in a separate `mobile` job.

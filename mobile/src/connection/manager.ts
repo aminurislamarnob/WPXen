@@ -1,13 +1,15 @@
-// One host's connection lifecycle: connect on open and on foreground,
-// heartbeat while up, exponential backoff with jitter after a drop, and no
-// more retries once the Mac reports this device revoked. The states come
+// One host's connection lifecycle: connect on open, heartbeat while up,
+// exponential backoff with jitter after a drop — cut short when the app
+// returns to the foreground or the network comes back or changes
+// (revival.ts) — and no more retries once the Mac reports this device
+// revoked or a latch (dialPolicy.ts) says retrying is pointless. The states come
 // from state.ts so every screen agrees; the backoff schedule from
 // backoff.ts. The encrypted channel itself is the shared client half.
 
-import { AppState, type AppStateStatus } from 'react-native';
 import { backoffDelayMs } from './backoff';
 import { deriveConnectionState, type ConnectionState } from './state';
 import { judgeDialFailure, readDialFailure, type ConnectionLatch } from './dialPolicy';
+import { subscribeRevivalTriggers } from './revival';
 import { createClient, decodeBase64 } from '../protocol';
 import type { HostRecord } from '../hosts/hostList';
 import { secureRandomBytes } from '../crypto';
@@ -19,6 +21,8 @@ export interface ConnectionUpdate {
   lastSeenAt: number | null;
   // Set with 'update-required': which side to update.
   update: 'desktop' | 'phone' | null;
+  // Failed dials since the last good connection (health.ts reads it).
+  attempts: number;
 }
 
 interface ManagerArgs {
@@ -49,7 +53,9 @@ export class HostConnection {
   private heartbeatLost = false;
   private socket: 'open' | 'connecting' | 'closed' = 'closed';
   private closeStatus: 'revoked' | 'closed' | null = null;
-  private appStateSub: { remove: () => void } | null = null;
+  private revivalUnsub: (() => void) | null = null;
+  // Resolves the pending backoff wait early (a nudge).
+  private retryWake: (() => void) | null = null;
   private latch: ConnectionLatch | null = null;
   private refusals = 0;
 
@@ -102,6 +108,7 @@ export class HostConnection {
       rttMs: this.rttMs,
       lastSeenAt: this.lastSeenAt,
       update: this.latch?.kind === 'update-required' ? this.latch.update : null,
+      attempts: this.attempts,
     });
   }
 
@@ -109,18 +116,49 @@ export class HostConnection {
     if (!this.stopped) return;
     this.stopped = false;
     this.loop();
-    // A return to the foreground re-opens a socket the OS killed silently.
-    this.appStateSub = AppState.addEventListener('change', (status: AppStateStatus) => {
-      if (status === 'active' && !this.stopped && this.socket !== 'open') {
-        this.loop();
+    this.revivalUnsub = subscribeRevivalTriggers(() => this.nudge());
+  }
+
+  // The app came back to the foreground, or the network came back or
+  // changed: a down connection redials now instead of waiting out its
+  // backoff, and an open one proves itself with a ping (a handoff can kill
+  // TCP while the socket still reads open).
+  private nudge(): void {
+    if (this.stopped || this.latch || this.closeStatus === 'revoked') return;
+    if (this.socket === 'open') {
+      this.probe();
+      return;
+    }
+    if (this.socket === 'connecting') return;
+    if (this.retryWake) {
+      if (this.retryTimer) clearTimeout(this.retryTimer);
+      this.retryTimer = null;
+      const wake = this.retryWake;
+      this.retryWake = null;
+      wake();
+      return;
+    }
+    this.loop();
+  }
+
+  private async probe(): Promise<void> {
+    const { heartbeatMs = DEFAULT_HEARTBEAT_MS } = this.args;
+    try {
+      await this.client?.request('ping', {}, { timeoutMs: Math.min(heartbeatMs, 5_000) });
+    } catch {
+      try {
+        this.client?.close();
+      } catch {
+        // The close handler restarts the loop.
       }
-    });
+    }
   }
 
   stop(): void {
     this.stopped = true;
-    this.appStateSub?.remove();
-    this.appStateSub = null;
+    this.revivalUnsub?.();
+    this.revivalUnsub = null;
+    this.retryWake = null;
     if (this.retryTimer) clearTimeout(this.retryTimer);
     this.retryTimer = null;
     this.stopHeartbeat();
@@ -158,9 +196,11 @@ export class HostConnection {
     this.emit();
     const delay = backoffDelayMs(this.attempts, this.args.random ?? Math.random);
     await new Promise<void>((resolve) => {
+      this.retryWake = resolve;
       this.retryTimer = setTimeout(resolve, delay);
     });
     this.retryTimer = null;
+    this.retryWake = null;
     this.loop();
   }
 
