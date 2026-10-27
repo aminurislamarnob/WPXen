@@ -28,6 +28,8 @@ export default function Terminal({
   isFocused,
   isAgent,
   onHandoff,
+  // Extra toolbar buttons from the pane (e.g. the chat view toggle).
+  actions,
 }) {
   // Link clicks: plain → the action card, ⌘ / ⇧⌘ → straight to a destination.
   // `onOpenLink(url, destination)` — 'system' or 'app' — is the owner's.
@@ -162,12 +164,13 @@ export default function Terminal({
       onBlurCapture={onBlur}
     >
       <div ref={hostRef} className="h-full w-full p-2" />
-      {((isAgent && onHandoff) || onClosePane) && (
+      {(actions || (isAgent && onHandoff) || onClosePane) && (
         <div
           className={`absolute top-2 z-10 flex items-center gap-1 ${
             searchOpen ? 'right-[180px]' : 'right-2'
           }`}
         >
+          {actions}
           {isAgent && onHandoff && (
             <button
               onClick={() => onHandoff(sessionId)}

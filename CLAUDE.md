@@ -269,6 +269,19 @@ renderer helpers.
   reaching for `vi.mock`.
 - Keep the no-module-scope-`require('electron')` rule above in mind when a new
   test imports a main-process module; the ratchet test enforces it.
+- **Chat transcript fixtures copy real record shapes, never real content.**
+  `test/fixtures/*.jsonl` mirror the keys, nesting and ordering of records seen
+  in real Claude / Codex / Antigravity transcripts, with invented text, paths
+  and ids. Shapes drift between Agent versions, so a fixture only proves what
+  it was copied from. `test/real-transcripts.test.js` is the drift check: it is
+  skipped unless `WPXEN_REAL_TRANSCRIPTS=1`, then runs every decoder through
+  the watch engine (first page, then Load older to the top) over
+  `~/.claude/projects`, `~/.codex/sessions` and
+  `~/.gemini/antigravity-cli/brain`, and asserts invariants — every row has a
+  unique id, no tool result renders as a user row, unpaired calls stay under a
+  threshold, nothing over the IPC cap, Load older never stalls. It prints counts
+  only. Run it after touching a decoder or `agentChat.cjs`:
+  `WPXEN_REAL_TRANSCRIPTS=1 npx vitest run test/real-transcripts.test.js`.
 
 ### Renderer layout
 

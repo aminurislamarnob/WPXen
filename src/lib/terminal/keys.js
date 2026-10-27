@@ -116,10 +116,16 @@ export function isImageDropPath(p) {
 // eslint-disable-next-line no-control-regex
 const hasControlByte = (p) => /[\x00-\x1f\x7f]/.test(p);
 
-function imagePasteText(p) {
+// The bytes a TUI reads an image path from inside a paste frame. Exported so
+// the chat composer (#118) attaches a dropped screenshot the way a terminal
+// drop does: a spaced macOS "Screenshot 2026-10-11 at 10.00.00.png" raw in
+// a frame is a path Codex shlex-splits, so it is escaped the same way here.
+export function imagePastePath(p) {
   if (!RAW_IMAGE_UNSAFE_RE.test(p)) return p;
   return p.replace(/[^a-zA-Z0-9_./@:\-\u0080-￿]/g, '\\$&');
 }
+
+const imagePasteText = imagePastePath;
 
 export function formatDropInput(paths, { bracketedPaste = false } = {}) {
   // A paste frame would rewrite control bytes, so those paths stay typed.

@@ -464,3 +464,21 @@ describe('Remote Access settings', () => {
     expect(s.write({ 'remote.keepAwake': 'yes' }).ok).toBe(false);
   });
 });
+
+describe('agents.chatViewDefault', () => {
+  it('defaults to off', () => {
+    expect(SETTINGS['agents.chatViewDefault']).toMatchObject({
+      type: 'bool',
+      default: false,
+    });
+  });
+
+  it('accepts bools and rejects anything else', () => {
+    expect(coerce(SETTINGS['agents.chatViewDefault'], true)).toEqual({
+      ok: true,
+      value: true,
+    });
+    expect(coerce(SETTINGS['agents.chatViewDefault'], 'yes').ok).toBe(false);
+    expect(coerce(SETTINGS['agents.chatViewDefault'], 1).ok).toBe(false);
+  });
+});

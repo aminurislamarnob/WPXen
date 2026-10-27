@@ -219,6 +219,26 @@ export default function AgentsSection() {
     ? `Active${awakeReasons.length ? ` (${awakeReasons.map((r) => awakeReasonLabels[r] || r).join(', ')})` : ''}`
     : 'Inactive';
 
+  const chatViewRows = (!visible || visible.includes('agents.chatViewDefault')) && (
+    <div>
+      <SectionLabel>Chat View</SectionLabel>
+      <Card>
+        <SettingsRow
+          id="agents.chatViewDefault"
+          visible={visible}
+          title="Open Claude Sessions in chat view"
+          subtitle="New Claude Code Sessions start in chat view instead of the terminal (⌘⇧C switches)"
+        >
+          <Toggle
+            checked={settings['agents.chatViewDefault'] === true}
+            onChange={(v) => setSetting('agents.chatViewDefault', v)}
+            label="Open Claude Sessions in chat view"
+          />
+        </SettingsRow>
+      </Card>
+    </div>
+  );
+
   return (
     <div className="space-y-6">
       {(!visible || visible.includes('agents.keepAwake')) && (
@@ -467,6 +487,7 @@ export default function AgentsSection() {
         </p>
       </div>
 
+      {chatViewRows}
       {notificationRows}
 
       <div>

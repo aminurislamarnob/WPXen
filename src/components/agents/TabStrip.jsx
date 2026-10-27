@@ -19,6 +19,18 @@ function handoffTooltip(tab, tabs) {
   return `Handed off from ${from}\n${tab.handoffFile}`;
 }
 
+// A resumed Session names the Session whose transcript it continues.
+function resumeTooltip(tab, tabs) {
+  if (!tab.resumeFrom) return undefined;
+  const origin = tabs.find((t) => t.sessionId === tab.resumeFrom);
+  const from = origin ? sessionTitle(origin, tabs) : 'an ended session';
+  return `Resumed from ${from}`;
+}
+
+function tabTooltip(tab, tabs) {
+  return handoffTooltip(tab, tabs) || resumeTooltip(tab, tabs);
+}
+
 export default function TabStrip({
   tabs,
   openFiles,
@@ -53,7 +65,7 @@ export default function TabStrip({
             key={tab.sessionId}
             onClick={() => selectSession(tab.sessionId)}
             onContextMenu={(e) => onTabContextMenu(e, tab.sessionId, 'session')}
-            title={handoffTooltip(tab, tabs)}
+            title={tabTooltip(tab, tabs)}
             className={`group flex items-center gap-1.5 pl-2.5 pr-1.5 h-7 rounded-lg text-[12.5px] cursor-pointer whitespace-nowrap ${
               isActive
                 ? 'bg-muted text-foreground font-medium'
