@@ -702,6 +702,18 @@ function failVerify(key, reason) {
   return lastVerifyResult;
 }
 
+// The public hostname can only answer with this Mac once the tunnel is
+// connected. Checked before that (saving a token, editing the hostname while
+// cloudflared is still starting) the fetch failed with 'dns' or
+// 'connection', and that failure was cached against the same key — so when
+// the tunnel came up, maybeVerify returned the stale failure instead of
+// checking, until someone pressed Check again.
+function tunnelNotConnected() {
+  if (tunnel.state === 'connected') return null;
+  setVerification({ state: 'idle', reason: null, checkedAt: null });
+  return { ok: false, reason: 'tunnel-not-connected' };
+}
+
 async function verifyHostname() {
   const cfg = deps.getRemoteConfig();
   const hostname = (cfg.hostname || '').trim();
@@ -710,6 +722,8 @@ async function verifyHostname() {
     setVerification({ state: 'idle', reason: null, checkedAt: null });
     return { ok: false, reason: 'no-hostname' };
   }
+  const waiting = tunnelNotConnected();
+  if (waiting) return waiting;
   const key = `${hostname}|${cfg.port}|${tokenGen}`;
   const nonce = deps.randomId();
   const url = `https://${hostname}${HEALTH_PATH}?nonce=${encodeURIComponent(nonce)}`;
@@ -767,6 +781,8 @@ async function maybeVerify() {
     setVerification({ state: 'idle', reason: null, checkedAt: null });
     return { ok: false, reason: 'no-hostname' };
   }
+  const waiting = tunnelNotConnected();
+  if (waiting) return waiting;
   const key = `${hostname}|${cfg.port}|${tokenGen}`;
   if (
     key === lastVerifyKey &&

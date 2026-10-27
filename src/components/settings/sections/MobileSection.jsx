@@ -272,7 +272,9 @@ export default function MobileSection() {
         ? VERIFY_REASON_COPY[verification.reason] || 'Verification failed.'
         : verification.state === 'verifying'
           ? 'Checking…'
-          : 'Not checked yet';
+          : tunnelState !== 'connected'
+            ? 'Checked once the tunnel connects'
+            : 'Not checked yet';
 
   // The status rows are live state, not settings, so they answer to the
   // registry entries above them rather than carrying ids of their own.
@@ -472,7 +474,7 @@ export default function MobileSection() {
             <Row title="Reachability" subtitle={verificationLine}>
               <button
                 onClick={checkAgain}
-                disabled={verifying || !hostname}
+                disabled={verifying || !hostname || tunnelState !== 'connected'}
                 className="btn-secondary text-xs flex-shrink-0"
               >
                 {verifying ? 'Checking…' : 'Check again'}

@@ -246,11 +246,51 @@ describe('hostname verification', () => {
     );
   });
 
+  // The tunnel's ready probe answers; everything else goes to the test's
+  // handler, so the hostname check runs against a connected tunnel.
+  function withReadyTunnel(handler) {
+    return (url, opts) =>
+      String(url).endsWith('/ready') ? { ok: true } : handler(url, opts);
+  }
+
   async function verified() {
     store.set(HOST_ID_KEY, 'test-host-id');
+    const handler = fetchHandler;
+    fetchHandler = withReadyTunnel((...args) => handler(...args));
     await remoteAccess.setToken('cf-secret-token');
     return remoteAccess.verifyHostname();
   }
+
+  it('checks the hostname only once the tunnel is connected, then for real', async () => {
+    store.set(HOST_ID_KEY, 'test-host-id');
+    remoteAccess.__setDeps({ randomId: () => 'test-nonce' });
+    let ready = false;
+    const hostnameFetches = [];
+    fetchHandler = async (url) => {
+      if (String(url).endsWith('/ready')) return { ok: ready };
+      hostnameFetches.push(String(url));
+      return jsonResponse({
+        nonce: 'test-nonce',
+        hostId: 'test-host-id',
+        protocolVersion: PROTOCOL_VERSION,
+      });
+    };
+    // cloudflared is running but not ready: nothing to check against yet.
+    await remoteAccess.setToken('cf-secret-token');
+    expect(remoteAccess.getStatus().tunnel.state).toBe('reconnecting');
+    expect(hostnameFetches).toEqual([]);
+    expect(remoteAccess.getStatus().verification.state).toBe('idle');
+    expect(await remoteAccess.verifyHostname()).toEqual({
+      ok: false,
+      reason: 'tunnel-not-connected',
+    });
+    expect(hostnameFetches).toEqual([]);
+    // The tunnel connects: the poll tick verifies, with nothing stale cached.
+    ready = true;
+    await remoteAccess.refreshTunnelState();
+    expect(hostnameFetches).toHaveLength(1);
+    expect(remoteAccess.getStatus().verification.state).toBe('ok');
+  });
 
   it('passes when the hostname echoes the nonce and this host identity', async () => {
     fetchHandler = async (url) => {
