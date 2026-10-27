@@ -28,6 +28,21 @@ describe('foldToolRuns', () => {
     expect(folded[2].role).toBe('assistant');
   });
 
+  it('keeps thinking between two calls inside the run, in order', () => {
+    const rows = [
+      { id: 't1', role: 'tool', tool_use: { name: 'Read' } },
+      { id: 'r1', role: 'reasoning', content: 'next, the test' },
+      { id: 't2', role: 'tool', tool_use: { name: 'Bash' } },
+      { id: 'r2', role: 'reasoning', content: 'all green' },
+      { id: 'a1', role: 'assistant', content: 'Done.' },
+    ];
+    const folded = foldToolRuns(rows);
+    expect(folded.map((r) => r.role)).toEqual(['tool-run', 'reasoning', 'assistant']);
+    expect(folded[0].items.map((r) => r.id)).toEqual(['t1', 'r1', 't2']);
+    expect(folded[0].summary).toBe('Read 1 file, ran 1 command');
+    expect(folded[1].id).toBe('r2');
+  });
+
   it('generates summary for tool runs', () => {
     const rows = [
       { id: '1', role: 'tool', tool_use: { name: 'read_file' } },
@@ -39,13 +54,13 @@ describe('foldToolRuns', () => {
       { id: '1', role: 'tool', tool_use: { name: 'read_file' } },
       { id: '2', role: 'tool', tool_use: { name: 'run_command' } },
     ];
-    expect(foldToolRuns(mixed)[0].summary).toBe('Read 1 file, Ran 1 command');
+    expect(foldToolRuns(mixed)[0].summary).toBe('Read 1 file, ran 1 command');
 
     const editSearch = [
       { id: '1', role: 'tool', tool_use: { name: 'replace' } },
       { id: '2', role: 'tool', tool_use: { name: 'grep_search' } },
     ];
-    expect(foldToolRuns(editSearch)[0].summary).toBe('Edited 1 file, Searched 1 time');
+    expect(foldToolRuns(editSearch)[0].summary).toBe('Edited 1 file, searched 1 time');
   });
 
   it("summarises Claude Code's tool names", () => {
@@ -56,7 +71,7 @@ describe('foldToolRuns', () => {
     });
     const run = ['Read', 'Read', 'Bash', 'Edit', 'Write', 'MultiEdit', 'Grep', 'Glob'];
     expect(foldToolRuns(run.map(tool))[0].summary).toBe(
-      'Read 2 files, Ran 1 command, Edited 3 files, Searched 2 times'
+      'Read 2 files, ran 1 command, edited 3 files, searched 2 times'
     );
     expect(foldToolRuns([tool('WebFetch')])[0].summary).toBe('Used 1 tool');
   });

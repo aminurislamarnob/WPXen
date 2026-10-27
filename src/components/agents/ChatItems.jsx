@@ -218,7 +218,11 @@ export function ToolRun({ run, ctx }) {
         <div className="mt-2 flex flex-col gap-2 border-l border-border pl-3">
           {run.items.map((item) => (
             <div key={item.id} className="text-[12px]">
-              <ToolItem item={item} ctx={ctx} />
+              {item.role === 'reasoning' ? (
+                <ReasoningRow row={item} onLink={ctx.onLink} />
+              ) : (
+                <ToolItem item={item} ctx={ctx} />
+              )}
             </div>
           ))}
         </div>

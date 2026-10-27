@@ -39,19 +39,29 @@ const SUMMARY_PARTS = [
   ['other', 'Used # tool', 'Used # tools'],
 ];
 
+const isToolRow = (row) =>
+  row.role === 'tool' ||
+  row.role === 'tool_result' ||
+  (row.role === 'user' && row.orphan);
+
+// Consecutive tool calls fold into one run. Thinking between two calls
+// stays inside the run (shown in order when it opens) rather than splitting
+// it in two; thinking after the last call, before the answer, stays out.
 export function foldToolRuns(rows) {
   const folded = [];
   let currentRun = null;
+  let heldReasoning = [];
+  const release = () => {
+    folded.push(...heldReasoning);
+    heldReasoning = [];
+  };
 
   for (const row of rows) {
     if (row.parentId) continue; // Nested rows are handled separately
 
-    if (
-      row.role === 'tool' ||
-      row.role === 'tool_result' ||
-      (row.role === 'user' && row.orphan)
-    ) {
+    if (isToolRow(row)) {
       if (!currentRun) {
+        release();
         currentRun = {
           id: `run-${row.id}`,
           role: 'tool-run',
@@ -61,12 +71,17 @@ export function foldToolRuns(rows) {
         };
         folded.push(currentRun);
       }
-      currentRun.items.push(row);
+      currentRun.items.push(...heldReasoning, row);
+      heldReasoning = [];
+    } else if (row.role === 'reasoning' && currentRun) {
+      heldReasoning.push(row);
     } else {
+      release();
       currentRun = null;
       folded.push(row);
     }
   }
+  release();
 
   for (const run of folded) {
     if (run.role === 'tool-run') {
@@ -83,10 +98,13 @@ export function foldToolRuns(rows) {
         counts[TOOL_KINDS[name] || 'other'] += n;
       }
 
+      // One sentence: "Read 3 files, ran 2 commands".
       const parts = [];
       for (const [kind, one, many] of SUMMARY_PARTS) {
         const n = counts[kind];
-        if (n > 0) parts.push((n === 1 ? one : many).replace('#', n));
+        if (n === 0) continue;
+        const part = (n === 1 ? one : many).replace('#', n);
+        parts.push(parts.length ? part[0].toLowerCase() + part.slice(1) : part);
       }
 
       if (parts.length === 0) {
