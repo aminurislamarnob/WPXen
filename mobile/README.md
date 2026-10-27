@@ -8,7 +8,7 @@ The native companion app for WPXen Remote Access (iOS and Android, Expo + React 
 2. Here: `npm install`, then `npm run ios` (Simulator) or `npm run android` (emulator), or `npm start` and scan the Metro QR with Expo Go.
 3. On the Mac: Settings → Mobile → Pair a device. In the app: Add Mac → scan the QR (camera) or paste the pairing link (Simulator, accessibility). Check the 4-digit codes match, allow it on the Mac.
 
-The phone reaches the Mac over its own Cloudflare tunnel; everything is end-to-end encrypted with the device key from pairing. The encrypted channel is the repo's shared protocol module (`../shared/remote-protocol/`, imported — never copied).
+The phone reaches the Mac over its own Cloudflare tunnel; everything is end-to-end encrypted. Pairing exchanges long-term keys; every connection then derives its own keys from those plus fresh ephemeral keys and nonces from both ends (protocol v2, `shared/remote-protocol/handshake.cjs`), so nothing recorded off the wire can be replayed. The encrypted channel is the repo's shared protocol module (`../shared/remote-protocol/`, imported — never copied).
 
 ## Scripts
 

@@ -1,13 +1,17 @@
 'use strict';
 
-// The client half of the protocol — the exact code the phone app imports in a
-// later ticket. `WebSocket` arrives as a parameter (the `ws` client in tests,
-// React Native's global on the phone), so this file never touches Node-only
-// APIs: tweetnacl plus the local helpers only.
+// The client half of the protocol — the exact code the phone app imports.
+// `WebSocket` arrives as a parameter (the `ws` client in tests, React
+// Native's global on the phone), so this file never touches Node-only APIs:
+// tweetnacl plus the local helpers only.
+//
+// Each dial runs the v2 handshake (handshake.cjs): hello → ready → sealed
+// auth frame → sealed connected event. connect() resolves only once the
+// connected event opens, which proves the Mac holds the host key. Keys and
+// counters belong to one connection and die with its socket.
 
-const { sealFrame, openFrame, randomNonce } = require('./frames.cjs');
-const { encodeBase64 } = require('./base64.cjs');
 const { PROTOCOL_VERSION, CLOSE_REVOKED } = require('./protocol.cjs');
+const { createHello, completeHandshake, authPayload } = require('./handshake.cjs');
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
 
@@ -25,14 +29,13 @@ function createClient({
   // One per dial. Lets a late close from a replaced socket be recognised and
   // ignored, so reconnecting is not raced by the connection it replaced.
   let generation = 0;
-  let outCounter = 0;
-  let inCounter = 0;
   let reqSeq = 0;
-  // This connection's binding (see frames.cjs): our nonce goes out in the
-  // hello, the Mac's comes back in `ch` on its first frame. Until then the
-  // channel isn't ready and connect() hasn't resolved.
-  let clientNonce = null;
-  let channel = null;
+  // This connection's handshake: 'hello' until the ready arrives, 'auth'
+  // until the connected event opens, then 'open'. `session` is the sealed
+  // channel (channelFraming.cjs) from the ready on.
+  let phase = 'idle';
+  let pendingHello = null;
+  let session = null;
   let ready = false;
   let dialing = null; // { promise, resolve, reject } while a dial is open
   let dialSocket = null; // the socket being dialled, before it is `socket`
@@ -59,17 +62,14 @@ function createClient({
     if (closed) return;
     closed = true;
     const wasReady = ready;
-    // The socket is spent: drop it so connect() dials a new one instead of
-    // short-circuiting on a stale reference, and reset the counters the way
-    // the server does — it counts from 1 per connection, so a reconnect that
-    // resumed at N+1 would have every frame dropped.
+    // The socket is spent, and its keys and counters with it: the next dial
+    // runs a fresh handshake.
     socket = null;
     dialSocket = null;
     ready = false;
-    channel = null;
-    clientNonce = null;
-    outCounter = 0;
-    inCounter = 0;
+    phase = 'idle';
+    pendingHello = null;
+    session = null;
     failAll(new Error('The connection closed.'));
     if (dialing) {
       const { reject, timer } = dialing;
@@ -97,26 +97,9 @@ function createClient({
     ws.send(JSON.stringify(outer));
   }
 
-  function sealAndSend(ws, payload) {
-    outCounter += 1;
-    const sealed = sealFrame({
-      payload: { ...payload, n: outCounter },
-      senderSecret: keys.secretKey,
-      recipientPublicKey: hostPublicKey,
-      nonce: randomNonce(randomBytes),
-    });
-    sendOuter(ws, {
-      v: PROTOCOL_VERSION,
-      deviceId,
-      counter: outCounter,
-      nonce: sealed.nonce,
-      box: sealed.box,
-    });
-  }
-
   function sendSealed(payload) {
     if (!ready) throw new Error('Not connected.');
-    sealAndSend(socket, { ...payload, ch: channel });
+    sendOuter(socket, { v: PROTOCOL_VERSION, frame: session.seal(payload) });
   }
 
   function deliverEvent(name, payload) {
@@ -129,7 +112,24 @@ function createClient({
     }
   }
 
-  function onSocketMessage(raw) {
+  function becomeReady(payload) {
+    ready = true;
+    phase = 'open';
+    if (dialing) {
+      const { resolve, timer } = dialing;
+      dialing = null;
+      clearTimeout(timer);
+      resolve();
+    }
+    for (const cb of [...openListeners]) {
+      try {
+        cb();
+      } catch {}
+    }
+    deliverEvent('connected', payload.payload);
+  }
+
+  function onSocketMessage(ws, raw) {
     let outer;
     try {
       outer = JSON.parse(String(raw));
@@ -141,61 +141,47 @@ function createClient({
       close();
       return;
     }
-    if (typeof outer.counter !== 'number' || outer.counter !== inCounter + 1) {
-      close();
-      return;
-    }
-    let payload;
-    try {
-      payload = openFrame({
-        nonce: outer.nonce,
-        box: outer.box,
-        senderPublicKey: hostPublicKey,
-        recipientSecret: keys.secretKey,
+    if (phase === 'hello') {
+      session = completeHandshake({
+        pending: pendingHello,
+        ready: outer,
+        deviceKeys: keys,
+        hostPublicKey,
       });
-    } catch {
-      close();
-      return;
-    }
-    // The sealed counter is the one that counts: the envelope's is plaintext.
-    if (!payload || typeof payload !== 'object' || payload.n !== outer.counter) {
-      close();
-      return;
-    }
-    if (!ready) {
-      // The Mac's first frame names the channel: our nonce, then its own.
-      if (
-        payload.kind !== 'event' ||
-        payload.name !== 'connected' ||
-        typeof payload.ch !== 'string' ||
-        !payload.ch.startsWith(`${clientNonce}.`) ||
-        payload.ch.length <= clientNonce.length + 1
-      ) {
+      pendingHello = null;
+      if (!session) {
         close();
         return;
       }
-      inCounter = outer.counter;
-      channel = payload.ch;
-      ready = true;
-      if (dialing) {
-        const { resolve, timer } = dialing;
-        dialing = null;
-        clearTimeout(timer);
-        resolve();
+      phase = 'auth';
+      try {
+        sendOuter(ws, {
+          v: PROTOCOL_VERSION,
+          frame: session.seal(authPayload(deviceId)),
+        });
+      } catch {
+        close();
       }
-      for (const cb of [...openListeners]) {
-        try {
-          cb();
-        } catch {}
-      }
-      deliverEvent('connected', payload.payload);
       return;
     }
-    if (payload.ch !== channel) {
+    if (!session || typeof outer.frame !== 'string') {
       close();
       return;
     }
-    inCounter = outer.counter;
+    // Exactly the next frame from the Mac on this connection, or the end.
+    const payload = session.open(outer.frame);
+    if (!payload || typeof payload !== 'object') {
+      close();
+      return;
+    }
+    if (phase === 'auth') {
+      if (payload.kind !== 'event' || payload.name !== 'connected') {
+        close();
+        return;
+      }
+      becomeReady(payload);
+      return;
+    }
     if (payload.kind === 'response' && typeof payload.id === 'string') {
       const waiter = pending.get(payload.id);
       if (!waiter) return;
@@ -212,10 +198,10 @@ function createClient({
     close();
   }
 
-  // Dials and binds a channel, or resolves straight away when one is up.
-  // Safe to call again after any close: the spent socket is gone and the
-  // counters restart, so one client can be reconnected for the life of the
-  // host.
+  // Dials and runs the handshake, or resolves straight away when a channel
+  // is up. Safe to call again after any close: the spent socket is gone and
+  // the next dial derives new keys, so one client can be reconnected for the
+  // life of the host.
   function connect() {
     if (socket && ready) return Promise.resolve();
     if (dialing) return dialing.promise;
@@ -227,7 +213,8 @@ function createClient({
       resolve = res;
       reject = rej;
     });
-    // A Mac that accepts the socket but never names the channel is no Mac.
+    // A Mac that accepts the socket but never completes the handshake is no
+    // Mac.
     const timer = setTimeout(() => {
       if (gen !== generation || ready) return;
       try {
@@ -247,11 +234,13 @@ function createClient({
         return;
       }
       socket = ws;
-      ws.onmessage = (event) => onSocketMessage(event.data ?? event);
+      ws.onmessage = (event) => onSocketMessage(ws, event.data ?? event);
       ws.onerror = () => {};
-      clientNonce = encodeBase64(randomNonce(randomBytes));
       try {
-        sealAndSend(ws, { kind: 'hello', clientNonce });
+        const hello = createHello({ deviceId, randomBytes });
+        pendingHello = hello.pending;
+        phase = 'hello';
+        sendOuter(ws, hello.message);
       } catch {
         try {
           ws.close();

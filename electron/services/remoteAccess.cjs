@@ -20,6 +20,8 @@ const {
   publicKeyB64,
   encodeBase64,
   decodeBase64,
+  acceptHello,
+  isAuthPayload,
 } = require('../../shared/remote-protocol/index.cjs');
 const QRCode = require('qrcode');
 const { saveSecret, loadSecret, hasSecret, clearSecret } = require('./secureSecrets.cjs');
@@ -55,8 +57,15 @@ const LAST_SEEN_MIN_MS = 60_000;
 const OFFER_TTL_MS = 5 * 60 * 1000;
 // The Allow/Deny dialog waits 2 minutes, then the phone gets pairing_timeout.
 const PAIR_PROMPT_TIMEOUT_MS = 2 * 60 * 1000;
-// A fresh socket that never speaks the protocol is closed.
+// A socket that has not authenticated (or started pairing) within 10 s is
+// cut (after Orca's ws-transport.ts PRE_AUTH_TIMEOUT_MS).
 const HANDSHAKE_TIMEOUT_MS = 10_000;
+// An authenticated socket is pinged every 15 s and cut after 3 unanswered
+// pings (after Orca's remote-runtime-server-heartbeat.ts). A phone that
+// vanished without a FIN — backgrounded, out of signal — would otherwise
+// count as connected, and hold keep-awake, until the OS gave up on it.
+const HEARTBEAT_MS = 15_000;
+const HEARTBEAT_MISSED_LIMIT = 3;
 // Failed pairing attempts (wrong secret, bad proof) are rate-limited per
 // remote address and globally; tripping either invalidates the offer.
 const PAIR_WINDOW_MS = 10 * 60 * 1000;
@@ -161,6 +170,14 @@ const deps = {
   },
   get now() {
     return 'now' in overrides ? overrides.now : Date.now;
+  },
+  get handshakeTimeoutMs() {
+    return 'handshakeTimeoutMs' in overrides
+      ? overrides.handshakeTimeoutMs
+      : HANDSHAKE_TIMEOUT_MS;
+  },
+  get heartbeatMs() {
+    return 'heartbeatMs' in overrides ? overrides.heartbeatMs : HEARTBEAT_MS;
   },
   get pairTimeoutMs() {
     return 'pairTimeoutMs' in overrides
@@ -1463,16 +1480,46 @@ function drop(ws) {
   } catch {}
 }
 
+// Ping an authenticated socket on an interval; any pong or frame proves it
+// alive. Missed beats are kept across ticks and only an answer clears them,
+// so a socket that stopped answering is cut on the third silent tick.
+function startHeartbeat(ws) {
+  let alive = true;
+  let missed = 0;
+  const markAlive = () => {
+    alive = true;
+    missed = 0;
+  };
+  ws.on('pong', markAlive);
+  ws.on('message', markAlive);
+  const timer = setInterval(() => {
+    if (!alive) {
+      missed += 1;
+      if (missed >= HEARTBEAT_MISSED_LIMIT) {
+        clearInterval(timer);
+        cutSocket(ws, CLOSE_DISCONNECT_ALL, 'heartbeat');
+        return;
+      }
+    }
+    alive = false;
+    try {
+      ws.ping();
+    } catch {}
+  }, deps.heartbeatMs);
+  if (timer.unref) timer.unref();
+  ws.on('close', () => clearInterval(timer));
+}
+
 function handleDeviceConnection(ws, req) {
   const ip = (req.socket && req.socket.remoteAddress) || 'unknown';
-  let device = null; // set once the device's hello has been verified
-  let devicePublicKey = null;
-  // This connection's binding: '<clientNonce>.<serverNonce>' (frames.cjs).
-  // Every sealed payload after the hello must carry it, so a frame captured
-  // on any other connection is refused here.
-  let channel = null;
-  let inCounter = 0;
-  let outCounter = 0;
+  // This connection's channel (shared handshake.cjs): 'new' until a hello,
+  // 'auth' once the ready is out and the phone's auth frame is due, 'open'
+  // once it opened. `device` is set only at 'open' — nothing about a device
+  // (connected-now, last seen, pushes, keep-awake) happens before.
+  let phase = 'new';
+  let device = null;
+  let pendingDevice = null; // the record the hello named, until auth
+  let session = null; // the sealed channel (channelFraming.cjs)
   // A host key that no longer decrypts (a reset Keychain, a copied data file)
   // is reported by getHostKeypair, never regenerated. Thrown from here it
   // would escape the WebSocket server's connection event and take the main
@@ -1487,23 +1534,15 @@ function handleDeviceConnection(ws, req) {
     return;
   }
 
-  let firstTimer = setTimeout(drop, HANDSHAKE_TIMEOUT_MS, ws);
+  // Unauthenticated sockets are reaped (after Orca's ws-transport.ts
+  // pre-auth timeout): a socket that has not finished the handshake — or
+  // pairing — in time is cut, however much it has said so far.
+  let firstTimer = setTimeout(cutSocket, deps.handshakeTimeoutMs, ws);
   ws.on('close', () => clearTimeout(firstTimer));
 
   function sendSealed(payload) {
-    outCounter += 1;
-    const sealed = sealFrame({
-      payload: { ...payload, ch: channel, n: outCounter },
-      senderSecret: keypair.secretKey,
-      recipientPublicKey: devicePublicKey,
-      nonce: randomNonce(deps.randomBytes),
-    });
-    sendWs(ws, {
-      v: PROTOCOL_VERSION,
-      counter: outCounter,
-      nonce: sealed.nonce,
-      box: sealed.box,
-    });
+    if (!session) return;
+    sendWs(ws, { v: PROTOCOL_VERSION, frame: session.seal(payload) });
   }
 
   function welcome() {
@@ -1522,8 +1561,9 @@ function handleDeviceConnection(ws, req) {
       return drop(ws);
     }
     if (!msg || typeof msg !== 'object') return drop(ws);
-    clearTimeout(firstTimer);
-    if (!device && msg.type === 'pair-request') {
+    if (phase === 'new' && msg.type === 'pair-request') {
+      // The Allow/Deny dialog waits on a human; its own timeout governs.
+      clearTimeout(firstTimer);
       handlePair(msg).catch(() => {
         try {
           drop(ws);
@@ -1641,45 +1681,49 @@ function handleDeviceConnection(ws, req) {
     // opens its channel with a hello like any other connection (here or on
     // a fresh socket), and a socket that never does is closed.
     clearTimeout(firstTimer);
-    firstTimer = setTimeout(drop, HANDSHAKE_TIMEOUT_MS, ws);
+    firstTimer = setTimeout(cutSocket, deps.handshakeTimeoutMs, ws);
   }
 
-  // The first frame of a device channel: a sealed hello from a paired device,
-  // counter 1. Only once it opens with that device's key is the socket
-  // tracked as the device's — connected-now, last seen, pushes, keep-awake
-  // all wait for it. An unknown id, a bad box or a replayed hello from another
-  // connection gets the same silent close.
+  // Step 2 of the handshake (handshake.cjs): answer a paired device's hello
+  // with this socket's fresh nonce and ephemeral key. Answering proves
+  // nothing about the caller — a hello copied off the wire gets a ready too
+  // — so the device is not tracked here; only an auth frame that opens
+  // under this connection's keys does that. An unknown id or a malformed
+  // hello is closed without a reply.
   function handleHello(msg) {
     const known = findDevice(msg.deviceId);
-    if (!known || msg.counter !== 1) return drop(ws);
-    let key;
-    let payload;
+    if (!known) return drop(ws);
+    let devicePublicKey;
     try {
-      key = decodeBase64(known.publicKey);
-      payload = openFrame({
-        nonce: msg.nonce,
-        box: msg.box,
-        senderPublicKey: key,
-        recipientSecret: keypair.secretKey,
-      });
+      devicePublicKey = decodeBase64(known.publicKey);
     } catch {
       return drop(ws);
     }
-    if (
-      !payload ||
-      payload.kind !== 'hello' ||
-      payload.n !== 1 ||
-      typeof payload.clientNonce !== 'string' ||
-      !/^[A-Za-z0-9+/=]{16,64}$/.test(payload.clientNonce)
-    ) {
-      return drop(ws);
-    }
+    if (devicePublicKey.length !== 32) return drop(ws);
+    const accepted = acceptHello({
+      hello: msg,
+      hostKeys: keypair,
+      devicePublicKey,
+      randomBytes: deps.randomBytes,
+    });
+    if (!accepted) return drop(ws);
+    pendingDevice = known;
+    session = accepted.session;
+    phase = 'auth';
+    sendWs(ws, accepted.reply);
+  }
+
+  // Step 3: the phone's frame 0 must open under this connection's keys and
+  // name the device the hello named. Only then is the socket the device's.
+  function handleAuth(payload) {
+    if (!isAuthPayload(payload, pendingDevice.id)) return drop(ws);
+    if (!findDevice(pendingDevice.id)) return drop(ws);
     clearTimeout(firstTimer);
-    device = known;
-    devicePublicKey = key;
-    inCounter = 1;
-    channel = `${payload.clientNonce}.${encodeBase64(deps.randomBytes(24))}`;
+    device = pendingDevice;
+    pendingDevice = null;
+    phase = 'open';
     trackChannel(ws, device.id, sendSealed);
+    startHeartbeat(ws);
     ensureSessionsFeed();
     welcome();
   }
@@ -1692,32 +1736,23 @@ function handleDeviceConnection(ws, req) {
     if (msg.v !== PROTOCOL_VERSION) return drop(ws);
     // Unknown ids are dropped with no reply — the response never reveals
     // whether the id or the key was wrong.
-    if (!channel) return handleHello(msg);
-    if (typeof msg.counter !== 'number' || msg.counter !== inCounter + 1) return drop(ws);
-    let payload;
-    try {
-      payload = openFrame({
-        nonce: msg.nonce,
-        box: msg.box,
-        senderPublicKey: devicePublicKey,
-        recipientSecret: keypair.secretKey,
-      });
-    } catch {
-      return drop(ws);
+    if (phase === 'new') {
+      if (msg.type !== 'hello') return drop(ws);
+      return handleHello(msg);
     }
-    // The sealed binding decides, not the plaintext envelope: a frame from
-    // another connection names another channel, and one moved within this
-    // connection carries the wrong sealed counter.
-    if (!payload || payload.ch !== channel || payload.n !== msg.counter) return drop(ws);
-    inCounter = msg.counter;
+    if (typeof msg.frame !== 'string') return drop(ws);
+    // Exactly the next frame from the phone on this connection, under this
+    // connection's key (channelFraming.cjs) — or the socket goes.
+    const payload = session.open(msg.frame);
+    if (!payload || typeof payload !== 'object') return drop(ws);
+    if (phase === 'auth') return handleAuth(payload);
     // Re-resolve the device on every frame (after Orca's per-frame dispatch
     // check): a record that is gone, however it went, authorises nothing,
     // whatever socket the frame rode in on.
     if (!findDevice(device.id)) return cutSocket(ws, CLOSE_REVOKED, 'revoked');
     if (ws.readyState !== ws.OPEN) return;
     touchDevice(device.id);
-    if (!payload || payload.kind !== 'request' || typeof payload.id !== 'string')
-      return drop(ws);
+    if (payload.kind !== 'request' || typeof payload.id !== 'string') return drop(ws);
     if (!ALLOWED_OPS.has(payload.op)) {
       return sendSealed({
         kind: 'response',

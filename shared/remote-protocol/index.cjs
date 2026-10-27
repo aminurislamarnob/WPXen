@@ -8,7 +8,8 @@
 // root eslint/prettier/vitest run so drift fails there, and CI's mobile job
 // bundles it through Metro (`npm run bundle:check` in mobile/).
 //
-// The frame format is documented in frames.cjs. Only tweetnacl plus the local
+// The wire format is documented in frames.cjs; the channel handshake in
+// handshake.cjs, its keys in keySchedule.cjs, its frames in channelFraming.cjs. Only tweetnacl plus the local
 // base64 helper are allowed here — no Buffer, crypto, atob or WebSocket.
 
 const {
@@ -35,6 +36,20 @@ const {
   createPairRequest,
   openPairAccept,
 } = require('./pairing.cjs');
+const { channelTranscript, sharedKey, deriveChannelKeys } = require('./keySchedule.cjs');
+const {
+  sealChannelFrame,
+  openChannelFrame,
+  createChannelSession,
+} = require('./channelFraming.cjs');
+const {
+  createHello,
+  parseHello,
+  acceptHello,
+  completeHandshake,
+  authPayload,
+  isAuthPayload,
+} = require('./handshake.cjs');
 const { createClient, DEFAULT_REQUEST_TIMEOUT_MS } = require('./client.cjs');
 
 module.exports = {
@@ -59,6 +74,18 @@ module.exports = {
   parsePairingUrl,
   createPairRequest,
   openPairAccept,
+  channelTranscript,
+  sharedKey,
+  deriveChannelKeys,
+  sealChannelFrame,
+  openChannelFrame,
+  createChannelSession,
+  createHello,
+  parseHello,
+  acceptHello,
+  completeHandshake,
+  authPayload,
+  isAuthPayload,
   createClient,
   DEFAULT_REQUEST_TIMEOUT_MS,
 };

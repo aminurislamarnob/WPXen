@@ -18,11 +18,11 @@ import {
   openPairAccept,
   createClient,
   decodeBase64,
-  encodeBase64,
-  sealFrame,
-  openFrame,
-  randomNonce,
+  createHello,
+  completeHandshake,
+  authPayload,
 } from '../shared/remote-protocol/index.cjs';
+import { createMacEnd } from './helpers/macEnd.js';
 
 // Device pairing and the encrypted channel (#142): the real localhost server
 // on 127.0.0.1:0, driven by the real client half of the shared protocol
@@ -356,22 +356,6 @@ describe('encrypted channel', () => {
     return { client, events, deviceId: opened.deviceId, keys, hostPublicKey, port };
   }
 
-  function sealedFrame({ deviceId, counter, payload, secret, recipientPublicKey }) {
-    const sealed = sealFrame({
-      payload,
-      senderSecret: secret,
-      recipientPublicKey,
-      nonce: randomNonce(),
-    });
-    return JSON.stringify({
-      v: PROTOCOL_VERSION,
-      deviceId,
-      counter,
-      nonce: sealed.nonce,
-      box: sealed.box,
-    });
-  }
-
   async function attackedSocket(port) {
     const rawSocket = new WebSocket(wsUrl(port));
     await new Promise((resolve) => rawSocket.on('open', resolve));
@@ -389,42 +373,37 @@ describe('encrypted channel', () => {
     return messages[count - 1];
   }
 
-  // A device channel opened by hand, frame by frame, so a test can capture
-  // and replay what crosses the wire.
+  // A device channel opened by hand, message by message, with the shared
+  // handshake — so a test can capture, alter and replay what crosses the
+  // wire. `frame()` seals the next request under this connection's keys.
   async function rawChannel({ port, deviceId, keys, hostPublicKey }) {
     const sock = await attackedSocket(port);
-    const hello = sealedFrame({
-      deviceId,
-      counter: 1,
-      payload: { kind: 'hello', n: 1, clientNonce: encodeBase64(randomNonce()) },
-      secret: keys.secretKey,
-      recipientPublicKey: hostPublicKey,
-    });
+    const { message, pending } = createHello({ deviceId });
+    const hello = JSON.stringify(message);
     sock.rawSocket.send(hello);
-    const welcome = JSON.parse(await nextMessage(sock.messages, 1));
-    const { ch } = openFrame({
-      nonce: welcome.nonce,
-      box: welcome.box,
-      senderPublicKey: hostPublicKey,
-      recipientSecret: keys.secretKey,
+    const ready = JSON.parse(await nextMessage(sock.messages, 1));
+    const session = completeHandshake({
+      pending,
+      ready,
+      deviceKeys: keys,
+      hostPublicKey,
     });
-    const frame = (n, extra = {}) =>
-      sealedFrame({
-        deviceId,
-        counter: n,
-        payload: {
-          kind: 'request',
-          id: `r${n}`,
-          op: 'ping',
-          params: {},
-          ch,
-          n,
-          ...extra,
-        },
-        secret: keys.secretKey,
-        recipientPublicKey: hostPublicKey,
-      });
-    return { ...sock, hello, ch, frame };
+    const seal = (payload) =>
+      JSON.stringify({ v: PROTOCOL_VERSION, frame: session.seal(payload) });
+    const auth = seal(authPayload(deviceId));
+    sock.rawSocket.send(auth);
+    // The connected event, sealed: the Mac proved its key too.
+    const welcome = JSON.parse(await nextMessage(sock.messages, 2));
+    expect(session.open(welcome.frame)).toMatchObject({
+      kind: 'event',
+      name: 'connected',
+    });
+    let seq = 0;
+    const frame = () => {
+      seq += 1;
+      return seal({ kind: 'request', id: `r${seq}`, op: 'ping', params: {} });
+    };
+    return { ...sock, hello, auth, session, frame };
   }
 
   it('round-trips ping encrypted; the wire carries no plaintext JSON', async () => {
@@ -444,135 +423,112 @@ describe('encrypted channel', () => {
     // Replay: a valid frame, then its identical twin.
     {
       const chan = await rawChannel(device);
-      const wire = chan.frame(2);
+      const wire = chan.frame();
       // The wire carries no plaintext JSON: the result is sealed inside.
-      expect(wire).not.toContain('pong');
+      expect(wire).not.toContain('ping');
       chan.rawSocket.send(wire);
-      expect(await nextMessage(chan.messages, 2)).not.toContain('pong');
+      expect(await nextMessage(chan.messages, 3)).not.toContain('pong');
       chan.rawSocket.send(wire);
       await chan.closed;
-      expect(chan.rawSocket.readyState).toBe(WebSocket.CLOSED);
+      expect(chan.messages).toHaveLength(3);
     }
 
-    // Reorder: counter 3 before 2.
+    // Reorder: the second frame before the first.
     {
       const chan = await rawChannel(device);
-      chan.rawSocket.send(chan.frame(3));
+      chan.frame();
+      chan.rawSocket.send(chan.frame());
       await chan.closed;
-      expect(chan.messages).toHaveLength(1); // the welcome, nothing for 3
+      expect(chan.messages).toHaveLength(2); // ready + connected, nothing more
     }
 
-    // Tampered: one flipped character in the box.
+    // Tampered: one flipped character in the frame.
     {
       const chan = await rawChannel(device);
-      const wire = JSON.parse(chan.frame(2));
-      wire.box =
-        wire.box.slice(0, 10) + (wire.box[10] === 'A' ? 'B' : 'A') + wire.box.slice(11);
+      const wire = JSON.parse(chan.frame());
+      wire.frame =
+        wire.frame.slice(0, 40) +
+        (wire.frame[40] === 'A' ? 'B' : 'A') +
+        wire.frame.slice(41);
       chan.rawSocket.send(JSON.stringify(wire));
       await chan.closed;
-      expect(chan.messages).toHaveLength(1);
+      expect(chan.messages).toHaveLength(2);
     }
 
-    // Undecryptable: a box sealed to nobody here.
+    // Reflected: the Mac's own frame sent back to it. Same connection, same
+    // counter, but sealed for the other direction under the other key.
     {
       const chan = await rawChannel(device);
-      const stranger = newKeyPair();
-      chan.rawSocket.send(
-        sealedFrame({
-          deviceId,
-          counter: 2,
-          payload: {
-            kind: 'request',
-            id: 'r2',
-            op: 'ping',
-            params: {},
-            ch: chan.ch,
-            n: 2,
-          },
-          secret: stranger.secretKey,
-          recipientPublicKey: stranger.publicKey,
-        })
-      );
-      await chan.closed;
-      expect(chan.messages).toHaveLength(1);
-    }
-  });
-
-  it('refuses a frame captured on one connection and replayed on another', async () => {
-    const { deviceId, keys, hostPublicKey, port } = await pairedClient();
-    const device = { port, deviceId, keys, hostPublicKey };
-
-    // The phone's real connection: hello, then a request the Mac answers.
-    const original = await rawChannel(device);
-    const captured = original.frame(2);
-    original.rawSocket.send(captured);
-    expect(JSON.parse(await nextMessage(original.messages, 2)).counter).toBe(2);
-    original.rawSocket.close();
-
-    // Someone in the path dials again with the captured frame as the first.
-    {
-      const sock = await attackedSocket(port);
-      sock.rawSocket.send(JSON.stringify({ ...JSON.parse(captured), counter: 1 }));
-      await sock.closed;
-      expect(sock.messages).toEqual([]);
-    }
-
-    // Or replays the captured hello too: the Mac opens a fresh channel, and
-    // the request still names the old one.
-    {
-      const sock = await attackedSocket(port);
-      sock.rawSocket.send(original.hello);
-      await nextMessage(sock.messages, 1); // a welcome sealed to the phone
-      sock.rawSocket.send(captured);
-      await sock.closed;
-      expect(sock.messages).toHaveLength(1);
-    }
-
-    // Moving a frame inside its own connection: the sealed counter disagrees
-    // with the envelope's.
-    {
-      const chan = await rawChannel(device);
-      const wire = JSON.parse(chan.frame(2));
-      chan.rawSocket.send(chan.frame(2));
-      await nextMessage(chan.messages, 2);
-      chan.rawSocket.send(JSON.stringify({ ...wire, counter: 3 }));
+      chan.rawSocket.send(chan.messages[1]);
       await chan.closed;
       expect(chan.messages).toHaveLength(2);
     }
   });
 
-  it('tracks a socket as the device only once its hello opens', async () => {
+  it('refuses a frame captured on one connection and replayed on another', async () => {
+    const { client, deviceId, keys, hostPublicKey, port } = await pairedClient();
+    client.close();
+    const device = { port, deviceId, keys, hostPublicKey };
+
+    // The phone's real connection: hello, auth, then a request answered.
+    const original = await rawChannel(device);
+    const captured = original.frame();
+    original.rawSocket.send(captured);
+    await nextMessage(original.messages, 3);
+    original.rawSocket.close();
+    await original.closed;
+    await new Promise((r) => setTimeout(r, 50));
+    expect(remoteAccess.listDevices()[0].connected).toBe(false);
+
+    // Someone in the path dials again with the captured frame first.
+    {
+      const sock = await attackedSocket(port);
+      sock.rawSocket.send(captured);
+      await sock.closed;
+      expect(sock.messages).toEqual([]);
+    }
+
+    // Or replays the whole conversation: the hello earns a ready with a new
+    // server nonce, so this connection's keys are ones the copy never had and
+    // the captured auth frame cannot open.
+    {
+      const sock = await attackedSocket(port);
+      sock.rawSocket.send(original.hello);
+      await nextMessage(sock.messages, 1);
+      expect(JSON.parse(sock.messages[0]).type).toBe('ready');
+      expect(remoteAccess.listDevices()[0].connected).toBe(false);
+      sock.rawSocket.send(original.auth);
+      sock.rawSocket.send(captured);
+      await sock.closed;
+      expect(sock.messages).toHaveLength(1);
+      expect(remoteAccess.listDevices()[0].connected).toBe(false);
+    }
+  });
+
+  it('tracks a socket as the device only once its auth frame opens', async () => {
     const { deviceId, client } = await pairedClient();
     client.close();
     await new Promise((r) => setTimeout(r, 50));
     expect(remoteAccess.listDevices()[0].connected).toBe(false);
 
-    // A known id with a counter but no verifiable box.
+    // A hello for a real device is answered — that proves nothing — and the
+    // device stays disconnected through an auth frame that doesn't open.
     const sock = await attackedSocket(remoteAccess.getStatus().actualPort);
-    sock.rawSocket.send(
-      JSON.stringify({ v: PROTOCOL_VERSION, deviceId, counter: 1, nonce: '', box: '' })
-    );
+    sock.rawSocket.send(JSON.stringify(createHello({ deviceId }).message));
+    await nextMessage(sock.messages, 1);
+    expect(remoteAccess.listDevices()[0].connected).toBe(false);
+    sock.rawSocket.send(JSON.stringify({ v: PROTOCOL_VERSION, frame: 'AAAA' }));
     await sock.closed;
-    expect(sock.messages).toEqual([]);
+    expect(sock.messages).toHaveLength(1);
     expect(remoteAccess.listDevices()[0].connected).toBe(false);
   });
 
   it('drops unknown device ids without answering', async () => {
-    const keys = newKeyPair();
     const port = listen();
-    const hostKeys = newKeyPair();
     const { rawSocket, closed } = await attackedSocket(port);
     let answered = false;
     rawSocket.on('message', () => (answered = true));
-    rawSocket.send(
-      sealedFrame({
-        deviceId: 'no-such-device',
-        counter: 1,
-        payload: { kind: 'request', id: 'r1', op: 'ping', params: {} },
-        secret: keys.secretKey,
-        recipientPublicKey: hostKeys.publicKey,
-      })
-    );
+    rawSocket.send(JSON.stringify(createHello({ deviceId: 'no-such-device' }).message));
     await closed;
     expect(answered).toBe(false);
   });
@@ -585,10 +541,15 @@ describe('encrypted channel', () => {
 
   it('times out a request nothing answers, through an injected socket', async () => {
     // The constructor takes any WebSocket implementation. This one opens the
-    // channel properly — it answers the hello — and then goes quiet, like a
-    // server that stopped answering mid-session.
+    // channel properly — it runs the Mac's half of the handshake — and then
+    // goes quiet, like a server that stopped answering mid-session.
     const host = newKeyPair();
     const keys = newKeyPair();
+    const end = createMacEnd({
+      hostKeys: host,
+      devicePublicKey: keys.publicKey,
+      deviceId: 'd',
+    });
     class GoesQuiet {
       static OPEN = 1;
       constructor() {
@@ -596,20 +557,9 @@ describe('encrypted channel', () => {
         queueMicrotask(() => this.onopen?.());
       }
       send(raw) {
-        const outer = JSON.parse(raw);
-        if (outer.counter !== 1) return;
-        const { clientNonce } = openFrame({
-          nonce: outer.nonce,
-          box: outer.box,
-          senderPublicKey: keys.publicKey,
-          recipientSecret: host.secretKey,
-        });
-        const sealed = sealFrame({
-          payload: { kind: 'event', name: 'connected', ch: `${clientNonce}.q`, n: 1 },
-          senderSecret: host.secretKey,
-          recipientPublicKey: keys.publicKey,
-        });
-        const data = JSON.stringify({ v: PROTOCOL_VERSION, counter: 1, ...sealed });
+        const { reply } = end.receive(raw);
+        if (!reply) return;
+        const data = JSON.stringify(reply);
         queueMicrotask(() => this.onmessage?.({ data }));
       }
       close() {}
@@ -777,6 +727,9 @@ describe('shared module portability guard', () => {
       'errors.cjs',
       'frames.cjs',
       'pairing.cjs',
+      'keySchedule.cjs',
+      'channelFraming.cjs',
+      'handshake.cjs',
       'client.cjs',
     ];
     for (const file of files) {

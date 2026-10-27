@@ -1,8 +1,11 @@
 'use strict';
 
 // Protocol identity. Phone and desktop compare versions on every handshake.
+// v2: per-connection keys and sealed direction/counter framing
+// (handshake.cjs). v1 — a sealed hello under the long-term keys, which a
+// copy could replay — never shipped and has no compatibility path.
 
-const PROTOCOL_VERSION = 1;
+const PROTOCOL_VERSION = 2;
 
 // The one unauthenticated route on the localhost server. `wpxen`-prefixed so
 // a future rename can find it next to any LEGACY_* list it may one day join.

@@ -1,14 +1,8 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { WebSocketServer } from 'ws';
 import WebSocket from 'ws';
-import {
-  PROTOCOL_VERSION,
-  newKeyPair,
-  sealFrame,
-  openFrame,
-  randomNonce,
-  createClient,
-} from '../shared/remote-protocol/index.cjs';
+import { newKeyPair, createClient } from '../shared/remote-protocol/index.cjs';
+import { createMacEnd } from './helpers/macEnd.js';
 
 // The client half's connection contract (#142), driven against a bare ws
 // server so the invariants are pinned without the whole Remote Access
@@ -18,75 +12,39 @@ import {
 
 const hostKeys = newKeyPair();
 
-// Stands in for the Mac: opens every frame, enforces the per-connection
-// counter and channel binding the real server enforces, answers the hello
-// with the connected event and `ping` with pong. Records what it saw so a
-// test can assert the counters restarted rather than resumed.
+// Stands in for the Mac: runs the shared handshake per connection
+// (helpers/macEnd.js), answers `ping` with pong, and records the sealed
+// frames each connection opened so a test can assert that every connection
+// starts over at frame 0 rather than resuming.
 function fakeMac() {
   const wss = new WebSocketServer({ port: 0, host: '127.0.0.1' });
-  const seen = []; // one array of counters per connection
+  const seen = []; // one array of opened frame counters per connection
   const sockets = new Set();
-  wss.on('connection', (ws, req) => {
+  let pinned = null;
+  wss.on('connection', (ws) => {
     sockets.add(ws);
     ws.on('close', () => sockets.delete(ws));
-    const counters = [];
-    seen.push(counters);
-    let inCounter = 0;
-    let outCounter = 0;
-    let channel = null;
-    let devicePublicKey = null;
-    const send = (payload) => {
-      outCounter += 1;
-      const sealed = sealFrame({
-        payload: { ...payload, ch: channel, n: outCounter },
-        senderSecret: hostKeys.secretKey,
-        recipientPublicKey: devicePublicKey,
-        nonce: randomNonce(),
-      });
-      ws.send(
-        JSON.stringify({
-          v: PROTOCOL_VERSION,
-          counter: outCounter,
-          nonce: sealed.nonce,
-          box: sealed.box,
-        })
-      );
-    };
+    const end = createMacEnd({
+      hostKeys,
+      devicePublicKey: pinned,
+      deviceId: 'device-1',
+    });
+    seen.push(end.opened);
     ws.on('message', (raw) => {
-      const outer = JSON.parse(String(raw));
-      counters.push(outer.counter);
-      // Exactly the server's rule: 1 on a fresh connection, then +1.
-      if (outer.counter !== inCounter + 1) {
-        ws.close();
-        return;
-      }
-      inCounter = outer.counter;
-      devicePublicKey = devicePublicKey || decodeDeviceKey(req);
-      const payload = openFrame({
-        nonce: outer.nonce,
-        box: outer.box,
-        senderPublicKey: devicePublicKey,
-        recipientSecret: hostKeys.secretKey,
-      });
-      if (payload.n !== outer.counter) return ws.close();
-      if (!channel) {
-        if (payload.kind !== 'hello') return ws.close();
-        channel = `${payload.clientNonce}.mac-${seen.length}`;
-        send({ kind: 'event', name: 'connected', payload: { deviceId: 'device-1' } });
-        return;
-      }
-      if (payload.ch !== channel) return ws.close();
-      send({ kind: 'response', id: payload.id, result: { pong: true } });
+      const result = end.receive(raw);
+      if (result.close) return ws.close();
+      if (result.reply) return ws.send(JSON.stringify(result.reply));
+      const { payload } = result;
+      ws.send(
+        JSON.stringify(
+          end.seal({ kind: 'response', id: payload.id, result: { pong: true } })
+        )
+      );
     });
   });
-  // The device key is fixed per test run; the handshake that would carry it
-  // is the pairing ticket's own concern, not this file's.
-  let pinned = null;
-  function decodeDeviceKey() {
-    return pinned;
-  }
   return {
     url: () => `ws://127.0.0.1:${wss.address().port}/wpxen-device`,
+    // The device key is fixed per test run; pairing is not this file's concern.
     pinDeviceKey: (key) => {
       pinned = key;
     },
@@ -147,18 +105,18 @@ describe('createClient connection lifecycle', () => {
     mac.dropAll();
     await waitFor(() => closes.length === 1, 'the drop to reach the client');
 
-    // The same client dials again and the channel works. The server counts
-    // from 1 per connection, so a client that resumed at N+1 is dropped on
-    // its first frame.
+    // The same client dials again and the channel works. Each connection
+    // has its own keys and counts from frame 0, so a client that resumed its
+    // old counter (or kept its old keys) is dropped on its first frame.
     await client.connect();
     expect(await client.request('ping')).toMatchObject({ pong: true });
     expect(await client.request('ping')).toMatchObject({ pong: true });
 
-    // Each connection opens with its hello (1), then counts on from there.
+    // Each connection opens with its auth frame (0), then counts on.
     const perConnection = mac.counters();
     expect(perConnection).toHaveLength(2);
-    expect(perConnection[0]).toEqual([1, 2]);
-    expect(perConnection[1]).toEqual([1, 2, 3]);
+    expect(perConnection[0]).toEqual([0, 1]);
+    expect(perConnection[1]).toEqual([0, 1, 2]);
     client.close();
   });
 
@@ -171,7 +129,7 @@ describe('createClient connection lifecycle', () => {
     client.close();
     await client.connect();
     expect(await client.request('ping')).toMatchObject({ pong: true });
-    expect(mac.counters().map((c) => c[0])).toEqual([1, 1]);
+    expect(mac.counters().map((c) => c[0])).toEqual([0, 0]);
     client.close();
   });
 

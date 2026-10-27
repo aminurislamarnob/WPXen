@@ -1,41 +1,38 @@
 'use strict';
 
-// Sealed frames. Every encrypted byte between phone and Mac is a tweetnacl
-// box; Cloudflare only ever carries ciphertext.
+// Long-term boxes: pairing only. Every encrypted byte between phone and Mac
+// is tweetnacl; Cloudflare only ever carries ciphertext.
 //
-// Wire format (outer JSON, plaintext fields only):
+// What is on the wire (outer JSON; only these fields are plaintext):
 //
-//   { v, deviceId?, counter, nonce, box }
+//   Pairing, one socket, before the phone has a device id (pairing.cjs):
+//     { v, type: 'pair-request', devicePublicKey, nonce, box }
+//     { type: 'pair-accept', deviceId, code, nonce, box }
+//     { type: 'pair-reject', reason, update? }        — carries no secrets
+//   `box` here is nacl.box under the two long-term keys with a random nonce
+//   (sealFrame / openFrame below). A captured request is useless again: the
+//   one-time pairing secret inside it dies on first use.
 //
-//   v         protocol version (a mismatch closes the socket)
-//   deviceId  the paired device, client → server only
-//   counter   monotonically increasing per direction, per connection,
-//             starting at 1. Anything else (replay, reorder, gap) closes it.
-//   nonce     24 fresh random bytes, base64
-//   box       base64 box(payloadJSON, nonce, recipientPub, senderSecret)
+//   Device channel, every later socket (handshake.cjs, channelFraming.cjs):
+//     { v, type: 'hello', deviceId, clientNonce, ephemeralKey }
+//     { v, type: 'ready', serverNonce, ephemeralKey }
+//     { v, frame }   — both ways, from then on
+//   `frame` is nacl.secretbox under a key derived for this connection alone
+//   (keySchedule.cjs), one key per direction. Its nonce is not random: it is
+//   the session id, direction, kind and counter, which the receiver
+//   recomputes from what it expects next and then checks against the
+//   sealed header byte for byte. The phone's frame 0 is its auth; the
+//   Mac's is the 'connected' event. A frame replayed, skipped, reflected,
+//   misread as another kind or moved to another connection doesn't open,
+//   and a frame that doesn't open closes the socket.
 //
-// Box payloads are JSON with a `kind`: 'pair-request' | 'pair-accept' |
-// 'hello' | 'request' | 'response' | 'event'. Plaintext rejections
-// ({ type: 'pair-reject', reason }) carry no secrets.
+// Sealed payloads are JSON with a `kind`: 'pair-request' | 'pair-accept'
+// in boxes; 'auth' | 'request' | 'response' | 'event' in channel frames.
 //
-// The plaintext envelope authenticates nothing, so a device channel binds
-// every sealed payload to its connection (after Orca's mobile E2EE v2, which
-// seals the session id, direction and counter inside each frame):
-//
-//   1. The phone's first frame is { kind: 'hello', n: 1, clientNonce }.
-//   2. The Mac answers with the 'connected' event carrying
-//      ch: '<clientNonce>.<serverNonce>' — fresh randomness from each side.
-//   3. Every later payload, both ways, carries that `ch` and `n` equal to
-//      the envelope's counter; anything else closes the socket.
-//
-// So a frame captured off the wire is worthless anywhere else: replayed on a
-// new connection its `ch` names the old one, and inside its own connection
-// its sealed `n` pins its position. Counters restart per connection.
-//
-// React Native safe: tweetnacl plus the local base64 helper only — no
-// Buffer, crypto, atob or WebSocket here. Strings cross the box boundary as
-// UTF-8 via TextEncoder/TextDecoder, which Node, browsers and React Native
-// all provide.
+// React Native safe: tweetnacl plus the local helpers only — no Buffer,
+// crypto, atob or WebSocket here. Strings cross the box boundary as UTF-8
+// via TextEncoder/TextDecoder, which Node, browsers and React Native all
+// provide.
 
 const nacl = require('tweetnacl');
 const { encodeBase64, decodeBase64 } = require('./base64.cjs');
