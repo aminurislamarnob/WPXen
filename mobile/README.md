@@ -14,7 +14,7 @@ The phone reaches the Mac over its own Cloudflare tunnel; everything is end-to-e
 
 - `npm run typecheck` — `tsc --noEmit`
 - `npm run lint` — `expo lint`
-- `npm run test` — `vitest run` (pure modules only: backoff, connection state, host list, grouping, key bar, resize policy, terminal document, Metro config)
+- `npm run test` — `vitest run` (pure modules only: backoff, connection state, host list, grouping, list sync, key bar, resize policy, terminal document, Metro config)
 - `npm run bundle:check` — bundles the app with Metro (`expo export --platform ios` into a temp dir) and fails if any import can't be resolved. Typecheck and vitest resolve through Node and miss this.
 
 The root desktop gate (`lint`, `format:check`, `test`, `build:renderer`) ignores `mobile/`; CI runs the four scripts above in a separate `mobile` job.

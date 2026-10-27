@@ -5,6 +5,7 @@ import { registerPushToken } from '../../push/register';
 import { HostConnection, type ConnectionUpdate } from '../../connection/manager';
 import { groupSessions, statusColor, type PhoneProject, type PhoneSessionRow } from '../../sessions/grouping';
 import { findHost, removeHost } from '../../hosts/hostList';
+import { INITIAL_LIST_SYNC, reduceListSync, type ListSyncEvent } from '../../sessions/listSync';
 import { deleteHostSecrets, loadDeviceKeys, loadHosts, saveHosts } from '../../hosts/secureHosts';
 
 function stateLabel(update: ConnectionUpdate | null, lastSeen: number | null): string {
@@ -52,8 +53,18 @@ export default function HostScreen() {
   const [sheetError, setSheetError] = useState<string | null>(null);
   const [pushEnabled, setPushEnabled] = useState(true);
   const [pushKnown, setPushKnown] = useState(false);
+  const [stale, setStale] = useState(false);
   const connection = useRef<HostConnection | null>(null);
-  const loadedOnce = useRef(false);
+  const listSync = useRef(INITIAL_LIST_SYNC);
+
+  // Every reconnect refetches, and the kept list reads stale until a fresh
+  // one lands (sessions/listSync.ts). Returns whether to refetch now.
+  const syncEvent = useCallback((event: ListSyncEvent): boolean => {
+    const next = reduceListSync(listSync.current, event);
+    listSync.current = next.state;
+    setStale(next.state.stale);
+    return next.refetch;
+  }, []);
 
   const loadLists = useCallback(async () => {
     const conn = connection.current;
@@ -68,13 +79,13 @@ export default function HostScreen() {
       setSessions(sessionsRes.sessions ?? []);
       setPushEnabled(pushRes.pushEnabled !== false);
       setPushKnown(true);
-      loadedOnce.current = true;
+      syncEvent({ type: 'loaded' });
       // Re-register the current token whenever it may have changed.
       registerPushToken((op, params) => conn.request(op, params)).catch(() => {});
     } catch {
       // Offline: the stale list stays under the state banner.
     }
-  }, []);
+  }, [syncEvent]);
 
   useEffect(() => {
     let cancelled = false;
@@ -101,14 +112,17 @@ export default function HostScreen() {
           if (cancelled) return;
           setUpdate(u);
           if (u.lastSeenAt != null) setLastSeen(u.lastSeenAt);
-          if (u.state === 'connected' && !loadedOnce.current) loadLists();
+          if (syncEvent({ type: 'connection', state: u.state })) loadLists();
         },
       });
       connection.current = conn;
       conn.subscribe('sessions.changed', (payload) => {
         if (cancelled) return;
         const rows = (payload as { sessions?: PhoneSessionRow[] })?.sessions;
-        if (Array.isArray(rows)) setSessions(rows);
+        if (Array.isArray(rows)) {
+          setSessions(rows);
+          syncEvent({ type: 'loaded' });
+        }
       });
       conn.start();
     })();
@@ -117,7 +131,7 @@ export default function HostScreen() {
       connection.current?.stop();
       connection.current = null;
     };
-  }, [id, loadLists]);
+  }, [id, loadLists, syncEvent]);
 
   const openSession = async (session: PhoneSessionRow) => {
     try {
@@ -235,10 +249,12 @@ export default function HostScreen() {
       {update?.state === 'revoked' && (
         <Text style={styles.body}>This device was removed from WPXen. Pair again from Settings → Mobile.</Text>
       )}
-      {!live && sessions.length > 0 && (
-        <Text style={styles.stale}>Showing the last synced list — reconnecting.</Text>
+      {stale && sessions.length > 0 && (
+        <Text style={styles.stale}>
+          {live ? 'Showing the last synced list — refreshing…' : 'Showing the last synced list — reconnecting.'}
+        </Text>
       )}
-      <View style={!live && sessions.length > 0 ? styles.dimmed : undefined}>
+      <View style={stale && sessions.length > 0 ? styles.dimmed : undefined}>
         {groups.map((group) => (
           <View key={group.key} style={styles.group}>
             <View style={styles.groupHeader}>
