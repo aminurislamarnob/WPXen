@@ -155,12 +155,10 @@ describe('agent-chat watcher', () => {
   });
 
   it('handles chunk-based tail reading and loadOlder', () => {
-    // Generate lines of ~500 bytes each.
-    // 400 lines * 500 bytes = ~200,000 bytes (~195 KB)
-    // PAGE_CHUNK is 64KB.
-    // Chunk 1 (64KB) -> ~131 lines. Total lines = 131 (< 200). Continues.
-    // Chunk 2 (64KB) -> ~131 lines. Total lines = 262 (> 200). Stops.
-    // Remaining bytes ~ 69KB. loadOlder will read the rest.
+    // 400 lines of ~500 bytes (~195 KB) read in 64 KB chunks. A page stops
+    // on the line that reaches MAX_PAGE_ROWS, not at the end of the chunk it
+    // sits in, so the first page is exactly 200 rows and Load older reads
+    // the other 200.
     const padding = 'A'.repeat(480);
     const lines = Array.from(
       { length: 400 },
@@ -189,10 +187,8 @@ describe('agent-chat watcher', () => {
       onRows: (newRows) => rows.push(...newRows),
     });
 
-    // We should get ~262 lines (it's exactly 262 depending on boundaries)
-    // Let's just assert it's > 200 and < 400
-    expect(rows.length).toBeGreaterThan(200);
-    expect(rows.length).toBeLessThan(400);
+    expect(rows.length).toBe(200);
+    expect(rows[0].id).toBe('msg-201');
 
     const loadedRows = rows.length;
 
@@ -1291,5 +1287,80 @@ describe('async subagents (#114)', () => {
       taskId: AGENT,
       status: 'completed',
     });
+  });
+});
+
+// A line bigger than the page budget used to stop the page mid-line:
+// `pageStart` never moved and every Load older re-read the same bytes.
+describe('oversized transcript lines (#112)', () => {
+  const agentChat = require('../electron/services/agentChat.cjs');
+  const os = require('node:os');
+  let dir;
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wpxen-big-'));
+    agentChat.__setDeps({
+      statSync: fs.statSync,
+      openSync: fs.openSync,
+      readSync: fs.readSync,
+      closeSync: fs.closeSync,
+      readdirSync: fs.readdirSync,
+      setInterval: () => 0,
+      clearInterval: () => {},
+    });
+  });
+  afterEach(() => {
+    agentChat.closeAllChats();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  const record = (uuid, text) => JSON.stringify(userRecord(uuid, text)) + '\n';
+
+  function pageAll(file) {
+    const rows = [];
+    agentChat.openChat('big', 'v', {
+      transcriptPath: file,
+      decodeLine: decodeClaudeLine,
+      onRows: (r) => rows.push(...r),
+    });
+    let pages = 0;
+    for (let page = agentChat.loadOlder('big'); ; page = agentChat.loadOlder('big')) {
+      rows.unshift(...page.rows);
+      if (page.atStart || ++pages > 20) break;
+    }
+    return { rows, pages };
+  }
+
+  it('Load older moves past a line larger than the page budget', () => {
+    const file = path.join(dir, 't.jsonl');
+    fs.writeFileSync(
+      file,
+      record('before', 'the first prompt') +
+        record('huge', 'x'.repeat(agentChat.MAX_PAGE_BYTES + 100_000)) +
+        record('after', 'the last prompt')
+    );
+    const { rows, pages } = pageAll(file);
+    expect(pages).toBeLessThan(5);
+    expect(rows.map((r) => r.id)).toEqual(['before', 'huge', 'after']);
+    // Under MAX_LINE_BYTES it is still decoded: its row is small.
+    expect(rows[1].content.length).toBeGreaterThan(agentChat.MAX_PAGE_BYTES);
+  });
+
+  it('shows a placeholder for a line over MAX_LINE_BYTES and keeps going', () => {
+    const file = path.join(dir, 't.jsonl');
+    fs.writeFileSync(
+      file,
+      record('before', 'the first prompt') +
+        record('huge', 'x'.repeat(agentChat.MAX_LINE_BYTES + 1000)) +
+        record('after', 'the last prompt')
+    );
+    const { rows, pages } = pageAll(file);
+    expect(pages).toBeLessThan(10);
+    expect(rows.map((r) => r.role)).toEqual(['user', 'status', 'user']);
+    expect(rows[1]).toMatchObject({
+      tooLarge: true,
+      content: expect.stringMatching(/too large/),
+    });
+    expect(rows[1].id).toMatch(/:\d{16}$/);
   });
 });

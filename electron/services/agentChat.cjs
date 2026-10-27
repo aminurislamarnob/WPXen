@@ -23,6 +23,12 @@ const POLL_INTERVAL = 400;
 const PAGE_CHUNK = 64 * 1024; // 64 KB read chunks
 const MAX_PAGE_ROWS = 200;
 const MAX_PAGE_BYTES = 2 * 1024 * 1024; // 2 MB
+// A single transcript line larger than this is never parsed: it becomes a
+// placeholder row (after Orca's transcript-tail-reader.ts:183-195, which
+// skips records over its cap). Above the page budget on purpose — a pasted
+// screenshot's record is base64 up to ~7 MB, and its row is only a ref.
+const MAX_LINE_BYTES = 8 * 1024 * 1024;
+const TOO_LARGE_TEXT = 'Transcript entry too large to show';
 // A tool result's head: what crosses IPC until the reader asks for the rest
 // (Orca's structured-path cap, agent-session-item-wire-form.ts:21).
 const TRUNCATE_THRESHOLD = 16 * 1024;
@@ -65,17 +71,32 @@ function transcriptFallbackId(file, offset) {
 }
 
 // Decode lines into rows, truncating results. Each decoder gets the line,
-// its state, and { fallbackId } for a record with no id of its own.
+// its state, and { fallbackId } for a record with no id of its own. A line
+// over MAX_LINE_BYTES (`oversized` from a page read, or a long one the live
+// tail just read) is a placeholder instead.
 function decodeLines(lines, state, decodeLine, file) {
   const rows = [];
-  for (const { offset, text } of lines) {
+  for (const { offset, text, oversized } of lines) {
+    const fallbackId = transcriptFallbackId(file, offset);
+    if (oversized || tooLong(text)) {
+      rows.push({
+        id: fallbackId,
+        role: 'status',
+        tooLarge: true,
+        content: TOO_LARGE_TEXT,
+      });
+      continue;
+    }
     if (!text.trim()) continue;
-    const row = decodeLine(text, state, {
-      fallbackId: transcriptFallbackId(file, offset),
-    });
+    const row = decodeLine(text, state, { fallbackId });
     if (row) rows.push(...[row].flat().map(truncateRow));
   }
   return rows;
+}
+
+// Characters never outnumber UTF-8 bytes, so most lines skip the count.
+function tooLong(text) {
+  return text.length > MAX_LINE_BYTES / 4 && Buffer.byteLength(text) > MAX_LINE_BYTES;
 }
 
 // A result over the cap, cut to its head and marked so the chat offers
@@ -138,49 +159,73 @@ function truncateRow(row) {
 }
 
 // ── Page reads ─────────────────────────────────────────────────────────────
-// Read backwards from `end`, collecting up to MAX_PAGE_ROWS lines or
-// MAX_PAGE_BYTES, whichever comes first. Returns the page's lines, oldest
-// first with their offsets, and `pageStart`, where the next older page ends.
+// Read backwards from `end` a line at a time, collecting up to MAX_PAGE_ROWS
+// lines or MAX_PAGE_BYTES read, whichever comes first. The budget is checked
+// only between lines, so a page always ends on a whole line and Load older
+// always moves: a line bigger than the budget used to leave `pageStart`
+// where it was, and every click re-read the same bytes. A line over
+// MAX_LINE_BYTES is scanned past without being kept (`oversized`).
+// Returns the page's lines, oldest first with their offsets, and
+// `pageStart`, where the next older page ends.
 function readPageLines(fd, end) {
   let cursor = end;
-  let bytesUsed = 0;
-  let remainingBuffer = Buffer.alloc(0);
-  const allLines = [];
+  let bytesRead = 0;
+  const newestFirst = [];
+  // The line being assembled, newest chunk first.
+  let parts = [];
+  let partBytes = 0;
+  let oversized = false;
+  let pageStart = end;
 
-  while (cursor > 0 && allLines.length < MAX_PAGE_ROWS && bytesUsed < MAX_PAGE_BYTES) {
+  const retain = (part) => {
+    if (oversized || part.length === 0) return;
+    partBytes += part.length;
+    if (partBytes > MAX_LINE_BYTES) {
+      parts = [];
+      oversized = true;
+      return;
+    }
+    parts.push(part);
+  };
+  // The line starting at `offset` is complete.
+  const finish = (offset) => {
+    if (oversized) newestFirst.push({ offset, oversized: true, text: '' });
+    else {
+      const bytes = parts.length === 1 ? parts[0] : Buffer.concat(parts.reverse());
+      newestFirst.push({ offset, text: bytes.toString('utf8') });
+    }
+    parts = [];
+    partBytes = 0;
+    oversized = false;
+    pageStart = offset;
+  };
+  const full = () => newestFirst.length >= MAX_PAGE_ROWS || bytesRead >= MAX_PAGE_BYTES;
+
+  // `end` sits just past a newline (or is 0), so the newline before it
+  // closes nothing: lines start right after each newline found below it.
+  scan: while (cursor > 0) {
     const chunkStart = Math.max(0, cursor - PAGE_CHUNK);
-    const chunkLen = cursor - chunkStart;
-    const buf = readRange(fd, chunkStart, chunkLen);
-    bytesUsed += chunkLen;
-
-    // `combined` starts at chunkStart, so a byte's file offset is
-    // chunkStart + its index.
-    const combined = Buffer.concat([buf, remainingBuffer]);
-    let lineEnd = combined.length;
-    const linesInChunk = [];
-
-    // Process backwards to safely handle partial lines
-    for (let i = combined.length - 1; i >= 0; i--) {
-      if (combined[i] === 0x0a) {
-        linesInChunk.unshift({
-          offset: chunkStart + i + 1,
-          text: combined.slice(i + 1, lineEnd).toString('utf8'),
-        });
-        lineEnd = i;
+    const buf = readRange(fd, chunkStart, cursor - chunkStart);
+    if (buf.length === 0) break;
+    bytesRead += buf.length;
+    let segmentEnd = buf.length;
+    for (let i = buf.length - 1; i >= 0; i--) {
+      if (buf[i] !== 0x0a) continue;
+      const lineStart = chunkStart + i + 1;
+      retain(buf.subarray(i + 1, segmentEnd));
+      segmentEnd = i;
+      if (lineStart < end) {
+        finish(lineStart);
+        if (full()) break scan;
       }
     }
-
-    remainingBuffer = combined.slice(0, lineEnd);
-    allLines.unshift(...linesInChunk);
+    retain(buf.subarray(0, segmentEnd));
     cursor = chunkStart;
   }
+  // The file's first line has no newline before it.
+  if (cursor === 0 && pageStart > 0 && (parts.length > 0 || oversized)) finish(0);
 
-  if (cursor === 0 && remainingBuffer.length > 0) {
-    allLines.unshift({ offset: 0, text: remainingBuffer.toString('utf8') });
-    remainingBuffer = Buffer.alloc(0);
-  }
-
-  return { lines: allLines, pageStart: cursor + remainingBuffer.length };
+  return { lines: newestFirst.reverse(), pageStart };
 }
 
 // The newest page. Returns { rows, pageStart, state }.
@@ -806,6 +851,7 @@ module.exports = {
   // Exposed for testing
   MAX_PAGE_ROWS,
   MAX_PAGE_BYTES,
+  MAX_LINE_BYTES,
   TRUNCATE_THRESHOLD,
   FETCH_FULL_CAP,
 };
