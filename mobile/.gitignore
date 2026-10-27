@@ -24,6 +24,9 @@ web-build/
 # Metro
 .metro-health-check*
 
+# Built on postinstall by scripts/build-terminal-engine.mjs
+src/terminal/terminalEngine.generated.ts
+
 # debug
 npm-debug.*
 yarn-debug.*

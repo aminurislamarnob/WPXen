@@ -22,6 +22,7 @@ No project id is committed — `app.config.js` reads `EAS_PROJECT_ID`. Without i
 
 ## Scripts
 
+- `postinstall` — bundles xterm.js (the desktop's version, pinned in `package.json`) into `src/terminal/terminalEngine.generated.ts`, which the terminal WebView inlines. It is gitignored; `npm install` / `npm ci` rebuild it. The terminal page loads nothing from the network.
 - `npm run typecheck` — `tsc --noEmit`
 - `npm run lint` — `expo lint`
 - `npm run test` — `vitest run` (pure modules only: backoff, connection state, host list, grouping, list sync, push registration, key bar, resize policy, terminal document, Metro and app config)

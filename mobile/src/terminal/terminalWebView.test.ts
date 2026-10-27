@@ -9,19 +9,22 @@ import {
   buildTerminalHtml,
 } from './terminalWebView';
 
-const rootPackageJson = JSON.parse(
-  readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../../../package.json'), 'utf8')
-);
+const here = dirname(fileURLToPath(import.meta.url));
+const rootPackageJson = JSON.parse(readFileSync(join(here, '../../../package.json'), 'utf8'));
+const mobilePackageJson = JSON.parse(readFileSync(join(here, '../../package.json'), 'utf8'));
 
 describe('terminal WebView document', () => {
-  it('loads the same xterm and unicode versions as the desktop', () => {
+  it('bundles the same xterm and unicode versions as the desktop', () => {
     expect(XTERM_VERSION).toBe(rootPackageJson.dependencies['@xterm/xterm'].replace(/^\^/, ''));
     expect(UNICODE_ADDON_VERSION).toBe(
       rootPackageJson.dependencies['@xterm/addon-unicode11'].replace(/^\^/, '')
     );
+    // The versions bundled are the ones mobile/package.json pins.
+    expect(mobilePackageJson.devDependencies['@xterm/xterm']).toBe(XTERM_VERSION);
+    expect(mobilePackageJson.devDependencies['@xterm/addon-unicode11']).toBe(UNICODE_ADDON_VERSION);
     const html = buildTerminalHtml({ theme: 'dark' });
-    expect(html).toContain(`@xterm/xterm@${XTERM_VERSION}`);
-    expect(html).toContain(`@xterm/addon-unicode11@${UNICODE_ADDON_VERSION}`);
+    expect(html).toContain('window.Terminal=');
+    expect(html).toContain('.xterm');
   });
 
   it('mirrors the desktop terminal config and palette', () => {
@@ -36,14 +39,24 @@ describe('terminal WebView document', () => {
     expect(light).toContain(TERMINAL_PALETTE.dark.green);
   });
 
-  it('speaks the ready/write/reset/theme contract and nothing else remote', () => {
+  it('speaks the ready/write/reset/theme contract', () => {
     const html = buildTerminalHtml({ theme: 'dark' });
     for (const type of ['init', 'write', 'reset', 'theme', 'grid', 'font-size', 'ready']) {
       expect(html).toContain(type);
     }
-    const remoteUrls = [...html.matchAll(/https?:\/\/([^/"'\s]+)/g)].map((m) => m[1]);
-    for (const host of remoteUrls) {
-      expect(host).toBe('cdn.jsdelivr.net');
+  });
+
+  // After Orca's terminal-webview-engine.test.ts. This page receives every
+  // decrypted byte of terminal output, so nothing in it may come from, or
+  // reach, the network.
+  it('loads nothing remote: no URL, no script src, no stylesheet link', () => {
+    for (const theme of ['dark', 'light'] as const) {
+      const html = buildTerminalHtml({ theme });
+      expect(html).not.toMatch(/\bhttps?:\/\//);
+      expect(html).not.toContain('cdn.jsdelivr.net');
+      expect(html).not.toContain('<script src=');
+      expect(html).not.toMatch(/<link[^>]+stylesheet/);
+      expect(html).toMatch(/Content-Security-Policy" content="default-src 'none';[^"]*connect-src 'none'/);
     }
   });
 });

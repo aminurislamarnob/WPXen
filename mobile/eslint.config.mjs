@@ -6,6 +6,6 @@ import expoConfig from 'eslint-config-expo/flat.js';
 export default defineConfig([
   ...expoConfig,
   {
-    ignores: ['dist/*'],
+    ignores: ['dist/*', 'src/terminal/*.generated.ts'],
   },
 ]);

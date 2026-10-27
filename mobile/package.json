@@ -35,6 +35,9 @@
   },
   "devDependencies": {
     "@types/react": "~19.2.2",
+    "@xterm/addon-unicode11": "0.8.0",
+    "@xterm/xterm": "5.5.0",
+    "esbuild": "0.28.2",
     "eslint": "^9.39.5",
     "eslint-config-expo": "^57.0.2",
     "typescript": "~6.0.3",
@@ -49,7 +52,8 @@
     "lint": "expo lint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "bundle:check": "node ./scripts/bundle-check.mjs"
+    "bundle:check": "node ./scripts/bundle-check.mjs",
+    "postinstall": "node ./scripts/build-terminal-engine.mjs"
   },
   "private": true
 }

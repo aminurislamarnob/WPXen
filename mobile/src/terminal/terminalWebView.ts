@@ -1,7 +1,10 @@
 // Terminal WebView document: xterm.js running inside the phone's WebView,
-// fed replay and live data over the RN bridge. It loads the same @xterm/xterm
-// and Unicode 11 addon versions as the desktop (pinned below — keep them
-// equal to the root package.json), and its palette is copied from the
+// fed replay and live data over the RN bridge. It runs the same @xterm/xterm
+// and Unicode 11 addon versions as the desktop (pinned in mobile/package.json
+// — keep them equal to the root package.json), bundled into the document by
+// scripts/build-terminal-engine.mjs: this page receives every decrypted byte
+// of terminal output, so it loads nothing from the network — no CDN, and a
+// Content-Security-Policy that refuses any fetch. Its palette is copied from the
 // desktop terminalThemes in src/lib/theme.js (keep the hex in sync; the font
 // stack is the phone's monospace rather than JetBrains Mono, which phones
 // lack).
@@ -14,10 +17,22 @@
 //     | { type: 'font-size', fontSize }
 //   document → RN: { type: 'ready' }
 
-export const XTERM_VERSION = '5.5.0';
-export const UNICODE_ADDON_VERSION = '0.8.0';
+import { XTERM_ENGINE_CSS, XTERM_ENGINE_JS, XTERM_ENGINE_VERSIONS } from './terminalEngine.generated';
 
-const CDN = 'https://cdn.jsdelivr.net/npm';
+export const XTERM_VERSION = XTERM_ENGINE_VERSIONS.xterm;
+export const UNICODE_ADDON_VERSION = XTERM_ENGINE_VERSIONS.unicode11;
+
+// Inline script and style only; no network, no frames, nothing to submit.
+const CONTENT_SECURITY_POLICY = [
+  "default-src 'none'",
+  "script-src 'unsafe-inline'",
+  "style-src 'unsafe-inline'",
+  'img-src data:',
+  'font-src data:',
+  "connect-src 'none'",
+  "form-action 'none'",
+  "base-uri 'none'",
+].join('; ');
 
 export interface TerminalPalette {
   background: string;
@@ -100,16 +115,14 @@ export type TerminalThemeName = 'dark' | 'light';
 
 export function buildTerminalHtml({ theme }: { theme: TerminalThemeName }): string {
   const palette = TERMINAL_PALETTE[theme];
-  const xtermJs = `${CDN}/@xterm/xterm@${XTERM_VERSION}/lib/xterm.js`;
-  const xtermCss = `${CDN}/@xterm/xterm@${XTERM_VERSION}/css/xterm.css`;
-  const unicodeJs = `${CDN}/@xterm/addon-unicode11@${UNICODE_ADDON_VERSION}/lib/addon-unicode11.js`;
   return [
     '<!DOCTYPE html>',
     '<html>',
     '<head>',
     '<meta charset="utf-8">',
     '<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">',
-    `<link rel="stylesheet" href="${xtermCss}">`,
+    `<meta http-equiv="Content-Security-Policy" content="${CONTENT_SECURITY_POLICY}">`,
+    `<style>${XTERM_ENGINE_CSS}</style>`,
     '<style>',
     'html, body { margin: 0; padding: 0; height: 100%; background: ' + palette.background + '; }',
     '#terminal { height: 100%; padding: 8px; }',
@@ -117,8 +130,7 @@ export function buildTerminalHtml({ theme }: { theme: TerminalThemeName }): stri
     '</head>',
     '<body>',
     '<div id="terminal"></div>',
-    `<script src="${xtermJs}"></script>`,
-    `<script src="${unicodeJs}"></script>`,
+    `<script>${XTERM_ENGINE_JS}</script>`,
     '<script>',
     '(function () {',
     '  var term = null;',
