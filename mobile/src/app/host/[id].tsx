@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Button, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { registerPushToken } from '../../push/register';
+import { registerPushToken, type PushRegistration } from '../../push/register';
+import { registrationNote } from '../../push/registration';
 import { HostConnection, type ConnectionUpdate } from '../../connection/manager';
 import { groupSessions, statusColor, type PhoneProject, type PhoneSessionRow } from '../../sessions/grouping';
 import { findHost, removeHost } from '../../hosts/hostList';
@@ -53,6 +54,7 @@ export default function HostScreen() {
   const [sheetError, setSheetError] = useState<string | null>(null);
   const [pushEnabled, setPushEnabled] = useState(true);
   const [pushKnown, setPushKnown] = useState(false);
+  const [pushRegistration, setPushRegistration] = useState<PushRegistration | null>(null);
   const [stale, setStale] = useState(false);
   const connection = useRef<HostConnection | null>(null);
   const listSync = useRef(INITIAL_LIST_SYNC);
@@ -81,7 +83,9 @@ export default function HostScreen() {
       setPushKnown(true);
       syncEvent({ type: 'loaded' });
       // Re-register the current token whenever it may have changed.
-      registerPushToken((op, params) => conn.request(op, params)).catch(() => {});
+      registerPushToken((op, params) => conn.request(op, params))
+        .then(setPushRegistration)
+        .catch(() => {});
     } catch {
       // Offline: the stale list stays under the state banner.
     }
@@ -292,6 +296,9 @@ export default function HostScreen() {
           <View style={styles.rowText}>
             <Text style={styles.rowTitle}>Notifications from this Mac</Text>
             <Text style={styles.rowSub}>Push when a Session needs you or finishes</Text>
+            {registrationNote(pushRegistration) && (
+              <Text style={styles.pushNote}>{registrationNote(pushRegistration)}</Text>
+            )}
           </View>
           <Switch
             value={pushEnabled}
@@ -371,6 +378,7 @@ const styles = StyleSheet.create({
   groupTitle: { fontSize: 13, fontWeight: '700', textTransform: 'uppercase', opacity: 0.6, marginBottom: 4 },
   newButton: { fontSize: 13, fontWeight: '600', color: '#0a7aff' },
   error: { fontSize: 13, color: '#c00', marginTop: 8 },
+  pushNote: { fontSize: 12, color: '#c60', marginTop: 2 },
   sheet: { flex: 1, padding: 20, paddingTop: 60 },
   row: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, gap: 10 },
   dot: { width: 10, height: 10, borderRadius: 5 },
