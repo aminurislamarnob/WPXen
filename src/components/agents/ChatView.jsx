@@ -8,7 +8,11 @@ import {
   useMemo,
 } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { pinnedIndexes, shouldStickToBottom } from '../../lib/chatList';
+import {
+  pinnedIndexes,
+  revealIndexAfterPrepend,
+  shouldStickToBottom,
+} from '../../lib/chatList';
 import {
   foldToolRuns,
   partitionChatRows,
@@ -189,11 +193,22 @@ export function ChatView({ sessionId, onRestart, onResume, headerActions }) {
     requestAnimationFrame(() => sessionCache.focus(sessionId));
   }, [sessionId]);
 
+  // The row that was first before the last Load older: kept rendered while
+  // the older page settles above it.
+  const [revealAnchor, setRevealAnchor] = useState(null);
+  const firstRowRef = useRef(null);
+  firstRowRef.current = messages[0]?.id ?? null;
+  const reveal = useMemo(
+    () => revealIndexAfterPrepend(foldedMessages, revealAnchor),
+    [foldedMessages, revealAnchor]
+  );
+
   const virtualizer = useVirtualizer({
     count: foldedMessages.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => 80,
-    rangeExtractor: (range) => pinnedIndexes(range, { count: foldedMessages.length }),
+    rangeExtractor: (range) =>
+      pinnedIndexes(range, { count: foldedMessages.length, reveal }),
   });
 
   // "Load older" pages backwards; the rows already on screen stay where they
@@ -209,6 +224,7 @@ export function ChatView({ sessionId, onRestart, onResume, headerActions }) {
       if (res.rows?.length) {
         const el = scrollRef.current;
         if (el) anchorRef.current = { height: el.scrollHeight, top: el.scrollTop };
+        setRevealAnchor(firstRowRef.current);
         setMessages((prev) => prependOlder(prev, res.rows));
       }
     } catch {

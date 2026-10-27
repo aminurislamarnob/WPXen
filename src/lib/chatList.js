@@ -28,3 +28,14 @@ export function shouldStickToBottom({
   if (clientHeight === 0 || scrollHeight === 0) return true;
   return scrollHeight - (scrollTop + clientHeight) <= threshold;
 }
+
+// After Load older, where the row the reader was looking at went: the index
+// of the display item (a single row, or the folded run holding it) with the
+// row `anchorId`. The virtualiser pins it via `reveal`, so the anchor stays
+// rendered and measured while the older page lands above it. -1 if gone.
+export function revealIndexAfterPrepend(folded, anchorId) {
+  if (!anchorId) return -1;
+  return folded.findIndex(
+    (item) => item.id === anchorId || item.items?.some((row) => row.id === anchorId)
+  );
+}
