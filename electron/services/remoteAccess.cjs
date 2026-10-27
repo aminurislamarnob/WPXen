@@ -1068,7 +1068,8 @@ async function devicePushState(id) {
 
 // ─── Session alert push ──────────────────────────────────────────────────
 // Called with alerts the engine already approved (switches, suppress-when-
-// focused, cooldown all ran before listeners) — never re-gated here.
+// focused, cooldown all ran before listeners) — not re-gated here, except
+// on Remote Access itself being on.
 
 function pushTargets() {
   return readDeviceRecords().filter(
@@ -1077,6 +1078,9 @@ function pushTargets() {
 }
 
 async function handleSessionAlert(alert) {
+  // Remote Access off means no phone hears anything (spec #149), whatever
+  // tokens the device records still hold for when it comes back on.
+  if (!deps.getRemoteConfig().enabled) return { ok: true, sent: 0 };
   const body = alert && ALERT_BODIES[alert.kind];
   if (!body || !alert.sessionId) return { ok: true, sent: 0 };
   const targets = pushTargets();

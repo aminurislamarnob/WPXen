@@ -107,6 +107,25 @@ describe('session alert push', () => {
     }
   });
 
+  it('sends nothing while Remote Access is off', async () => {
+    // Turning Remote Access off is the user saying "no phone"; the device
+    // records (and their tokens) stay so it can be turned back on.
+    store.set(DEVICE_KEY, [device()]);
+    remoteAccess.__setDeps({
+      getRemoteConfig: () => ({
+        enabled: false,
+        port: 6780,
+        hostname: 'wpxen.example.com',
+      }),
+    });
+    const result = await remoteAccess.handleSessionAlert({
+      kind: 'done',
+      sessionId: 's1',
+    });
+    expect(result).toEqual({ ok: true, sent: 0 });
+    expect(posts).toHaveLength(0);
+  });
+
   it('reads a terminal bell as needs-input', async () => {
     store.set(DEVICE_KEY, [device()]);
     await remoteAccess.handleSessionAlert({ kind: 'bell', sessionId: 's1' });
