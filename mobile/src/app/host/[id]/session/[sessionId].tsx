@@ -27,6 +27,7 @@ import {
 import { KEY_BAR_ORDER, keyBytes, pressWithCtrlArmed, type KeyId } from '../../../../terminal/keyBar';
 import { buildTerminalHtml, TERMINAL_FONT_SIZE } from '../../../../terminal/terminalWebView';
 import { decideResize, type ResizeDims } from '../../../../terminal/resizePolicy';
+import { BACKGROUND_GRACE_MS, stepBackgroundGrace, type GracePhase } from '../../../../terminal/backgroundGrace';
 
 interface Outgoing {
   type: 'init' | 'write' | 'reset' | 'theme' | 'grid' | 'font-size';
@@ -91,6 +92,10 @@ export default function SessionTerminalScreen() {
   const generation = useRef(0);
   const queue = useRef<Outgoing[]>([]);
   const attached = useRef(false);
+  // Background grace (terminal/backgroundGrace.ts): 'detached' means the
+  // phone unsubscribed after 30 s away and must not re-attach until active.
+  const grace = useRef<GracePhase>('foreground');
+  const graceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const themeRef = useRef(theme);
 
   const post = useCallback((msg: Outgoing) => {
@@ -187,7 +192,9 @@ export default function SessionTerminalScreen() {
           // the pty while the socket was down.
           const entered = u.state === 'connected' && !wasConnected.current;
           wasConnected.current = u.state === 'connected';
-          if (entered) {
+          // A reconnect while backgrounded past the grace stays detached;
+          // returning to the foreground re-attaches.
+          if (entered && grace.current !== 'detached') {
             reconnected.current = true;
             attach();
             maybeResizeRef.current();
@@ -238,7 +245,28 @@ export default function SessionTerminalScreen() {
       Platform.OS === 'ios' ? Keyboard.addListener('keyboardWillShow', markKeyboard) : null;
     // Returning to the terminal re-measures: rotation, fold, or a desktop
     // resize may have moved everything while away.
+    const applyGrace = (event: Parameters<typeof stepBackgroundGrace>[1]) => {
+      const next = stepBackgroundGrace(grace.current, event);
+      grace.current = next.phase;
+      if (next.action === 'start-grace') {
+        if (graceTimer.current) clearTimeout(graceTimer.current);
+        graceTimer.current = setTimeout(() => {
+          graceTimer.current = null;
+          applyGrace({ type: 'grace-expired' });
+        }, BACKGROUND_GRACE_MS);
+      } else if (next.action === 'cancel-grace') {
+        if (graceTimer.current) clearTimeout(graceTimer.current);
+        graceTimer.current = null;
+      } else if (next.action === 'unsubscribe') {
+        detach();
+      } else if (next.action === 'resubscribe') {
+        // The replay resets the document to the Session's current screen.
+        reconnected.current = true;
+        attach();
+      }
+    };
     const appSub = AppState.addEventListener('change', (status) => {
+      applyGrace({ type: 'app-state', state: status });
       if (status === 'active') {
         reconnected.current = true;
         maybeResizeRef.current();
@@ -251,6 +279,7 @@ export default function SessionTerminalScreen() {
       willSub?.remove();
       appSub.remove();
       if (retryTimer.current) clearTimeout(retryTimer.current);
+      if (graceTimer.current) clearTimeout(graceTimer.current);
       detach();
       connection.current?.stop();
       connection.current = null;
