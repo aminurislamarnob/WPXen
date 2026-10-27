@@ -145,13 +145,15 @@ export function subagentSummary(item) {
   };
 }
 
-// A folded tool run opens by default while it holds something live: an
-// unanswered question card, or a subagent still running. Collapsed, they'd
-// sit behind a "Used 1 tool" summary.
+// A folded tool run opens by default while it holds a question card or a
+// subagent still running. Collapsed, they'd sit behind a "Used 1 tool"
+// summary. A question card keeps its run open once answered: the card is
+// where the recorded answer shows, and closing on the answer would hide it
+// the moment it lands.
 export function runNeedsAttention(run) {
   return run.items.some(
     (item) =>
-      (!item.result && item.tool_use?.name === 'AskUserQuestion') ||
+      item.tool_use?.name === 'AskUserQuestion' ||
       (!!item.subagent && subagentStatus(item) === 'running')
   );
 }

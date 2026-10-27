@@ -151,11 +151,14 @@ describe('runNeedsAttention', () => {
     result,
   });
 
-  it('opens a run holding an unanswered question', () => {
+  it('opens a run holding a question card, and keeps it open once answered', () => {
     expect(
       runNeedsAttention(run({ role: 'tool', tool_use: { name: 'Read' } }, ask()))
     ).toBe(true);
-    expect(runNeedsAttention(run(ask({ answers: {} })))).toBe(false);
+    // The recorded answer shows on the card: the run must not collapse.
+    expect(runNeedsAttention(run(ask({ answers: { 'Which path?': '/status' } })))).toBe(
+      true
+    );
   });
 
   it('opens a run holding a running subagent', () => {

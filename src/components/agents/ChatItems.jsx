@@ -198,8 +198,8 @@ export function ToolItem({ item, ctx }) {
 }
 
 // Consecutive tool calls under one summary ("Read 3 files, ran 2 commands").
-// It opens on its own while it holds something live — an open question or a
-// running subagent — so those never hide behind the summary.
+// It opens on its own while it holds a question card (answered or not) or a
+// running subagent, so those never hide behind the summary.
 export function ToolRun({ run, ctx }) {
   const live = runNeedsAttention(run);
   const [openState, setOpen] = useState(null);
