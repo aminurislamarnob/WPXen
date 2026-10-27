@@ -139,6 +139,12 @@ const deps = {
   get randomId() {
     return 'randomId' in overrides ? overrides.randomId : randomUUID;
   },
+  // Every random byte the protocol draws: the host keypair, box nonces,
+  // channel nonces and pairing secrets (the shared module takes its source
+  // from its caller — see shared/remote-protocol/keys.cjs).
+  get randomBytes() {
+    return 'randomBytes' in overrides ? overrides.randomBytes : nodeRandomBytes;
+  },
   get safeStorage() {
     return 'safeStorage' in overrides ? overrides.safeStorage : null;
   },
@@ -203,6 +209,10 @@ const deps = {
     return { setTimeout, clearTimeout };
   },
 };
+
+function nodeRandomBytes(length) {
+  return new Uint8Array(randomBytes(length));
+}
 
 function __setDeps(next) {
   Object.assign(overrides, next);
@@ -755,7 +765,7 @@ function getHostKeypair() {
     }
     return keyPairFromSecret(secret);
   }
-  const pair = newKeyPair();
+  const pair = newKeyPair(deps.randomBytes);
   saveSecret({
     store,
     safeStorage: deps.safeStorage ?? undefined,
@@ -802,7 +812,7 @@ async function pairingOffer({ hostname }) {
   const host = (hostname || '').trim();
   if (!host) throw new Error('Set a public hostname before pairing.');
   const keypair = getHostKeypair();
-  const secret = randomBytes(16).toString('hex');
+  const secret = Buffer.from(deps.randomBytes(16)).toString('hex');
   offer = { secret, expiresAt: deps.now() + OFFER_TTL_MS };
   offerConsumed = false;
   const url = pairingUrl({
@@ -1471,7 +1481,7 @@ function handleDeviceConnection(ws, req) {
       payload: { ...payload, ch: channel, n: outCounter },
       senderSecret: keypair.secretKey,
       recipientPublicKey: devicePublicKey,
-      nonce: randomNonce(),
+      nonce: randomNonce(deps.randomBytes),
     });
     sendWs(ws, {
       v: PROTOCOL_VERSION,
@@ -1597,7 +1607,7 @@ function handleDeviceConnection(ws, req) {
       payload: { kind: 'pair-accept', deviceId, code },
       senderSecret: keypair.secretKey,
       recipientPublicKey: deviceKey,
-      nonce: randomNonce(),
+      nonce: randomNonce(deps.randomBytes),
     });
     sendWs(ws, {
       type: 'pair-accept',
@@ -1650,7 +1660,7 @@ function handleDeviceConnection(ws, req) {
     device = known;
     devicePublicKey = key;
     inCounter = 1;
-    channel = `${payload.clientNonce}.${encodeBase64(randomBytes(24))}`;
+    channel = `${payload.clientNonce}.${encodeBase64(deps.randomBytes(24))}`;
     trackChannel(device.id, { ws, send: sendSealed });
     ensureSessionsFeed();
     welcome();

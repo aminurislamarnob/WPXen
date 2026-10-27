@@ -14,6 +14,7 @@ import {
   openPairAccept,
 } from '../protocol';
 import type { HostRecord } from '../hosts/hostList';
+import { secureRandomBytes } from '../crypto';
 
 export type PairFailureReason =
   | 'invalid-link'
@@ -81,7 +82,7 @@ export async function pairWithLink({
     return { ok: false, reason: offer.version > PROTOCOL_VERSION ? 'version-desktop' : 'version-phone' };
   }
 
-  const keys = newKeyPair();
+  const keys = newKeyPair(secureRandomBytes);
   const hostPublicKey = decodeBase64(offer.hostPublicKeyB64);
   const { message, code } = createPairRequest({
     secret: offer.secret,
@@ -90,6 +91,7 @@ export async function pairWithLink({
     keys,
     hostPublicKey,
     version: PROTOCOL_VERSION,
+    randomBytes: secureRandomBytes,
   });
 
   let socket: WebSocket;

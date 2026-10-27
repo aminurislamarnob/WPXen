@@ -18,6 +18,8 @@ function createClient({
   hostPublicKey,
   deviceId,
   requestTimeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+  // The caller's CSPRNG (see keys.cjs): expo-crypto on the phone.
+  randomBytes,
 }) {
   let socket = null;
   // One per dial. Lets a late close from a replaced socket be recognised and
@@ -101,7 +103,7 @@ function createClient({
       payload: { ...payload, n: outCounter },
       senderSecret: keys.secretKey,
       recipientPublicKey: hostPublicKey,
-      nonce: randomNonce(),
+      nonce: randomNonce(randomBytes),
     });
     sendOuter(ws, {
       v: PROTOCOL_VERSION,
@@ -247,7 +249,7 @@ function createClient({
       socket = ws;
       ws.onmessage = (event) => onSocketMessage(event.data ?? event);
       ws.onerror = () => {};
-      clientNonce = encodeBase64(randomNonce());
+      clientNonce = encodeBase64(randomNonce(randomBytes));
       try {
         sealAndSend(ws, { kind: 'hello', clientNonce });
       } catch {

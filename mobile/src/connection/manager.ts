@@ -9,6 +9,7 @@ import { backoffDelayMs } from './backoff';
 import { deriveConnectionState, type ConnectionState } from './state';
 import { createClient, decodeBase64 } from '../protocol';
 import type { HostRecord } from '../hosts/hostList';
+import { secureRandomBytes } from '../crypto';
 
 export interface ConnectionUpdate {
   state: ConnectionState;
@@ -63,6 +64,7 @@ export class HostConnection {
       keys: { publicKey: decodeBase64(keys.publicKey), secretKey: decodeBase64(keys.secretKey) },
       hostPublicKey: decodeBase64(host.hostPublicKey),
       deviceId,
+      randomBytes: secureRandomBytes,
     });
     this.client.onClose((status: 'revoked' | 'closed') => {
       this.socket = 'closed';

@@ -39,6 +39,7 @@
 
 const nacl = require('tweetnacl');
 const { encodeBase64, decodeBase64 } = require('./base64.cjs');
+const { drawRandom } = require('./keys.cjs');
 
 function encodeUtf8(text) {
   return new TextEncoder().encode(text);
@@ -48,8 +49,9 @@ function decodeUtf8(bytes) {
   return new TextDecoder().decode(bytes);
 }
 
-function randomNonce() {
-  return nacl.randomBytes(nacl.box.nonceLength);
+// `randomBytes` is the caller's source (see keys.cjs).
+function randomNonce(randomBytes) {
+  return drawRandom(randomBytes, nacl.box.nonceLength);
 }
 
 function sealFrame({ payload, senderSecret, recipientPublicKey, nonce = randomNonce() }) {

@@ -57,6 +57,7 @@ function createPairRequest({
   keys,
   hostPublicKey,
   version,
+  randomBytes,
 }) {
   const sealed = sealFrame({
     payload: {
@@ -69,7 +70,7 @@ function createPairRequest({
     },
     senderSecret: keys.secretKey,
     recipientPublicKey: hostPublicKey,
-    nonce: randomNonce(),
+    nonce: randomNonce(randomBytes),
   });
   return {
     message: {
