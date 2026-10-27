@@ -8,10 +8,14 @@
 // A user message that is injected context rather than the user's prompt.
 // <environment_context> and <user_instructions> are named in the spec;
 // <external_*> (open-page snapshots) and <skill> expansions (Orca's rule)
-// ride the same channel.
+// ride the same channel. Real 0.100 / 0.130 rollouts also inject the
+// AGENTS.md instructions and <system_instruction> blocks as user turns —
+// the latter even as an event_msg user_message, so the check runs there too.
 const INJECTED_USER_PREFIXES = [
   '<environment_context>',
   '<user_instructions>',
+  '<system_instruction>',
+  '# agents.md instructions for',
   '<external_',
   '<skill>',
 ];
@@ -19,6 +23,23 @@ const INJECTED_USER_PREFIXES = [
 function isInjectedUserText(text) {
   const trimmed = String(text).trimStart().toLowerCase();
   return INJECTED_USER_PREFIXES.some((prefix) => trimmed.startsWith(prefix));
+}
+
+// Every turn is written twice: once as the event_msg the TUI shows
+// (user_message / agent_message, or item_completed in paginated rollouts) and
+// once as the response_item copy sent to the model, whose blocks are
+// input_text / output_text. Rendering both doubles every turn, so — Orca's
+// rule (transcript-line-decoders-codex.ts:61-174, via claudeContentBlocks) —
+// the model copies are dropped and only plain `text` blocks count there.
+
+function responseMessageText(content) {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content
+    .filter((b) => b && (b.type === 'text' || b.type === 'Text'))
+    .map((b) => (typeof b.text === 'string' ? b.text : ''))
+    .filter(Boolean)
+    .join('\n');
 }
 
 // Join the text parts of message content blocks (input_text, output_text,
@@ -92,6 +113,22 @@ function planTodos(input) {
 // `fallbackId` is the line's byte-offset id from the engine: real rollouts
 // (0.100, 0.130) write no payload.id, and a row without an id is dropped by
 // the renderer's upsert.
+// Paginated rollouts record the visible turn as an item_completed event
+// whose item is a UserMessage / AgentMessage (Orca's codexCompletedTurnItem).
+function completedItem(item, fallbackId) {
+  if (!item || typeof item !== 'object') return null;
+  const text = messageText(item.content);
+  if (!text) return null;
+  const id = item.id || fallbackId;
+  if (item.type === 'UserMessage' || item.type === 'user_message') {
+    return isInjectedUserText(text) ? null : { id, role: 'user', content: text };
+  }
+  if (item.type === 'AgentMessage' || item.type === 'agent_message') {
+    return { id, role: 'assistant', content: text };
+  }
+  return null;
+}
+
 function decodeCodexLine(lineStr, state, { fallbackId } = {}) {
   if (!lineStr || !lineStr.trim()) return null;
   let record;
@@ -113,7 +150,7 @@ function decodeCodexLine(lineStr, state, { fallbackId } = {}) {
   if (record.type === 'response_item') {
     if (payload.type === 'message') {
       if (payload.role !== 'user' && payload.role !== 'assistant') return null;
-      const text = messageText(payload.content);
+      const text = responseMessageText(payload.content);
       if (!text) return null;
       if (payload.role === 'user' && isInjectedUserText(text)) return null;
       return { id, role: payload.role, content: text };
@@ -204,13 +241,14 @@ function decodeCodexLine(lineStr, state, { fallbackId } = {}) {
       return null;
     }
     if (payload.type === 'user_message' && typeof payload.message === 'string') {
-      if (!payload.message) return null;
+      if (!payload.message || isInjectedUserText(payload.message)) return null;
       return { id, role: 'user', content: payload.message };
     }
     if (payload.type === 'agent_message' && typeof payload.message === 'string') {
       if (!payload.message) return null;
       return { id, role: 'assistant', content: payload.message };
     }
+    if (payload.type === 'item_completed') return completedItem(payload.item, id);
     return null;
   }
 

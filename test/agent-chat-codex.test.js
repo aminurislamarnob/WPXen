@@ -43,18 +43,11 @@ describe('decodeCodexLine', () => {
     expect(decodeCodexLine(users[1], state)).toBeNull(); // <external_…>
   });
 
-  it('decodes the real user message', () => {
-    const row = decodeCodexLine(byKind['response_item/message/user'][2], {});
-    expect(row.role).toBe('user');
-    expect(row.content).toContain('My request:');
-    expect(row.content).toContain('Transcript this video.');
-  });
-
-  it('decodes the assistant message', () => {
-    const row = decodeCodexLine(first('response_item/message/assistant'), {});
-    expect(row.role).toBe('assistant');
-    expect(row.id).toBeTruthy();
-    expect(row.content).toContain('transcribe the spoken audio');
+  // This rollout carries only the response_item copies of its turns; Codex
+  // shows the event_msg ones, so the copies never render (see below).
+  it('drops the response_item copy of a prompt and of an answer', () => {
+    expect(decodeCodexLine(byKind['response_item/message/user'][2], {})).toBeNull();
+    expect(decodeCodexLine(first('response_item/message/assistant'), {})).toBeNull();
   });
 
   it('pairs a custom tool call with its output by call_id', () => {
@@ -233,22 +226,27 @@ describe('codex chat binding (engine)', () => {
     return file;
   }
 
-  const fixtureUser = rawLines.find(
-    (l) => l.includes('"role":"user"') && l.includes('My request:')
+  // The visible turns of a 0.130 rollout (test/fixtures, real shapes).
+  const lines130 = fs
+    .readFileSync(path.join(__dirname, 'fixtures', 'codex-rollout-0.130.jsonl'), 'utf8')
+    .split('\n')
+    .filter((l) => l.trim());
+  const fixtureUser = lines130.find(
+    (l) => l.includes('"user_message"') && l.includes('Fix the footer link.')
   );
-  const fixtureAssistant = rawLines.find((l) => l.includes('"role":"assistant"'));
-  // Synthesized in the observed schema: a second session's first message.
-  const secondUser =
-    JSON.stringify({
-      timestamp: '2026-10-10T00:00:00.000Z',
-      type: 'response_item',
-      payload: {
-        type: 'message',
-        id: 'msg_second',
-        role: 'user',
-        content: [{ type: 'input_text', text: 'Second session hello' }],
-      },
-    }) + '\n';
+  const fixtureAssistant = lines130.find((l) => l.includes('"agent_message"'));
+  // A second session's first message, in the same event_msg shape.
+  const secondUser = JSON.stringify({
+    timestamp: '2026-10-10T00:00:00.000Z',
+    type: 'event_msg',
+    payload: {
+      type: 'user_message',
+      message: 'Second session hello',
+      images: [],
+      local_images: [],
+      text_elements: [],
+    },
+  });
 
   const rowsFor = (sessionId) =>
     seen.filter((d) => d.sessionId === sessionId).flatMap((d) => d.rows);
@@ -298,10 +296,10 @@ describe('codex chat binding (engine)', () => {
 
       const rows = rowsFor(id);
       expect(
-        rows.some((r) => r.role === 'user' && r.content.includes('My request:'))
+        rows.some((r) => r.role === 'user' && r.content.includes('Fix the footer'))
       ).toBe(true);
       expect(
-        rows.some((r) => r.role === 'assistant' && r.content.includes('transcribe'))
+        rows.some((r) => r.role === 'assistant' && r.content.includes('Fixed the footer'))
       ).toBe(true);
     } finally {
       vi.useRealTimers();
@@ -465,5 +463,75 @@ describe('codex rollouts without payload ids (0.100, 0.130)', () => {
       payload: { type: 'reasoning', summary: [{ text: 'Thinking.' }] },
     });
     expect(decodeCodexLine(bare, {}, { fallbackId: 'f:1' }).id).toBe('f:1');
+  });
+});
+
+// Every turn is written twice — event_msg for the TUI, response_item for the
+// model — and Codex injects instructions as user turns.
+describe('codex turns render once, without injected context', () => {
+  const read = (name) =>
+    fs
+      .readFileSync(path.join(__dirname, 'fixtures', name), 'utf8')
+      .split('\n')
+      .filter((l) => l.trim());
+  const decodeAll = (name) => {
+    const state = {};
+    return read(name)
+      .flatMap((l, i) => [decodeCodexLine(l, state, { fallbackId: `f:${i}` }) ?? []])
+      .flat();
+  };
+
+  it.each(['codex-rollout-0.100.jsonl', 'codex-rollout-0.130.jsonl'])(
+    '%s: one user row per prompt, one assistant row per answer',
+    (name) => {
+      const rows = decodeAll(name);
+      const users = rows.filter((r) => r.role === 'user');
+      const answers = rows.filter((r) => r.role === 'assistant');
+      expect(users).toHaveLength(1);
+      expect(answers).toHaveLength(1);
+      expect(users[0].content).not.toMatch(/^(<|# AGENTS\.md)/);
+    }
+  );
+
+  it('never shows AGENTS.md, environment context or a system instruction', () => {
+    const rows = [
+      ...decodeAll('codex-rollout-0.100.jsonl'),
+      ...decodeAll('codex-rollout-0.130.jsonl'),
+    ];
+    const text = rows.map((r) => r.content || '').join('\n');
+    expect(text).not.toContain('AGENTS.md instructions');
+    expect(text).not.toContain('<environment_context>');
+    expect(text).not.toContain('<system_instruction>');
+    expect(text).not.toContain('<permissions instructions>');
+  });
+
+  it('renders the item_completed turns of a paginated rollout', () => {
+    // Orca's paginated-history shape (transcript-reader-codex-history-mode).
+    const completed = (item) =>
+      JSON.stringify({
+        type: 'event_msg',
+        payload: { type: 'item_completed', thread_id: 't', turn_id: 'u', item },
+      });
+    const state = {};
+    const user = decodeCodexLine(
+      completed({
+        type: 'UserMessage',
+        id: 'user-1',
+        content: [{ type: 'text', text: 'Visible prompt', text_elements: [] }],
+      }),
+      state,
+      { fallbackId: 'f:1' }
+    );
+    const answer = decodeCodexLine(
+      completed({
+        type: 'AgentMessage',
+        content: [{ type: 'Text', text: 'Visible response' }],
+        phase: 'final_answer',
+      }),
+      state,
+      { fallbackId: 'f:2' }
+    );
+    expect(user).toEqual({ id: 'user-1', role: 'user', content: 'Visible prompt' });
+    expect(answer).toEqual({ id: 'f:2', role: 'assistant', content: 'Visible response' });
   });
 });
