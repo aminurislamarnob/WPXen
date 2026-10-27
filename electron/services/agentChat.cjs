@@ -228,13 +228,78 @@ function readPageLines(fd, end) {
   return { lines: newestFirst.reverse(), pageStart };
 }
 
-// The newest page. Returns { rows, pageStart, state }.
-function tailRead(fd, fileSize, decodeLine, file) {
+// ── Facts from before the first page ───────────────────────────────────────
+// A Session's facts (background tasks, the model's context window) can rest
+// on records far above the newest page: a background task started an hour
+// ago, the `model` attachment written once at session start. A decoder that
+// names `markers` — strings only such records contain — gets each matching
+// line of the rest of the file through `noteFacts(line, state)`, oldest
+// first, before the newest page is decoded with the same state. Lines are
+// found with Buffer.indexOf, so a 100 MB transcript is scanned, not parsed.
+const FACT_SCAN_CHUNK = 1024 * 1024;
+
+function scanFacts(fd, end, { markers, noteFacts }, state) {
+  if (!end || !Array.isArray(markers) || !markers.length || !noteFacts) return;
+  const needles = markers.map((m) => Buffer.from(m));
+  let pos = 0;
+  let carry = Buffer.alloc(0);
+  let skipping = false; // inside a line too long to keep
+  while (pos < end) {
+    let buf = readRange(fd, pos, Math.min(FACT_SCAN_CHUNK, end - pos));
+    if (buf.length === 0) break;
+    pos += buf.length;
+    if (skipping) {
+      const nl = buf.indexOf(0x0a);
+      if (nl === -1) continue;
+      skipping = false;
+      buf = buf.subarray(nl + 1);
+    }
+    const combined = carry.length ? Buffer.concat([carry, buf]) : buf;
+    const lastNl = combined.lastIndexOf(0x0a);
+    carry = lastNl === -1 ? combined : combined.subarray(lastNl + 1);
+    if (carry.length > MAX_LINE_BYTES) {
+      carry = Buffer.alloc(0);
+      skipping = true;
+    }
+    if (lastNl === -1) continue;
+    const whole = combined.subarray(0, lastNl + 1);
+    const hits = new Map(); // line start -> line end
+    for (const needle of needles) {
+      for (let i = whole.indexOf(needle); i !== -1;) {
+        const start = whole.lastIndexOf(0x0a, i) + 1;
+        const stop = whole.indexOf(0x0a, i);
+        hits.set(start, stop);
+        i = whole.indexOf(needle, stop + 1);
+      }
+    }
+    for (const start of [...hits.keys()].sort((a, b) => a - b)) {
+      try {
+        noteFacts(whole.toString('utf8', start, hits.get(start)), state);
+      } catch {
+        // a fact line that doesn't parse is not a fact
+      }
+    }
+  }
+}
+
+// The newest page. Returns { rows, pageStart, state }. `factScan`
+// ({ markers, noteFacts }) seeds the state from the lines above the page.
+function tailRead(fd, fileSize, decodeLine, file, factScan = null) {
   if (fileSize === 0) return { rows: [], pageStart: 0, state: {} };
   const { lines, pageStart } = readPageLines(fd, fileSize);
   const state = {};
+  if (factScan) scanFacts(fd, pageStart, factScan, state);
   const rows = decodeLines(lines, state, decodeLine, file);
   return { rows, pageStart, state };
+}
+
+// What the chat shows beside the rows, compared to push it only on change.
+function factsKey(state) {
+  try {
+    return JSON.stringify(state?.facts ?? null);
+  } catch {
+    return null;
+  }
 }
 
 // ── Older page ─────────────────────────────────────────────────────────────
@@ -535,6 +600,8 @@ function openChat(sessionId, viewerId, opts) {
     // when absent.
     findToolResult,
     toolResultNeedle,
+    // { markers, noteFacts }: see scanFacts.
+    factScan = null,
     onNotice,
     transcriptId,
     startedAt,
@@ -588,7 +655,13 @@ function openChat(sessionId, viewerId, opts) {
   let state;
   try {
     complete = completeLength(fd, stat.size);
-    ({ rows, pageStart, state } = tailRead(fd, complete, decodeLine, transcriptPath));
+    ({ rows, pageStart, state } = tailRead(
+      fd,
+      complete,
+      decodeLine,
+      transcriptPath,
+      factScan
+    ));
   } catch (err) {
     watches.delete(sessionId);
     try {
@@ -600,6 +673,7 @@ function openChat(sessionId, viewerId, opts) {
   watch.pageStart = pageStart;
   watch.state = state;
   watch.tailOffset = complete;
+  watch.factsKey = factsKey(state);
 
   // `atStart`: the first page already reaches the top of the file, so the
   // chat offers no "Load older".
@@ -636,10 +710,18 @@ function openChat(sessionId, viewerId, opts) {
         watch.tailOffset += buf.length - partial.length;
         const newRows = decodeLines(lines, watch.state, watch.decodeLine, watch.path);
 
+        // A record can move the facts and render nothing — a
+        // <task-notification>, a task_status attachment — so the facts
+        // are pushed whenever they change, rows or not.
+        const key = factsKey(watch.state);
+        const factsChanged = key !== watch.factsKey;
+        watch.factsKey = key;
         if (newRows.length > 0) {
           augmentToolRows(watch, newRows);
           watch.currentRows.push(...newRows);
           onRows(newRows, watch.state);
+        } else if (factsChanged) {
+          onRows([], watch.state);
         }
       }
 

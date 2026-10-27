@@ -1491,6 +1491,9 @@ function openChat(sessionId, viewerId) {
     decodeLine,
     findToolResult: decoder.findToolResult,
     toolResultNeedle: decoder.toolResultNeedle,
+    factScan: decoder.noteFacts
+      ? { markers: decoder.FACT_MARKERS, noteFacts: decoder.noteFacts }
+      : null,
     relocate,
     transcriptId: session.transcriptId,
     startedAt: session.startedAt,

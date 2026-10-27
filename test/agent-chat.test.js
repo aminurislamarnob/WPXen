@@ -1364,3 +1364,116 @@ describe('oversized transcript lines (#112)', () => {
     expect(rows[1].id).toMatch(/:\d{16}$/);
   });
 });
+
+// Background-task state that moves without a row (#115): a notification or
+// a task_status attachment renders nothing, and the task may have started
+// above the newest page.
+describe('session facts without rows (#115)', () => {
+  const agentChat = require('../electron/services/agentChat.cjs');
+  const claude = require('../electron/services/agentChatClaude.cjs');
+  const os = require('node:os');
+  const fixture = fs
+    .readFileSync(path.join(__dirname, 'fixtures', 'claude-2.1-transcript.jsonl'), 'utf8')
+    .split('\n')
+    .filter(Boolean);
+  // The background Bash call (run_in_background) and its result.
+  const bgCall = fixture.find((l) => l.includes('"run_in_background":true'));
+  const bgResult = fixture.find((l) => l.includes('"backgroundTaskId":"bk7q2m9xa"'));
+  const notification = (status) =>
+    JSON.stringify({
+      parentUuid: 'a-9',
+      isSidechain: false,
+      type: 'user',
+      message: {
+        role: 'user',
+        content: `<task-notification>\n<task-id>bk7q2m9xa</task-id>\n<status>${status}</status>\n<summary>Background command completed</summary>\n</task-notification>`,
+      },
+      uuid: 'u-note',
+      timestamp: '2026-10-20T08:10:00.000Z',
+      origin: { kind: 'task-notification' },
+    });
+  // Claude Code 2.1's task_status attachment, as seen on real transcripts.
+  const taskStatus = (taskId, status) =>
+    JSON.stringify({
+      parentUuid: 'a-1',
+      isSidechain: false,
+      attachment: {
+        type: 'task_status',
+        taskId,
+        taskType: 'local_bash',
+        description: 'Run the dev server',
+        status,
+        deltaSummary: null,
+        outputFilePath: `/tmp/tasks/${taskId}.output`,
+        shell: 'zsh',
+      },
+      type: 'attachment',
+      uuid: `att-${taskId}`,
+      timestamp: '2026-10-20T08:00:00.000Z',
+    });
+  const filler = (n) =>
+    Array.from({ length: n }, (_, i) =>
+      JSON.stringify(userRecord(`fill-${i}`, `later prompt ${i}`))
+    ).join('\n');
+
+  let dir;
+  let pushes;
+  beforeEach(() => {
+    vi.useFakeTimers();
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wpxen-facts-'));
+    agentChat.__setDeps({
+      statSync: fs.statSync,
+      openSync: fs.openSync,
+      readSync: fs.readSync,
+      closeSync: fs.closeSync,
+      readdirSync: fs.readdirSync,
+      setInterval,
+      clearInterval,
+    });
+  });
+  afterEach(() => {
+    agentChat.closeAllChats();
+    vi.useRealTimers();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  function open(content) {
+    const file = path.join(dir, 't.jsonl');
+    fs.writeFileSync(file, content + '\n');
+    pushes = [];
+    agentChat.openChat('facts', 'v', {
+      transcriptPath: file,
+      decodeLine: claude.decodeClaudeLine,
+      factScan: { markers: claude.FACT_MARKERS, noteFacts: claude.noteFacts },
+      onRows: (rows, state) => pushes.push({ rows, facts: state?.facts }),
+    });
+    return file;
+  }
+  const lastFacts = () => pushes.filter((p) => p.facts).at(-1).facts;
+
+  it('pushes a task finishing even though its notification renders no row', () => {
+    const file = open([bgCall, bgResult].join('\n'));
+    expect(lastFacts().tasks.bk7q2m9xa.status).toBe('running');
+    fs.appendFileSync(file, notification('completed') + '\n');
+    vi.advanceTimersByTime(500);
+    const last = pushes.at(-1);
+    expect(last.rows).toEqual([]);
+    expect(last.facts.tasks.bk7q2m9xa.status).toBe('completed');
+  });
+
+  it('takes a task it never saw start from its task_status attachment', () => {
+    open(
+      [userRecord('u-1', 'start the server'), taskStatus('b1dev', 'running')]
+        .map((r) => (typeof r === 'string' ? r : JSON.stringify(r)))
+        .join('\n')
+    );
+    expect(lastFacts().tasks.b1dev).toMatchObject({ status: 'running' });
+  });
+
+  it('folds task state recorded above the newest page', () => {
+    // The task's status sits under 300 later prompts, off the first page.
+    open([taskStatus('b2old', 'running'), filler(300)].join('\n'));
+    expect(pushes[0].rows.some((r) => r.id === 'att-b2old')).toBe(false);
+    expect(lastFacts().tasks.b2old).toMatchObject({ status: 'running' });
+  });
+});

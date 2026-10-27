@@ -116,7 +116,12 @@ function readWhole(agent, file, n) {
   agentChat.openChat(sessionId, 'viewer', {
     transcriptPath: file,
     decodeLine: agent.decodeLine,
+    // What agents.cjs passes.
     findToolResult: agent.decoder.findToolResult,
+    toolResultNeedle: agent.decoder.toolResultNeedle,
+    factScan: agent.decoder.noteFacts
+      ? { markers: agent.decoder.FACT_MARKERS, noteFacts: agent.decoder.noteFacts }
+      : null,
     onRows: (rows) => apply(rows),
   });
   // A page with no rows is fine (bookkeeping records); a long run of them

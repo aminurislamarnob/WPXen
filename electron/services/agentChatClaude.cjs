@@ -167,9 +167,53 @@ function noteAttachment(attachment, facts) {
   ) {
     noteTaskNotification(attachment.prompt, facts);
   } else if (attachment.type === 'task_status' && attachment.taskId) {
-    const task = facts.tasks[attachment.taskId];
-    if (task && typeof attachment.status === 'string') task.status = attachment.status;
+    if (typeof attachment.status !== 'string') return;
+    // A task started before the loaded pages is known only from here.
+    const task = (facts.tasks[attachment.taskId] = facts.tasks[attachment.taskId] || {
+      id: attachment.taskId,
+      command: typeof attachment.description === 'string' ? attachment.description : '',
+    });
+    task.status = attachment.status;
   }
+}
+
+function initFacts(state) {
+  state.facts = state.facts || { tasks: {}, todos: null, usage: null };
+  state.facts.taskList = state.facts.taskList || { order: [], byId: {} };
+  return state.facts;
+}
+
+// Strings only fact-bearing records contain, for the engine's scan of the
+// lines above the first page (agentChat scanFacts).
+const FACT_MARKERS = ['"type":"task_status"', TASK_NOTIFICATION_MARKER];
+
+// The facts-only pass over one of those lines: attachments and
+// <task-notification> turns, never rows.
+function noteFacts(lineStr, state) {
+  let record;
+  try {
+    record = JSON.parse(lineStr);
+  } catch {
+    return;
+  }
+  const facts = initFacts(state);
+  if (record?.type === 'attachment') {
+    noteAttachment(record.attachment, facts);
+    return;
+  }
+  if (record?.type !== 'user' || record.isMeta) return;
+  const content = record.message?.content;
+  const text =
+    typeof content === 'string'
+      ? content
+      : Array.isArray(content)
+        ? content
+            .filter((b) => b?.type === 'text' && typeof b.text === 'string')
+            .map((b) => b.text)
+            .join('\n')
+        : '';
+  if (text.trim().startsWith(TASK_NOTIFICATION_MARKER))
+    noteTaskNotification(text.trim(), facts);
 }
 
 // The inline diff a file-editing tool call carries, or null. Claude Code's
@@ -280,8 +324,7 @@ function decodeClaudeLine(lineStr, state) {
 }
 
 function decodeRecord(record, state) {
-  state.facts = state.facts || { tasks: {}, todos: null, usage: null };
-  state.facts.taskList = state.facts.taskList || { order: [], byId: {} };
+  initFacts(state);
   if (record.type === 'attachment') {
     noteAttachment(record.attachment, state.facts);
     return null;
@@ -466,6 +509,8 @@ function findToolResult(record, toolUseId) {
 module.exports = {
   claudeTranscriptPath,
   decodeClaudeLine,
+  FACT_MARKERS,
+  noteFacts,
   findToolResult,
   readTaskNotification,
   toolResultText,
