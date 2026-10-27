@@ -926,10 +926,9 @@ async function renameDevice(id, name) {
   return { ok: true };
 }
 
-// Revoke deletes the record (push fields die with it — they are empty until
-// the push ticket) and closes every live socket at once with the revoked
-// code, so the phone can say it was removed. The next connect fails exactly
-// like an unknown device: closed, no reply.
+// Revoke deletes the record (push fields die with it) and cuts every live
+// socket at once (see cutSocket), so the phone can say it was removed. The
+// next connect fails exactly like an unknown device: closed, no reply.
 async function revokeDevice(id) {
   const store = deps.store;
   if (!store) throw new Error('Remote Access needs a store before it can start');
@@ -937,11 +936,7 @@ async function revokeDevice(id) {
     throw new Error('Unknown device.');
   const sockets = deviceSockets.get(id);
   if (sockets) {
-    for (const entry of [...sockets]) {
-      try {
-        entry.ws.close(CLOSE_REVOKED, 'revoked');
-      } catch {}
-    }
+    for (const entry of [...sockets]) cutSocket(entry.ws, CLOSE_REVOKED, 'revoked');
     deviceSockets.delete(id);
   }
   store.set(
@@ -960,12 +955,25 @@ async function disconnectAll() {
 
 // Shared by disconnect-all and by stopping the server: an ordinary close the
 // phone may reconnect after, never the revoked code. Records are untouched.
+//
+// Ending access ends it now (after Orca's ws-transport.ts, "revocation must
+// stop streams immediately"). `ws.close(code)` only asks: a peer that
+// ignores the close frame keeps the socket for ws's 30 s close timeout, and
+// every sealed frame it sent meanwhile used to run. The close frame still
+// goes first, best effort, so a well-behaved phone reads why; then the TCP
+// connection is destroyed without waiting for an answer.
+function cutSocket(ws, code, reason) {
+  try {
+    ws.close(code, reason);
+  } catch {}
+  try {
+    ws.terminate();
+  } catch {}
+}
 function closeEveryDeviceSocket() {
   for (const [id, entries] of [...deviceSockets.entries()]) {
     for (const entry of [...entries]) {
-      try {
-        entry.ws.close(CLOSE_DISCONNECT_ALL, 'disconnecting');
-      } catch {}
+      cutSocket(entry.ws, CLOSE_DISCONNECT_ALL, 'disconnecting');
     }
     deviceSockets.delete(id);
   }
@@ -1497,6 +1505,9 @@ function handleDeviceConnection(ws, req) {
   }
 
   function onMessage(data) {
+    // A socket this side has begun closing runs nothing more, whoever closed
+    // it and whatever the peer keeps sending until the TCP connection ends.
+    if (ws.readyState !== ws.OPEN) return;
     let msg;
     try {
       msg = JSON.parse(String(data));
@@ -1692,6 +1703,11 @@ function handleDeviceConnection(ws, req) {
     // connection carries the wrong sealed counter.
     if (!payload || payload.ch !== channel || payload.n !== msg.counter) return drop(ws);
     inCounter = msg.counter;
+    // Re-resolve the device on every frame (after Orca's per-frame dispatch
+    // check): a record that is gone, however it went, authorises nothing,
+    // whatever socket the frame rode in on.
+    if (!findDevice(device.id)) return cutSocket(ws, CLOSE_REVOKED, 'revoked');
+    if (ws.readyState !== ws.OPEN) return;
     touchDevice(device.id);
     if (!payload || payload.kind !== 'request' || typeof payload.id !== 'string')
       return drop(ws);
@@ -1799,11 +1815,8 @@ function dispose() {
     sessionsUnsub = null;
   }
   for (const entries of deviceSockets.values()) {
-    for (const entry of [...entries]) {
-      try {
-        entry.ws.close();
-      } catch {}
-    }
+    for (const entry of [...entries])
+      cutSocket(entry.ws, CLOSE_DISCONNECT_ALL, 'disconnecting');
   }
   deviceSockets.clear();
   for (const key of [...terminalSubs.keys()]) {
