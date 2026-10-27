@@ -246,9 +246,12 @@ export function upsertRows(list, rows) {
 
 // An older page goes in front. A row already on screen keeps its newer copy,
 // and a call that arrives with its orphan result's id removes that orphan.
+// The page itself can hold one row twice — a call, then the call again once
+// its result lands — so it is collapsed the way a live push is: the later
+// copy replaces the earlier one in place.
 export function prependOlder(list, older) {
   const seen = new Set(list.map((m) => m.id));
-  const fresh = older.filter((r) => r.id && !seen.has(r.id));
+  const fresh = upsertRows([], older).filter((r) => !seen.has(r.id));
   const removed = new Set(older.flatMap((r) => r.remove || []));
   const rest = removed.size ? list.filter((m) => !removed.has(m.id)) : list;
   return fresh.length || rest !== list ? [...fresh, ...rest] : list;

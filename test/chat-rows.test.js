@@ -220,4 +220,24 @@ describe('applying pushes', () => {
       { id: 'b', v: 'new' },
     ]);
   });
+
+  it('keeps one copy of a row an older page carries twice, the later one', () => {
+    // A Claude call row, then the same call re-emitted once its result is
+    // decoded — both inside one Load older page.
+    const next = prependOlder(
+      [{ id: 'z' }],
+      [
+        { id: 'call-1', role: 'tool', tool_use: { id: 'call-1' } },
+        { id: 'text-1', role: 'assistant' },
+        {
+          id: 'call-1',
+          role: 'tool',
+          tool_use: { id: 'call-1' },
+          result: { content: 'ok' },
+        },
+      ]
+    );
+    expect(next.map((r) => r.id)).toEqual(['call-1', 'text-1', 'z']);
+    expect(next[0].result).toEqual({ content: 'ok' });
+  });
 });
