@@ -257,7 +257,11 @@ export function ReasoningRow({ row, onLink }) {
 export function ChatItem({ msg, ctx }) {
   if (msg.role === 'status') {
     return (
-      <div className="w-full text-center text-[12px] text-muted-foreground">
+      <div
+        className={`w-full text-center text-[12px] ${
+          msg.tone === 'error' ? 'text-destructive' : 'text-muted-foreground'
+        }`}
+      >
         {msg.content}
       </div>
     );

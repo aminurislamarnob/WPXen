@@ -28,6 +28,16 @@ const rawLines = fs
 const records = rawLines.map((l) => ({ line: l, record: JSON.parse(l) }));
 const byStep = (step) => records.find((r) => r.record.step_index === step);
 
+// test/fixtures/antigravity-typed-results: real record shapes, invented
+// content — a planner response, then one typed result step per call.
+const typed = fs
+  .readFileSync(
+    path.join(__dirname, 'fixtures', 'antigravity-typed-results.jsonl'),
+    'utf8'
+  )
+  .split('\n')
+  .filter((l) => l.trim());
+
 describe('decodeAntigravityLine', () => {
   it('unwraps USER_REQUEST and drops the metadata', () => {
     const row = decodeAntigravityLine(byStep(0).line, {});
@@ -75,16 +85,75 @@ describe('decodeAntigravityLine', () => {
     expect(third.result.content).toContain('truncated by Antigravity');
   });
 
-  it('upserts a re-reported step_index in place', () => {
+  // Real transcripts never repeat a step_index (none of this machine's 54
+  // do); each call's result is the step after it, typed or GENERIC.
+  it('pairs each call with the step that follows it, typed records included', () => {
     const state = {};
-    // Same schema as the real RUNNING line, re-reported DONE (the transcript
-    // appends a second line with the same step_index when the tool finishes).
-    const running = JSON.parse(byStep(6).line);
-    const done = { ...running, status: 'DONE', content: `${running.content}\nFinished.` };
-    const first = decodeAntigravityLine(JSON.stringify(running), state);
-    const second = decodeAntigravityLine(JSON.stringify(done), state);
-    expect(second.id).toBe(first.id);
-    expect(second.result.content).toContain('Finished.');
+    const rows = typed.flatMap((l) => [decodeAntigravityLine(l, state) ?? []].flat());
+    const latest = new Map(rows.map((r) => [r.id, r]));
+    const calls = [...latest.values()].filter((r) => r.role === 'tool');
+    expect(calls.map((c) => c.tool_use.name)).toEqual([
+      'view_file',
+      'run_command',
+      'multi_replace_file_content',
+      'edit_file',
+      'write_file',
+      'grep_search',
+      'list_dir',
+    ]);
+    expect(calls.every((c) => c.result)).toBe(true);
+    const byName = Object.fromEntries(calls.map((c) => [c.tool_use.name, c]));
+    expect(byName.view_file.result.content).toContain('header.php');
+    expect(byName.run_command.result.content).toContain('No syntax errors');
+    expect(byName.run_command.result.is_error).toBeFalsy();
+    expect(byName.multi_replace_file_content.result.content).toContain('2 chunks');
+    expect(byName.list_dir.result.content).toContain('notes.txt');
+  });
+
+  it('pairs a result shown unpaired once Load older brings its call in', () => {
+    // The newest page starts at the result steps; its planner response is
+    // on the older page, decoded later with fresh state plus the orphans.
+    const newer = {};
+    const orphanView = decodeAntigravityLine(typed[3], newer);
+    const orphanRun = decodeAntigravityLine(typed[4], newer);
+    expect(orphanView.id).toBe('agy-3-result');
+
+    const older = decodeAntigravityLine(typed[2], { results: newer.results });
+    const calls = older.filter((r) => r.role === 'tool');
+    expect(calls.map((c) => c.result?.content.slice(0, 9))).toEqual([
+      'File Path',
+      'No syntax',
+    ]);
+    expect(calls[0].result.tool_use_id).toBe(calls[0].id);
+    expect(older[0].remove).toEqual([orphanView.id, orphanRun.id]);
+  });
+
+  it('marks a command with a non-zero exit code as failed', () => {
+    const state = {};
+    decodeAntigravityLine(typed[2], state);
+    const run = JSON.parse(typed[4]);
+    const row = decodeAntigravityLine(JSON.stringify({ ...run, exit_code: 2 }), state);
+    expect(row.result.is_error).toBe(true);
+  });
+
+  it('shows multi_replace_file_content, edit_file and write_file as diffs', () => {
+    const rows = [decodeAntigravityLine(typed[5], {})].flat();
+    const edit = (name) => rows.find((r) => r.tool_use?.name === name).edit;
+    expect(edit('multi_replace_file_content')).toEqual({
+      path: '/tmp/example-site/header.php',
+      original: '<div class="hdr">\n\n</div>',
+      modified: '<header class="hdr">\n\n</header>',
+    });
+    expect(edit('edit_file')).toEqual({
+      path: '/tmp/example-site/footer.php',
+      original: 'old footer',
+      modified: 'new footer',
+    });
+    expect(edit('write_file')).toEqual({
+      path: '/tmp/example-site/notes.txt',
+      original: '',
+      modified: 'invented notes\n',
+    });
   });
 
   it('skips SYSTEM_MESSAGE and CHECKPOINT', () => {
@@ -92,10 +161,14 @@ describe('decodeAntigravityLine', () => {
     expect(decodeAntigravityLine(byStep(85).line, {})).toBeNull();
   });
 
-  it('shows ERROR_MESSAGE as a notice row', () => {
+  it('shows ERROR_MESSAGE as a notice row, not as the model speaking', () => {
     const row = decodeAntigravityLine(byStep(861).line, {});
-    expect(row.role).toBe('assistant');
+    expect(row.role).toBe('status');
+    expect(row.tone).toBe('error');
     expect(row.content).toContain('API error');
+    const last = decodeAntigravityLine(typed.at(-1), {});
+    expect(last).toMatchObject({ role: 'status', tone: 'error' });
+    expect(last.content).toContain('quota exhausted');
   });
 
   it('diffs replace_file_content from its args', () => {
