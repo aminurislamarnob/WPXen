@@ -27,7 +27,7 @@ import { useAgentSessions, setSelectedSession } from '../lib/useAgentSessions';
 import TabStrip from './agents/TabStrip';
 import { cleanupOrphanedDrafts } from '../lib/chatDraft';
 import TabContextMenu from './agents/TabContextMenu';
-import { getViewMode, setViewMode } from '../lib/chatView';
+import { getViewMode, opensInChatByDefault, setViewMode } from '../lib/chatView';
 import {
   tabsToClose,
   closeImpact,
@@ -124,8 +124,8 @@ export default function AgentsPane() {
     }
   }, [sessionsLoaded, allSessions]);
 
-  // "Open Claude Sessions in chat view": a chat-capable Session row seen for
-  // the first time starts in chat view. Rows present at the initial load are
+  // "Open Claude Sessions in chat view": a Claude Session row seen for the
+  // first time starts in chat view. Rows present at the initial load are
   // existing Sessions and keep their mode, whatever the setting.
   const chatDefaultSeenRef = useRef(null);
   useEffect(() => {
@@ -137,8 +137,7 @@ export default function AgentsPane() {
     for (const s of allSessions) {
       if (!chatDefaultSeenRef.current.has(s.sessionId)) {
         chatDefaultSeenRef.current.add(s.sessionId);
-        if (s.chat && settings['agents.chatViewDefault'])
-          setViewMode(s.sessionId, 'chat');
+        if (opensInChatByDefault(s, settings)) setViewMode(s.sessionId, 'chat');
       }
     }
   }, [allSessions, sessionsLoaded, settings]);

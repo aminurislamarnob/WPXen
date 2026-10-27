@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { isEndedSession, canResumeSession } from '../src/lib/chatView.js';
+import {
+  isEndedSession,
+  canResumeSession,
+  opensInChatByDefault,
+} from '../src/lib/chatView.js';
 
 // The exit bar gates on these: Respawn whenever the Session ended, Resume
 // only once it has ended AND carries a pinned transcript for an Agent that
@@ -45,5 +49,21 @@ describe('canResumeSession', () => {
   it('refuses when the agent cannot resume', () => {
     expect(canResumeSession(ended, plain)).toBe(false);
     expect(canResumeSession(ended, null)).toBe(false);
+  });
+});
+
+describe('opensInChatByDefault (#121)', () => {
+  const on = { 'agents.chatViewDefault': true };
+  const off = { 'agents.chatViewDefault': false };
+
+  it('opens new Claude Sessions in chat view when the setting is on', () => {
+    expect(opensInChatByDefault({ chat: 'claude' }, on)).toBe(true);
+    expect(opensInChatByDefault({ chat: 'claude' }, off)).toBe(false);
+  });
+
+  it('leaves every other chat-capable Agent in the terminal', () => {
+    expect(opensInChatByDefault({ chat: 'codex' }, on)).toBe(false);
+    expect(opensInChatByDefault({ chat: 'antigravity' }, on)).toBe(false);
+    expect(opensInChatByDefault({ chat: null }, on)).toBe(false);
   });
 });

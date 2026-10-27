@@ -47,3 +47,11 @@ export function canResumeSession(session, agent) {
   if (!session.transcriptId) return false;
   return Boolean(agent?.resumeFlag);
 }
+
+// "Open Claude Sessions in chat view" (#121): the setting names Claude, and
+// only Claude Code Sessions follow it. Codex and Antigravity have chat too,
+// but their transcript appears only after the first message, so landing on
+// an empty chat would hide the TUI they start in.
+export function opensInChatByDefault(session, settings) {
+  return session?.chat === 'claude' && settings?.['agents.chatViewDefault'] === true;
+}
