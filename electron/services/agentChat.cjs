@@ -477,7 +477,7 @@ function labelSubagentRow(watch, sub, row) {
     description: sub.description,
     status: subagentStatus(watch, sub, row),
   };
-  row.subagentCount = sub.state?.toolUseCount || 0;
+  row.subagentCount = sub.toolUseCount || 0;
 }
 
 // The newest copy of a tool row: a call is re-emitted once its result lands.
@@ -506,6 +506,14 @@ function discoverSubagents(watch) {
     } catch {
       continue; // written but not finished, or unreadable: retry next poll
     }
+    // The meta can land before the transcript does; a row labelled as a
+    // subagent with nothing to tail would say "Loading…" forever. Until the
+    // .jsonl exists the parent stays a plain tool row: retry next poll.
+    try {
+      deps.statSync(path.join(subagentDir(watch), `agent-${agentId}.jsonl`));
+    } catch {
+      continue;
+    }
     watch.subagents.set(agentId, {
       agentId,
       type: meta.agentType,
@@ -513,6 +521,12 @@ function discoverSubagents(watch) {
       toolUseId: meta.toolUseId,
       expanded: false,
       fd: null,
+      // The tool-call count, from a string scan of complete lines.
+      countOffset: 0,
+      toolUseCount: 0,
+      // Decoding, only while expanded.
+      decoded: false,
+      replay: false,
       tailOffset: 0,
       pageStart: 0,
       state: {},
@@ -534,6 +548,21 @@ function closeSubagent(sub) {
   sub.fd = null;
 }
 
+// A subagent's tool calls: one `"type":"tool_use"` per call block, written
+// compactly; inside a string (a quoted result) the quotes are escaped.
+const TOOL_USE_NEEDLE = Buffer.from('"type":"tool_use"');
+
+function countNeedle(buf, needle) {
+  let n = 0;
+  for (let i = buf.indexOf(needle); i !== -1; i = buf.indexOf(needle, i + needle.length))
+    n++;
+  return n;
+}
+
+// Each poll: settle the parent row's state, then — while the subagent runs
+// or is open — follow its transcript. Collapsed, only the call count is
+// kept, from a scan of the new bytes, and no nested row is sent; the rows
+// are decoded once the row is opened, replaying what was decoded before.
 function pollSubagent(watch, sub) {
   const parentRow = latestToolRow(watch, sub.toolUseId);
   const status = subagentStatus(watch, sub, parentRow);
@@ -547,18 +576,28 @@ function pollSubagent(watch, sub) {
   if (!running && !sub.expanded) return closeSubagent(sub);
 
   const nested = (rows) => rows.map((r) => ({ ...r, parentId: sub.toolUseId }));
-  const reportCount = () => {
-    if (parentRow && sub.state.toolUseCount !== undefined) {
-      parentRow.subagentCount = sub.state.toolUseCount;
-      watch.onRows([parentRow]);
-    }
-  };
-
   const subPath = subagentPath(watch, sub);
   try {
-    if (sub.fd === null) {
-      sub.fd = deps.openSync(subPath, 'r');
-      const complete = completeLength(sub.fd, deps.statSync(subPath).size);
+    if (sub.fd === null) sub.fd = deps.openSync(subPath, 'r');
+    const size = deps.statSync(subPath).size;
+
+    if (size > sub.countOffset) {
+      const buf = readRange(sub.fd, sub.countOffset, size - sub.countOffset);
+      const lastNl = buf.lastIndexOf(0x0a);
+      if (lastNl !== -1) {
+        const added = countNeedle(buf.subarray(0, lastNl + 1), TOOL_USE_NEEDLE);
+        sub.countOffset += lastNl + 1;
+        sub.toolUseCount += added;
+        if (added > 0 && parentRow) {
+          parentRow.subagentCount = sub.toolUseCount;
+          watch.onRows([parentRow]);
+        }
+      }
+    }
+    if (!sub.expanded) return;
+
+    if (!sub.decoded) {
+      const complete = completeLength(sub.fd, size);
       const { rows, pageStart, state } = tailRead(
         sub.fd,
         complete,
@@ -569,22 +608,24 @@ function pollSubagent(watch, sub) {
       sub.pageStart = pageStart;
       sub.state = state;
       sub.tailOffset = complete;
+      sub.decoded = true;
+      sub.replay = false;
       if (rows.length > 0) watch.onRows(nested(rows));
-      reportCount();
       return;
     }
 
-    const size = deps.statSync(subPath).size;
-    if (size <= sub.tailOffset) return;
-    const buf = readRange(sub.fd, sub.tailOffset, size - sub.tailOffset);
-    const { lines, partial } = splitLines(buf, sub.tailOffset);
-    sub.tailOffset += buf.length - partial.length;
-    const newRows = decodeLines(lines, sub.state, watch.decodeLine, subPath);
-    if (newRows.length > 0) {
+    const newRows = [];
+    if (size > sub.tailOffset) {
+      const buf = readRange(sub.fd, sub.tailOffset, size - sub.tailOffset);
+      const { lines, partial } = splitLines(buf, sub.tailOffset);
+      sub.tailOffset += buf.length - partial.length;
+      newRows.push(...decodeLines(lines, sub.state, watch.decodeLine, subPath));
       sub.currentRows.push(...newRows);
-      watch.onRows(nested(newRows));
-      reportCount();
     }
+    // Reopened: the renderer may hold none of the rows (a remounted chat).
+    const send = sub.replay ? sub.currentRows : newRows;
+    sub.replay = false;
+    if (send.length > 0) watch.onRows(nested(send));
   } catch {
     // Missing or unreadable subagent file: the parent stays a plain tool row.
   }
@@ -824,10 +865,18 @@ function findSubagent(watch, toolUseId) {
   return null;
 }
 
+// Opening a subagent row starts decoding it now rather than on the next
+// poll; closing it (or the row unmounting) stops the nested rows.
 function chatExpandSubagent(sessionId, toolUseId, expanded) {
   const watch = watches.get(sessionId);
   const sub = watch && findSubagent(watch, toolUseId);
-  if (sub) sub.expanded = !!expanded;
+  if (!sub) return;
+  const opening = !!expanded && !sub.expanded;
+  sub.expanded = !!expanded;
+  if (opening) {
+    sub.replay = sub.decoded;
+    pollSubagent(watch, sub);
+  }
 }
 
 function chatLoadOlderSubagent(sessionId, toolUseId) {

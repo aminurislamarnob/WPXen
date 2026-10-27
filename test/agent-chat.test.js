@@ -842,11 +842,79 @@ describe('subagents in agentChat', () => {
     expect(call.subagent).toMatchObject({ agentId: 'abc123', type: 'Explore' });
   });
 
-  it('tails a running subagent without being expanded', () => {
+  it('keeps a collapsed running subagent to a call count, no nested rows', () => {
     writeSession({ parent: agentCall });
     const rows = watch();
     vi.advanceTimersByTime(500);
-    expect(rows.some((r) => r.parentId === 'toolu_Agent1')).toBe(true);
+    expect(rows.some((r) => r.parentId === 'toolu_Agent1')).toBe(false);
+    const count = () => rows.filter((r) => r.tool_use?.id === 'toolu_Agent1').at(-1);
+    expect(count().subagentCount).toBe(1);
+
+    // Another call in the subagent: the count moves, still no rows.
+    const sub = path.join(proj, UUID, 'subagents', 'agent-abc123.jsonl');
+    fs.appendFileSync(
+      sub,
+      line({
+        isSidechain: true,
+        agentId: 'abc123',
+        type: 'assistant',
+        uuid: 's-3',
+        message: {
+          id: 'msg-sub-2',
+          role: 'assistant',
+          content: [
+            { type: 'tool_use', id: 'toolu_S2', name: 'Read', input: { file_path: 'a' } },
+          ],
+        },
+      })
+    );
+    vi.advanceTimersByTime(500);
+    expect(count().subagentCount).toBe(2);
+    expect(rows.some((r) => r.parentId === 'toolu_Agent1')).toBe(false);
+  });
+
+  it('opening a running subagent sends its rows; closing stops them', () => {
+    writeSession({ parent: agentCall });
+    const rows = watch();
+    chatExpandSubagent('sess-sub', 'toolu_Agent1', true);
+    const nested = () => rows.filter((r) => r.parentId === 'toolu_Agent1');
+    expect(nested().map((r) => r.role)).toEqual(['user', 'tool']);
+
+    chatExpandSubagent('sess-sub', 'toolu_Agent1', false);
+    const sub = path.join(proj, UUID, 'subagents', 'agent-abc123.jsonl');
+    fs.appendFileSync(
+      sub,
+      line({
+        isSidechain: true,
+        agentId: 'abc123',
+        type: 'user',
+        uuid: 's-4',
+        message: { role: 'user', content: 'more' },
+      })
+    );
+    vi.advanceTimersByTime(500);
+    expect(nested()).toHaveLength(2);
+
+    // Reopened: everything decoded so far is sent again, plus the new row.
+    chatExpandSubagent('sess-sub', 'toolu_Agent1', true);
+    expect(
+      nested()
+        .slice(2)
+        .map((r) => r.id)
+    ).toEqual(['s-1', 'toolu_S1', 's-4']);
+  });
+
+  it('stays a plain tool row while the meta exists but the transcript does not', () => {
+    writeSession({ parent: agentCall + agentResult });
+    const sub = path.join(proj, UUID, 'subagents', 'agent-abc123.jsonl');
+    fs.rmSync(sub);
+    const rows = watch();
+    const call = () => rows.filter((r) => r.tool_use?.id === 'toolu_Agent1').at(-1);
+    expect(call().subagent).toBeUndefined();
+
+    fs.writeFileSync(sub, subLines);
+    vi.advanceTimersByTime(500);
+    expect(call().subagent).toMatchObject({ agentId: 'abc123' });
   });
 });
 
@@ -1261,7 +1329,9 @@ describe('async subagents (#114)', () => {
     open(writeSession(launch));
     expect(parent().result).toBeDefined();
     expect(parent().subagent.status).toBe('running');
-    // ...and its transcript is tailed while it runs.
+    // Collapsed, it is followed for its count only; opened, its rows come.
+    expect(rows.some((r) => r.parentId === TOOLU)).toBe(false);
+    agentChat.chatExpandSubagent('async', TOOLU, true);
     expect(rows.some((r) => r.parentId === TOOLU)).toBe(true);
   });
 

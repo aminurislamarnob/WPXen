@@ -1,6 +1,7 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { ChevronRight } from 'lucide-react';
 import { foldToolRuns, subagentSummary } from '../../lib/chatRows';
+import { subagentExpansion } from '../../lib/chatSubagent';
 import { ChatItem } from './ChatItems';
 
 const STATUS_DOT = {
@@ -17,8 +18,8 @@ const NESTED_PAGE = 200;
 
 // A delegated Agent / Task call, with the subagent's own rows nested inside —
 // the same renderers as the main list, so its tool runs and diffs read the
-// same. The main process tails the subagent while it runs or while this is
-// open.
+// same. The main process sends its nested rows only while this is open;
+// collapsed, the header shows the call count it keeps.
 export function SubagentRow({ item, nestedMessages, ctx }) {
   const [expanded, setExpanded] = useState(false);
   const [shown, setShown] = useState(NESTED_PAGE);
@@ -30,10 +31,20 @@ export function SubagentRow({ item, nestedMessages, ctx }) {
   const visible = folded.slice(-shown);
   const hiddenInMemory = folded.length - visible.length;
 
+  const sessionId = ctx.sessionId;
+  const expansion = useMemo(
+    () =>
+      subagentExpansion((open) =>
+        window.electronAPI.chatExpandSubagent(sessionId, toolUseId, open)
+      ),
+    [sessionId, toolUseId]
+  );
+  useEffect(() => () => expansion.release(), [expansion]);
+
   const toggle = () => {
     const next = !expanded;
     setExpanded(next);
-    window.electronAPI.chatExpandSubagent(ctx.sessionId, toolUseId, next);
+    expansion.set(next);
   };
 
   const showEarlier = async () => {
