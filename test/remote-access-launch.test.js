@@ -113,11 +113,13 @@ beforeEach(async () => {
       ptys.push(p);
       return p;
     },
-    shellEnv: () => ({ PATH: '/usr/bin' }),
+    // Detection reads this env (not the real login shell), so it must hold
+    // `sh`: /bin on macOS, /usr/bin on Linux.
+    shellEnv: () => ({ PATH: '/usr/bin:/bin' }),
     userShell: () => '/bin/zsh',
     homedir: () => home,
   });
-  // `sh` is on every PATH, so this custom agent is always detected.
+  // `sh` is on the faked PATH above, so this custom agent is always detected.
   agents.setConfig({ custom: [{ id: 'fake', name: 'Fake', cmd: 'sh --agent' }] });
   store = fakeStore({
     [HOST_ID_KEY]: 'test-host-id',
