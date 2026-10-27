@@ -14,8 +14,11 @@ const proc = require('child_process');
 // and the display is still free to sleep and lock. `-w <our pid>` ties its
 // lifetime to the app, so even a hard crash can't orphan an assertion that
 // keeps the Mac awake forever. If caffeinate can't be spawned we fall back to
-// Electron's powerSaveBlocker ('prevent-display-sleep', as Orca does); only
-// one of the two is ever held.
+// Electron's powerSaveBlocker; only one of the two is ever held. The fallback
+// is 'prevent-app-suspension' — the system stays awake, the display still
+// sleeps and locks, matching caffeinate -i -s. Orca uses
+// 'prevent-display-sleep', but spec #150 says the display is free to sleep,
+// and keeping it lit would leave the screen of an unattended Mac unlocked.
 //
 // Lives in the main process alongside the ptys (ADR 0001), so it works with
 // the window hidden to the tray. Electron is resolved lazily — tests import
@@ -165,7 +168,7 @@ function startFallback() {
   const blocker = deps.powerSaveBlocker;
   if (!blocker) return;
   try {
-    blockerId = blocker.start('prevent-display-sleep');
+    blockerId = blocker.start('prevent-app-suspension');
   } catch (err) {
     deps.log(`[keep-awake] powerSaveBlocker failed: ${err?.message || err}`);
     blockerId = null;

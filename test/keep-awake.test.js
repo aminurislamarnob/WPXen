@@ -139,7 +139,7 @@ describe('modes', () => {
 });
 
 describe('fallback', () => {
-  it('uses prevent-display-sleep when caffeinate fails to spawn', async () => {
+  it('uses prevent-app-suspension when caffeinate fails to spawn', async () => {
     spawn.mockImplementationOnce(() => {
       const c = fakeChild();
       children.push(c);
@@ -149,7 +149,10 @@ describe('fallback', () => {
     keepAwake.setMode('on');
     await tick();
     expect(liveCaffeinate()).toBe(0);
-    expect(blocker.start).toHaveBeenCalledWith('prevent-display-sleep');
+    // The system stays awake; the display is still free to sleep and lock
+    // (spec #150), exactly as with caffeinate -i -s.
+    expect(blocker.start).toHaveBeenCalledWith('prevent-app-suspension');
+    expect(blocker.start).not.toHaveBeenCalledWith('prevent-display-sleep');
     expect(blocker.held.size).toBe(1);
     expect(keepAwake.getStatus().active).toBe(true);
   });
