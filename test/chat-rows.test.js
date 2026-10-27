@@ -99,6 +99,22 @@ describe('subagentSummary', () => {
     });
   });
 
+  it('takes the main process status for a background subagent', () => {
+    // A background Agent call has its `async_launched` result at once.
+    const launched = { content: 'Async agent launched', meta: { asyncLaunched: true } };
+    const running = call({
+      result: launched,
+      subagent: { agentId: 'a', status: 'running' },
+    });
+    expect(subagentSummary(running).status).toBe('running');
+    expect(
+      subagentSummary(
+        call({ result: launched, subagent: { agentId: 'a', status: null } })
+      ).status
+    ).toBeNull();
+    expect(runNeedsAttention({ role: 'tool-run', items: [running] })).toBe(true);
+  });
+
   it("falls back to the call's own input for the description", () => {
     expect(subagentSummary(call({ subagent: { agentId: 'a' } })).description).toBe(
       'From input'

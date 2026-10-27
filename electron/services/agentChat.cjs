@@ -11,6 +11,7 @@ let deps = {
   readFileSync: fs.readFileSync,
   setInterval,
   clearInterval,
+  now: () => Date.now(),
 };
 
 function __setDeps(newDeps) {
@@ -308,18 +309,11 @@ function completeLength(fd, size) {
   return 0;
 }
 
-function augmentToolRows(rows, subagents) {
+function augmentToolRows(watch, rows) {
   for (const row of rows) {
     if (row.role === 'tool' && row.tool_use) {
-      for (const sub of subagents.values()) {
-        if (sub.toolUseId === row.tool_use.id) {
-          row.subagent = {
-            agentId: sub.agentId,
-            type: sub.type,
-            description: sub.description,
-          };
-          row.subagentCount = sub.state?.toolUseCount || 0;
-        }
+      for (const sub of watch.subagents.values()) {
+        if (sub.toolUseId === row.tool_use.id) labelSubagentRow(watch, sub, row);
       }
     }
   }
@@ -331,6 +325,49 @@ function augmentToolRows(rows, subagents) {
 // type, description and the parent's tool_use id.
 function subagentDir(watch) {
   return path.join(watch.transcriptDir, watch.transcriptId, 'subagents');
+}
+
+function subagentPath(watch, sub) {
+  return path.join(subagentDir(watch), `agent-${sub.agentId}.jsonl`);
+}
+
+// A subagent's state, after Orca's transcript-only fallback
+// (session-scanner-claude-subagents.ts:170-226). A synchronous Agent call
+// runs until its result lands. A background one returns `async_launched`
+// at once and settles only when a <task-notification> reports its agentId;
+// with no final report it counts as running only while its transcript was
+// written in the last five minutes, else its state is unknown (null).
+const SUBAGENT_RUNNING_RECENCY_MS = 5 * 60_000;
+const TERMINAL_SUBAGENT_STATUSES = {
+  completed: 'done',
+  failed: 'failed',
+  killed: 'stopped',
+  stopped: 'stopped',
+};
+
+function subagentStatus(watch, sub, parentRow) {
+  if (!parentRow) return null;
+  const result = parentRow.result;
+  if (!result) return 'running';
+  if (!result.meta?.asyncLaunched) return result.is_error ? 'failed' : 'done';
+  const reported = watch.state.facts?.agents?.[sub.agentId];
+  if (TERMINAL_SUBAGENT_STATUSES[reported]) return TERMINAL_SUBAGENT_STATUSES[reported];
+  try {
+    const { mtimeMs } = deps.statSync(subagentPath(watch, sub));
+    return deps.now() - mtimeMs <= SUBAGENT_RUNNING_RECENCY_MS ? 'running' : null;
+  } catch {
+    return null;
+  }
+}
+
+function labelSubagentRow(watch, sub, row) {
+  row.subagent = {
+    agentId: sub.agentId,
+    type: sub.type,
+    description: sub.description,
+    status: subagentStatus(watch, sub, row),
+  };
+  row.subagentCount = sub.state?.toolUseCount || 0;
 }
 
 // The newest copy of a tool row: a call is re-emitted once its result lands.
@@ -373,11 +410,7 @@ function discoverSubagents(watch) {
     });
     const parentRow = latestToolRow(watch, meta.toolUseId);
     if (parentRow) {
-      parentRow.subagent = {
-        agentId,
-        type: meta.agentType,
-        description: meta.description,
-      };
+      labelSubagentRow(watch, watch.subagents.get(agentId), parentRow);
       watch.onRows([parentRow]);
     }
   }
@@ -393,7 +426,14 @@ function closeSubagent(sub) {
 
 function pollSubagent(watch, sub) {
   const parentRow = latestToolRow(watch, sub.toolUseId);
-  const running = !!parentRow && !parentRow.result;
+  const status = subagentStatus(watch, sub, parentRow);
+  // A background subagent settles from a notification the parent decodes as
+  // no row at all: push the parent row whenever its state moves.
+  if (parentRow?.subagent && parentRow.subagent.status !== status) {
+    parentRow.subagent = { ...parentRow.subagent, status };
+    watch.onRows([parentRow]);
+  }
+  const running = status === 'running';
   if (!running && !sub.expanded) return closeSubagent(sub);
 
   const nested = (rows) => rows.map((r) => ({ ...r, parentId: sub.toolUseId }));
@@ -404,7 +444,7 @@ function pollSubagent(watch, sub) {
     }
   };
 
-  const subPath = path.join(subagentDir(watch), `agent-${sub.agentId}.jsonl`);
+  const subPath = subagentPath(watch, sub);
   try {
     if (sub.fd === null) {
       sub.fd = deps.openSync(subPath, 'r');
@@ -552,7 +592,7 @@ function openChat(sessionId, viewerId, opts) {
         const newRows = decodeLines(lines, watch.state, watch.decodeLine, watch.path);
 
         if (newRows.length > 0) {
-          augmentToolRows(newRows, watch.subagents);
+          augmentToolRows(watch, newRows);
           watch.currentRows.push(...newRows);
           onRows(newRows, watch.state);
         }
@@ -606,7 +646,7 @@ function loadOlder(sessionId) {
   if (rows.length > 0) {
     // Subagents are discovered from the folder, not the page: an Agent call
     // paged in now may already have one.
-    augmentToolRows(rows, watch.subagents);
+    augmentToolRows(watch, rows);
     watch.currentRows.unshift(...rows);
   }
 
@@ -673,7 +713,7 @@ function chatLoadOlderSubagent(sessionId, toolUseId) {
     sub.fd,
     sub.pageStart,
     watch.decodeLine,
-    path.join(subagentDir(watch), `agent-${sub.agentId}.jsonl`)
+    subagentPath(watch, sub)
   );
   sub.pageStart = pageStart;
 
@@ -729,9 +769,7 @@ async function chatImage(sessionId, ref) {
   if (!watch || !validImageRef(ref)) return null;
   const files = [
     watch.path,
-    ...[...watch.subagents.values()].map((sub) =>
-      path.join(subagentDir(watch), `agent-${sub.agentId}.jsonl`)
-    ),
+    ...[...watch.subagents.values()].map((sub) => subagentPath(watch, sub)),
   ];
   for (const file of files) {
     let record;

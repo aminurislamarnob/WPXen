@@ -809,6 +809,7 @@ describe('subagents in agentChat', () => {
       agentId: 'abc123',
       type: 'Explore',
       description: 'Find REST routes',
+      status: 'done',
     });
   });
 
@@ -1173,5 +1174,122 @@ describe('tool results over the cap (#112)', () => {
     const call = rows.filter((r) => r.role === 'tool').at(-1);
     expectCapped(call, full);
     expect(agentChat.chatFetchFull('cap-agy', call.tool_use.id)).toBe(full);
+  });
+});
+
+// Claude Code 2.1 background subagents (test/fixtures/claude-async-subagent,
+// real shapes): the Agent call's result is `async_launched` at once, and a
+// <task-notification> user turn whose <task-id> is the agentId settles it.
+describe('async subagents (#114)', () => {
+  const agentChat = require('../electron/services/agentChat.cjs');
+  const claude = require('../electron/services/agentChatClaude.cjs');
+  const os = require('node:os');
+  const fixture = fs
+    .readFileSync(path.join(__dirname, 'fixtures', 'claude-async-subagent.jsonl'), 'utf8')
+    .split('\n')
+    .filter(Boolean);
+  const notifyAt = fixture.findIndex((l) =>
+    l.includes('"turnOrigin":"task_notification"')
+  );
+  const launch = fixture.slice(0, notifyAt).join('\n') + '\n';
+  const settle = fixture.slice(notifyAt).join('\n') + '\n';
+  const UUID = '7c1e9a40-2b5d-4f8e-9c3a-000000000001';
+  const AGENT = 'a1b2c3d4e5f60718';
+  const TOOLU = 'toolu_01InventedAsyncAgent0001';
+  let proj;
+  let rows;
+
+  function writeSession(parent, { subMtime } = {}) {
+    proj = fs.mkdtempSync(path.join(os.tmpdir(), 'wpxen-async-'));
+    const file = path.join(proj, `${UUID}.jsonl`);
+    fs.writeFileSync(file, parent);
+    const dir = path.join(proj, UUID, 'subagents');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, `agent-${AGENT}.meta.json`),
+      JSON.stringify({
+        agentType: 'Explore',
+        description: 'Audit theme templates',
+        toolUseId: TOOLU,
+      })
+    );
+    const sub = path.join(dir, `agent-${AGENT}.jsonl`);
+    fs.writeFileSync(
+      sub,
+      JSON.stringify({
+        isSidechain: true,
+        agentId: AGENT,
+        type: 'user',
+        uuid: 's-1',
+        message: { role: 'user', content: 'List every template in the theme.' },
+      }) + '\n'
+    );
+    if (subMtime) fs.utimesSync(sub, subMtime, subMtime);
+    return file;
+  }
+
+  function open(file) {
+    rows = [];
+    agentChat.openChat('async', 'v', {
+      transcriptPath: file,
+      transcriptId: UUID,
+      decodeLine: claude.decodeClaudeLine,
+      onRows: (r) => rows.push(...r),
+    });
+    vi.advanceTimersByTime(500);
+  }
+  const parent = () => rows.filter((r) => r.tool_use?.id === TOOLU).at(-1);
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    agentChat.__setDeps({
+      statSync: fs.statSync,
+      openSync: fs.openSync,
+      readSync: fs.readSync,
+      closeSync: fs.closeSync,
+      readdirSync: fs.readdirSync,
+      readFileSync: fs.readFileSync,
+      setInterval,
+      clearInterval,
+      now: () => Date.now(),
+    });
+  });
+  afterEach(() => {
+    agentChat.closeAllChats();
+    vi.useRealTimers();
+    fs.rmSync(proj, { recursive: true, force: true });
+  });
+
+  it('is running after async_launched, though the call already has a result', () => {
+    open(writeSession(launch));
+    expect(parent().result).toBeDefined();
+    expect(parent().subagent.status).toBe('running');
+    // ...and its transcript is tailed while it runs.
+    expect(rows.some((r) => r.parentId === TOOLU)).toBe(true);
+  });
+
+  it('settles from the task-notification whose task-id is its agentId', () => {
+    const file = writeSession(launch);
+    open(file);
+    fs.appendFileSync(file, settle);
+    vi.advanceTimersByTime(500);
+    // The notification renders no row, yet the parent row is pushed again.
+    expect(parent().subagent.status).toBe('done');
+  });
+
+  it('with no report, counts as running only while its transcript is fresh', () => {
+    const stale = new Date(Date.now() - 10 * 60_000);
+    open(writeSession(launch, { subMtime: stale }));
+    expect(parent().subagent.status).toBeNull();
+    expect(rows.some((r) => r.parentId === TOOLU)).toBe(false);
+  });
+
+  it('reads the status before <summary>: a result can quote its own tag', () => {
+    const text = JSON.parse(fixture[notifyAt]).message.content;
+    expect(text).toContain('<status>failed</status>');
+    expect(claude.readTaskNotification(text)).toEqual({
+      taskId: AGENT,
+      status: 'completed',
+    });
   });
 });

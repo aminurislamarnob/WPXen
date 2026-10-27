@@ -101,13 +101,23 @@ export function foldToolRuns(rows) {
   return folded;
 }
 
-// What a subagent row's header shows: running until the parent Agent / Task
-// call has its result, then done or failed from that result.
+// A subagent's state from its parent Agent / Task call: the main process
+// works it out (a background subagent's call returns at once and settles
+// from a later notification) and sends it as `subagent.status` — running,
+// done, failed, stopped, or null when nothing says. Without one: running
+// until the call has its result, then done or failed from that result.
+function subagentStatus(item) {
+  const meta = item.subagent || {};
+  if ('status' in meta) return meta.status ?? null;
+  return !item.result ? 'running' : item.result.is_error ? 'failed' : 'done';
+}
+
+// What a subagent row's header shows.
 export function subagentSummary(item) {
   const meta = item.subagent || {};
   const n = item.subagentCount;
   return {
-    status: !item.result ? 'running' : item.result.is_error ? 'failed' : 'done',
+    status: subagentStatus(item),
     type: meta.type || item.tool_use?.input?.subagent_type || 'Subagent',
     description: meta.description || item.tool_use?.input?.description || 'Task',
     count: n ? `${n} tool call${n === 1 ? '' : 's'}` : null,
@@ -120,7 +130,8 @@ export function subagentSummary(item) {
 export function runNeedsAttention(run) {
   return run.items.some(
     (item) =>
-      !item.result && (item.tool_use?.name === 'AskUserQuestion' || !!item.subagent)
+      (!item.result && item.tool_use?.name === 'AskUserQuestion') ||
+      (!!item.subagent && subagentStatus(item) === 'running')
   );
 }
 

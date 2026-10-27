@@ -7,6 +7,7 @@ const STATUS_DOT = {
   running: 'bg-status-running animate-pulse',
   done: 'bg-muted-foreground',
   failed: 'bg-status-error',
+  stopped: 'bg-status-warning',
 };
 
 // The nested list isn't virtualised, so it shows the latest rows only and
@@ -68,10 +69,12 @@ export function SubagentRow({ item, nestedMessages, ctx }) {
         {count && (
           <span className="shrink-0 text-[11px] text-muted-foreground">{count}</span>
         )}
-        <span className="flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground">
-          <span className={`h-1.5 w-1.5 rounded-full ${STATUS_DOT[status]}`} />
-          {status}
-        </span>
+        {status && (
+          <span className="flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground">
+            <span className={`h-1.5 w-1.5 rounded-full ${STATUS_DOT[status]}`} />
+            {status}
+          </span>
+        )}
       </button>
 
       {expanded && (

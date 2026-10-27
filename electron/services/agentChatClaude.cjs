@@ -88,10 +88,32 @@ function noteTask(toolBlock, result, facts) {
 }
 
 // <task-notification><task-id>…</task-id>…<status>completed</status>…
+// Orca's parser (claude-task-notification-text.ts): the status is read only
+// before <summary>, since the <result> a subagent returns can quote its own
+// <status> tag.
+const TASK_NOTIFICATION_MARKER = '<task-notification>';
+
+function readTaskNotification(text) {
+  if (typeof text !== 'string') return null;
+  const body = text.trimStart();
+  if (!body.startsWith(TASK_NOTIFICATION_MARKER)) return null;
+  const taskId = /<task-id>([^<]+)<\/task-id>/.exec(body)?.[1]?.trim();
+  if (!taskId) return null;
+  const summaryAt = body.indexOf('<summary>');
+  const head = summaryAt === -1 ? body : body.slice(0, summaryAt);
+  const status = /<status>([a-z_]+)<\/status>/.exec(head)?.[1];
+  return status ? { taskId, status } : { taskId };
+}
+
+// A background Bash / Monitor task moves on; a background subagent's id is
+// its agentId, so its last reported status lands in `facts.agents` — what
+// the engine settles an async subagent's row with.
 function noteTaskNotification(text, facts) {
-  const id = /<task-id>([^<]+)<\/task-id>/.exec(text)?.[1];
-  const status = /<status>([^<]+)<\/status>/.exec(text)?.[1];
-  if (id && status && facts.tasks[id]) facts.tasks[id].status = status;
+  const note = readTaskNotification(text);
+  if (!note?.status) return;
+  if (facts.tasks[note.taskId]) facts.tasks[note.taskId].status = note.status;
+  facts.agents = facts.agents || {};
+  facts.agents[note.taskId] = note.status;
 }
 
 // The to-do checklist. Older Claude Code rewrites the whole list with
@@ -141,7 +163,7 @@ function noteAttachment(attachment, facts) {
   if (
     attachment.type === 'queued_command' &&
     typeof attachment.prompt === 'string' &&
-    attachment.prompt.trimStart().startsWith('<task-notification>')
+    attachment.prompt.trimStart().startsWith(TASK_NOTIFICATION_MARKER)
   ) {
     noteTaskNotification(attachment.prompt, facts);
   } else if (attachment.type === 'task_status' && attachment.taskId) {
@@ -199,6 +221,10 @@ function attachToolResults(results, record, state) {
         backgroundTaskId: tur.backgroundTaskId,
         taskId: tur.taskId,
         task_id: tur.task_id,
+        // A background (async) Agent call returns at once; the subagent
+        // keeps running until a <task-notification> names its agentId.
+        agentId: typeof tur.agentId === 'string' ? tur.agentId : undefined,
+        asyncLaunched: tur.status === 'async_launched' || undefined,
         createdTaskId:
           tur.task && typeof tur.task === 'object' && tur.task.id != null
             ? String(tur.task.id)
@@ -303,7 +329,7 @@ function decodeRecord(record, state) {
       .map((b) => b.text)
       .join('\n')
       .trim();
-    if (contentStr.startsWith('<task-notification>')) {
+    if (contentStr.startsWith(TASK_NOTIFICATION_MARKER)) {
       noteTaskNotification(contentStr, state.facts);
       return null;
     }
@@ -441,5 +467,6 @@ module.exports = {
   claudeTranscriptPath,
   decodeClaudeLine,
   findToolResult,
+  readTaskNotification,
   toolResultText,
 };
