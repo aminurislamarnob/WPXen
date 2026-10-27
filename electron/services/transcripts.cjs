@@ -8,6 +8,9 @@ let deps = {
   statSync: fs.statSync,
   readFileSync: fs.readFileSync,
   existsSync: fs.existsSync,
+  openSync: fs.openSync,
+  readSync: fs.readSync,
+  closeSync: fs.closeSync,
 };
 
 function __setDeps(newDeps) {
@@ -15,6 +18,26 @@ function __setDeps(newDeps) {
 }
 
 const { claudeTranscriptPath } = require('./agentChatClaude.cjs');
+
+// The first bytes of a file, or '' when it can't be read.
+const HEAD_BYTES = 64 * 1024;
+function readHead(file, bytes = HEAD_BYTES) {
+  let fd = null;
+  try {
+    fd = deps.openSync(file, 'r');
+    const buf = Buffer.alloc(bytes);
+    const n = deps.readSync(fd, buf, 0, bytes, 0);
+    return buf.subarray(0, n).toString('utf8');
+  } catch {
+    return '';
+  } finally {
+    if (fd !== null) {
+      try {
+        deps.closeSync(fd);
+      } catch {}
+    }
+  }
+}
 
 function locateClaude({ cwd, startedAt, home, transcriptId }) {
   // A pinned Session has exactly one transcript. Until Claude writes it (the
@@ -157,18 +180,44 @@ function antigravityConversationId(cwd, home) {
   }
 }
 
-function locateAntigravity({ cwd, home, exclude }) {
+// When a conversation began: its first record's created_at (written before
+// the content, so it sits in the head however long the prompt), else the
+// transcript's birth time; null when neither says.
+function antigravityStartedMs(transcript) {
+  const match = /"created_at":"([^"]+)"/.exec(readHead(transcript, 4096));
+  const created = match ? Date.parse(match[1]) : NaN;
+  if (Number.isFinite(created)) return created;
+  try {
+    const { birthtimeMs } = deps.statSync(transcript);
+    return Number.isFinite(birthtimeMs) && birthtimeMs > 0 ? birthtimeMs : null;
+  } catch {
+    return null;
+  }
+}
+
+// created_at has second resolution: allow that, and a little clock slack.
+const ANTIGRAVITY_START_SKEW_MS = 5_000;
+
+function locateAntigravity({ cwd, home, exclude, startedAt }) {
   const convId = antigravityConversationId(cwd, home);
   if (!convId) return null;
   const transcript = antigravityTranscriptPath(home, convId);
   // A transcript already driving another Session is not ours.
   if (exclude && exclude.has(transcript)) return null;
   try {
-    if (deps.existsSync(transcript)) return transcript;
+    if (!deps.existsSync(transcript)) return null;
   } catch {
-    // skip
+    return null;
   }
-  return null;
+  // The folder keeps pointing at its last conversation until a new one
+  // starts — the first prompt of this Session creates it. One that began
+  // before the Session is an earlier run's history, never this one's.
+  const sessionStart = Number(startedAt);
+  if (Number.isFinite(sessionStart) && sessionStart > 0) {
+    const began = antigravityStartedMs(transcript);
+    if (began !== null && began < sessionStart - ANTIGRAVITY_START_SKEW_MS) return null;
+  }
+  return transcript;
 }
 
 const REGISTRY = {

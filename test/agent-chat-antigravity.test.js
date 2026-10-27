@@ -249,41 +249,81 @@ describe('antigravity chat binding (engine)', () => {
     fs.rmSync(home, { recursive: true, force: true });
   });
 
-  it('tails user and assistant rows from the mapped transcript', () => {
-    const res = agents.launch({
-      site: { id: 'site-1', path: home },
-      agentId: 'antigravity',
-    });
-    expect(res.ok).toBe(true);
+  const user = rawLines.find((l) => l.includes('"USER_INPUT"'));
+  const assistant = rawLines.find(
+    (l) => l.includes('"PLANNER_RESPONSE"') && l.includes('successfully implemented')
+  );
+  // The fixture's lines, as written by a conversation that began at `at`.
+  const at = (line, ms) =>
+    line.replace(/"created_at":"[^"]+"/, `"created_at":"${new Date(ms).toISOString()}"`);
 
-    const user = rawLines.find((l) => l.includes('"USER_INPUT"'));
-    const assistant = rawLines.find(
-      (l) => l.includes('"PLANNER_RESPONSE"') && l.includes('successfully implemented')
-    );
+  function mapFolder(convId) {
     const cacheDir = path.join(home, '.gemini', 'antigravity-cli', 'cache');
     fs.mkdirSync(cacheDir, { recursive: true });
     fs.writeFileSync(
       path.join(cacheDir, 'last_conversations.json'),
-      JSON.stringify({ [home]: 'conv-live' })
+      JSON.stringify({ [home]: convId })
     );
+  }
+  function writeConversation(convId, lines) {
     const logsDir = path.join(
       home,
       '.gemini',
       'antigravity-cli',
       'brain',
-      'conv-live',
+      convId,
       '.system_generated',
       'logs'
     );
     fs.mkdirSync(logsDir, { recursive: true });
-    fs.writeFileSync(path.join(logsDir, 'transcript.jsonl'), `${user}\n${assistant}\n`);
+    fs.writeFileSync(path.join(logsDir, 'transcript.jsonl'), lines.join('\n') + '\n');
+  }
+  const rowsFor = (sessionId) =>
+    seen.filter((d) => d.sessionId === sessionId).flatMap((d) => d.rows);
 
-    agents.openChat(res.sessionId, 'viewer-1');
-    const rows = seen.filter((d) => d.sessionId === res.sessionId).flatMap((d) => d.rows);
+  function launchAgy() {
+    const res = agents.launch({
+      site: { id: 'site-1', path: home },
+      agentId: 'antigravity',
+    });
+    expect(res.ok).toBe(true);
+    return res.sessionId;
+  }
+
+  it('tails user and assistant rows from the mapped transcript', () => {
+    const id = launchAgy();
+    const now = Date.now();
+    mapFolder('conv-live');
+    writeConversation('conv-live', [at(user, now + 1000), at(assistant, now + 2000)]);
+
+    agents.openChat(id, 'viewer-1');
+    const rows = rowsFor(id);
     expect(rows.some((r) => r.role === 'user')).toBe(true);
     expect(
       rows.some((r) => r.role === 'assistant' && r.content.includes('successfully'))
     ).toBe(true);
+  });
+
+  it("never binds the folder's earlier conversation; waits for the Session's own", () => {
+    vi.useFakeTimers();
+    try {
+      const id = launchAgy();
+      const now = Date.now();
+      // The folder still maps to yesterday's conversation.
+      mapFolder('conv-old');
+      writeConversation('conv-old', [at(user, now - 86_400_000)]);
+      agents.openChat(id, 'viewer-1');
+      vi.advanceTimersByTime(2500);
+      expect(rowsFor(id)).toHaveLength(0);
+
+      // The Session's first prompt starts a new conversation.
+      writeConversation('conv-new', [at(user, now + 1000), at(assistant, now + 2000)]);
+      mapFolder('conv-new');
+      vi.advanceTimersByTime(2500);
+      expect(rowsFor(id).some((r) => r.role === 'assistant')).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
