@@ -1511,6 +1511,12 @@ function startHeartbeat(ws) {
 }
 
 function handleDeviceConnection(ws, req) {
+  // A protocol violation on the wire (a reserved opcode, an unmasked frame,
+  // invalid UTF-8, an oversized message) surfaces as an 'error' event on the
+  // socket, and ws closes it itself. With no listener, EventEmitter throws
+  // it instead — an uncaught exception in the main process, from anyone who
+  // can reach the hostname, before any authentication.
+  ws.on('error', () => {});
   const ip = (req.socket && req.socket.remoteAddress) || 'unknown';
   // This connection's channel (shared handshake.cjs): 'new' until a hello,
   // 'auth' once the ready is out and the phone's auth frame is due, 'open'

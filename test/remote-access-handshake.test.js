@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
+import net from 'node:net';
+import { randomBytes } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import WebSocket from 'ws';
@@ -306,5 +308,36 @@ describe('heartbeat', () => {
     const socket = stubborn.sockets.at(-1);
     await waitFor(() => expect(socket.tcpClosed).toBe(true), 'silent phone kept');
     expect(remoteAccess.listDevices()[0].connected).toBe(false);
+  });
+});
+
+describe('a malformed frame from anyone', () => {
+  it('closes that socket and never escapes as an uncaught exception', async () => {
+    const thrown = [];
+    const onUncaught = (err) => thrown.push(err);
+    process.on('uncaughtException', onUncaught);
+    try {
+      const port = remoteAccess.getStatus().actualPort;
+      const tcp = net.connect(port, '127.0.0.1');
+      await new Promise((resolve) => tcp.on('connect', resolve));
+      const upgraded = new Promise((resolve) => tcp.once('data', resolve));
+      tcp.write(
+        'GET /wpxen-device HTTP/1.1\r\nHost: 127.0.0.1\r\n' +
+          'Upgrade: websocket\r\nConnection: Upgrade\r\n' +
+          `Sec-WebSocket-Key: ${randomBytes(16).toString('base64')}\r\n` +
+          'Sec-WebSocket-Version: 13\r\n\r\n'
+      );
+      await upgraded;
+      const closed = new Promise((resolve) => tcp.on('close', resolve));
+      tcp.on('error', () => {});
+      // Opcode 0x3 is reserved: ws rejects the frame with an 'error' event.
+      tcp.write(Buffer.from([0x83, 0x80, 1, 2, 3, 4]));
+      await closed;
+      await new Promise((r) => setTimeout(r, 50));
+      expect(thrown).toEqual([]);
+      expect(remoteAccess.getStatus().state).toBe('listening');
+    } finally {
+      process.off('uncaughtException', onUncaught);
+    }
   });
 });
