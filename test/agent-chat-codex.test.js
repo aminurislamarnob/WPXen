@@ -400,3 +400,70 @@ describe('codex locator selection', () => {
     ).toBe(free);
   });
 });
+
+// Rollouts as Codex CLI 0.100 and 0.130 write them (test/fixtures, shapes
+// copied from real rollouts, content invented): no payload.id anywhere.
+describe('codex rollouts without payload ids (0.100, 0.130)', () => {
+  const agentChat = require('../electron/services/agentChat.cjs');
+  const { upsertRows, partitionChatRows } = require('../src/lib/chatRows');
+
+  const fixture = (name) => path.join(__dirname, 'fixtures', name);
+
+  // What the renderer ends up holding after the first page.
+  function rendered(file) {
+    let list = [];
+    agentChat.openChat(`codex-${file}`, 'v', {
+      transcriptPath: fixture(file),
+      decodeLine: decodeCodexLine,
+      onRows: (rows) => {
+        list = upsertRows(list, partitionChatRows(rows).top);
+      },
+    });
+    agentChat.closeChat(`codex-${file}`, 'v');
+    return list;
+  }
+
+  beforeEach(() => {
+    agentChat.__setDeps({
+      statSync: fs.statSync,
+      openSync: fs.openSync,
+      readSync: fs.readSync,
+      closeSync: fs.closeSync,
+      readdirSync: fs.readdirSync,
+      setInterval: () => 0,
+      clearInterval: () => {},
+    });
+  });
+
+  it.each(['codex-rollout-0.100.jsonl', 'codex-rollout-0.130.jsonl'])(
+    '%s: the prompt and the answer reach the chat',
+    (file) => {
+      const list = rendered(file);
+      expect(list.every((r) => r.id)).toBe(true);
+      expect(list.some((r) => r.role === 'user')).toBe(true);
+      expect(list.some((r) => r.role === 'assistant')).toBe(true);
+      expect(list.some((r) => r.role === 'tool')).toBe(true);
+    }
+  );
+
+  it('ids come from the line offset and survive a re-read', () => {
+    const first = rendered('codex-rollout-0.100.jsonl').map((r) => r.id);
+    const again = rendered('codex-rollout-0.100.jsonl').map((r) => r.id);
+    expect(again).toEqual(first);
+    const message = first.find((id) => id.startsWith('codex-rollout-0.100.jsonl:'));
+    expect(message).toMatch(/:\d{16}$/);
+  });
+
+  it('a record with its own id keeps it', () => {
+    const line = JSON.stringify({
+      type: 'response_item',
+      payload: { type: 'reasoning', id: 'rs_own', summary: [{ text: 'Thinking.' }] },
+    });
+    expect(decodeCodexLine(line, {}, { fallbackId: 'f:1' }).id).toBe('rs_own');
+    const bare = JSON.stringify({
+      type: 'response_item',
+      payload: { type: 'reasoning', summary: [{ text: 'Thinking.' }] },
+    });
+    expect(decodeCodexLine(bare, {}, { fallbackId: 'f:1' }).id).toBe('f:1');
+  });
+});

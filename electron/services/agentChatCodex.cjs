@@ -89,7 +89,10 @@ function planTodos(input) {
   return value.plan.length > 0 && todos.length === 0 ? null : todos;
 }
 
-function decodeCodexLine(lineStr, state) {
+// `fallbackId` is the line's byte-offset id from the engine: real rollouts
+// (0.100, 0.130) write no payload.id, and a row without an id is dropped by
+// the renderer's upsert.
+function decodeCodexLine(lineStr, state, { fallbackId } = {}) {
   if (!lineStr || !lineStr.trim()) return null;
   let record;
   try {
@@ -100,6 +103,7 @@ function decodeCodexLine(lineStr, state) {
   const payload =
     record.payload && typeof record.payload === 'object' ? record.payload : null;
   if (!payload) return null;
+  const id = payload.id || record.id || fallbackId;
 
   state.codexCalls = state.codexCalls || {};
   state.codexResults = state.codexResults || {};
@@ -112,11 +116,7 @@ function decodeCodexLine(lineStr, state) {
       const text = messageText(payload.content);
       if (!text) return null;
       if (payload.role === 'user' && isInjectedUserText(text)) return null;
-      return {
-        id: payload.id || record.id,
-        role: payload.role,
-        content: text,
-      };
+      return { id, role: payload.role, content: text };
     }
 
     if (payload.type === 'reasoning') {
@@ -124,11 +124,7 @@ function decodeCodexLine(lineStr, state) {
         (typeof payload.text === 'string' && payload.text) ||
         summaryText(payload.summary);
       if (!text) return null;
-      return {
-        id: payload.id || record.id,
-        role: 'reasoning',
-        content: text,
-      };
+      return { id, role: 'reasoning', content: text };
     }
 
     if (
@@ -209,11 +205,11 @@ function decodeCodexLine(lineStr, state) {
     }
     if (payload.type === 'user_message' && typeof payload.message === 'string') {
       if (!payload.message) return null;
-      return { id: record.id, role: 'user', content: payload.message };
+      return { id, role: 'user', content: payload.message };
     }
     if (payload.type === 'agent_message' && typeof payload.message === 'string') {
       if (!payload.message) return null;
-      return { id: record.id, role: 'assistant', content: payload.message };
+      return { id, role: 'assistant', content: payload.message };
     }
     return null;
   }

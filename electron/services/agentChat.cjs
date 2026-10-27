@@ -36,18 +36,43 @@ function readRange(fd, start, length) {
   return buf.slice(0, n);
 }
 
-// Split a buffer into lines. Returns { lines: string[], partial: Buffer }.
+// Split a buffer read from `base` into lines, each with the byte offset it
+// starts at. Returns { lines: { offset, text }[], partial: Buffer }, where
 // `partial` is the trailing bytes after the last newline.
-function splitLines(buf) {
+function splitLines(buf, base = 0) {
   const lines = [];
   let start = 0;
   for (let i = 0; i < buf.length; i++) {
     if (buf[i] === 0x0a) {
-      lines.push(buf.slice(start, i).toString('utf8'));
+      lines.push({ offset: base + start, text: buf.slice(start, i).toString('utf8') });
       start = i + 1;
     }
   }
   return { lines, partial: buf.slice(start) };
+}
+
+// A line's id when its record carries none (Codex rollouts write no
+// payload.id): its byte offset, which every read of the file agrees on — the
+// first page, Load older and the live tail alike (after Orca's
+// transcript-fallback-id.ts). The basename keeps the user's paths off IPC;
+// one watch never reads two files of the same name into one row list.
+const FALLBACK_ID_WIDTH = 16;
+function transcriptFallbackId(file, offset) {
+  return `${path.basename(file)}:${String(offset).padStart(FALLBACK_ID_WIDTH, '0')}`;
+}
+
+// Decode lines into rows, truncating results. Each decoder gets the line,
+// its state, and { fallbackId } for a record with no id of its own.
+function decodeLines(lines, state, decodeLine, file) {
+  const rows = [];
+  for (const { offset, text } of lines) {
+    if (!text.trim()) continue;
+    const row = decodeLine(text, state, {
+      fallbackId: transcriptFallbackId(file, offset),
+    });
+    if (row) rows.push(...[row].flat().map(truncateRow));
+  }
+  return rows;
 }
 
 // Truncate tool results in a decoded row, marking truncated ones.
@@ -74,13 +99,12 @@ function truncateRow(row) {
   return { ...row, blocks };
 }
 
-// ── Tail read ──────────────────────────────────────────────────────────────
-// Read backwards from EOF, collecting up to MAX_PAGE_ROWS rows or
-// MAX_PAGE_BYTES, whichever comes first. Returns { rows, pageStart }.
-function tailRead(fd, fileSize, decodeLine) {
-  if (fileSize === 0) return { rows: [], pageStart: 0, state: {} };
-
-  let cursor = fileSize;
+// ── Page reads ─────────────────────────────────────────────────────────────
+// Read backwards from `end`, collecting up to MAX_PAGE_ROWS lines or
+// MAX_PAGE_BYTES, whichever comes first. Returns the page's lines, oldest
+// first with their offsets, and `pageStart`, where the next older page ends.
+function readPageLines(fd, end) {
+  let cursor = end;
   let bytesUsed = 0;
   let remainingBuffer = Buffer.alloc(0);
   const allLines = [];
@@ -91,94 +115,53 @@ function tailRead(fd, fileSize, decodeLine) {
     const buf = readRange(fd, chunkStart, chunkLen);
     bytesUsed += chunkLen;
 
+    // `combined` starts at chunkStart, so a byte's file offset is
+    // chunkStart + its index.
     const combined = Buffer.concat([buf, remainingBuffer]);
-    let end = combined.length;
+    let lineEnd = combined.length;
     const linesInChunk = [];
 
     // Process backwards to safely handle partial lines
     for (let i = combined.length - 1; i >= 0; i--) {
       if (combined[i] === 0x0a) {
-        linesInChunk.unshift(combined.slice(i + 1, end).toString('utf8'));
-        end = i;
+        linesInChunk.unshift({
+          offset: chunkStart + i + 1,
+          text: combined.slice(i + 1, lineEnd).toString('utf8'),
+        });
+        lineEnd = i;
       }
     }
 
-    remainingBuffer = combined.slice(0, end);
+    remainingBuffer = combined.slice(0, lineEnd);
     allLines.unshift(...linesInChunk);
     cursor = chunkStart;
   }
 
   if (cursor === 0 && remainingBuffer.length > 0) {
-    allLines.unshift(remainingBuffer.toString('utf8'));
+    allLines.unshift({ offset: 0, text: remainingBuffer.toString('utf8') });
     remainingBuffer = Buffer.alloc(0);
   }
 
-  const state = {};
-  const decoded = [];
-  for (const line of allLines) {
-    if (!line.trim()) continue;
-    const row = decodeLine(line, state);
-    if (row) {
-      if (Array.isArray(row)) decoded.push(...row.map(truncateRow));
-      else decoded.push(truncateRow(row));
-    }
-  }
+  return { lines: allLines, pageStart: cursor + remainingBuffer.length };
+}
 
-  const pageStart = cursor + remainingBuffer.length;
-  return { rows: decoded, pageStart, state };
+// The newest page. Returns { rows, pageStart, state }.
+function tailRead(fd, fileSize, decodeLine, file) {
+  if (fileSize === 0) return { rows: [], pageStart: 0, state: {} };
+  const { lines, pageStart } = readPageLines(fd, fileSize);
+  const state = {};
+  const rows = decodeLines(lines, state, decodeLine, file);
+  return { rows, pageStart, state };
 }
 
 // ── Older page ─────────────────────────────────────────────────────────────
 // `results` holds the orphan tool results newer pages already decoded, so a
 // call paged in here picks its result up.
-function loadOlderPage(fd, pageStart, decodeLine, results = {}) {
+function loadOlderPage(fd, pageStart, decodeLine, file, results = {}) {
   if (pageStart <= 0) return { rows: [], pageStart: 0, atStart: true };
-
-  let cursor = pageStart;
-  let bytesUsed = 0;
-  let remainingBuffer = Buffer.alloc(0);
-  const allLines = [];
-
-  while (cursor > 0 && allLines.length < MAX_PAGE_ROWS && bytesUsed < MAX_PAGE_BYTES) {
-    const chunkStart = Math.max(0, cursor - PAGE_CHUNK);
-    const chunkLen = cursor - chunkStart;
-    const buf = readRange(fd, chunkStart, chunkLen);
-    bytesUsed += chunkLen;
-
-    const combined = Buffer.concat([buf, remainingBuffer]);
-    let end = combined.length;
-    const linesInChunk = [];
-
-    for (let i = combined.length - 1; i >= 0; i--) {
-      if (combined[i] === 0x0a) {
-        linesInChunk.unshift(combined.slice(i + 1, end).toString('utf8'));
-        end = i;
-      }
-    }
-
-    remainingBuffer = combined.slice(0, end);
-    allLines.unshift(...linesInChunk);
-    cursor = chunkStart;
-  }
-
-  if (cursor === 0 && remainingBuffer.length > 0) {
-    allLines.unshift(remainingBuffer.toString('utf8'));
-    remainingBuffer = Buffer.alloc(0);
-  }
-
-  const state = { results };
-  const decoded = [];
-  for (const line of allLines) {
-    if (!line.trim()) continue;
-    const row = decodeLine(line, state);
-    if (row) {
-      if (Array.isArray(row)) decoded.push(...row.map(truncateRow));
-      else decoded.push(truncateRow(row));
-    }
-  }
-
-  const newPageStart = cursor + remainingBuffer.length;
-  return { rows: decoded, pageStart: newPageStart, atStart: newPageStart <= 0 };
+  const { lines, pageStart: newPageStart } = readPageLines(fd, pageStart);
+  const rows = decodeLines(lines, { results }, decodeLine, file);
+  return { rows, pageStart: newPageStart, atStart: newPageStart <= 0 };
 }
 
 // ── Fetch full tool result ─────────────────────────────────────────────────
@@ -196,7 +179,7 @@ function fetchFull(fd, fileSize, toolUseId) {
     const { lines, partial: remainder } = splitLines(combined);
     partial = remainder;
 
-    for (const line of lines) {
+    for (const { text: line } of lines) {
       if (!line.trim()) continue;
       let record;
       try {
@@ -387,7 +370,12 @@ function pollSubagent(watch, sub) {
     if (sub.fd === null) {
       sub.fd = deps.openSync(subPath, 'r');
       const complete = completeLength(sub.fd, deps.statSync(subPath).size);
-      const { rows, pageStart, state } = tailRead(sub.fd, complete, watch.decodeLine);
+      const { rows, pageStart, state } = tailRead(
+        sub.fd,
+        complete,
+        watch.decodeLine,
+        subPath
+      );
       sub.currentRows = rows;
       sub.pageStart = pageStart;
       sub.state = state;
@@ -400,14 +388,9 @@ function pollSubagent(watch, sub) {
     const size = deps.statSync(subPath).size;
     if (size <= sub.tailOffset) return;
     const buf = readRange(sub.fd, sub.tailOffset, size - sub.tailOffset);
-    const { lines, partial } = splitLines(buf);
+    const { lines, partial } = splitLines(buf, sub.tailOffset);
     sub.tailOffset += buf.length - partial.length;
-    const newRows = [];
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      const row = watch.decodeLine(line, sub.state);
-      if (row) newRows.push(...[row].flat().map(truncateRow));
-    }
+    const newRows = decodeLines(lines, sub.state, watch.decodeLine, subPath);
     if (newRows.length > 0) {
       sub.currentRows.push(...newRows);
       watch.onRows(nested(newRows));
@@ -476,7 +459,7 @@ function openChat(sessionId, viewerId, opts) {
   let state;
   try {
     complete = completeLength(fd, stat.size);
-    ({ rows, pageStart, state } = tailRead(fd, complete, decodeLine));
+    ({ rows, pageStart, state } = tailRead(fd, complete, decodeLine, transcriptPath));
   } catch (err) {
     watches.delete(sessionId);
     try {
@@ -520,17 +503,9 @@ function openChat(sessionId, viewerId, opts) {
 
         // Only complete lines advance the offset; a partial one is re-read
         // whole on the next poll.
-        const { lines, partial } = splitLines(buf);
+        const { lines, partial } = splitLines(buf, watch.tailOffset);
         watch.tailOffset += buf.length - partial.length;
-        const newRows = [];
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          const row = watch.decodeLine(line, watch.state);
-          if (row) {
-            if (Array.isArray(row)) newRows.push(...row.map(truncateRow));
-            else newRows.push(truncateRow(row));
-          }
-        }
+        const newRows = decodeLines(lines, watch.state, watch.decodeLine, watch.path);
 
         if (newRows.length > 0) {
           augmentToolRows(newRows, watch.subagents);
@@ -579,6 +554,7 @@ function loadOlder(sessionId) {
     watch.fd,
     watch.pageStart,
     watch.decodeLine,
+    watch.path,
     watch.state.results
   );
   watch.pageStart = pageStart;
@@ -652,7 +628,8 @@ function chatLoadOlderSubagent(sessionId, toolUseId) {
   const { rows, pageStart, atStart } = loadOlderPage(
     sub.fd,
     sub.pageStart,
-    watch.decodeLine
+    watch.decodeLine,
+    path.join(subagentDir(watch), `agent-${sub.agentId}.jsonl`)
   );
   sub.pageStart = pageStart;
 
@@ -743,6 +720,7 @@ module.exports = {
   chatLoadOlderSubagent,
   chatImage,
   IMAGE_MAX_BYTES,
+  transcriptFallbackId,
   // Exposed for testing
   MAX_PAGE_ROWS,
   MAX_PAGE_BYTES,
