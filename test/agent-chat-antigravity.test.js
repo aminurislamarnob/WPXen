@@ -15,7 +15,7 @@ import {
 } from '../electron/services/transcripts.cjs';
 
 // Fixture lines copied from a real Antigravity transcript.jsonl (paths
-// scrubbed /Users/welabs → /Users/example): USER_INPUT, a thinking planner
+// home directory scrubbed to /Users/example): USER_INPUT, a thinking planner
 // with 3 view_file calls, its 3 GENERIC results (one truncated), a RUNNING
 // line, SYSTEM_MESSAGE, a replace_file_content planner, an assistant
 // markdown planner, CHECKPOINT, ERROR_MESSAGE.
