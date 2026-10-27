@@ -76,10 +76,13 @@ describe('isRunningAsync', () => {
 
   it('sees a process that really is an nginx binary', async () => {
     // A symlink named nginx: argv[0] is its path, the binary is untouched.
-    // (A *copy* of /bin/sleep gets SIGKILLed by macOS code signing.)
+    // (A *copy* gets SIGKILLed by macOS code signing.) The target is node,
+    // not /bin/sleep: Ubuntu 26.04's coreutils is one multi-call binary that
+    // picks the utility from argv[0], so a sleep invoked as "nginx" exits at
+    // once. Node ignores argv[0].
     const fake = path.join(tmp, 'nginx');
-    fs.symlinkSync('/bin/sleep', fake);
-    await startAndSettle(fake, ['30']);
+    fs.symlinkSync(process.execPath, fake);
+    await startAndSettle(fake, ['-e', 'setTimeout(() => {}, 30000)']);
     expect(await nginx.isRunningAsync()).toBe(true);
     expect(nginx.isRunning()).toBe(true);
   });
