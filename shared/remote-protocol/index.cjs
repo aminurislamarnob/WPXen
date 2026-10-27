@@ -4,9 +4,9 @@
 //
 // Plain JavaScript with JSDoc types and no Node-only or Electron APIs, so both
 // the Electron main process (via require) and the React Native phone app (via
-// Metro) import the same framing, names and versions. Desktop CI does not lint,
-// format-check, test or build `mobile/`; this folder stays in the root
-// eslint/prettier run so drift fails here, not on the phone.
+// Metro) import the same framing, names and versions. This folder stays in the
+// root eslint/prettier/vitest run so drift fails there, and CI's mobile job
+// bundles it through Metro (`npm run bundle:check` in mobile/).
 //
 // The frame format is documented in frames.cjs. Only tweetnacl plus the local
 // base64 helper are allowed here — no Buffer, crypto, atob or WebSocket.

@@ -26,6 +26,13 @@ hides every test failure behind it — when a run goes red, check which step
 stopped rather than assuming the first error is the only one. Run all four
 locally before pushing.
 
+A second job, `mobile`, gates WPXen Mobile on its own: in `mobile/`,
+`typecheck` → `lint` → `test` → `bundle:check`. `bundle:check` runs Metro the
+way a build does (`expo export` into a temp dir) — the only check that sees an
+import Metro can't resolve, such as a package `shared/` reaches for that
+`mobile/metro.config.js` doesn't map. Run it after touching `shared/` or
+`mobile/`.
+
 ⚠️ **Never `require('electron')` at module scope** in anything a test
 imports — directly or transitively. Tests load main-process modules under plain
 Node, where `electron`'s `index.js` runs `getElectronPath()` at module scope: it
