@@ -535,3 +535,59 @@ describe('codex turns render once, without injected context', () => {
     expect(answer).toEqual({ id: 'f:2', role: 'assistant', content: 'Visible response' });
   });
 });
+
+describe('codex locator reads only the head of each rollout', () => {
+  let home;
+  beforeEach(() => {
+    home = fs.mkdtempSync(path.join(os.tmpdir(), 'wpxen-codex-head-'));
+  });
+  afterEach(() => {
+    setTranscriptDeps({
+      readFileSync: fs.readFileSync,
+      openSync: fs.openSync,
+      readSync: fs.readSync,
+      closeSync: fs.closeSync,
+    });
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+
+  it('matches the cwd from line 1 without reading the rest', () => {
+    const now = new Date();
+    const dir = path.join(
+      home,
+      '.codex',
+      'sessions',
+      String(now.getFullYear()),
+      String(now.getMonth() + 1).padStart(2, '0'),
+      String(now.getDate()).padStart(2, '0')
+    );
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, 'rollout-big.jsonl');
+    const meta = fs
+      .readFileSync(path.join(__dirname, 'fixtures', 'codex-rollout-0.130.jsonl'), 'utf8')
+      .split('\n')[0]
+      .replace('/tmp/example-site', '/my/cwd');
+    // A long session: megabytes after the session_meta line.
+    fs.writeFileSync(file, meta + '\n' + 'x'.repeat(4 * 1024 * 1024) + '\n');
+
+    let bytesRead = 0;
+    setTranscriptDeps({
+      homedir: () => home,
+      existsSync: fs.existsSync,
+      readdirSync: fs.readdirSync,
+      statSync: fs.statSync,
+      readFileSync: () => {
+        throw new Error('read the whole rollout');
+      },
+      openSync: fs.openSync,
+      closeSync: fs.closeSync,
+      readSync: (...args) => {
+        const n = fs.readSync(...args);
+        bytesRead += n;
+        return n;
+      },
+    });
+    expect(locateTranscript('codex', '/my/cwd', 0, null, null, home)).toBe(file);
+    expect(bytesRead).toBeLessThanOrEqual(64 * 1024);
+  });
+});

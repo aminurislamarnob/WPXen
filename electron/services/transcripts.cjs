@@ -77,6 +77,24 @@ function locateClaude({ cwd, startedAt, home, transcriptId }) {
   return latest;
 }
 
+// The cwd a rollout's session_meta names, from its first line only (after
+// Orca's codex-rollout-session-meta.ts:7-47). Every candidate is checked on
+// every 2 s locate retry, and a rollout grows to megabytes: reading it whole
+// to see line 1 cost the whole file each time. A first line past 64 KB
+// (its base_instructions are ~12-22 KB today) reads as no cwd.
+function rolloutCwd(file) {
+  const firstLine = readHead(file).split(/\r?\n/, 1)[0]?.trim();
+  if (!firstLine) return null;
+  try {
+    const meta = JSON.parse(firstLine);
+    return meta?.type === 'session_meta' && typeof meta.payload?.cwd === 'string'
+      ? meta.payload.cwd
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 function locateCodex({ cwd, startedAt, home, exclude }) {
   const sessionsDir = path.join(home, '.codex', 'sessions');
   if (!deps.existsSync(sessionsDir)) return null;
@@ -114,21 +132,13 @@ function locateCodex({ cwd, startedAt, home, exclude }) {
             if (exclude && exclude.has(full)) continue;
             try {
               const stat = deps.statSync(full);
-              if (stat.mtimeMs >= startedAt && stat.mtimeMs > maxMtime) {
-                // Read first line
-                const content = deps.readFileSync(full, 'utf8');
-                const firstLine = content.split('\n')[0];
-                if (firstLine) {
-                  const meta = JSON.parse(firstLine);
-                  if (
-                    meta.type === 'session_meta' &&
-                    meta.payload &&
-                    meta.payload.cwd === cwd
-                  ) {
-                    maxMtime = stat.mtimeMs;
-                    latest = full;
-                  }
-                }
+              if (
+                stat.mtimeMs >= startedAt &&
+                stat.mtimeMs > maxMtime &&
+                rolloutCwd(full) === cwd
+              ) {
+                maxMtime = stat.mtimeMs;
+                latest = full;
               }
             } catch {
               // skip
