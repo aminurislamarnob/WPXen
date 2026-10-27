@@ -50,7 +50,7 @@ const {
   authPayload,
   isAuthPayload,
 } = require('./handshake.cjs');
-const { createClient, DEFAULT_REQUEST_TIMEOUT_MS } = require('./client.cjs');
+const { createClient, DEFAULT_REQUEST_TIMEOUT_MS, DIAL_ERRORS } = require('./client.cjs');
 
 module.exports = {
   PROTOCOL_VERSION,
@@ -88,4 +88,5 @@ module.exports = {
   isAuthPayload,
   createClient,
   DEFAULT_REQUEST_TIMEOUT_MS,
+  DIAL_ERRORS,
 };

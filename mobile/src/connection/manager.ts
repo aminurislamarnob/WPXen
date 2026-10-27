@@ -7,6 +7,7 @@
 import { AppState, type AppStateStatus } from 'react-native';
 import { backoffDelayMs } from './backoff';
 import { deriveConnectionState, type ConnectionState } from './state';
+import { judgeDialFailure, readDialFailure, type ConnectionLatch } from './dialPolicy';
 import { createClient, decodeBase64 } from '../protocol';
 import type { HostRecord } from '../hosts/hostList';
 import { secureRandomBytes } from '../crypto';
@@ -16,6 +17,8 @@ export interface ConnectionUpdate {
   // Last ping round-trip while connected, for the host screen's proof.
   rttMs: number | null;
   lastSeenAt: number | null;
+  // Set with 'update-required': which side to update.
+  update: 'desktop' | 'phone' | null;
 }
 
 interface ManagerArgs {
@@ -47,6 +50,7 @@ export class HostConnection {
   private socket: 'open' | 'connecting' | 'closed' = 'closed';
   private closeStatus: 'revoked' | 'closed' | null = null;
   private appStateSub: { remove: () => void } | null = null;
+  private latch: ConnectionLatch | null = null;
 
   constructor(args: ManagerArgs) {
     this.args = {
@@ -92,9 +96,11 @@ export class HostConnection {
         closeStatus: this.closeStatus,
         lastSeenAt: this.lastSeenAt,
         heartbeatLost: this.heartbeatLost,
+        latch: this.latch,
       }),
       rttMs: this.rttMs,
       lastSeenAt: this.lastSeenAt,
+      update: this.latch?.kind === 'update-required' ? this.latch.update : null,
     });
   }
 
@@ -132,8 +138,9 @@ export class HostConnection {
 
   private async loop(): Promise<void> {
     if (this.stopped || this.socket === 'open' || this.socket === 'connecting') return;
-    // Revocation is terminal: the list screen owns the row from here.
-    if (this.closeStatus === 'revoked') return;
+    // Revocation is terminal: the list screen owns the row from here. So is
+    // a latch: the Mac said why, and redialling won't change it.
+    if (this.closeStatus === 'revoked' || this.latch) return;
     this.socket = 'connecting';
     this.emit();
     try {
@@ -144,7 +151,7 @@ export class HostConnection {
     // Snapshot through a cast: narrowing follows the initializer otherwise.
     const socketAfter = this.socket as 'open' | 'connecting' | 'closed';
     const closeAfter = this.closeStatus as 'revoked' | 'closed' | null;
-    if (this.stopped || closeAfter === 'revoked') return;
+    if (this.stopped || closeAfter === 'revoked' || this.latch) return;
     if (socketAfter === 'open') return;
     this.attempts += 1;
     this.emit();
@@ -162,9 +169,11 @@ export class HostConnection {
     if (!client) return;
     try {
       await client.connect();
-    } catch {
+    } catch (err) {
       this.socket = 'closed';
       this.closeStatus = 'closed';
+      const verdict = judgeDialFailure(readDialFailure(err));
+      if (verdict.action === 'latch') this.latch = verdict.latch;
       this.emit();
       return;
     }

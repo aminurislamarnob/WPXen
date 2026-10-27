@@ -26,6 +26,8 @@ function stateLabel(update: ConnectionUpdate | null, lastSeen: number | null): s
       return 'Mac asleep';
     case 'revoked':
       return 'Removed from WPXen';
+    case 'update-required':
+      return update.update === 'desktop' ? 'Update WPXen on the Mac' : 'Update WPXen Mobile';
   }
 }
 
@@ -249,6 +251,13 @@ export default function HostScreen() {
       <Text style={styles.state}>{stateLabel(update, lastSeen)}</Text>
       {update?.state === 'connected' && update.rttMs != null && (
         <Text style={styles.body}>Ping round-trip: {Math.round(update.rttMs)} ms, encrypted end to end.</Text>
+      )}
+      {update?.state === 'update-required' && (
+        <Text style={styles.body}>
+          {update.update === 'desktop'
+            ? 'This app speaks a newer protocol than WPXen on the Mac. Update WPXen on the Mac, then reopen this screen.'
+            : 'WPXen on the Mac speaks a newer protocol than this app. Update WPXen Mobile, then reopen this screen.'}
+        </Text>
       )}
       {update?.state === 'revoked' && (
         <Text style={styles.body}>This device was removed from WPXen. Pair again from Settings → Mobile.</Text>

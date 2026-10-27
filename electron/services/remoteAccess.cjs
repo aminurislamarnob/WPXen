@@ -1817,9 +1817,20 @@ function handleDeviceConnection(ws, req) {
   }
 
   async function handleFrameAsync(msg) {
+    // A paired phone on another protocol version is told which side to
+    // update, in plaintext (the version is no secret — the health route
+    // reports it), instead of a silent close it would retry forever.
+    if (phase === 'new' && msg.type === 'hello' && msg.v !== PROTOCOL_VERSION) {
+      sendWs(ws, {
+        v: PROTOCOL_VERSION,
+        type: 'error',
+        reason: PAIR_ERRORS.versionMismatch,
+        update:
+          typeof msg.v === 'number' && msg.v > PROTOCOL_VERSION ? 'desktop' : 'phone',
+      });
+      return drop(ws);
+    }
     if (msg.v !== PROTOCOL_VERSION) return drop(ws);
-    // Unknown ids are dropped with no reply — the response never reveals
-    // whether the id or the key was wrong.
     if (phase === 'new') {
       if (msg.type !== 'hello') return drop(ws);
       return handleHello(msg);

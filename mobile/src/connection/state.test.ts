@@ -41,3 +41,15 @@ describe('deriveConnectionState', () => {
     ).toBe('revoked');
   });
 });
+
+describe('a latched failure', () => {
+  it('reads update-required, and only revocation outranks it', () => {
+    const latch = { kind: 'update-required', update: 'desktop' } as const;
+    expect(
+      deriveConnectionState({ socket: 'closed', closeStatus: 'closed', lastSeenAt: 1, heartbeatLost: true, latch })
+    ).toBe('update-required');
+    expect(
+      deriveConnectionState({ socket: 'closed', closeStatus: 'revoked', lastSeenAt: 1, heartbeatLost: false, latch })
+    ).toBe('revoked');
+  });
+});

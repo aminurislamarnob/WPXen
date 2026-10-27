@@ -11,9 +11,28 @@
 // counters belong to one connection and die with its socket.
 
 const { PROTOCOL_VERSION, CLOSE_REVOKED } = require('./protocol.cjs');
+const { PAIR_ERRORS } = require('./errors.cjs');
 const { createHello, completeHandshake, authPayload } = require('./handshake.cjs');
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
+
+// Why a dial failed, on the rejected connect()'s error as `code`:
+//   'version_mismatch'  the Mac speaks another protocol version; `update`
+//                       names the side to update ('desktop' | 'phone')
+//   'unreachable'       anything else — no answer, a dropped socket
+const DIAL_ERRORS = {
+  versionMismatch: 'version_mismatch',
+  unreachable: 'unreachable',
+};
+
+function dialError(code, extra = {}) {
+  const err = new Error(
+    code === DIAL_ERRORS.versionMismatch ? 'Version mismatch.' : 'Could not connect.'
+  );
+  err.code = code;
+  Object.assign(err, extra);
+  return err;
+}
 
 function createClient({
   url,
@@ -44,6 +63,8 @@ function createClient({
   const openListeners = new Set();
   const closeListeners = new Set();
   let closed = false;
+  // Set when the Mac says why it is refusing this dial.
+  let dialRefusal = null;
 
   function failAll(err) {
     for (const { reject, timer } of pending.values()) {
@@ -75,7 +96,9 @@ function createClient({
       const { reject, timer } = dialing;
       dialing = null;
       clearTimeout(timer);
-      reject(new Error('Could not connect.'));
+      const refusal = dialRefusal;
+      dialRefusal = null;
+      reject(refusal || dialError(DIAL_ERRORS.unreachable));
     }
     // A dial that never came up is the caller's rejected connect(), not a
     // closed connection.
@@ -137,7 +160,22 @@ function createClient({
       close();
       return;
     }
-    if (!outer || typeof outer !== 'object' || outer.v !== PROTOCOL_VERSION) {
+    if (!outer || typeof outer !== 'object') {
+      close();
+      return;
+    }
+    if (
+      phase === 'hello' &&
+      outer.type === 'error' &&
+      outer.reason === PAIR_ERRORS.versionMismatch
+    ) {
+      dialRefusal = dialError(DIAL_ERRORS.versionMismatch, {
+        update: outer.update === 'desktop' ? 'desktop' : 'phone',
+      });
+      close();
+      return;
+    }
+    if (outer.v !== PROTOCOL_VERSION) {
       close();
       return;
     }
@@ -207,6 +245,7 @@ function createClient({
     if (dialing) return dialing.promise;
     const gen = ++generation;
     closed = false;
+    dialRefusal = null;
     let resolve;
     let reject;
     const promise = new Promise((res, rej) => {
@@ -306,4 +345,4 @@ function createClient({
   return { connect, request, subscribe, onOpen, onClose, close };
 }
 
-module.exports = { createClient, DEFAULT_REQUEST_TIMEOUT_MS };
+module.exports = { createClient, DEFAULT_REQUEST_TIMEOUT_MS, DIAL_ERRORS };

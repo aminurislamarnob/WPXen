@@ -21,6 +21,7 @@ import {
   createHello,
   completeHandshake,
   authPayload,
+  DIAL_ERRORS,
 } from '../shared/remote-protocol/index.cjs';
 import { createMacEnd } from './helpers/macEnd.js';
 
@@ -595,6 +596,58 @@ describe('encrypted channel', () => {
     rawSocket.send(JSON.stringify(createHello({ deviceId: 'no-such-device' }).message));
     await closed;
     expect(answered).toBe(false);
+  });
+
+  it('tells a paired phone on another version which side to update', async () => {
+    const { client, deviceId } = await pairedClient();
+    client.close();
+    for (const [v, update] of [
+      [PROTOCOL_VERSION + 1, 'desktop'],
+      [PROTOCOL_VERSION - 1, 'phone'],
+    ]) {
+      const sock = await attackedSocket(listen());
+      sock.rawSocket.send(JSON.stringify({ ...createHello({ deviceId }).message, v }));
+      await sock.closed;
+      expect(sock.messages.map((m) => JSON.parse(m))).toEqual([
+        {
+          v: PROTOCOL_VERSION,
+          type: 'error',
+          reason: PAIR_ERRORS.versionMismatch,
+          update,
+        },
+      ]);
+    }
+  });
+
+  it("rejects the client's connect with the side to update", async () => {
+    class OtherVersionMac {
+      static OPEN = 1;
+      constructor() {
+        this.readyState = 1;
+        queueMicrotask(() => this.onopen?.());
+      }
+      send() {
+        const data = JSON.stringify({
+          v: PROTOCOL_VERSION + 1,
+          type: 'error',
+          reason: PAIR_ERRORS.versionMismatch,
+          update: 'phone',
+        });
+        queueMicrotask(() => this.onmessage?.({ data }));
+      }
+      close() {}
+    }
+    const client = createClient({
+      url: 'ws://127.0.0.1:1',
+      WebSocket: OtherVersionMac,
+      keys: newKeyPair(),
+      hostPublicKey: newKeyPair().publicKey,
+      deviceId: 'd',
+    });
+    await expect(client.connect()).rejects.toMatchObject({
+      code: DIAL_ERRORS.versionMismatch,
+      update: 'phone',
+    });
   });
 
   it('rejects ops outside the allowlist', async () => {
