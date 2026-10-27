@@ -11,7 +11,8 @@ export type ConnectionState =
   | 'offline'
   | 'asleep'
   | 'revoked'
-  | 'update-required';
+  | 'update-required'
+  | 'auth-failed';
 
 export interface ConnectionSnapshot {
   socket: 'open' | 'connecting' | 'closed';
@@ -29,6 +30,7 @@ export function deriveConnectionState(snap: ConnectionSnapshot): ConnectionState
   // Revocation sticks: the Mac removed this device, so retrying is pointless.
   if (snap.closeStatus === 'revoked') return 'revoked';
   if (snap.latch?.kind === 'update-required') return 'update-required';
+  if (snap.latch?.kind === 'auth-failed') return 'auth-failed';
   if (snap.socket === 'open') return snap.heartbeatLost ? 'asleep' : 'connected';
   if (snap.heartbeatLost) return 'asleep';
   if (snap.lastSeenAt != null) return 'offline';

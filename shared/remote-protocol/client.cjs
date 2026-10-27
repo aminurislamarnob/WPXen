@@ -19,9 +19,12 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
 // Why a dial failed, on the rejected connect()'s error as `code`:
 //   'version_mismatch'  the Mac speaks another protocol version; `update`
 //                       names the side to update ('desktop' | 'phone')
+//   'revoked'           the Mac closed the dial with the revoked code: it
+//                       knows no such device (revoked while offline)
 //   'unreachable'       anything else — no answer, a dropped socket
 const DIAL_ERRORS = {
   versionMismatch: 'version_mismatch',
+  revoked: 'revoked',
   unreachable: 'unreachable',
 };
 
@@ -96,9 +99,11 @@ function createClient({
       const { reject, timer } = dialing;
       dialing = null;
       clearTimeout(timer);
-      const refusal = dialRefusal;
+      const refusal =
+        dialRefusal ||
+        dialError(code === CLOSE_REVOKED ? DIAL_ERRORS.revoked : DIAL_ERRORS.unreachable);
       dialRefusal = null;
-      reject(refusal || dialError(DIAL_ERRORS.unreachable));
+      reject(refusal);
     }
     // A dial that never came up is the caller's rejected connect(), not a
     // closed connection.

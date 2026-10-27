@@ -10,6 +10,7 @@ import remoteAccess, {
 import {
   PROTOCOL_VERSION,
   PAIR_ERRORS,
+  CLOSE_REVOKED,
   newKeyPair,
   publicKeyB64,
   confirmationCode,
@@ -588,13 +589,16 @@ describe('encrypted channel', () => {
     expect(remoteAccess.listDevices()[0].connected).toBe(false);
   });
 
-  it('drops unknown device ids without answering', async () => {
+  it('refuses unknown device ids with the revoked code and no message', async () => {
     const port = listen();
-    const { rawSocket, closed } = await attackedSocket(port);
+    const { rawSocket } = await attackedSocket(port);
+    const closed = new Promise((resolve) =>
+      rawSocket.on('close', (code) => resolve(code))
+    );
     let answered = false;
     rawSocket.on('message', () => (answered = true));
     rawSocket.send(JSON.stringify(createHello({ deviceId: 'no-such-device' }).message));
-    await closed;
+    expect(await closed).toBe(CLOSE_REVOKED);
     expect(answered).toBe(false);
   });
 

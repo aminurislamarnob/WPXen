@@ -1772,11 +1772,14 @@ function handleDeviceConnection(ws, req) {
   // with this socket's fresh nonce and ephemeral key. Answering proves
   // nothing about the caller — a hello copied off the wire gets a ready too
   // — so the device is not tracked here; only an auth frame that opens
-  // under this connection's keys does that. An unknown id or a malformed
-  // hello is closed without a reply.
+  // under this connection's keys does that. A malformed hello is closed
+  // without a reply. An unknown id is closed with the revoked code: a phone
+  // revoked while it was offline only finds out when it next dials, and a
+  // silent close would read as "Mac unreachable" and be retried forever.
+  // (Ids are not secret — they ride every hello in plaintext.)
   function handleHello(msg) {
     const known = findDevice(msg.deviceId);
-    if (!known) return drop(ws);
+    if (!known) return cutSocket(ws, CLOSE_REVOKED, 'unknown device');
     let devicePublicKey;
     try {
       devicePublicKey = decodeBase64(known.publicKey);

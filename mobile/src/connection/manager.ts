@@ -51,6 +51,7 @@ export class HostConnection {
   private closeStatus: 'revoked' | 'closed' | null = null;
   private appStateSub: { remove: () => void } | null = null;
   private latch: ConnectionLatch | null = null;
+  private refusals = 0;
 
   constructor(args: ManagerArgs) {
     this.args = {
@@ -172,13 +173,15 @@ export class HostConnection {
     } catch (err) {
       this.socket = 'closed';
       this.closeStatus = 'closed';
-      const verdict = judgeDialFailure(readDialFailure(err));
-      if (verdict.action === 'latch') this.latch = verdict.latch;
+      const judged = judgeDialFailure(readDialFailure(err), this.refusals);
+      this.refusals = judged.refusals;
+      if (judged.verdict.action === 'latch') this.latch = judged.verdict.latch;
       this.emit();
       return;
     }
     this.socket = 'open';
     this.closeStatus = null;
+    this.refusals = 0;
     this.heartbeatLost = false;
     this.missed = 0;
     this.attempts = 0;

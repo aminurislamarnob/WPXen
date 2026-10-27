@@ -18,6 +18,7 @@ import {
   openPairAccept,
   createClient,
   decodeBase64,
+  DIAL_ERRORS,
 } from '../shared/remote-protocol/index.cjs';
 import { stubbornWebSocket } from './helpers/stubbornWebSocket.js';
 
@@ -312,5 +313,27 @@ describe('ending access releases the terminal subscriptions', () => {
     await phoneAtTerminal();
     remoteAccess.stop();
     await waitFor(() => expect(liveSubs).toBe(0), 'stop leaked the subscription');
+  });
+});
+
+describe('revoked while the phone was offline', () => {
+  it('its next dial is refused with the revoked code, not a silent close', async () => {
+    const { port, keys, hostPublicKey, deviceId } = await pairKeys();
+    const client = createClient({
+      url: wsUrl(port),
+      WebSocket,
+      keys,
+      hostPublicKey,
+      deviceId,
+    });
+    await client.connect();
+    client.close();
+    await waitFor(
+      () => expect(remoteAccess.listDevices()[0].connected).toBe(false),
+      'never disconnected'
+    );
+    // Revoked with no socket open: nothing could tell the phone then.
+    await remoteAccess.revokeDevice(deviceId);
+    await expect(client.connect()).rejects.toMatchObject({ code: DIAL_ERRORS.revoked });
   });
 });

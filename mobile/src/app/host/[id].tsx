@@ -26,6 +26,8 @@ function stateLabel(update: ConnectionUpdate | null, lastSeen: number | null): s
       return 'Mac asleep';
     case 'revoked':
       return 'Removed from WPXen';
+    case 'auth-failed':
+      return 'Pairing invalid — re-pair';
     case 'update-required':
       return update.update === 'desktop' ? 'Update WPXen on the Mac' : 'Update WPXen Mobile';
   }
@@ -257,6 +259,12 @@ export default function HostScreen() {
           {update.update === 'desktop'
             ? 'This app speaks a newer protocol than WPXen on the Mac. Update WPXen on the Mac, then reopen this screen.'
             : 'WPXen on the Mac speaks a newer protocol than this app. Update WPXen Mobile, then reopen this screen.'}
+        </Text>
+      )}
+      {update?.state === 'auth-failed' && (
+        <Text style={styles.body}>
+          The Mac no longer knows this phone — it was probably removed while the phone was offline. Remove this Mac
+          here and pair again from Settings → Mobile.
         </Text>
       )}
       {update?.state === 'revoked' && (

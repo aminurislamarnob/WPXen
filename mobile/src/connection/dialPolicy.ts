@@ -5,9 +5,17 @@
 
 export type DialFailure =
   | { code: 'version_mismatch'; update: 'desktop' | 'phone' }
+  | { code: 'revoked' }
   | { code: 'unreachable' };
 
-export type ConnectionLatch = { kind: 'update-required'; update: 'desktop' | 'phone' };
+export type ConnectionLatch =
+  | { kind: 'update-required'; update: 'desktop' | 'phone' }
+  | { kind: 'auth-failed' };
+
+// Refusals with the revoked code in a row before the pairing is declared
+// invalid (after Orca's direct-rpc-client.ts authentication retry): one
+// refusal could be a Mac mid-restore, three is the Mac saying so.
+export const AUTH_REFUSALS_TO_LATCH = 3;
 
 export type DialVerdict = { action: 'retry' } | { action: 'latch'; latch: ConnectionLatch };
 
@@ -17,13 +25,28 @@ export function readDialFailure(err: unknown): DialFailure {
   if (e && e.code === 'version_mismatch') {
     return { code: 'version_mismatch', update: e.update === 'desktop' ? 'desktop' : 'phone' };
   }
+  if (e && e.code === 'revoked') return { code: 'revoked' };
   return { code: 'unreachable' };
 }
 
-export function judgeDialFailure(failure: DialFailure): DialVerdict {
+// `refusals` counts revoked-code refusals in a row; any other outcome
+// (including a successful connect, which the caller handles) resets it.
+export function judgeDialFailure(
+  failure: DialFailure,
+  refusals = 0
+): { verdict: DialVerdict; refusals: number } {
   // A version mismatch never fixes itself by redialling.
   if (failure.code === 'version_mismatch') {
-    return { action: 'latch', latch: { kind: 'update-required', update: failure.update } };
+    return {
+      verdict: { action: 'latch', latch: { kind: 'update-required', update: failure.update } },
+      refusals: 0,
+    };
   }
-  return { action: 'retry' };
+  if (failure.code === 'revoked') {
+    const next = refusals + 1;
+    return next >= AUTH_REFUSALS_TO_LATCH
+      ? { verdict: { action: 'latch', latch: { kind: 'auth-failed' } }, refusals: next }
+      : { verdict: { action: 'retry' }, refusals: next };
+  }
+  return { verdict: { action: 'retry' }, refusals: 0 };
 }
