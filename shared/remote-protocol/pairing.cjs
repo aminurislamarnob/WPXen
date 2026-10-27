@@ -104,7 +104,15 @@ function openPairAccept({ message, keys, hostPublicKey }) {
   ) {
     throw new Error('Not a pairing accept.');
   }
-  return { deviceId: payload.deviceId, code: payload.code };
+  return {
+    deviceId: payload.deviceId,
+    code: payload.code,
+    // What the phone calls this Mac; the Mac's own name, never the phone's.
+    machineName:
+      typeof payload.machineName === 'string' && payload.machineName.trim()
+        ? payload.machineName.trim().slice(0, 64)
+        : null,
+  };
 }
 
 module.exports = {

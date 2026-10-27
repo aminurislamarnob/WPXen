@@ -4,7 +4,7 @@
 // dependency for one small JSON list.
 
 import * as SecureStore from 'expo-secure-store';
-import type { HostRecord } from './hostList';
+import { touchHost, type HostRecord } from './hostList';
 
 const HOSTS_KEY = 'wpxen.hosts.v1';
 const keyFor = (deviceId: string): string => `wpxen.keys.${deviceId}`;
@@ -27,6 +27,15 @@ export async function loadHosts(): Promise<HostRecord[]> {
 
 export async function saveHosts(hosts: HostRecord[]): Promise<void> {
   await SecureStore.setItemAsync(HOSTS_KEY, JSON.stringify(hosts));
+}
+
+// Every connect: last seen, and the Mac's current machine name.
+export async function recordHostContact(id: string, machineName: string | null): Promise<void> {
+  try {
+    await saveHosts(touchHost(await loadHosts(), id, Date.now(), machineName));
+  } catch {
+    // Best effort: the next connect records it again.
+  }
 }
 
 export async function saveDeviceKeys(deviceId: string, keys: DeviceKeys): Promise<void> {

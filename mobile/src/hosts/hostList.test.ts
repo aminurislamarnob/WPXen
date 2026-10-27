@@ -35,6 +35,13 @@ describe('hostList', () => {
     expect(next.find((h) => h.id === 'device-2')?.lastSeen).toBeNull();
   });
 
+  it('takes the machine name the Mac reports on contact, keeping it when none is sent', () => {
+    const list = [mac({ name: 'Old Name' })];
+    expect(touchHost(list, 'device-1', 7, 'Studio Mac')[0]).toMatchObject({ name: 'Studio Mac', lastSeen: 7 });
+    expect(touchHost(list, 'device-1', 8, null)[0]).toMatchObject({ name: 'Old Name', lastSeen: 8 });
+    expect(touchHost(list, 'device-1', 9, '  ')[0].name).toBe('Old Name');
+  });
+
   it('finds by id', () => {
     expect(findHost([mac()], 'device-1')).toMatchObject({ name: 'Studio Mac' });
     expect(findHost([], 'device-1')).toBeNull();

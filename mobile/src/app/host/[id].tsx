@@ -7,7 +7,13 @@ import { HostConnection, type ConnectionUpdate } from '../../connection/manager'
 import { groupSessions, statusColor, type PhoneProject, type PhoneSessionRow } from '../../sessions/grouping';
 import { findHost, removeHost } from '../../hosts/hostList';
 import { INITIAL_LIST_SYNC, reduceListSync, type ListSyncEvent } from '../../sessions/listSync';
-import { deleteHostSecrets, loadDeviceKeys, loadHosts, saveHosts } from '../../hosts/secureHosts';
+import {
+  deleteHostSecrets,
+  loadDeviceKeys,
+  loadHosts,
+  recordHostContact,
+  saveHosts,
+} from '../../hosts/secureHosts';
 
 function stateLabel(update: ConnectionUpdate | null, lastSeen: number | null): string {
   if (!update) return 'Connecting…';
@@ -124,6 +130,12 @@ export default function HostScreen() {
         },
       });
       connection.current = conn;
+      conn.subscribe('connected', (payload) => {
+        const machineName = (payload as { machineName?: unknown })?.machineName;
+        const named = typeof machineName === 'string' && machineName.trim() ? machineName.trim() : null;
+        if (!cancelled && named) setName(named);
+        recordHostContact(host.id, named);
+      });
       conn.subscribe('sessions.changed', (payload) => {
         if (cancelled) return;
         const rows = (payload as { sessions?: PhoneSessionRow[] })?.sessions;

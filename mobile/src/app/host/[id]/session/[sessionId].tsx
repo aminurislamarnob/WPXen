@@ -21,6 +21,7 @@ import {
   loadDeviceKeys,
   loadHosts,
   loadTextSize,
+  recordHostContact,
   saveTextSize,
 } from '../../../../hosts/secureHosts';
 import { KEY_BAR_ORDER, keyBytes, pressWithCtrlArmed, type KeyId } from '../../../../terminal/keyBar';
@@ -194,6 +195,10 @@ export default function SessionTerminalScreen() {
         },
       });
       connection.current = conn;
+      conn.subscribe('connected', (payload) => {
+        const machineName = (payload as { machineName?: unknown })?.machineName;
+        recordHostContact(host.id, typeof machineName === 'string' ? machineName : null);
+      });
       conn.subscribe('terminal.replay', (payload) => {
         if (cancelled) return;
         const replay = payload as { sessionId?: string; data?: string; exited?: boolean };

@@ -176,8 +176,9 @@ export async function pairWithLink({
   }
 
   let deviceId: string;
+  let machineName: string | null;
   try {
-    ({ deviceId } = openPairAccept({ message: reply, keys, hostPublicKey }));
+    ({ deviceId, machineName } = openPairAccept({ message: reply, keys, hostPublicKey }));
   } catch {
     try {
       socket.close();
@@ -199,7 +200,9 @@ export async function pairWithLink({
     keys: keysB64,
     host: {
       id: deviceId,
-      name: deviceName,
+      // The Mac's name — not this phone's own, which every Mac used to be
+      // filed under.
+      name: machineName || 'Mac',
       url: offer.wssUrl,
       hostId: offer.hostId,
       hostPublicKey: offer.hostPublicKeyB64,

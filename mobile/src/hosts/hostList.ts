@@ -5,7 +5,9 @@
 
 export interface HostRecord {
   id: string;
-  // Shown in the list; renamed on the Mac it follows the next sync.
+  // The Mac's own machine name, as it last reported it (the pair accept,
+  // then every connect): shown in the list, and a rename on the Mac follows
+  // on the next connect.
   name: string;
   // wss:// URL this host was paired on.
   url: string;
@@ -26,8 +28,16 @@ export function removeHost(list: HostRecord[], id: string): HostRecord[] {
   return list.filter((h) => h.id !== id);
 }
 
-export function touchHost(list: HostRecord[], id: string, now: number): HostRecord[] {
-  return list.map((h) => (h.id === id ? { ...h, lastSeen: now } : h));
+// Record a contact: last seen now, and the machine name the Mac reported
+// (kept as it was when the Mac sent none).
+export function touchHost(
+  list: HostRecord[],
+  id: string,
+  now: number,
+  machineName?: string | null
+): HostRecord[] {
+  const name = typeof machineName === 'string' ? machineName.trim() : '';
+  return list.map((h) => (h.id === id ? { ...h, lastSeen: now, ...(name ? { name } : {}) } : h));
 }
 
 export function findHost(list: HostRecord[], id: string): HostRecord | null {

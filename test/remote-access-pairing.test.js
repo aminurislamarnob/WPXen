@@ -160,6 +160,7 @@ beforeEach(async () => {
       return new Promise(() => {});
     },
     onPaired: (info) => paired.push(info),
+    machineName: () => 'Studio Mac',
     getRemoteConfig: () => ({ enabled: true, port: 6780, hostname: HOSTNAME }),
   });
   remoteAccess.start({ port: 0 });
@@ -368,6 +369,9 @@ describe('handshake outcome', () => {
 
     const opened = openPairAccept({ message: reply, keys, hostPublicKey });
     expect(opened.deviceId).toBe(reply.deviceId);
+    // The phone names the Mac by the Mac's name — it used to file it under
+    // its own (deviceName), so every Mac read "My iPhone".
+    expect(opened.machineName).toBe('Studio Mac');
 
     const devices = store.data.wpxenRemoteDevices;
     expect(devices).toHaveLength(1);
@@ -477,8 +481,9 @@ describe('encrypted channel', () => {
     const result = await client.request('ping');
     expect(result).toMatchObject({ pong: true });
     expect(typeof result.serverTime).toBe('number');
-    // The welcome event proves server → client encryption too.
-    expect(events).toEqual([{ deviceId }]);
+    // The welcome event proves server → client encryption too, and names
+    // the Mac on every connect so a rename since pairing reaches the phone.
+    expect(events).toEqual([{ deviceId, machineName: 'Studio Mac' }]);
     client.close();
   });
 

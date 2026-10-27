@@ -2,6 +2,7 @@
 
 const http = require('http');
 const net = require('net');
+const os = require('os');
 const { randomUUID, randomBytes } = require('crypto');
 const {
   PROTOCOL_VERSION,
@@ -207,6 +208,11 @@ const deps = {
   get log() {
     return 'log' in overrides ? overrides.log : console.warn;
   },
+  // The name the phone shows for this Mac. The hostname without macOS's
+  // `.local` suffix ("Studio-Mac"); swapped in tests.
+  get machineName() {
+    return 'machineName' in overrides ? overrides.machineName : defaultMachineName;
+  },
   get getRemoteConfig() {
     return 'getRemoteConfig' in overrides
       ? overrides.getRemoteConfig
@@ -239,6 +245,18 @@ const deps = {
     return { setTimeout, clearTimeout };
   },
 };
+
+function defaultMachineName() {
+  return os.hostname().replace(/\.local$/i, '') || 'Mac';
+}
+
+function machineLabel() {
+  try {
+    return sanitizeDeviceLabel(deps.machineName(), 'Mac');
+  } catch {
+    return 'Mac';
+  }
+}
 
 function nodeRandomBytes(length) {
   return new Uint8Array(randomBytes(length));
@@ -1621,7 +1639,13 @@ function handleDeviceConnection(ws, req) {
 
   function welcome() {
     touchDevice(device.id);
-    sendSealed({ kind: 'event', name: 'connected', payload: { deviceId: device.id } });
+    // The machine name rides every connect, so a Mac renamed since pairing
+    // shows its new name on the phone.
+    sendSealed({
+      kind: 'event',
+      name: 'connected',
+      payload: { deviceId: device.id, machineName: machineLabel() },
+    });
   }
 
   function onMessage(data) {
@@ -1762,7 +1786,7 @@ function handleDeviceConnection(ws, req) {
     });
     consumeOffer();
     const sealed = sealFrame({
-      payload: { kind: 'pair-accept', deviceId, code },
+      payload: { kind: 'pair-accept', deviceId, code, machineName: machineLabel() },
       senderSecret: keypair.secretKey,
       recipientPublicKey: deviceKey,
       nonce: randomNonce(deps.randomBytes),
