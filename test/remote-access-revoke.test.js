@@ -72,6 +72,9 @@ let home;
 let ptys;
 let store;
 let stubborn;
+// Live engine subscriptions the phone holds: +1 on subscribe, -1 when the
+// server hands the unsubscribe back.
+let liveSubs;
 
 function wsUrl(port) {
   return `ws://127.0.0.1:${port}/wpxen-device`;
@@ -81,6 +84,7 @@ beforeEach(async () => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'wpxen-ra-revoke-'));
   fs.mkdirSync(path.join(home, 'code'));
   ptys = [];
+  liveSubs = 0;
   stubborn = stubbornWebSocket();
   agents.__setDeps({
     spawnPty: () => {
@@ -109,7 +113,17 @@ beforeEach(async () => {
       markRead: (id, read) => agents.markRead(id, read),
       get: (id) => agents.getSession(id),
       projects: () => [{ id: 'shop', name: 'Shop', kind: 'site' }],
-      subscribeOutput: (id, sinks) => agents.subscribeOutput(id, sinks),
+      subscribeOutput: (id, sinks) => {
+        const off = agents.subscribeOutput(id, sinks);
+        liveSubs += 1;
+        let done = false;
+        return () => {
+          if (done) return;
+          done = true;
+          liveSubs -= 1;
+          off();
+        };
+      },
       write: (id, data) => agents.write(id, data),
       resize: (id, cols, rows) => agents.resize(id, cols, rows),
     },
@@ -258,5 +272,45 @@ describe('every frame re-checks its device', () => {
     ).rejects.toThrow();
     await closed;
     expect(writes()).not.toContain('orphaned\n');
+  });
+});
+
+describe('ending access releases the terminal subscriptions', () => {
+  // The close handler is what detaches a socket's terminals. Revoke and
+  // disconnect-all used to delete the device's socket set before that
+  // handler ran, so it found nothing and returned early: the engine kept
+  // feeding a socket that no longer existed, once per revoke.
+  async function phoneAtTerminal() {
+    const { sessionId } = agents.launch({ site: site(), agentId: agents.SHELL_ID });
+    const { port, keys, hostPublicKey, deviceId } = await pairKeys();
+    const client = createClient({
+      url: wsUrl(port),
+      WebSocket,
+      keys,
+      hostPublicKey,
+      deviceId,
+    });
+    await client.connect();
+    await client.request('terminal.attach', { sessionId });
+    expect(liveSubs).toBe(1);
+    return { client, deviceId };
+  }
+
+  it('revoke unsubscribes the terminals', async () => {
+    const { deviceId } = await phoneAtTerminal();
+    await remoteAccess.revokeDevice(deviceId);
+    await waitFor(() => expect(liveSubs).toBe(0), 'revoke leaked the subscription');
+  });
+
+  it('disconnect all unsubscribes the terminals', async () => {
+    await phoneAtTerminal();
+    await remoteAccess.disconnectAll();
+    await waitFor(() => expect(liveSubs).toBe(0), 'disconnect leaked the subscription');
+  });
+
+  it('turning Remote Access off unsubscribes the terminals', async () => {
+    await phoneAtTerminal();
+    remoteAccess.stop();
+    await waitFor(() => expect(liveSubs).toBe(0), 'stop leaked the subscription');
   });
 });

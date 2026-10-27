@@ -827,11 +827,17 @@ async function pairingOffer({ hostname }) {
 
 // ─── Device registry ─────────────────────────────────────────────────────
 
-// Live channels by device id. Each entry carries its socket plus its sealed
-// sender (counters live per connection), so pushes fan out without lookups.
-// The source of the connected-now indicator; revoking or disconnecting closes
-// these first.
-const deviceSockets = new Map(); // deviceId -> Set({ ws, send })
+// Live channels, keyed by the socket itself (after Orca's
+// mobile-socket-wiring.ts): { deviceId, send, ending }. `send` is the
+// connection's sealed sender (counters live per connection), so pushes fan
+// out without lookups. The source of the connected-now indicator.
+//
+// Only a socket's own close handler removes its entry — and with it the
+// socket's terminal subscriptions. Revoke and disconnect-all just cut the
+// socket and mark it `ending`; deleting the entry themselves (as they once
+// did, by device id) left the close handler nothing to find, so it returned
+// before detaching and the engine kept feeding a socket that was gone.
+const channels = new Map(); // ws -> { deviceId, send, ending }
 const deviceListeners = new Set();
 
 function readDeviceRecords() {
@@ -851,7 +857,7 @@ function listDevices() {
       platform: d.platform,
       pairedAt: d.pairedAt,
       lastSeen: d.lastSeen,
-      connected: (deviceSockets.get(d.id)?.size || 0) > 0,
+      connected: liveSocketsFor(d.id).length > 0,
     }));
 }
 
@@ -895,15 +901,20 @@ function touchDevice(id) {
   publishDevices();
 }
 
-function trackChannel(id, entry) {
-  if (!deviceSockets.has(id)) deviceSockets.set(id, new Set());
-  deviceSockets.get(id).add(entry);
-  entry.ws.on('close', () => {
-    const set = deviceSockets.get(id);
-    if (!set) return;
-    set.delete(entry);
-    if (set.size === 0) deviceSockets.delete(id);
-    detachTerminalsForWs(entry.ws);
+// A device's sockets that are still live: not yet closed, not being cut.
+function liveSocketsFor(id) {
+  const out = [];
+  for (const [ws, channel] of channels) {
+    if (channel.deviceId === id && !channel.ending) out.push(ws);
+  }
+  return out;
+}
+
+function trackChannel(ws, deviceId, send) {
+  channels.set(ws, { deviceId, send, ending: false });
+  ws.on('close', () => {
+    channels.delete(ws);
+    detachTerminalsForWs(ws);
     publishDevices();
   });
   publishDevices();
@@ -934,11 +945,7 @@ async function revokeDevice(id) {
   if (!store) throw new Error('Remote Access needs a store before it can start');
   if (!readDeviceRecords().some((d) => d && d.id === id))
     throw new Error('Unknown device.');
-  const sockets = deviceSockets.get(id);
-  if (sockets) {
-    for (const entry of [...sockets]) cutSocket(entry.ws, CLOSE_REVOKED, 'revoked');
-    deviceSockets.delete(id);
-  }
+  for (const ws of liveSocketsFor(id)) cutSocket(ws, CLOSE_REVOKED, 'revoked');
   store.set(
     DEVICE_KEY,
     readDeviceRecords().filter((d) => !d || d.id !== id)
@@ -953,16 +960,17 @@ async function disconnectAll() {
   return { ok: true };
 }
 
-// Shared by disconnect-all and by stopping the server: an ordinary close the
-// phone may reconnect after, never the revoked code. Records are untouched.
-//
 // Ending access ends it now (after Orca's ws-transport.ts, "revocation must
 // stop streams immediately"). `ws.close(code)` only asks: a peer that
 // ignores the close frame keeps the socket for ws's 30 s close timeout, and
 // every sealed frame it sent meanwhile used to run. The close frame still
 // goes first, best effort, so a well-behaved phone reads why; then the TCP
-// connection is destroyed without waiting for an answer.
+// connection is destroyed without waiting for an answer. The channel entry
+// stays until the socket's close handler runs (see `channels`), marked
+// `ending` so it stops counting as connected straight away.
 function cutSocket(ws, code, reason) {
+  const channel = channels.get(ws);
+  if (channel) channel.ending = true;
   try {
     ws.close(code, reason);
   } catch {}
@@ -970,12 +978,12 @@ function cutSocket(ws, code, reason) {
     ws.terminate();
   } catch {}
 }
+
+// Shared by disconnect-all and by stopping the server: an ordinary close the
+// phone may reconnect after, never the revoked code. Records are untouched.
 function closeEveryDeviceSocket() {
-  for (const [id, entries] of [...deviceSockets.entries()]) {
-    for (const entry of [...entries]) {
-      cutSocket(entry.ws, CLOSE_DISCONNECT_ALL, 'disconnecting');
-    }
-    deviceSockets.delete(id);
+  for (const ws of [...channels.keys()]) {
+    cutSocket(ws, CLOSE_DISCONNECT_ALL, 'disconnecting');
   }
   publishDevices();
 }
@@ -1144,16 +1152,15 @@ function pushSessionsChanged() {
   } catch {
     return;
   }
-  for (const entries of deviceSockets.values()) {
-    for (const entry of [...entries]) {
-      try {
-        entry.send({
-          kind: 'event',
-          name: 'sessions.changed',
-          payload: { sessions: rows },
-        });
-      } catch {}
-    }
+  for (const channel of channels.values()) {
+    if (channel.ending) continue;
+    try {
+      channel.send({
+        kind: 'event',
+        name: 'sessions.changed',
+        payload: { sessions: rows },
+      });
+    } catch {}
   }
 }
 
@@ -1672,7 +1679,7 @@ function handleDeviceConnection(ws, req) {
     devicePublicKey = key;
     inCounter = 1;
     channel = `${payload.clientNonce}.${encodeBase64(deps.randomBytes(24))}`;
-    trackChannel(device.id, { ws, send: sendSealed });
+    trackChannel(ws, device.id, sendSealed);
     ensureSessionsFeed();
     welcome();
   }
@@ -1814,11 +1821,10 @@ function dispose() {
     } catch {}
     sessionsUnsub = null;
   }
-  for (const entries of deviceSockets.values()) {
-    for (const entry of [...entries])
-      cutSocket(entry.ws, CLOSE_DISCONNECT_ALL, 'disconnecting');
+  for (const ws of [...channels.keys()]) {
+    cutSocket(ws, CLOSE_DISCONNECT_ALL, 'disconnecting');
   }
-  deviceSockets.clear();
+  channels.clear();
   for (const key of [...terminalSubs.keys()]) {
     try {
       const sub = terminalSubs.get(key);
