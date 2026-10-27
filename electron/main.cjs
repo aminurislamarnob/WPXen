@@ -213,6 +213,12 @@ app.whenReady().then(() => {
     try {
       await procman.reconcileOrphans();
     } catch {}
+    // Only now the Remote Access tunnel, when it was left on with a token
+    // saved: started before the reconcile, its own fresh pid file was taken
+    // for an orphan's and the tunnel killed on every launch.
+    require('./services/remoteAccess.cjs')
+      .syncTunnel()
+      .catch(() => {});
 
     // Which services come up on launch is a preference (Settings → Services);
     // Mailpit additionally needs to be installed. Falls back to the historical

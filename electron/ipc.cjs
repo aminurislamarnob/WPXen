@@ -447,8 +447,10 @@ function registerHandlers(win, storeInstance) {
       remoteAccess.start({ port: settings.get('remote.port') });
     } catch {}
   }
-  // The tunnel comes up with the app when it was left on with a token saved.
-  remoteAccess.syncTunnel().catch(() => {});
+  // The tunnel comes up with the app when it was left on with a token saved
+  // — but not from here: main.cjs starts it once procman has reconciled the
+  // previous run's orphans, so the reconcile can't mistake this run's fresh
+  // tunnel pid file for an orphan's.
   // The keep-awake remote reason follows Remote Access, its setting, and the
   // connected devices. Session changes already re-run the hold decision
   // through watchSessions; the first evaluation happens here.
