@@ -366,7 +366,13 @@ export function ChatView({ sessionId, onRestart, onResume, headerActions }) {
       const file = item.getAsFile();
       if (!file) continue;
       try {
-        paths.push(await window.electronAPI.chatSaveImage(await file.arrayBuffer()));
+        paths.push(
+          await window.electronAPI.chatSaveImage(
+            sessionId,
+            await file.arrayBuffer(),
+            item.type
+          )
+        );
       } catch {
         // an unsaved image is just not attached
       }

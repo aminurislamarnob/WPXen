@@ -1404,6 +1404,9 @@ function stop(sessionId) {
   }
   sessions.delete(sessionId);
   notifier.forget(sessionId);
+  require('./chatImages.cjs')
+    .clearChatImages(sessionId)
+    .catch(() => {});
   emitChange({ immediate: true });
 }
 

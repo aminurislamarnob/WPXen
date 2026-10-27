@@ -430,14 +430,11 @@ function registerHandlers(win, storeInstance) {
     const site = findProject(siteId);
     return require('./services/chatCommands.cjs').listCommands(site?.path);
   });
-  // A pasted or dropped image, saved to a temp file the TUI can attach.
-  ipcMain.handle('agent-chat-save-image', async (_e, bytes) => {
-    const os = require('os');
-    const fsp = require('fs/promises');
-    const p = path.join(os.tmpdir(), `wpxen-chat-image-${crypto.randomUUID()}.png`);
-    await fsp.writeFile(p, Buffer.from(bytes));
-    return p;
-  });
+  // A pasted image, saved to a temp file the TUI can attach; removed once
+  // its Session is gone (agents.stop).
+  ipcMain.handle('agent-chat-save-image', (_e, sessionId, bytes, mime) =>
+    require('./services/chatImages.cjs').saveChatImage(sessionId, bytes, mime)
+  );
   ipcMain.handle('agent-chat-image', (_e, sessionId, ref) => {
     return agents.chatImage(sessionId, ref);
   });
