@@ -274,6 +274,15 @@ under `services/office/` is electron-free and tested through `CLAUDE_HOME` /
   re-rendering, because `ShadowBudget` is keyed on the Office's identity. Put new
   derivations in `computeOfficeState`, which commits a session only when a field
   flips. The tick test asserts `toBe`, so keep it.
+- **`ended` linger.** `session_ended` keeps the session as `ended` (tool and interns
+  cleared, tailers stopped at once). The first tick stamps `endedAt`, and the first
+  tick `ENDED_LINGER_MS` later removes it. Ended sessions are skipped by the waiting
+  and break derivations and ignore every event but `session_appeared` (a reused pid
+  replaces it) and `tick`; the HUD counts only live ones, and focus clears on actual
+  removal.
+- **Snapshot sink.** `start({ onSnapshot })` binds production's sink once; `ipc.cjs`
+  resolves the windows when each snapshot is sent. `__setDeps({ onSnapshot })`
+  stays the test override.
 - **Credentials guardrails.** `scanner.cjs` reads only `*.json` in
   `~/.claude/sessions/` and skips names containing `.key`, because the key files
   beside them are credentials. `antigravity.cjs` lists only `<root>/brain/` folder
@@ -283,24 +292,33 @@ under `services/office/` is electron-free and tested through `CLAUDE_HOME` /
 - **The hook** makes _waiting on you_ exact. It is optional: without it, a tool
   running ≥ 15 s is read as waiting (always, for Antigravity). Settings → Office
   drives `office-hooks-install` / `-uninstall` / `-status`. Like `dns.sudoers`, it
-  is an action row with a `settingsRegistry.js` entry and no schema key.
+  is an action row with a `settingsRegistry.js` entry and no schema key,
+  deliberately deviating from #187's "schema and registry": there is no stored
+  value, the state lives in the Claude file.
   - `hooksInstaller.cjs` edits **`~/.claude/settings.json`** (`$CLAUDE_HOME`
     overrides the dir). Claude Code and the tools coexisting there (Orca, Agent
     Flow, Superset) register their hooks in that file. The source's `~/.claude.json`
     is only swept for legacy entries. Each entry uses the file's matcher-wrapper
     shape `{ hooks: [{ type: 'command', command }] }`, because Claude Code does not
     run the source's bare `{ type, command }`. The command is
-    `node "<userData>/wpxen-hook-forwarder.cjs" # wpxen`.
+    `'<abs node>' '<userData>/wpxen-hook-forwarder.cjs' # wpxen`.
   - **The tag is the ownership record.** Install adds an entry only where none
     bears `WPXEN_HOOK_TAG`. Uninstall removes exactly the tagged ones, and
     `updateHooks` writes each key back in its original shape, so other tools' hooks
     round-trip byte-identical. An entry edited by hand without the tag is invisible
     to both, and uninstall leaves it firing forever. Both verbs also strip
-    `LEGACY_HOOK_TAGS` (`# claude-agent-verse`) in the same edit. The file is backed
-    up to `.bak`, staged to `.tmp`, diffed, then written, and the diff goes to the UI.
-  - Install refuses unless `node` resolves on the login-shell PATH. The forwarder
-    runs under the system node, not `ELECTRON_RUN_AS_NODE`, because a baked app path
-    goes stale when the app moves.
+    `LEGACY_HOOK_TAGS` (`# claude-agent-verse`) in the same edit. Edits are
+    `office-hooks-preview` (diffs for `settings.json` and the legacy sweep, nothing
+    written) then, after a confirm in Settings, `office-hooks-apply` with the
+    preview's token (refused if a file changed since): `.bak` backup, `.tmp`, then
+    an atomic rename.
+  - Install refuses unless `node` resolves on the login-shell PATH, and pins its
+    **absolute path** (Claude Code's own PATH may lack nvm/Volta). If that node or
+    the forwarder is later deleted the hook silently dies: `status()` reports
+    `healthy: false` with a problem code, Settings polls it (focus + 5 s) and offers
+    Reinstall. Bare-`node` entries from older builds are still matched by the tag.
+    The system node is used rather than `ELECTRON_RUN_AS_NODE`, because a baked app
+    path goes stale when the app moves.
   - ⚠️ `forwarder.cjs` is **copied** into userData at install time. Editing it
     changes nothing on an installed machine until the hook is reinstalled. Keep it
     node-core only, and make fixes on the receiving side: `hookSocket.toHookEvent`

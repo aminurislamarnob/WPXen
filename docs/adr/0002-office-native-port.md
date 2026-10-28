@@ -41,9 +41,14 @@ writes one JSON line, and exits.
 
 **3. The system `node` runs the forwarder, not `ELECTRON_RUN_AS_NODE`.** The hook
 command written into `~/.claude/settings.json` is
-`node "<userData>/wpxen-hook-forwarder.cjs" # wpxen`. The forwarder is a
-dependency-free script copied into userData at install time. Install checks that
-`node` resolves on the login-shell PATH and refuses with a hint when it does not.
+`'<node>' '<userData>/wpxen-hook-forwarder.cjs' # wpxen`, where `<node>` is the
+system node's **absolute path**, resolved once at install through the login-shell
+PATH (Claude Code runs hooks with its own PATH, which need not hold an nvm or
+Volta node). The forwarder is a dependency-free script copied into userData at
+install time. Install refuses with a hint when `node` does not resolve. Pinning
+trades one silent failure for a detectable one: if that node is later removed, the
+hook breaks, and Settings → Office reports it as needing a reinstall. Entries from
+earlier builds wrote a bare `node`; the tag still identifies them.
 
 - _Rejected: run the forwarder with WPXen's own binary under
   `ELECTRON_RUN_AS_NODE`._ It needs no node install, but it bakes the app bundle's
@@ -82,9 +87,20 @@ hook installer), so the copy verifies itself.
 - The forwarder is a copy, so a fix to `forwarder.cjs` reaches users only when they
   reinstall the hook. Field mapping therefore happens on the receiving side
   (`hookSocket.cjs`), which ships with every app update.
-- The hook needs a `node` on the PATH that Claude Code runs hooks with. The install
-  check covers the login shell, not every environment Claude Code can be started
-  from.
+- The hook pins the `node` found at install time. Removing that node (an nvm
+  version) or the forwarder breaks the hook until it is reinstalled; Settings →
+  Office polls for this and offers Reinstall.
+- Hook edits are previewed, then confirmed, then applied: `preview` returns the
+  diff of `settings.json` (and of the legacy `~/.claude.json` sweep) and writes
+  nothing, `apply` backs up to `.bak`, stages `.tmp` and renames, and refuses if a
+  file changed since the preview. `office.hook` is an action row with a
+  `settingsRegistry.js` entry and no schema key (the `dns.sudoers` precedent). This
+  deliberately deviates from #187's "declared in both the schema and the settings
+  registry": there is no stored value to validate, because the state lives in the
+  Claude settings file.
+- A finished conversation stays in the Office as `ended` for a short linger
+  (`ENDED_LINGER_MS`) before a tick removes it, so it is seen to end (spec story 8).
+  Its tailers stop immediately.
 - The standalone project's hook entries (`# claude-agent-verse`) are a legacy
   generation. WPXen's install and uninstall both remove them, the way WPXen cleans
   up after its own renames.
