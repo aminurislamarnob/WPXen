@@ -344,6 +344,11 @@ app.on('before-quit', (e) => {
   try {
     require('./services/keepAwake.cjs').dispose();
   } catch {}
+  // The Office engine runs until quit (lazy-started on first visit); stop its
+  // poll loop and release every transcript tailer's file handle.
+  try {
+    require('./services/office/engine.cjs').stop();
+  } catch {}
 
   // Allow the window to actually close on quit
   if (mainWindow) {

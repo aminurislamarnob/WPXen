@@ -37,6 +37,7 @@ const VALID_EVENT_CHANNELS = [
   'browser-shortcut',
   'settings-updated',
   'keep-awake-status-update',
+  'office-update',
 ];
 
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -162,6 +163,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   checkSudoers: () => ipcRenderer.invoke('check-sudoers'),
   installSudoers: () => ipcRenderer.invoke('install-sudoers'),
   uninstallSudoers: () => ipcRenderer.invoke('uninstall-sudoers'),
+
+  // Office (live agent sessions). Lazy-starts the engine on first call and
+  // returns the current Office; later snapshots arrive on 'office-update'.
+  officeStart: () => ipcRenderer.invoke('office-start'),
 
   // Settings
   // Schema-backed settings. `setSettings` takes a patch of dotted keys and
