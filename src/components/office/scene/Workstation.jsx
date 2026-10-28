@@ -5,6 +5,7 @@ import { useFrame, useThree } from '@react-three/fiber';
 import { Label } from './Label.jsx';
 import { Character, STAND_HEIGHT } from './Character.jsx';
 import { BreakPresence } from '../../../lib/office/scene/breaks.js';
+import { internBench } from '../../../lib/office/scene/layout.js';
 import { StaticBatch } from './StaticBatch.jsx';
 import {
   DeskLamp,
@@ -28,10 +29,10 @@ import {
 
 // ── Workstation ──────────────────────────────────────────────
 // A desk with its peripherals and, when a session occupies it, the character
-// whose pose shows the Agent State. Interns (#183) and click-to-focus (#185)
-// land in their own tickets; the Commuter stays ported whole as shared
-// infrastructure — without a break spot (wired in #184) it keeps the
-// character seated.
+// whose pose shows the Agent State, plus an intern on a stool per live
+// subagent. Click-to-focus (#185) lands in its own ticket; the Commuter stays
+// ported whole as shared infrastructure — without a break spot (wired in
+// #184) it keeps the character seated.
 
 const DESK_TOP = 0.74;
 const SEAT = 0.49;
@@ -163,6 +164,63 @@ function AgentTag({ name, state, tool, emphasis = false, onBreak }) {
         </>
       )}
     </div>
+  );
+}
+
+// ── Interns ──────────────────────────────────────────────────
+// A subagent pulls up a stool in front of the parent's desk, laptop on a tiny
+// side table, and leaves when its work ends. Seat positions come from the
+// pure internBench plan; click-to-focus on an intern lands with #185.
+
+function Intern({ sub, seat, accent }) {
+  const look = useMemo(() => lookFor(sub.subagentId, { intern: true }), [sub.subagentId]);
+  const [hover, setHover] = useState(false);
+  return (
+    <group
+      position={[seat.x, 0, seat.z]}
+      rotation={[0, seat.yaw, 0]}
+      onPointerOver={(e) => {
+        e.stopPropagation();
+        setHover(true);
+      }}
+      onPointerOut={() => setHover(false)}
+    >
+      {/* stool */}
+      <mesh position={[0, 0.17, 0]} castShadow>
+        <cylinderGeometry args={[0.15, 0.13, 0.34, 24]} />
+        <meshStandardMaterial color={palette.fabricWarm} roughness={0.95} />
+      </mesh>
+      <group scale={0.95} position={[0, 0.34, 0]}>
+        <Character look={look} state={sub.state} accent={accent} floor={-0.34 / 0.95} />
+      </group>
+      {/* tiny side table with laptop */}
+      <group position={[0, 0, 0.42]}>
+        <mesh position={[0, 0.25, 0]} castShadow>
+          <cylinderGeometry args={[0.012, 0.012, 0.5, 8]} />
+          <meshStandardMaterial color={palette.deskLeg} />
+        </mesh>
+        <mesh position={[0, 0.505, 0]} castShadow receiveShadow>
+          <cylinderGeometry args={[0.18, 0.18, 0.02, 28]} />
+          <meshStandardMaterial color={palette.deskTop} roughness={0.5} />
+        </mesh>
+        <Laptop
+          position={[0, 0.515, 0.02]}
+          rotation={[0, Math.PI, 0]}
+          scale={0.8}
+          kind="code"
+          variant={sub.subagentId}
+          scroll={sub.state === 'working'}
+        />
+      </group>
+      {(sub.state === 'waiting_on_user' || sub.state === 'error' || hover) && (
+        <Label
+          position={[0, 0.34 + tagHeight(sub.state) * 0.95, 0]}
+          zIndexRange={[20, 0]}
+        >
+          <AgentTag name={sub.agentType} state={sub.state} tool={sub.currentTool} />
+        </Label>
+      )}
+    </group>
   );
 }
 
@@ -329,6 +387,7 @@ export function Workstation({
   const decor = seed % 4;
   const lit = state !== null;
   const [seated, setSeated] = useState(true);
+  const bench = session ? internBench(session.subagents) : null;
 
   return (
     <group>
@@ -418,7 +477,14 @@ export function Workstation({
         </Commuter>
       )}
 
-      {/* Interns (subagents pulling up a chair) land with #183. */}
+      {bench?.seated.map((seat) => (
+        <Intern key={seat.sub.subagentId} sub={seat.sub} seat={seat} accent={accent} />
+      ))}
+      {bench && bench.overflow > 0 && (
+        <Label position={[1.15, 0.6, 1.42]}>
+          <div className="intern-overflow">+{bench.overflow}</div>
+        </Label>
+      )}
     </group>
   );
 }
