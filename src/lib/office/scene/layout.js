@@ -268,3 +268,28 @@ export function routeToBreak(plan, desk, spot) {
     { x: spot.x, z: spot.z },
   ];
 }
+
+// ── Intern seating ───────────────────────────────────────────
+// Subagents pull up stools in a row in front of their parent's desk: the
+// source renders at most three (Workstation.tsx slice(0, 3)), each 0.55 apart
+// from x = -0.5 at z = 1.42, angled -0.25 toward the parent; anything beyond
+// the third stool is a "+n" overflow badge instead of more furniture.
+
+export const INTERN_SEATS = 3;
+
+/**
+ * Seat plan for a session's subagents: at most INTERN_SEATS stools plus an
+ * overflow count. Pure value — Workstation renders it verbatim.
+ */
+export function internBench(subagents) {
+  const all = Object.values(subagents ?? {});
+  return {
+    seated: all.slice(0, INTERN_SEATS).map((sub, i) => ({
+      sub,
+      x: -0.5 + i * 0.55,
+      z: 1.42,
+      yaw: -0.25,
+    })),
+    overflow: Math.max(0, all.length - INTERN_SEATS),
+  };
+}

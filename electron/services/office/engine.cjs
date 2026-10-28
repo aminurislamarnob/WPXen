@@ -25,6 +25,7 @@
 // `deps`, swappable in tests via __setDeps.
 
 const { join } = require('node:path');
+const { readdir, readFile, stat } = require('node:fs/promises');
 const { reduce, emptyOffice } = require('./reducer.cjs');
 const scanner = require('./scanner.cjs');
 const { FileTailer } = require('./tailer.cjs');
@@ -37,6 +38,8 @@ const hookSocket = require('./hookSocket.cjs');
 const POLL_INTERVAL_MS = 1000;
 /** Burst window: changes within it collapse into one snapshot push. */
 const SNAPSHOT_COALESCE_MS = 100;
+/** Subagent transcripts untouched for this long belong to finished work and are skipped. */
+const SUBAGENT_STALE_MS = 10 * 60_000;
 
 // Swapped in tests — .cjs modules load through Node's CJS loader, out of
 // vi.mock's reach (same seam as browser.cjs / externalTools.cjs).
@@ -77,6 +80,10 @@ let office = emptyOffice();
 let scanSnapshot = scanner.emptyScanSnapshot();
 /** One transcript tailer per live pid. @type {Map<number, { sessionId: string, tailer: { stop: () => void } }>} */
 const tailers = new Map();
+/** One tailer per live subagent, keyed "pid-subagentId". @type {Map<string, { stop: () => void }>} */
+const subagentTailers = new Map();
+/** Keys of subagents that ended (or were stale on discovery) — never re-tailed. @type {Set<string>} */
+const finishedSubagents = new Set();
 let started = false;
 /** @type {ReturnType<typeof setTimeout> | null} */
 let pollTimer = null;
@@ -120,6 +127,24 @@ function tailTranscript(pid, transcriptPath, sessionId) {
   });
 }
 
+/**
+ * Release a session's subagent tailers and forget which of its subagents
+ * finished — a new conversation (or a new process at the same pid) starts
+ * subagent discovery from scratch.
+ * @param {number} pid
+ */
+function stopSubagents(pid) {
+  for (const [key, subTailer] of subagentTailers.entries()) {
+    if (key.startsWith(`${pid}-`)) {
+      subTailer.stop();
+      subagentTailers.delete(key);
+    }
+  }
+  for (const key of finishedSubagents) {
+    if (key.startsWith(`${pid}-`)) finishedSubagents.delete(key);
+  }
+}
+
 // ── Dispatch ─────────────────────────────────────────────────
 
 /**
@@ -142,6 +167,7 @@ function dispatch(event) {
     const current = tailers.get(event.pid);
     const session = office.sessions[event.pid];
     if (session && current && current.sessionId !== event.sessionId) {
+      stopSubagents(event.pid);
       tailTranscript(
         event.pid,
         claudeTranscriptPath(session.cwd, event.sessionId),
@@ -154,6 +180,7 @@ function dispatch(event) {
       current.tailer.stop();
       tailers.delete(event.pid);
     }
+    stopSubagents(event.pid);
   }
 
   // The reducer returns the same Office when nothing changed (most ticks); skip those.
@@ -169,6 +196,83 @@ function scheduleSnapshot() {
   }, deps.coalesceMs);
 }
 
+// ── Subagent discovery ───────────────────────────────────────
+
+/**
+ * Per-poll scan for a session's subagents. Their transcripts live beside the
+ * session's own, in projects/<slug>/<sessionId>/subagents/, one
+ * agent-<id>.meta.json + agent-<id>.jsonl pair each. A fresh pair makes the
+ * subagent appear and its transcript gets tailed; an assistant line with no
+ * tool_use ends it; a transcript idle past SUBAGENT_STALE_MS is finished work
+ * and never appears at all.
+ * @param {{ pid: number, cwd: string, sessionId: string }} session
+ */
+async function discoverSubagents(session) {
+  const subagentsDir = join(
+    scanner.claudeHome(),
+    'projects',
+    scanner.projectSlug(session.cwd),
+    session.sessionId,
+    'subagents'
+  );
+  try {
+    const files = await readdir(subagentsDir);
+    const metaFiles = files.filter((f) => f.endsWith('.meta.json'));
+    for (const metaFile of metaFiles) {
+      const subagentId = metaFile.replace('agent-', '').replace('.meta.json', '');
+      const key = `${session.pid}-${subagentId}`;
+      if (subagentTailers.has(key) || finishedSubagents.has(key)) continue;
+
+      const jsonlPath = join(subagentsDir, `agent-${subagentId}.jsonl`);
+      const mtime = await stat(jsonlPath).then(
+        (s) => s.mtimeMs,
+        () => 0
+      );
+      if (deps.now() - mtime > SUBAGENT_STALE_MS) {
+        finishedSubagents.add(key);
+        continue;
+      }
+      const metaContent = await readFile(join(subagentsDir, metaFile), 'utf-8');
+      const meta = JSON.parse(metaContent);
+
+      dispatch({
+        type: 'subagent_appeared',
+        pid: session.pid,
+        subagentId,
+        agentType: meta.agentType || 'Agent',
+        description: meta.description || '',
+        toolUseId: meta.toolUseId,
+      });
+
+      const tailer = deps.createTailer(jsonlPath);
+      subagentTailers.set(key, tailer);
+
+      tailer.on('line', (line) => {
+        dispatch({
+          type: 'subagent_transcript_line',
+          pid: session.pid,
+          subagentId,
+          line,
+        });
+
+        if (line.type === 'assistant' && Array.isArray(line.message?.content)) {
+          const hasToolUse = line.message.content.some((c) => c.type === 'tool_use');
+          if (!hasToolUse) {
+            dispatch({ type: 'subagent_ended', pid: session.pid, subagentId });
+            tailer.stop();
+            subagentTailers.delete(key);
+            finishedSubagents.add(key);
+          }
+        }
+      });
+
+      tailer.start().catch(() => {});
+    }
+  } catch {
+    // subagents dir doesn't exist yet, ignore
+  }
+}
+
 // ── Poll loop ────────────────────────────────────────────────
 
 async function poll() {
@@ -176,6 +280,11 @@ async function poll() {
     const result = await deps.scan(scanSnapshot);
     scanSnapshot = result.snapshot;
     for (const event of result.events) dispatch(event);
+
+    for (const session of Object.values(office.sessions)) {
+      if (session.agent !== 'claude') continue;
+      await discoverSubagents(session);
+    }
 
     dispatch({ type: 'tick', now: deps.now() });
   } catch (err) {
@@ -233,6 +342,9 @@ function stop() {
   }
   for (const { tailer } of tailers.values()) tailer.stop();
   tailers.clear();
+  for (const subTailer of subagentTailers.values()) subTailer.stop();
+  subagentTailers.clear();
+  finishedSubagents.clear();
 }
 
 /** @returns {Office} */

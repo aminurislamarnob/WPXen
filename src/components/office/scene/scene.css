@@ -2,7 +2,7 @@
    Part of the 3D scene's look, ported near-verbatim from the source project's
    index.css and scoped to the Office canvas. These are art direction, not page
    chrome: the colours stay literal (the scene is identical in light and dark
-   mode), so no WPXen tokens here. `.intern-overflow` joins them with #183. */
+   mode), so no WPXen tokens here. */
 
 .label-layer {
   position: absolute;
@@ -115,4 +115,14 @@
 .pod-label__count b {
   color: #b45309;
   font-weight: 600;
+}
+
+/* "+n" badge when more subagents are live than stools at the desk. */
+.intern-overflow {
+  font-size: 11px;
+  font-weight: 650;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: #1d1f24;
+  color: #fff;
 }

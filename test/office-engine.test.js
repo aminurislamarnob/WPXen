@@ -129,6 +129,141 @@ describe('engine snapshots', () => {
   });
 });
 
+describe('engine subagent discovery', () => {
+  // Fixtures mirror the source project's scrubbed basic/ layout: a live
+  // registry entry (this test process's own pid), its transcript under
+  // projects/<slug>/, and subagent files beside it in
+  // projects/<slug>/<sessionId>/subagents/agent-<id>.{jsonl,meta.json}.
+  const sessionId = 'abc-123';
+  let cwd;
+  let subagentsDir;
+
+  function liveSession() {
+    cwd = path.join(home, 'mock-project');
+    fs.mkdirSync(cwd);
+    const slugDir = path.join(home, 'projects', projectSlug(cwd));
+    fs.mkdirSync(slugDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(slugDir, `${sessionId}.jsonl`),
+      JSON.stringify({
+        type: 'user',
+        uuid: 'u-1',
+        timestamp: new Date().toISOString(),
+        message: { content: 'Fan out the work' },
+      }) + '\n'
+    );
+    subagentsDir = path.join(slugDir, sessionId, 'subagents');
+    fs.mkdirSync(subagentsDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(home, 'sessions', `${process.pid}.json`),
+      JSON.stringify({
+        pid: process.pid,
+        sessionId,
+        cwd,
+        name: 'mock-session',
+        startedAt: Date.now(),
+      })
+    );
+  }
+
+  function writeSubagent(id, lines, meta = {}) {
+    fs.writeFileSync(
+      path.join(subagentsDir, `agent-${id}.meta.json`),
+      JSON.stringify({
+        agentType: 'Architect',
+        description: 'Designing',
+        toolUseId: 't3',
+        ...meta,
+      })
+    );
+    fs.writeFileSync(
+      path.join(subagentsDir, `agent-${id}.jsonl`),
+      lines.map((l) => JSON.stringify(l)).join('\n') + (lines.length ? '\n' : '')
+    );
+  }
+
+  const toolUseLine = (tool = 'Bash') => ({
+    type: 'assistant',
+    uuid: `a-${Math.random()}`,
+    timestamp: new Date().toISOString(),
+    message: { content: [{ type: 'tool_use', name: tool }] },
+  });
+
+  const subagents = () => engine.getOffice().sessions[process.pid]?.subagents ?? {};
+
+  it('discovers a fresh subagent within a poll cycle and tracks its own transcript', async () => {
+    engine.__setDeps({ pollIntervalMs: 25, coalesceMs: 5 });
+    liveSession();
+    writeSubagent('xyz', [toolUseLine('Grep')]);
+
+    engine.start();
+
+    await until(() => subagents()['xyz']);
+    expect(subagents()['xyz']).toMatchObject({
+      subagentId: 'xyz',
+      agentType: 'Architect',
+      description: 'Designing',
+      toolUseId: 't3',
+    });
+
+    // The intern's state follows its own transcript, not the parent's: its
+    // tool_use line makes it working with Grep while the parent — whose own
+    // transcript ends on a user prompt — is thinking.
+    await until(() => subagents()['xyz'].state === 'working');
+    expect(subagents()['xyz'].currentTool).toBe('Grep');
+    expect(engine.getOffice().sessions[process.pid].state).toBe('thinking');
+
+    // Lines keep flowing while the subagent runs: a later tool switch lands.
+    fs.appendFileSync(
+      path.join(subagentsDir, 'agent-xyz.jsonl'),
+      JSON.stringify(toolUseLine('Bash')) + '\n'
+    );
+    await until(() => subagents()['xyz'].currentTool === 'Bash');
+    expect(subagents()['xyz'].state).toBe('working');
+  });
+
+  it('ends a subagent on an assistant line with no tool_use, and never re-tails it', async () => {
+    engine.__setDeps({ pollIntervalMs: 25, coalesceMs: 5 });
+    liveSession();
+    writeSubagent('xyz', [toolUseLine('Bash')]);
+
+    engine.start();
+    await until(() => subagents()['xyz']?.state === 'working');
+
+    // The closing assistant message carries text only — the subagent is done.
+    fs.appendFileSync(
+      path.join(subagentsDir, 'agent-xyz.jsonl'),
+      JSON.stringify({
+        type: 'assistant',
+        uuid: 'a-end',
+        timestamp: new Date().toISOString(),
+        message: { content: [{ type: 'text', text: 'Done' }] },
+      }) + '\n'
+    );
+    await until(() => !subagents()['xyz']);
+
+    // Finished subagents are remembered: later polls must not resurrect it
+    // even though its files are still on disk with a fresh mtime.
+    await sleep(100);
+    expect(subagents()['xyz']).toBeUndefined();
+  });
+
+  it('treats a transcript idle past the 10 min threshold as finished — it never appears', async () => {
+    engine.__setDeps({ pollIntervalMs: 25, coalesceMs: 5 });
+    liveSession();
+    writeSubagent('old', [toolUseLine('Bash')]);
+    const stale = (Date.now() - 11 * 60_000) / 1000;
+    fs.utimesSync(path.join(subagentsDir, 'agent-old.jsonl'), stale, stale);
+
+    engine.start();
+    await until(() => engine.getOffice().sessions[process.pid]);
+
+    // Give discovery several poll cycles; the stale subagent must stay out.
+    await sleep(150);
+    expect(subagents()['old']).toBeUndefined();
+  });
+});
+
 describe('engine end to end (registry + transcript + tick)', () => {
   it('tails the transcript under $CLAUDE_HOME/projects/<slug>, flips a long tool call to waiting, and ends the session when its registry entry goes', async () => {
     const onSnapshot = vi.fn();

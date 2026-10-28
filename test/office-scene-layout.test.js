@@ -4,6 +4,7 @@ import {
   DESKS_PER_ROW,
   SlotAllocator,
   createAllocators,
+  internBench,
   planFloor,
   routeToBreak,
 } from '../src/lib/office/scene/layout.js';
@@ -191,5 +192,36 @@ describe('routeToBreak', () => {
       sofa
     );
     for (const via of sofa.via) expect(route).toContainEqual(via);
+  });
+});
+
+describe('internBench', () => {
+  const sub = (id) => ({ subagentId: id, agentType: 'Agent', state: 'working' });
+
+  it('pulls up a chair per subagent at the source seat positions', () => {
+    const { seated, overflow } = internBench({ a: sub('a'), b: sub('b') });
+    expect(overflow).toBe(0);
+    expect(seated.map((s) => s.sub.subagentId)).toEqual(['a', 'b']);
+    // Source seating: a row in front of the desk, 0.55 apart from x = -0.5,
+    // each stool at z = 1.42 angled -0.25 toward the parent.
+    expect(seated[0]).toMatchObject({ x: -0.5, z: 1.42, yaw: -0.25 });
+    expect(seated[1]).toMatchObject({ x: -0.5 + 0.55, z: 1.42, yaw: -0.25 });
+  });
+
+  it('seats at most three and counts the rest as overflow', () => {
+    const { seated, overflow } = internBench({
+      a: sub('a'),
+      b: sub('b'),
+      c: sub('c'),
+      d: sub('d'),
+      e: sub('e'),
+    });
+    expect(seated).toHaveLength(3);
+    expect(seated.map((s) => s.sub.subagentId)).toEqual(['a', 'b', 'c']);
+    expect(overflow).toBe(2);
+  });
+
+  it('handles a session with no subagents map', () => {
+    expect(internBench(undefined)).toEqual({ seated: [], overflow: 0 });
   });
 });
