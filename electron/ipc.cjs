@@ -53,6 +53,7 @@ const keepAwake = require('./services/keepAwake.cjs');
 const handoff = require('./services/handoff.cjs');
 const transcripts = require('./services/transcripts.cjs');
 const officeEngine = require('./services/office/engine.cjs');
+const officeHooks = require('./services/office/hooksInstaller.cjs');
 const { humanize } = require('./services/errors.cjs');
 
 let store;
@@ -2876,8 +2877,38 @@ function registerHandlers(win, storeInstance) {
           win.webContents.send('office-update', office);
         }
       },
+      // While the engine runs, the hook socket listens here (userData, beside
+      // the installed forwarder) — the engine itself stays electron-free.
+      hookSocketDir: app.getPath('userData'),
     })
   );
+
+  // Claude Code hook install/uninstall — the one-click action behind
+  // Settings → Office (the dnsmasq/sudoers precedent: an action, not a stored
+  // value). Status is scanned from the user's Claude settings file.
+  ipcMain.handle('office-hooks-status', () => {
+    try {
+      return officeHooks.status();
+    } catch (err) {
+      return { installed: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('office-hooks-install', async () => {
+    try {
+      return { success: true, ...officeHooks.install() };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('office-hooks-uninstall', async () => {
+    try {
+      return { success: true, ...officeHooks.uninstall() };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
 
   // ─── Settings ────────────────────────────────────────────────────────
 

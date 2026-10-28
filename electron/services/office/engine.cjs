@@ -15,8 +15,10 @@
 // coalesce (~100 ms) so a cold-start transcript replay lands as one push.
 //
 // Lifecycle: lazy single-start — the first Office visit calls start(), which
-// is idempotent; the engine then stays warm until app quit calls stop().
-// Subagent discovery (#183), Antigravity (#186) and the hook socket (#187)
+// is idempotent; the engine then stays warm until app quit calls stop(). While
+// it runs, the hook socket (hookSocket.cjs) listens in userData and feeds
+// exact hook_event state into the same dispatch; without it the office falls
+// back to inferred waiting. Subagent discovery (#183) and Antigravity (#186)
 // land later.
 //
 // Electron-free (the ratchet test enforces it): effects are injected through
@@ -26,6 +28,7 @@ const { join } = require('node:path');
 const { reduce, emptyOffice } = require('./reducer.cjs');
 const scanner = require('./scanner.cjs');
 const { FileTailer } = require('./tailer.cjs');
+const hookSocket = require('./hookSocket.cjs');
 
 /** @typedef {import('./types.cjs').Office} Office */
 /** @typedef {import('./types.cjs').DomainEvent} DomainEvent */
@@ -186,14 +189,26 @@ async function poll() {
  * Start the engine: one immediate poll, then the setTimeout chain. Lazy and
  * idempotent — the first Office visit starts it, later calls are no-ops, and
  * it runs until stop() at app quit. Returns the current Office either way.
- * @param {{ onSnapshot?: (office: Office) => void }} [effects] Bound on first
- *   start; snapshots flow to it from then on.
+ * @param {{ onSnapshot?: (office: Office) => void, hookSocketDir?: string }}
+ *   [effects] Bound on first start; snapshots flow to onSnapshot from then on,
+ *   and the hook socket listens in hookSocketDir (userData — ipc.cjs passes it,
+ *   keeping this module electron-free). Without a dir the socket stays closed
+ *   and waiting is inferred as before.
  * @returns {Office}
  */
 function start(effects = {}) {
   if (started) return office;
   started = true;
   if (effects.onSnapshot) __setDeps({ onSnapshot: effects.onSnapshot });
+
+  // Exact real-time state via the Claude Code hook (#187). A socket failure
+  // must never take the poll loop down with it — the office degrades to
+  // transcript inference instead.
+  try {
+    hookSocket.start({ dir: effects.hookSocketDir, dispatch });
+  } catch (err) {
+    console.error('[office] failed to start hook socket:', err);
+  }
 
   const loop = async () => {
     await poll();
@@ -207,6 +222,7 @@ function start(effects = {}) {
 /** Stop polling and release every tailer's file handle. Called at app quit. */
 function stop() {
   started = false;
+  hookSocket.stop();
   if (pollTimer) {
     clearTimeout(pollTimer);
     pollTimer = null;
