@@ -47,3 +47,69 @@ Launch Preset. Stored on the Site record (`launchTargets`) so it travels with
 the Site and is reclaimed on delete. Chosen from the Agents pane's "New session"
 menu; the webroot with the Launch Preset is the default when none is picked.
 _Avoid_: Preset (that's the global default), workspace, task
+
+### Office
+
+**Office**:
+The top-level section that shows every live agent conversation on the machine as a
+Character in a 3D office, including conversations WPXen did not start. It only
+watches. It never launches, steers or stops an Agent.
+_Avoid_: Agent Verse, dashboard, monitor
+
+**Room**:
+The part of the Office given to one Agent (Claude Code or Antigravity), with its own
+look. Exactly one Room is on screen at a time.
+_Avoid_: Floor, tab (the tab only switches Rooms)
+
+**Character**:
+One live agent conversation as the Office shows it: a figure at a desk whose pose
+shows its Agent State. A Character can be a Session WPXen spawned, or one started in
+any other terminal or app.
+_Avoid_: Session (a Session is a pty WPXen hosts for a Site; the Office's
+code keeps its source project's `Session` name for a Character, but prose says
+Character), avatar, agent
+
+**Intern**:
+A subagent of a Character, seated beside its parent's desk while the subagent runs.
+It leaves when the subagent finishes.
+_Avoid_: Child session, helper, sub-character
+
+**Pod**:
+The cluster of desks for one Project Key, marked by a floor sign.
+_Avoid_: Team, group, cluster
+
+**Project Key**:
+The name that groups Characters into a Pod. It is the git repository's name for the
+Character's working directory, or the folder's own name when there is no repository.
+_Avoid_: Project (the Agents sidebar's Projects are Sites), Site, workspace
+
+**Agent State**:
+What a Character is doing: working (with its current tool), thinking, idle, error,
+ended, or Waiting on You. An ended Character lingers at its desk for a few seconds
+before it leaves, and is not counted as live.
+_Avoid_: Status (the Agents section's Session status is a different set: idle,
+working, done, needs-input, exited, error)
+
+**Waiting on You**:
+The Agent State of a Character blocked on the user, such as a permission prompt or a
+question. The Hook reports it exactly. Without the Hook, it is inferred from a tool
+call that has run past the waiting threshold.
+_Avoid_: Needs input (the Agents section's term for a Session), blocked, paused
+
+**Break**:
+A Character idle past the break threshold, which walks from its desk to the lounge
+and walks back when it has work again. Being on a Break qualifies idle and is not an
+Agent State of its own.
+_Avoid_: Away, AFK, sleeping
+
+**Domain Event**:
+One observed fact about the machine's agents (a conversation appeared, a transcript
+line was written, the Hook fired, a clock tick) that the Office is rebuilt from.
+_Avoid_: Message, update, snapshot (a snapshot is the Office after the events)
+
+**Hook**:
+The optional Claude Code hook WPXen installs from Settings, so that Claude Code
+reports its state the moment it changes and Waiting on You becomes exact instead of
+inferred. WPXen shows the change to the Claude settings file and asks before it
+writes, and the hook pins the absolute path of the `node` it was installed with.
+_Avoid_: Plugin, integration, webhook

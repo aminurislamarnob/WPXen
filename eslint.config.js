@@ -68,6 +68,14 @@ module.exports = [
     },
   },
 
+  // The 3D office scene — React Three Fiber renders three.js objects, not DOM
+  // elements, so React's DOM property whitelist doesn't apply to its JSX
+  // (`position`, `args`, `castShadow`, material props, …).
+  {
+    files: ['src/components/office/scene/**/*.jsx'],
+    rules: { 'react/no-unknown-property': 'off' },
+  },
+
   // Tests — Node + Vitest globals.
   {
     files: ['test/**/*.{js,cjs}', '**/*.test.{js,cjs}'],

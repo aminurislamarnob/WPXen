@@ -52,6 +52,8 @@ const externalTools = require('./services/externalTools.cjs');
 const keepAwake = require('./services/keepAwake.cjs');
 const handoff = require('./services/handoff.cjs');
 const transcripts = require('./services/transcripts.cjs');
+const officeEngine = require('./services/office/engine.cjs');
+const officeHooks = require('./services/office/hooksInstaller.cjs');
 const { humanize } = require('./services/errors.cjs');
 
 let store;
@@ -2856,6 +2858,59 @@ function registerHandlers(win, storeInstance) {
       dnsmasq.configureDnsmasq();
       dnsmasq.start();
       return { success: true };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  // ─── Office (see services/office/engine.cjs) ─────────────────────────
+
+  // Lazy single-start: the first Office visit starts the engine (nothing is
+  // scanned before then); it then stays warm until app quit — switching away
+  // never stops it. Idempotent, so every later mount just gets the current
+  // Office back. Snapshots are pushed on 'office-update', already
+  // reference-deduped and coalesced by the engine. The sink is bound once, so
+  // it looks the windows up at send time rather than capturing one: a window
+  // recreated after the first visit (macOS activate) still gets updates.
+  ipcMain.handle('office-start', () =>
+    officeEngine.start({
+      onSnapshot: (office) => {
+        for (const w of BrowserWindow.getAllWindows()) {
+          if (!w.isDestroyed() && w.webContents)
+            w.webContents.send('office-update', office);
+        }
+      },
+      // While the engine runs, the hook socket listens here (userData, beside
+      // the installed forwarder) — the engine itself stays electron-free.
+      hookSocketDir: app.getPath('userData'),
+    })
+  );
+
+  // Claude Code hook install/uninstall — the one-click action behind
+  // Settings → Office (the dnsmasq/sudoers precedent: an action, not a stored
+  // value). Two steps so the diff is shown before anything is written:
+  // preview computes it, apply writes it once the user confirms (refusing if
+  // the files moved in between). Status is scanned from the user's Claude
+  // settings file, cheap enough for the page to poll.
+  ipcMain.handle('office-hooks-status', () => {
+    try {
+      return officeHooks.status();
+    } catch (err) {
+      return { installed: false, healthy: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('office-hooks-preview', (_e, command) => {
+    try {
+      return { success: true, ...officeHooks.preview(command) };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('office-hooks-apply', (_e, command, token) => {
+    try {
+      return { success: true, ...officeHooks.apply(command, { token }) };
     } catch (err) {
       return { success: false, error: humanize(err) };
     }
