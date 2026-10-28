@@ -7,19 +7,22 @@
 // callback (ipc.cjs binds it to the 'office-update' channel).
 //
 // Every second (a setTimeout chain, like startStatusPoller — a slow scan can
-// never stack overlapping runs) it diffs the Claude Code session registry,
-// dispatches the resulting domain events through the pure reducer, tails each
-// live session's transcript under $CLAUDE_HOME/projects/<slug>, and emits a
-// tick. Two throttles guard the IPC channel: a snapshot is scheduled only when
-// the reducer returned a *different* Office reference, and scheduled snapshots
-// coalesce (~100 ms) so a cold-start transcript replay lands as one push.
+// never stack overlapping runs) it diffs the Claude Code session registry and
+// the Antigravity brain folders (antigravity.cjs, #186), dispatches the
+// resulting domain events through the pure reducer, tails each live session's
+// transcript — Claude's under $CLAUDE_HOME/projects/<slug>, Antigravity's at
+// the conversation's own brain path — and emits a tick. Two throttles guard
+// the IPC channel: a snapshot is scheduled only when the reducer returned a
+// *different* Office reference, and scheduled snapshots coalesce (~100 ms) so
+// a cold-start transcript replay lands as one push.
 //
 // Lifecycle: lazy single-start — the first Office visit calls start(), which
 // is idempotent; the engine then stays warm until app quit calls stop(). While
 // it runs, the hook socket (hookSocket.cjs) listens in userData and feeds
 // exact hook_event state into the same dispatch; without it the office falls
-// back to inferred waiting. Subagent discovery (#183) and Antigravity (#186)
-// land later.
+// back to inferred waiting — Antigravity has no hook, so its waiting state is
+// always the running-tool-threshold inference. Each poll also discovers a
+// Claude session's subagents (see discoverSubagents) and tails them as interns.
 //
 // Electron-free (the ratchet test enforces it): effects are injected through
 // `deps`, swappable in tests via __setDeps.
@@ -28,6 +31,8 @@ const { join } = require('node:path');
 const { readdir, readFile, stat } = require('node:fs/promises');
 const { reduce, emptyOffice } = require('./reducer.cjs');
 const scanner = require('./scanner.cjs');
+const antigravity = require('./antigravity.cjs');
+const { getProjectKey } = require('./projectKey.cjs');
 const { FileTailer } = require('./tailer.cjs');
 const hookSocket = require('./hookSocket.cjs');
 
@@ -48,6 +53,9 @@ let overrides = {};
 const deps = {
   get scan() {
     return 'scan' in overrides ? overrides.scan : scanner.scan;
+  },
+  get scanAg() {
+    return 'scanAg' in overrides ? overrides.scanAg : antigravity.scanAntigravity;
   },
   get createTailer() {
     return 'createTailer' in overrides
@@ -78,6 +86,7 @@ function __setDeps(next) {
 /** @type {Office} */
 let office = emptyOffice();
 let scanSnapshot = scanner.emptyScanSnapshot();
+let agSnapshot = antigravity.emptyAgScanSnapshot();
 /** One transcript tailer per live pid. @type {Map<number, { sessionId: string, tailer: { stop: () => void } }>} */
 const tailers = new Map();
 /** One tailer per live subagent, keyed "pid-subagentId". @type {Map<string, { stop: () => void }>} */
@@ -112,8 +121,10 @@ function claudeTranscriptPath(cwd, sessionId) {
  * @param {number} pid
  * @param {string} transcriptPath
  * @param {string} sessionId
+ * @param {(line: *) => void} [onLine] Observes each line after dispatch
+ *   (Antigravity workspace inference).
  */
-function tailTranscript(pid, transcriptPath, sessionId) {
+function tailTranscript(pid, transcriptPath, sessionId, onLine) {
   tailers.get(pid)?.tailer.stop();
   const tailer = deps.createTailer(transcriptPath);
   tailers.set(pid, { sessionId, tailer });
@@ -121,6 +132,7 @@ function tailTranscript(pid, transcriptPath, sessionId) {
     // Lines from a transcript we've since switched away from are stale.
     if (tailers.get(pid)?.tailer !== tailer) return;
     dispatch({ type: 'transcript_line', pid, line });
+    onLine?.(line);
   });
   tailer.start().catch((err) => {
     console.error(`[office] failed to tail transcript for pid ${pid}:`, err);
@@ -145,6 +157,33 @@ function stopSubagents(pid) {
   }
 }
 
+/**
+ * Tail an Antigravity conversation and move it to its project pod once a tool
+ * call names its workspace. The transcript carries no cwd, so the first
+ * absolute tool-call path (brain-internal paths excluded) is resolved on disk
+ * to a folder, then to a project key — the session_workspace dispatch below.
+ * @param {number} pid
+ * @param {string} conversationId
+ */
+function tailAntigravity(pid, conversationId) {
+  const conversation = agSnapshot.conversations.get(conversationId);
+  if (!conversation) return;
+  let resolving = false;
+  tailTranscript(pid, conversation.transcriptPath, conversationId, (line) => {
+    if (resolving) return;
+    const path = antigravity.toolPathFromStep(line);
+    if (!path) return;
+    resolving = true;
+    antigravity
+      .workspaceDir(path)
+      .then(async (cwd) => ({ cwd, projectKey: await getProjectKey(cwd) }))
+      .then(({ cwd, projectKey }) => {
+        if (office.sessions[pid]?.sessionId === conversationId)
+          dispatch({ type: 'session_workspace', pid, cwd, projectKey });
+      });
+  });
+}
+
 // ── Dispatch ─────────────────────────────────────────────────
 
 /**
@@ -157,11 +196,15 @@ function dispatch(event) {
   office = reduce(office, event);
 
   if (event.type === 'session_appeared') {
-    tailTranscript(
-      event.pid,
-      claudeTranscriptPath(event.cwd, event.sessionId),
-      event.sessionId
-    );
+    if (event.agent === 'antigravity') {
+      tailAntigravity(event.pid, event.sessionId);
+    } else {
+      tailTranscript(
+        event.pid,
+        claudeTranscriptPath(event.cwd, event.sessionId),
+        event.sessionId
+      );
+    }
   } else if (event.type === 'session_status') {
     // A new conversation in the same process writes to a new transcript file.
     const current = tailers.get(event.pid);
@@ -281,6 +324,11 @@ async function poll() {
     scanSnapshot = result.snapshot;
     for (const event of result.events) dispatch(event);
 
+    const ag = await deps.scanAg(agSnapshot);
+    // The snapshot must be current before dispatch, which looks up the transcript path.
+    agSnapshot = ag.snapshot;
+    for (const event of ag.events) dispatch(event);
+
     for (const session of Object.values(office.sessions)) {
       if (session.agent !== 'claude') continue;
       await discoverSubagents(session);
@@ -362,6 +410,7 @@ function __reset() {
   stop();
   office = emptyOffice();
   scanSnapshot = scanner.emptyScanSnapshot();
+  agSnapshot = antigravity.emptyAgScanSnapshot();
   overrides = {};
 }
 

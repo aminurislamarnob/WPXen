@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ROOMS,
   officeInRoom,
+  roomCounts,
   roomOf,
   roomTheme,
   waitingIn,
@@ -51,6 +52,30 @@ describe('office rooms', () => {
       session(3, 'idle'),
     ];
     expect(waitingIn(sessions)).toBe(2);
+  });
+
+  it('roomCounts derives each tab’s agent count and waiting-on-you count from the whole office', () => {
+    const office = {
+      sessions: {
+        1: session(1, 'waiting_on_user'), // claude by default
+        2: session(2, 'working', {
+          // A waiting intern counts toward its room's waiting badge too.
+          subagents: { a: { subagentId: 'a', state: 'waiting_on_user' } },
+        }),
+        [-1]: session(-1, 'working', { agent: 'antigravity' }),
+        [-2]: session(-2, 'waiting_on_user', { agent: 'antigravity' }),
+      },
+      waitingCount: 3,
+    };
+    expect(roomCounts(office)).toEqual([
+      { kind: 'claude', count: 2, waiting: 2 },
+      { kind: 'antigravity', count: 2, waiting: 1 },
+    ]);
+    // An empty office still lists both rooms, at zero.
+    expect(roomCounts({ sessions: {}, waitingCount: 0 })).toEqual([
+      { kind: 'claude', count: 0, waiting: 0 },
+      { kind: 'antigravity', count: 0, waiting: 0 },
+    ]);
   });
 
   it('officeInRoom filters by room and recomputes the waiting count', () => {
