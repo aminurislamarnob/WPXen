@@ -55,6 +55,11 @@ describe('scan', () => {
     expect(sessionsDir()).toBe(path.join(home, 'sessions'));
   });
 
+  it('treats an empty CLAUDE_HOME as unset', () => {
+    process.env.CLAUDE_HOME = '';
+    expect(claudeHome()).toBe(path.join(os.homedir(), '.claude'));
+  });
+
   it('reports the registry status with the session, then only when it changes', async () => {
     const file = path.join(home, 'sessions', `${process.pid}.json`);
     fs.writeFileSync(file, entry('busy', 100));

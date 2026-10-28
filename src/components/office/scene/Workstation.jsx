@@ -6,6 +6,7 @@ import { Label } from './Label.jsx';
 import { Character, STAND_HEIGHT } from './Character.jsx';
 import { BreakPresence } from '../../../lib/office/scene/breaks.js';
 import { internBench } from '../../../lib/office/scene/layout.js';
+import { stateBadge } from '../../../lib/office/hud.js';
 import { StaticBatch } from './StaticBatch.jsx';
 import {
   DeskLamp,
@@ -19,13 +20,7 @@ import {
   Notebooks,
   OfficeChair,
 } from './Props.jsx';
-import {
-  hash,
-  lookFor,
-  palette,
-  stateColor,
-  stateLabel,
-} from '../../../lib/office/scene/theme.js';
+import { hash, lookFor, palette, stateColor } from '../../../lib/office/scene/theme.js';
 
 // ── Workstation ──────────────────────────────────────────────
 // A desk with its peripherals and, when a session occupies it, the character
@@ -157,6 +152,9 @@ function Desk({ accent, occupied }) {
 
 function AgentTag({ name, state, tool, emphasis = false, onBreak }) {
   const waiting = state === 'waiting_on_user';
+  const badge = stateBadge(state, { tool, onBreak });
+  // Beside the name: the tool while working, else the state, else "On break".
+  const detail = badge.tool ?? (state !== 'idle' || onBreak ? badge.label : null);
   return (
     <div
       className={`agent-tag ${waiting ? 'agent-tag--waiting' : ''} ${emphasis ? 'agent-tag--emphasis' : ''}`}
@@ -164,17 +162,11 @@ function AgentTag({ name, state, tool, emphasis = false, onBreak }) {
     >
       <span className="agent-tag__dot" />
       {waiting ? (
-        <span className="agent-tag__label">Waiting on you</span>
+        <span className="agent-tag__label">{badge.label}</span>
       ) : (
         <>
           <span className="agent-tag__name">{name}</span>
-          {state === 'working' && tool ? (
-            <span className="agent-tag__tool">{tool}</span>
-          ) : state !== 'idle' ? (
-            <span className="agent-tag__tool">{stateLabel[state]}</span>
-          ) : (
-            onBreak && <span className="agent-tag__tool">On break</span>
-          )}
+          {detail && <span className="agent-tag__tool">{detail}</span>}
         </>
       )}
     </div>

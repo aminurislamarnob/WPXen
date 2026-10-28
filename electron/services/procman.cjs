@@ -547,4 +547,5 @@ module.exports = {
   reconcileOrphans,
   getLogPath,
   setBaseDir,
+  pidAlive,
 };

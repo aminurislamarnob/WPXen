@@ -17,6 +17,7 @@ const { readdir, readFile } = require('node:fs/promises');
 const { join } = require('node:path');
 const { homedir } = require('node:os');
 const { getProjectKey } = require('./projectKey.cjs');
+const { pidAlive } = require('../procman.cjs');
 
 /** @typedef {import('./types.cjs').DomainEvent} DomainEvent */
 
@@ -39,30 +40,17 @@ function projectSlug(cwd) {
 }
 
 /**
- * The Claude home directory. CLAUDE_HOME overrides it (the test seam).
+ * The Claude home directory. CLAUDE_HOME overrides it (the test seam); an
+ * empty string counts as unset, the same as the installer always read it.
  * @returns {string}
  */
 function claudeHome() {
-  return process.env.CLAUDE_HOME ?? join(homedir(), '.claude');
+  return process.env.CLAUDE_HOME || join(homedir(), '.claude');
 }
 
 /** @returns {string} */
 function sessionsDir() {
   return join(claudeHome(), 'sessions');
-}
-
-/**
- * Whether a PID is alive. Dead pids are never shown as live.
- * @param {number} pid
- * @returns {boolean}
- */
-function isProcessAlive(pid) {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 /**
@@ -102,7 +90,7 @@ async function scan(prev) {
       if (typeof entry.pid !== 'number') continue;
 
       // Verify the process is still alive — dead pids are never shown as live.
-      if (!isProcessAlive(entry.pid)) continue;
+      if (!pidAlive(entry.pid)) continue;
 
       const name = entry.name ?? `session-${entry.pid}`;
       const startedAt = entry.startedAt ?? Date.now();
