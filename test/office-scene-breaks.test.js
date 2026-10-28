@@ -6,8 +6,9 @@ import {
 } from '../src/lib/office/scene/breaks.js';
 import { createAllocators, planFloor } from '../src/lib/office/scene/layout.js';
 
-// Break allocation is shared infrastructure landed with the scene; the lounge
-// furniture and commuting that make it visible arrive with #184.
+// Break allocation is the pure seam behind commuting: on-break sessions get a
+// sticky spot in the lounge, at the coffee bar or at the ping-pong table. The
+// walk itself is reviewed via the dev Preview, not tested here.
 
 function session(pid, extra = {}) {
   return {

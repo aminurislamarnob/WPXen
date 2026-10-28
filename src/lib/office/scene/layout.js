@@ -3,8 +3,8 @@
 // Slots are sticky: a pod or desk keeps its position for as long as it lives,
 // and freed slots are reused lowest-first. Pure math, no React, no DOM —
 // ported whole from the source scene (web/src/scene/layout.ts), including the
-// amenity strip and break routes that tickets #184's lounge furniture and
-// commuting will consume; until then that data is inert.
+// amenity strip the lounge furniture fills and the break routes commuters
+// walk.
 
 export const DESK_PITCH = 1.85;
 export const ROW_PITCH = 2.6;
