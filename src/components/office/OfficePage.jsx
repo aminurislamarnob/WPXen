@@ -1,76 +1,47 @@
 import { useEffect, useState } from 'react';
-import { Building2, Circle } from 'lucide-react';
-import { Card, PageHeader, Row, SectionLabel } from '../ui';
+import { Card, PageHeader, SegmentedTabs } from '../ui';
+import { OfficeScene } from './scene/OfficeScene.jsx';
+import { ROOMS, officeInRoom } from '../../lib/office/scene/rooms.js';
+import { subscribePreview } from '../../lib/office/preview.js';
 
-// Office — live Claude Code sessions on this machine (ticket #181's tracer
-// slice: the debug list; the 3D scene follows in later tickets). Mounting this
-// page lazy-starts the main-process engine over IPC; the engine then stays
-// warm until quit, pushing Office snapshots on 'office-update' only when the
-// reducer produced a change.
+// Office — the claude-agent-verse 3D office: every live Claude Code session on
+// this machine is a character at a desk, clustered into pods by project.
+// Mounting this page lazy-starts the main-process engine over IPC; the engine
+// then stays warm until quit, pushing Office snapshots on 'office-update' only
+// when the reducer produced a change. The page chrome is WPXen (tokens,
+// primitives); the canvas content keeps the source art direction.
+//
+// Room tabs (#186) will replace this pinned room; until the Antigravity
+// adapter lands only the Claude Code room has sessions anyway.
+const ROOM = ROOMS[0];
 
-// Agent State → presentation, on semantic tokens only. waiting_on_user is the
-// state that blocks on the user, so it alone gets a filled pill; the rest are
-// a dot + label. working/thinking share the brand blue until the scene's own
-// state palette lands (#182).
-const STATE_META = {
-  working: { label: 'Working', className: 'text-highlight' },
-  thinking: { label: 'Thinking', className: 'text-highlight' },
-  idle: { label: 'Idle', className: 'text-status-running' },
-  error: { label: 'Error', className: 'text-status-error' },
-  ended: { label: 'Ended', className: 'text-muted-foreground' },
-};
+const EMPTY_OFFICE = { sessions: {}, waitingCount: 0 };
 
-function StateBadge({ session }) {
-  if (session.state === 'waiting_on_user') {
-    return (
-      <span className="inline-flex items-center gap-1.5 border border-status-warning/30 bg-status-warning/10 text-status-warning px-2 py-0.5 rounded-full text-xs font-semibold flex-shrink-0">
-        <Circle size={6} className="fill-current status-dot-running" />
-        Waiting on you
-      </span>
-    );
-  }
-  const meta = STATE_META[session.state] ?? {
-    label: session.state,
-    className: 'text-muted-foreground',
-  };
-  const onBreak = session.state === 'idle' && session.onBreak;
-  return (
-    <span
-      className={`inline-flex items-center gap-1.5 text-xs font-medium flex-shrink-0 ${meta.className}`}
-    >
-      <Circle size={6} className="fill-current" />
-      {onBreak ? 'On break' : meta.label}
-      {session.state === 'working' && session.currentTool && (
-        <span className="text-muted-foreground font-normal">· {session.currentTool}</span>
-      )}
-    </span>
-  );
-}
+// Dev-only Preview: synthetic snapshots straight into the scene, never the
+// engine. `import.meta.env.DEV` is compile-time, so the menu and the preview
+// wiring are dead-code-eliminated from packaged builds.
+const DEV = import.meta.env.DEV;
 
-// Sessions clustered by project key (git repo name or folder basename), the
-// same grouping the 3D office uses for its pods.
-function groupByProject(office) {
-  const groups = new Map();
-  for (const session of Object.values(office?.sessions ?? {})) {
-    const list = groups.get(session.projectKey) ?? [];
-    list.push(session);
-    groups.set(session.projectKey, list);
-  }
-  return [...groups.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([projectKey, sessions]) => ({
-      projectKey,
-      sessions: sessions.sort((a, b) => a.startedAt - b.startedAt),
-    }));
+function usePreview(mode) {
+  const [office, setOffice] = useState(null);
+  useEffect(() => {
+    if (!DEV || mode === 'off') {
+      setOffice(null);
+      return;
+    }
+    return subscribePreview(setOffice, mode);
+  }, [mode]);
+  return office;
 }
 
 export default function OfficePage() {
-  const [office, setOffice] = useState(null);
+  const [office, setOffice] = useState(EMPTY_OFFICE);
+  const [previewMode, setPreviewMode] = useState('off');
 
   useEffect(() => {
     let mounted = true;
     window.electronAPI.officeStart().then((o) => {
-      if (mounted) setOffice(o);
+      if (mounted && o) setOffice(o);
     });
     const off = window.electronAPI.on('office-update', setOffice);
     return () => {
@@ -79,52 +50,55 @@ export default function OfficePage() {
     };
   }, []);
 
-  const groups = groupByProject(office);
-  const sessionCount = Object.keys(office?.sessions ?? {}).length;
-  const waiting = office?.waitingCount ?? 0;
+  const previewOffice = usePreview(previewMode);
+  const shown = previewOffice ?? office;
+  const roomOffice = officeInRoom(shown, ROOM.kind);
+  const sessionCount = Object.keys(roomOffice.sessions).length;
+  const waiting = roomOffice.waitingCount;
 
   return (
-    <div className="px-6 pb-6 max-w-[735px] mx-auto animate-fade-in">
-      <PageHeader
-        title="Office"
-        subtitle={
-          sessionCount === 0
-            ? 'Live Claude Code sessions on this machine'
-            : `${sessionCount} live session${sessionCount === 1 ? '' : 's'}${
-                waiting > 0 ? ` · ${waiting} waiting on you` : ''
-              }`
-        }
-      />
+    <div className="h-full flex flex-col animate-fade-in">
+      <div className="px-6 flex-shrink-0">
+        <PageHeader
+          title="Office"
+          subtitle={
+            previewOffice
+              ? 'Preview — synthetic sessions, engine untouched'
+              : sessionCount === 0
+                ? 'Live Claude Code sessions on this machine'
+                : `${sessionCount} live session${sessionCount === 1 ? '' : 's'}${
+                    waiting > 0 ? ` · ${waiting} waiting on you` : ''
+                  }`
+          }
+        >
+          {DEV && (
+            <SegmentedTabs
+              tabs={[
+                { value: 'off', label: 'Preview off' },
+                { value: 'cycle', label: 'Cycle' },
+                { value: 'still', label: 'Still' },
+              ]}
+              value={previewMode}
+              onChange={setPreviewMode}
+            />
+          )}
+        </PageHeader>
+      </div>
 
-      {sessionCount === 0 ? (
-        <Card className="px-6 py-10 text-center">
-          <Building2 size={28} className="mx-auto text-muted-foreground" />
-          <p className="text-[13px] font-medium text-foreground mt-3">
-            No live Claude Code sessions
-          </p>
-          <p className="text-xs text-muted-foreground mt-1">
-            Start one anywhere on this machine and it appears here within a couple of
-            seconds.
-          </p>
-        </Card>
-      ) : (
-        groups.map(({ projectKey, sessions }) => (
-          <div key={projectKey} className="mb-4">
-            <SectionLabel>{projectKey}</SectionLabel>
-            <Card>
-              {sessions.map((session) => (
-                <Row
-                  key={session.pid}
-                  title={<span className="font-medium">{session.name}</span>}
-                  subtitle={session.title ?? session.cwd}
-                >
-                  <StateBadge session={session} />
-                </Row>
-              ))}
+      {/* Full-bleed canvas — the deliberate exception to the max-w page wrap. */}
+      <div className="relative flex-1 min-h-0 overflow-hidden">
+        <OfficeScene office={roomOffice} room={ROOM} />
+        {sessionCount === 0 && (
+          <div className="absolute left-1/2 bottom-10 -translate-x-1/2 z-10">
+            <Card className="px-5 py-3.5 text-center shadow-md">
+              <p className="text-[13px] font-medium text-foreground">
+                The {ROOM.name} room is quiet
+              </p>
+              <p className="text-xs text-muted-foreground mt-0.5">{ROOM.hint}</p>
             </Card>
           </div>
-        ))
-      )}
+        )}
+      </div>
     </div>
   );
 }
