@@ -52,6 +52,7 @@ const externalTools = require('./services/externalTools.cjs');
 const keepAwake = require('./services/keepAwake.cjs');
 const handoff = require('./services/handoff.cjs');
 const transcripts = require('./services/transcripts.cjs');
+const officeEngine = require('./services/office/engine.cjs');
 const { humanize } = require('./services/errors.cjs');
 
 let store;
@@ -2860,6 +2861,23 @@ function registerHandlers(win, storeInstance) {
       return { success: false, error: humanize(err) };
     }
   });
+
+  // ─── Office (see services/office/engine.cjs) ─────────────────────────
+
+  // Lazy single-start: the first Office visit starts the engine (nothing is
+  // scanned before then) and binds its snapshot push to this window; it then
+  // stays warm until app quit — switching away never stops it. Idempotent, so
+  // every later mount just gets the current Office back. Snapshots are pushed
+  // on 'office-update', already reference-deduped and coalesced by the engine.
+  ipcMain.handle('office-start', () =>
+    officeEngine.start({
+      onSnapshot: (office) => {
+        if (win && !win.isDestroyed() && win.webContents) {
+          win.webContents.send('office-update', office);
+        }
+      },
+    })
+  );
 
   // ─── Settings ────────────────────────────────────────────────────────
 
