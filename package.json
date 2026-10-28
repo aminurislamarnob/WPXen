@@ -48,6 +48,9 @@
     "@codemirror/language": "^6.12.4",
     "@codemirror/merge": "^6.12.2",
     "@lezer/highlight": "^1.2.3",
+    "@react-spring/three": "^10.1.2",
+    "@react-three/drei": "^10.7.9",
+    "@react-three/fiber": "^9.8.2",
     "@tanstack/react-virtual": "^3.14.14",
     "@tiptap/extension-image": "^3.31.3",
     "@tiptap/extension-list": "^3.31.3",
@@ -73,7 +76,9 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-resizable-panels": "^3.0.6",
-    "react-router-dom": "^6.21.3"
+    "react-router-dom": "^6.21.3",
+    "three": "^0.186.1",
+    "three-stdlib": "^2.36.1"
   },
   "devDependencies": {
     "@electron/rebuild": "^4.2.0",
