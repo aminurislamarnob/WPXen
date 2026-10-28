@@ -14,7 +14,7 @@ import {
   routeToBreak,
 } from '../../../lib/office/scene/layout.js';
 import { frameRate, isBusy, isFarZoom } from '../../../lib/office/scene/pacing.js';
-import { BreakPresence } from '../../../lib/office/scene/breaks.js';
+import { BreakAllocator, BreakPresence } from '../../../lib/office/scene/breaks.js';
 import { BeanBag, Room } from './Room.jsx';
 import { Label, LabelLayer } from './Label.jsx';
 import { FloorPlant } from './Props.jsx';
@@ -27,8 +27,7 @@ import './scene.css';
 // The canvas owner: orthographic isometric camera with orbit/zoom and an
 // auto-framing rig, rendered on a demand frameloop that a FrameDriver ticks
 // only as fast as the office needs (and not at all when the window is hidden).
-// Click-to-focus (#185) and break-spot allocation (#184) wire into the
-// plumbing kept here.
+// Click-to-focus (#185) wires into the plumbing kept here.
 
 const VIEW_DIR = new THREE.Vector3(1, 0.92, 1.12).normalize();
 
@@ -327,16 +326,21 @@ function Lights({ plan }) {
  *   the camera frames the remaining area (the inspector uses this in #185).
  */
 export function OfficeScene({ office, room, insetRight = 0 }) {
-  // Each room keeps its own sticky desk slots, so switching back finds everyone
-  // where they were. (#184 adds a sticky BreakAllocator beside the desks.)
+  // Each room keeps its own sticky desk slots and break spots, so switching
+  // back finds everyone where they were — at their desk or in the lounge.
   const rooms = useRef(new Map());
   let slots = rooms.current.get(room.kind);
-  if (!slots) rooms.current.set(room.kind, (slots = { desks: createAllocators() }));
-  const { desks } = slots;
+  if (!slots)
+    rooms.current.set(
+      room.kind,
+      (slots = { desks: createAllocators(), breaks: new BreakAllocator() })
+    );
+  const { desks, breaks: breakAlloc } = slots;
   const plan = useMemo(() => planFloor(office, desks), [office, desks]);
-  // Break-spot assignment lands with the lounge (#184); until then nobody
-  // leaves their desk.
-  const breaks = useMemo(() => new Map(), []);
+  const breaks = useMemo(
+    () => breakAlloc.sync(Object.values(office.sessions), plan.amenities.spots),
+    [office, plan, breakAlloc]
+  );
   const presence = useMemo(() => new Set(), []);
 
   const [visible, setVisible] = useState(document.visibilityState === 'visible');
@@ -346,7 +350,7 @@ export function OfficeScene({ office, room, insetRight = 0 }) {
     return () => document.removeEventListener('visibilitychange', onChange);
   }, []);
 
-  // a rally needs smooth frames; it becomes possible once #184 assigns ping-pong spots
+  // a rally needs smooth frames
   const rally = [...breaks.values()].some((s) => s.activity === 'pingpong');
   const fps = frameRate({ visible, busy: isBusy(office), rally });
   const [far, setFar] = useState(true);

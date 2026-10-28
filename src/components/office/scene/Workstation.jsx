@@ -28,10 +28,8 @@ import {
 
 // ── Workstation ──────────────────────────────────────────────
 // A desk with its peripherals and, when a session occupies it, the character
-// whose pose shows the Agent State. Interns (#183) and click-to-focus (#185)
-// land in their own tickets; the Commuter stays ported whole as shared
-// infrastructure — without a break spot (wired in #184) it keeps the
-// character seated.
+// whose pose shows the Agent State, commuting between desk and break spot.
+// Interns (#183) and click-to-focus (#185) land in their own tickets.
 
 const DESK_TOP = 0.74;
 const SEAT = 0.49;

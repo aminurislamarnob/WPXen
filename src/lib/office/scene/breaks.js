@@ -4,8 +4,7 @@ import { hash } from './theme.js';
 // ── Breaks ───────────────────────────────────────────────────
 // A Session that has been idle long enough is `onBreak`: its character walks
 // to a ping-pong end or the coffee bar, and runs back to its desk when work
-// arrives. Ported whole as shared infrastructure; the scene wires the
-// allocator up when the lounge and commuting land (#184).
+// arrives.
 
 /** Seconds for the ball to go there and back. */
 export const RALLY_PERIOD = 1.8;
