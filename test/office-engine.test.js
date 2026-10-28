@@ -129,6 +129,90 @@ describe('engine snapshots', () => {
   });
 });
 
+describe('engine with Antigravity', () => {
+  let agHome;
+  let wsRoot;
+
+  beforeEach(() => {
+    agHome = fs.mkdtempSync(path.join(os.tmpdir(), 'wpxen-office-engine-agy-'));
+    wsRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'wpxen-office-engine-ws-'));
+    process.env.ANTIGRAVITY_HOME = agHome;
+  });
+
+  afterEach(() => {
+    delete process.env.ANTIGRAVITY_HOME;
+    fs.rmSync(agHome, { recursive: true, force: true });
+    fs.rmSync(wsRoot, { recursive: true, force: true });
+  });
+
+  it('a conversation appears in the Antigravity room, joins its project pod from a tool-call path, and leaves when its transcript falls quiet', async () => {
+    engine.__setDeps({ pollIntervalMs: 25, coalesceMs: 5 });
+
+    // The workspace the tool call will name — a plain folder, so the project
+    // key falls back to its basename.
+    const workspace = path.join(wsRoot, 'acme-shop');
+    fs.mkdirSync(workspace);
+
+    const id = '9b2d41e7-55aa-4c21-8c3f-1d0e6f7a8b9c';
+    const logs = path.join(
+      agHome,
+      'antigravity',
+      'brain',
+      id,
+      '.system_generated',
+      'logs'
+    );
+    fs.mkdirSync(logs, { recursive: true });
+    const transcript = path.join(logs, 'transcript.jsonl');
+    fs.writeFileSync(
+      transcript,
+      [
+        JSON.stringify({
+          step_index: 0,
+          source: 'USER_EXPLICIT',
+          type: 'USER_INPUT',
+          status: 'DONE',
+          created_at: new Date().toISOString(),
+          content: '<USER_REQUEST>\nShip the coupon banner\n</USER_REQUEST>',
+        }),
+        JSON.stringify({
+          step_index: 1,
+          source: 'MODEL',
+          type: 'PLANNER_RESPONSE',
+          status: 'DONE',
+          created_at: new Date().toISOString(),
+          tool_calls: [
+            { name: 'run_command', args: { CommandLine: 'npm test', Cwd: workspace } },
+          ],
+        }),
+      ].join('\n') + '\n'
+    );
+
+    engine.start();
+
+    // Appears with a synthetic negative pid in the unknown-workspace pod, then
+    // the tool-call path moves it into its project's pod (session_workspace).
+    await until(() => {
+      const s = Object.values(engine.getOffice().sessions)[0];
+      return s && s.projectKey === 'acme-shop';
+    });
+    const session = Object.values(engine.getOffice().sessions)[0];
+    expect(session.pid).toBeLessThan(0);
+    expect(session).toMatchObject({
+      agent: 'antigravity',
+      sessionId: id,
+      name: `agy-${id.slice(0, 8)}`,
+      cwd: workspace,
+      title: 'Ship the coupon banner',
+    });
+
+    // 30 minutes of transcript silence → the conversation has left the office.
+    const past = new Date(Date.now() - 31 * 60_000);
+    fs.utimesSync(transcript, past, past);
+    await until(() => Object.keys(engine.getOffice().sessions).length === 0);
+  });
+});
+
 describe('engine end to end (registry + transcript + tick)', () => {
   it('tails the transcript under $CLAUDE_HOME/projects/<slug>, flips a long tool call to waiting, and ends the session when its registry entry goes', async () => {
     const onSnapshot = vi.fn();

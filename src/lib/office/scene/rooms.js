@@ -3,9 +3,8 @@ import { palette } from './theme.js';
 // ── Rooms ────────────────────────────────────────────────────
 // One room per kind of agent, shown one at a time. Rooms share the floor plan
 // and furniture; the name, accent and wall colour make it obvious which one
-// you're in. Ported whole from the source scene: the Antigravity room renders
-// only once its adapter and the room tabs land (#186) — until then the Office
-// page pins the first room.
+// you're in. Ported whole from the source scene; the Office page's room tabs
+// switch between them and show each room's counts (roomCounts).
 
 /**
  * @typedef {object} RoomTheme
@@ -54,6 +53,20 @@ export function waitingIn(sessions) {
       if (sub.state === 'waiting_on_user') n++;
   }
   return n;
+}
+
+/**
+ * One entry per room, from the whole office: the agent count and the
+ * waiting-on-you count its tab shows. Tabs always count every room, whichever
+ * one is on screen.
+ * @returns {{ kind: string, count: number, waiting: number }[]}
+ */
+export function roomCounts(office) {
+  const all = Object.values(office.sessions);
+  return ROOMS.map((room) => {
+    const sessions = all.filter((s) => roomOf(s) === room.kind);
+    return { kind: room.kind, count: sessions.length, waiting: waitingIn(sessions) };
+  });
 }
 
 /** The part of the office that sits in one room. */
