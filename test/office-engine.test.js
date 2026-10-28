@@ -482,8 +482,8 @@ describe('engine end to end (registry + transcript + tick)', () => {
       currentTool: 'Bash',
     });
     expect(engine.getOffice().waitingCount).toBe(1);
-    // The pushed snapshot is the same object the handler would return.
-    expect(onSnapshot).toHaveBeenCalled();
+    // The push trails the state change by the coalesce window, so wait for it.
+    await until(() => onSnapshot.mock.calls.length > 0);
 
     // Registry entry disappears → the session ends: shown as ended (no longer
     // waiting) for the linger, then it leaves the office.
