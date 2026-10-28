@@ -85,7 +85,8 @@ _Avoid_: Project (the Agents sidebar's Projects are Sites), Site, workspace
 
 **Agent State**:
 What a Character is doing: working (with its current tool), thinking, idle, error,
-ended, or Waiting on You.
+ended, or Waiting on You. An ended Character lingers at its desk for a few seconds
+before it leaves, and is not counted as live.
 _Avoid_: Status (the Agents section's Session status is a different set: idle,
 working, done, needs-input, exited, error)
 
@@ -109,5 +110,6 @@ _Avoid_: Message, update, snapshot (a snapshot is the Office after the events)
 **Hook**:
 The optional Claude Code hook WPXen installs from Settings, so that Claude Code
 reports its state the moment it changes and Waiting on You becomes exact instead of
-inferred.
+inferred. WPXen shows the change to the Claude settings file and asks before it
+writes, and the hook pins the absolute path of the `node` it was installed with.
 _Avoid_: Plugin, integration, webhook

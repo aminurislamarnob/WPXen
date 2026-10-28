@@ -3,8 +3,8 @@
 // ── Office engine ────────────────────────────────────────────
 // The poll loop behind the Office section, distilled from claude-agent-verse
 // packages/server/src/main.ts with the transport cut away: no HTTP, no
-// WebSocket, no tokens — snapshots leave through an injected onSnapshot
-// callback (ipc.cjs binds it to the 'office-update' channel).
+// WebSocket, no tokens — snapshots leave through the onSnapshot callback
+// passed to start() (ipc.cjs sends them on the 'office-update' channel).
 //
 // Every second (a setTimeout chain, like startStatusPoller — a slow scan can
 // never stack overlapping runs) it diffs the Claude Code session registry and
@@ -62,9 +62,9 @@ const deps = {
       ? overrides.createTailer
       : (filePath) => new FileTailer(filePath);
   },
-  /** Receives every pushed Office snapshot. Bound by ipc.cjs at start(). */
+  /** Receives every pushed Office snapshot: a test override, else start()'s. */
   get onSnapshot() {
-    return 'onSnapshot' in overrides ? overrides.onSnapshot : () => {};
+    return 'onSnapshot' in overrides ? overrides.onSnapshot : snapshotSink;
   },
   get now() {
     return 'now' in overrides ? overrides.now : () => Date.now();
@@ -94,6 +94,8 @@ const subagentTailers = new Map();
 /** Keys of subagents that ended (or were stale on discovery) — never re-tailed. @type {Set<string>} */
 const finishedSubagents = new Set();
 let started = false;
+/** Production's snapshot sink, bound once by start(). @type {(office: Office) => void} */
+let snapshotSink = () => {};
 /** @type {ReturnType<typeof setTimeout> | null} */
 let pollTimer = null;
 /** @type {ReturnType<typeof setTimeout> | null} */
@@ -218,6 +220,7 @@ function dispatch(event) {
       );
     }
   } else if (event.type === 'session_ended') {
+    // The session lingers as ended in the Office, but its files are released now.
     const current = tailers.get(event.pid);
     if (current) {
       current.tailer.stop();
@@ -330,7 +333,8 @@ async function poll() {
     for (const event of ag.events) dispatch(event);
 
     for (const session of Object.values(office.sessions)) {
-      if (session.agent !== 'claude') continue;
+      // An ended session is only lingering: its interns left with it.
+      if (session.agent !== 'claude' || session.state === 'ended') continue;
       await discoverSubagents(session);
     }
 
@@ -347,16 +351,18 @@ async function poll() {
  * idempotent — the first Office visit starts it, later calls are no-ops, and
  * it runs until stop() at app quit. Returns the current Office either way.
  * @param {{ onSnapshot?: (office: Office) => void, hookSocketDir?: string }}
- *   [effects] Bound on first start; snapshots flow to onSnapshot from then on,
- *   and the hook socket listens in hookSocketDir (userData — ipc.cjs passes it,
- *   keeping this module electron-free). Without a dir the socket stays closed
- *   and waiting is inferred as before.
+ *   [effects] Bound on first start; snapshots flow to onSnapshot from then on
+ *   (ipc.cjs resolves the window when each one is sent, so a recreated window
+ *   still gets them), and the hook socket listens in hookSocketDir (userData —
+ *   ipc.cjs passes it, keeping this module electron-free). Without a dir the
+ *   socket stays closed and waiting is inferred as before. A test's
+ *   __setDeps({ onSnapshot }) takes precedence over the one bound here.
  * @returns {Office}
  */
 function start(effects = {}) {
   if (started) return office;
   started = true;
-  if (effects.onSnapshot) __setDeps({ onSnapshot: effects.onSnapshot });
+  if (effects.onSnapshot) snapshotSink = effects.onSnapshot;
 
   // Exact real-time state via the Claude Code hook (#187). A socket failure
   // must never take the poll loop down with it — the office degrades to
@@ -411,6 +417,7 @@ function __reset() {
   office = emptyOffice();
   scanSnapshot = scanner.emptyScanSnapshot();
   agSnapshot = antigravity.emptyAgScanSnapshot();
+  snapshotSink = () => {};
   overrides = {};
 }
 

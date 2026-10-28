@@ -4,7 +4,9 @@ import {
   WAITING_THRESHOLD_MS,
   BREAK_THRESHOLD_MS,
   FEED_CAP,
+  ENDED_LINGER_MS,
 } from '../electron/services/office/types.cjs';
+import { HOOK_TYPES } from '../electron/services/office/hooksInstaller.cjs';
 
 // One-time faithful port of the claude-agent-verse core reducer suite
 // (packages/core/src/reducer.test.ts). All fixture data is synthetic —
@@ -190,9 +192,97 @@ describe('reducer', () => {
   });
 
   describe('session_ended', () => {
-    it('removes the session from the office', () => {
-      const office = officeWith(appeared(), { type: 'session_ended', pid: 1001 });
-      expect(Object.keys(office.sessions)).toHaveLength(0);
+    const ended = { type: 'session_ended', pid: 1001 };
+    const T = 1700000100000;
+    const working = {
+      type: 'transcript_line',
+      pid: 1001,
+      line: {
+        type: 'assistant',
+        timestamp: new Date(T - 20_000).toISOString(),
+        message: { content: [{ type: 'tool_use', name: 'Bash' }] },
+      },
+    };
+    const withIntern = {
+      type: 'subagent_appeared',
+      pid: 1001,
+      subagentId: 'sub-1',
+      agentType: 'Explore',
+      description: 'Look around',
+      toolUseId: 't1',
+    };
+
+    it('keeps the session, visibly ended, with its tool and interns cleared', () => {
+      const office = officeWith(appeared(), working, withIntern, ended);
+      const s = office.sessions[1001];
+      expect(s.state).toBe('ended');
+      expect(s.currentTool).toBeUndefined();
+      expect(s.subagents).toEqual({});
+    });
+
+    it('stops counting an ended session as waiting', () => {
+      let office = officeWith(appeared(), working, { type: 'tick', now: T });
+      expect(office.waitingCount).toBe(1);
+      office = reduce(office, ended);
+      expect(office.waitingCount).toBe(0);
+      office = reduce(office, { type: 'tick', now: T + 1 });
+      expect(office.sessions[1001].state).toBe('ended');
+      expect(office.waitingCount).toBe(0);
+    });
+
+    it('removes the session on the first tick past the linger', () => {
+      let office = officeWith(appeared(), ended);
+      office = reduce(office, { type: 'tick', now: T });
+      expect(office.sessions[1001].state).toBe('ended');
+      // Inside the linger: nothing changes, same reference.
+      expect(reduce(office, { type: 'tick', now: T + ENDED_LINGER_MS - 1 })).toBe(office);
+      office = reduce(office, { type: 'tick', now: T + ENDED_LINGER_MS });
+      expect(office.sessions[1001]).toBeUndefined();
+    });
+
+    it('lingers for a few seconds', () => {
+      expect(ENDED_LINGER_MS).toBeGreaterThanOrEqual(2000);
+      expect(ENDED_LINGER_MS).toBeLessThanOrEqual(10_000);
+    });
+
+    it('is not revived by the registry status or other late events', () => {
+      let office = officeWith(appeared(), ended, { type: 'tick', now: T });
+      for (const event of [
+        { type: 'session_status', pid: 1001, status: 'busy', sessionId: 'aaa-bbb-ccc' },
+        working,
+        withIntern,
+        { type: 'hook_event', pid: 1001, hookData: { type: 'PermissionRequest' } },
+        { type: 'session_workspace', pid: 1001, cwd: '/x', projectKey: 'x' },
+        ended,
+      ]) {
+        expect(reduce(office, event)).toBe(office);
+      }
+      office = reduce(office, { type: 'tick', now: T + 1 });
+      expect(office.sessions[1001].state).toBe('ended');
+    });
+
+    it('a new session at the same pid during the linger replaces the ended one', () => {
+      let office = officeWith(appeared(), working, ended, { type: 'tick', now: T });
+      office = reduce(
+        office,
+        appeared({ sessionId: 'new-session', name: 'next-task', startedAt: T + 10 })
+      );
+      const s = office.sessions[1001];
+      expect(s).toMatchObject({
+        sessionId: 'new-session',
+        name: 'next-task',
+        state: 'idle',
+        feed: [],
+      });
+      expect(s.endedAt).toBeUndefined();
+      // And it is not swept away when the old linger would have expired.
+      office = reduce(office, { type: 'tick', now: T + ENDED_LINGER_MS + 1 });
+      expect(office.sessions[1001].sessionId).toBe('new-session');
+    });
+
+    it('an unknown pid ending is a no-op', () => {
+      const office = officeWith(appeared());
+      expect(reduce(office, { type: 'session_ended', pid: 9999 })).toBe(office);
     });
   });
 
@@ -527,6 +617,71 @@ describe('reducer', () => {
 
       expect(office.sessions[1001].state).toBe('thinking');
       expect(office.sessions[1001].hookWaiting).toBe(false);
+    });
+
+    // The engine pushes a snapshot whenever the reference changes, so an event
+    // that changes nothing observable must hand back the same Office.
+    const hook = (type) => ({ type: 'hook_event', pid: 1001, hookData: { type } });
+
+    it.each(
+      HOOK_TYPES.filter(
+        (t) =>
+          ![
+            'PermissionRequest',
+            'Notification',
+            'PreToolUse',
+            'PostToolUse',
+            'PostToolUseFailure',
+          ].includes(t)
+      )
+    )('%s changes nothing, so it keeps the same reference', (type) => {
+      const office = officeWith(appeared());
+      expect(reduce(office, hook(type))).toBe(office);
+    });
+
+    it.each(['PermissionRequest', 'Notification'])(
+      '%s while already waiting on the hook keeps the same reference',
+      (type) => {
+        const office = officeWith(appeared(), hook('PermissionRequest'));
+        expect(reduce(office, hook(type))).toBe(office);
+      }
+    );
+
+    it('PreToolUse while already working keeps the same reference', () => {
+      const office = officeWith(appeared(), hook('PreToolUse'));
+      expect(office.sessions[1001].state).toBe('working');
+      expect(reduce(office, hook('PreToolUse'))).toBe(office);
+    });
+
+    it.each(['PostToolUse', 'PostToolUseFailure'])(
+      '%s with no hook wait to clear keeps the same reference',
+      (type) => {
+        const office = officeWith(appeared());
+        expect(reduce(office, hook(type))).toBe(office);
+      }
+    );
+
+    it('every registered hook type is covered by a same-reference case', () => {
+      expect(HOOK_TYPES).toEqual(
+        expect.arrayContaining([
+          'SessionStart',
+          'SessionEnd',
+          'Stop',
+          'SubagentStart',
+          'SubagentStop',
+        ])
+      );
+    });
+
+    it('a hook for an unknown session is a no-op', () => {
+      const office = officeWith(appeared());
+      expect(
+        reduce(office, {
+          type: 'hook_event',
+          pid: 4242,
+          hookData: { type: 'PermissionRequest', sessionId: 'nope' },
+        })
+      ).toBe(office);
     });
   });
 

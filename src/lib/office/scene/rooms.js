@@ -56,7 +56,15 @@ export function waitingIn(sessions) {
 }
 
 /**
- * One entry per room, from the whole office: the agent count and the
+ * Sessions still running. An ended one lingers on the floor for a few seconds
+ * so it is seen to end (ENDED_LINGER_MS in the engine), but it is not live.
+ */
+function liveIn(sessions) {
+  return sessions.filter((s) => s.state !== 'ended').length;
+}
+
+/**
+ * One entry per room, from the whole office: the live agent count and the
  * waiting-on-you count its tab shows. Tabs always count every room, whichever
  * one is on screen.
  * @returns {{ kind: string, count: number, waiting: number }[]}
@@ -65,15 +73,16 @@ export function roomCounts(office) {
   const all = Object.values(office.sessions);
   return ROOMS.map((room) => {
     const sessions = all.filter((s) => roomOf(s) === room.kind);
-    return { kind: room.kind, count: sessions.length, waiting: waitingIn(sessions) };
+    return { kind: room.kind, count: liveIn(sessions), waiting: waitingIn(sessions) };
   });
 }
 
-/** The part of the office that sits in one room. */
+/** The part of the office that sits in one room, ended sessions included. */
 export function officeInRoom(office, kind) {
   const sessions = Object.values(office.sessions).filter((s) => roomOf(s) === kind);
   return {
     sessions: Object.fromEntries(sessions.map((s) => [s.pid, s])),
     waitingCount: waitingIn(sessions),
+    liveCount: liveIn(sessions),
   };
 }

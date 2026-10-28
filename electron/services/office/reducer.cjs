@@ -7,7 +7,12 @@
 // nothing — the engine relies on that to skip snapshot broadcasts.
 // Dependency-free: no electron, no node APIs.
 
-const { WAITING_THRESHOLD_MS, BREAK_THRESHOLD_MS, FEED_CAP } = require('./types.cjs');
+const {
+  WAITING_THRESHOLD_MS,
+  BREAK_THRESHOLD_MS,
+  FEED_CAP,
+  ENDED_LINGER_MS,
+} = require('./types.cjs');
 
 /** @typedef {import('./types.cjs').Office} Office */
 /** @typedef {import('./types.cjs').Session} Session */
@@ -330,6 +335,21 @@ function computeOfficeState(office, now) {
 
   for (const pid of Object.keys(nextSessions)) {
     const session = nextSessions[Number(pid)];
+
+    // An ended session takes no part in the derivations below. The first tick
+    // stamps when it ended; the first tick past the linger removes it.
+    if (session.state === 'ended') {
+      if (now === undefined) continue;
+      if (session.endedAt === undefined) {
+        nextSessions[Number(pid)] = { ...session, endedAt: now };
+        changed = true;
+      } else if (now - session.endedAt >= ENDED_LINGER_MS) {
+        delete nextSessions[Number(pid)];
+        changed = true;
+      }
+      continue;
+    }
+
     let sessionChanged = false;
     let nextSession = { ...session };
 
@@ -418,9 +438,20 @@ function computeOfficeState(office, now) {
 function reduce(office, event) {
   let next = office;
 
+  // An ended session is only lingering: nothing but its replacement at the
+  // same pid (session_appeared) or the tick that removes it touches it.
+  if (
+    event.type !== 'session_appeared' &&
+    event.type !== 'tick' &&
+    office.sessions[event.pid]?.state === 'ended'
+  ) {
+    return office;
+  }
+
   switch (event.type) {
     case 'session_appeared': {
-      if (!office.sessions[event.pid]) {
+      // A new process can reuse the pid of one still lingering as ended.
+      if (!office.sessions[event.pid] || office.sessions[event.pid].state === 'ended') {
         next = {
           ...office,
           sessions: {
@@ -458,9 +489,26 @@ function reduce(office, event) {
     }
 
     case 'session_ended': {
-      const rest = { ...office.sessions };
-      delete rest[event.pid];
-      next = { ...office, sessions: rest };
+      // Visibly ended before it leaves: the session stays, as `ended`, until a
+      // tick past ENDED_LINGER_MS removes it. Its interns leave with it now.
+      const session = office.sessions[event.pid];
+      if (!session) break;
+      next = {
+        ...office,
+        sessions: {
+          ...office.sessions,
+          [event.pid]: {
+            ...session,
+            state: 'ended',
+            currentTool: undefined,
+            toolStartedAt: undefined,
+            hookWaiting: false,
+            onBreak: false,
+            subagents: {},
+            endedAt: undefined,
+          },
+        },
+      };
       break;
     }
 
@@ -588,7 +636,7 @@ function reduce(office, event) {
       if (!session && event.hookData?.sessionId) {
         for (const pidStr of Object.keys(office.sessions)) {
           const s = office.sessions[Number(pidStr)];
-          if (s && s.sessionId === event.hookData.sessionId) {
+          if (s && s.state !== 'ended' && s.sessionId === event.hookData.sessionId) {
             session = s;
             matchingPid = Number(pidStr);
             break;
@@ -598,22 +646,28 @@ function reduce(office, event) {
 
       if (session) {
         const hType = event.hookData.type;
-        const nextSession = { ...session };
+        let hookWaiting = !!session.hookWaiting;
+        let state = session.state;
 
         if (hType === 'PermissionRequest' || hType === 'Notification') {
-          nextSession.hookWaiting = true;
-          nextSession.state = 'waiting_on_user';
+          hookWaiting = true;
+          state = 'waiting_on_user';
         } else if (
           hType === 'PreToolUse' ||
           hType === 'PostToolUse' ||
           hType === 'PostToolUseFailure'
         ) {
-          nextSession.hookWaiting = false;
+          hookWaiting = false;
           if (hType === 'PreToolUse') {
-            nextSession.state = 'working';
+            state = 'working';
           }
         }
 
+        // Most hooks (SessionStart/End, Stop, Subagent*, a repeat) change
+        // nothing; keep the reference so the engine pushes no snapshot.
+        if (hookWaiting === !!session.hookWaiting && state === session.state) break;
+
+        const nextSession = { ...session, hookWaiting, state };
         next = {
           ...office,
           sessions: {
