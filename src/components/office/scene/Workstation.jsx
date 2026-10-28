@@ -30,8 +30,9 @@ import {
 // ── Workstation ──────────────────────────────────────────────
 // A desk with its peripherals and, when a session occupies it, the character
 // whose pose shows the Agent State, commuting between desk and break spot,
-// plus an intern on a stool per live subagent. Click-to-focus (#185) lands in
-// its own ticket.
+// plus an intern on a stool per live subagent. Clicking the character or an
+// intern selects it (the Office page focuses the camera and opens the
+// inspector); the focused one keeps its tag up, outlined.
 
 const DESK_TOP = 0.74;
 const SEAT = 0.49;
@@ -50,6 +51,20 @@ const tagHeight = (state) =>
         : 1.1;
 
 const ACTIVE = ['working', 'thinking', 'waiting_on_user', 'error'];
+
+/**
+ * Pointer cursor while a clickable character is hovered, restored on hover-out
+ * and on unmount (a character can leave the office under the pointer).
+ */
+function useHoverCursor(hover) {
+  useEffect(() => {
+    if (!hover) return;
+    document.body.style.cursor = 'pointer';
+    return () => {
+      document.body.style.cursor = 'auto';
+    };
+  }, [hover]);
+}
 
 /** Screen content follows what the agent is doing; the seed keeps neighbours varied. */
 function screenFor(state, tool, seed) {
@@ -169,15 +184,20 @@ function AgentTag({ name, state, tool, emphasis = false, onBreak }) {
 // ── Interns ──────────────────────────────────────────────────
 // A subagent pulls up a stool in front of the parent's desk, laptop on a tiny
 // side table, and leaves when its work ends. Seat positions come from the
-// pure internBench plan; click-to-focus on an intern lands with #185.
+// pure internBench plan (lib/office/focus.js aims the camera at the same seat).
 
-function Intern({ sub, seat, accent }) {
+function Intern({ sub, seat, accent, focused, onSelect }) {
   const look = useMemo(() => lookFor(sub.subagentId, { intern: true }), [sub.subagentId]);
   const [hover, setHover] = useState(false);
+  useHoverCursor(hover);
   return (
     <group
       position={[seat.x, 0, seat.z]}
       rotation={[0, seat.yaw, 0]}
+      onClick={(e) => {
+        e.stopPropagation();
+        onSelect();
+      }}
       onPointerOver={(e) => {
         e.stopPropagation();
         setHover(true);
@@ -211,12 +231,17 @@ function Intern({ sub, seat, accent }) {
           scroll={sub.state === 'working'}
         />
       </group>
-      {(sub.state === 'waiting_on_user' || sub.state === 'error' || hover) && (
+      {(sub.state === 'waiting_on_user' || sub.state === 'error' || hover || focused) && (
         <Label
           position={[0, 0.34 + tagHeight(sub.state) * 0.95, 0]}
           zIndexRange={[20, 0]}
         >
-          <AgentTag name={sub.agentType} state={sub.state} tool={sub.currentTool} />
+          <AgentTag
+            name={sub.agentType}
+            state={sub.state}
+            tool={sub.currentTool}
+            emphasis={focused}
+          />
         </Label>
       )}
     </group>
@@ -372,6 +397,8 @@ export function Workstation({
   origin,
   route = null,
   spot = null,
+  focus = null,
+  onSelect,
 }) {
   const seed = hash(session?.sessionId ?? deskKey);
   const look = useMemo(
@@ -379,6 +406,8 @@ export function Workstation({
     [session?.sessionId, deskKey]
   );
   const [hover, setHover] = useState(false);
+  useHoverCursor(hover);
+  const isFocused = !!session && focus?.pid === session.pid && !focus.subagentId;
   const state = session?.state ?? null;
   const tool = session?.currentTool;
   const kind = screenFor(state, tool, seed);
@@ -440,6 +469,10 @@ export function Workstation({
           route={route}
           spot={spot}
           onSeated={setSeated}
+          onClick={(e) => {
+            e.stopPropagation();
+            onSelect({ pid: session.pid });
+          }}
           onPointerOver={(e) => {
             e.stopPropagation();
             setHover(true);
@@ -458,7 +491,7 @@ export function Workstation({
                 activity={activity}
                 stride={stride}
               />
-              {(ACTIVE.includes(session.state) || hover) && (
+              {(ACTIVE.includes(session.state) || hover || isFocused) && (
                 <Label
                   position={[0, tagHeight(session.state) * CHAR_SCALE, 0]}
                   zIndexRange={[30, 0]}
@@ -467,6 +500,7 @@ export function Workstation({
                     name={session.title || session.name}
                     state={session.state}
                     tool={tool}
+                    emphasis={isFocused}
                     onBreak={session.onBreak}
                   />
                 </Label>
@@ -477,7 +511,14 @@ export function Workstation({
       )}
 
       {bench?.seated.map((seat) => (
-        <Intern key={seat.sub.subagentId} sub={seat.sub} seat={seat} accent={accent} />
+        <Intern
+          key={seat.sub.subagentId}
+          sub={seat.sub}
+          seat={seat}
+          accent={accent}
+          focused={focus?.pid === session.pid && focus.subagentId === seat.sub.subagentId}
+          onSelect={() => onSelect({ pid: session.pid, subagentId: seat.sub.subagentId })}
+        />
       ))}
       {bench && bench.overflow > 0 && (
         <Label position={[1.15, 0.6, 1.42]}>

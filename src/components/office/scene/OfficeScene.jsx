@@ -14,6 +14,7 @@ import {
   routeToBreak,
 } from '../../../lib/office/scene/layout.js';
 import { frameRate, isBusy, isFarZoom } from '../../../lib/office/scene/pacing.js';
+import { focusKey, focusTarget } from '../../../lib/office/focus.js';
 import { BreakAllocator, BreakPresence } from '../../../lib/office/scene/breaks.js';
 import { BeanBag, Room } from './Room.jsx';
 import { Label, LabelLayer } from './Label.jsx';
@@ -27,13 +28,14 @@ import './scene.css';
 // The canvas owner: orthographic isometric camera with orbit/zoom and an
 // auto-framing rig, rendered on a demand frameloop that a FrameDriver ticks
 // only as fast as the office needs (and not at all when the window is hidden).
-// Click-to-focus (#185) wires into the plumbing kept here.
+// Clicking a character or intern focuses the camera on it; clicking empty
+// floor (onPointerMissed) releases focus and re-frames the room.
 
 const VIEW_DIR = new THREE.Vector3(1, 0.92, 1.12).normalize();
 
 // ── Pods ─────────────────────────────────────────────────────
 
-function PodZone({ pod, plan, breaks, far }) {
+function PodZone({ pod, plan, breaks, focus, onSelect, far }) {
   const accent = teamColor(pod.projectKey);
   const carpet = useMemo(
     () => new THREE.Color(palette.rug).lerp(new THREE.Color(accent), 0.13),
@@ -69,6 +71,8 @@ function PodZone({ pod, plan, breaks, far }) {
               origin={d}
               route={route}
               spot={spot}
+              focus={focus}
+              onSelect={onSelect}
             />
           </group>
         );
@@ -190,19 +194,31 @@ function frameRoom(plan, width, height, inset) {
   return { zoom, target: center.applyMatrix4(cam.matrixWorld), cam };
 }
 
-function CameraRig({ room, plan, insetRight }) {
+function CameraRig({ room, plan, breaks, focus, insetRight }) {
   const { camera, size, controls, invalidate } = useThree();
   const goal = useRef(null);
   const frame = frameRoom(plan, size.width, size.height, { right: insetRight, top: 72 });
   // Switching rooms re-frames even when both rooms happen to be the same size.
   const boundsKey = `${room},${plan.minX},${plan.maxX},${plan.minZ},${plan.maxZ},${size.width},${size.height},${insetRight}`;
+  const aimKey = focusKey(focus, breaks);
 
   useEffect(() => {
-    goal.current = { target: frame.target, zoom: frame.zoom };
+    const p = focusTarget(plan, focus, breaks);
+    if (!p) {
+      // No focus (or it was released): back to the auto-framed room.
+      goal.current = { target: frame.target, zoom: frame.zoom };
+    } else {
+      const zoom = Math.max(frame.zoom * 2.6, 80);
+      // Keep the focused agent centred in the area beside the side panel.
+      const right = new THREE.Vector3()
+        .setFromMatrixColumn(frame.cam.matrixWorld, 0)
+        .multiplyScalar(insetRight / 2 / zoom);
+      goal.current = { target: new THREE.Vector3(p.x, p.y, p.z).add(right), zoom };
+    }
     invalidate();
-    // plan changes every tick; only re-aim when the room bounds change
+    // plan changes every tick; only re-aim when the room or the focus changes
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [boundsKey]);
+  }, [boundsKey, aimKey]);
 
   useFrame((_, dt) => {
     const g = goal.current;
@@ -322,10 +338,20 @@ function Lights({ plan }) {
  * @param {object} props
  * @param {object} props.office The sessions in the room on screen.
  * @param {object} props.room The RoomTheme to render.
+ * @param {{ pid: number, subagentId?: string } | null} [props.focus] The
+ *   session or intern the camera is on (see lib/office/focus.js).
+ * @param {(focus: object | null) => void} [props.onSelect] Called with the
+ *   clicked character or intern, or null when the click hit empty floor.
  * @param {number} [props.insetRight] Pixels on the right covered by HUD panels;
- *   the camera frames the remaining area (the inspector uses this in #185).
+ *   the camera frames the remaining area.
  */
-export function OfficeScene({ office, room, insetRight = 0 }) {
+export function OfficeScene({
+  office,
+  room,
+  focus = null,
+  onSelect = () => {},
+  insetRight = 0,
+}) {
   // Each room keeps its own sticky desk slots and break spots, so switching
   // back finds everyone where they were — at their desk or in the lounge.
   const rooms = useRef(new Map());
@@ -366,6 +392,7 @@ export function OfficeScene({ office, room, insetRight = 0 }) {
         shadows="soft"
         dpr={[1, 2]}
         gl={{ antialias: true, alpha: true }}
+        onPointerMissed={() => onSelect(null)}
       >
         <OrthographicCamera
           makeDefault
@@ -386,7 +413,13 @@ export function OfficeScene({ office, room, insetRight = 0 }) {
           maxZoom={260}
           screenSpacePanning
         />
-        <CameraRig room={room.kind} plan={plan} insetRight={insetRight} />
+        <CameraRig
+          room={room.kind}
+          plan={plan}
+          breaks={breaks}
+          focus={focus}
+          insetRight={insetRight}
+        />
         <FrameDriver fps={fps} />
         <ShadowBudget version={office} />
         <ZoomWatcher onChange={setFar} />
@@ -399,6 +432,8 @@ export function OfficeScene({ office, room, insetRight = 0 }) {
               pod={pod}
               plan={plan}
               breaks={breaks}
+              focus={focus}
+              onSelect={onSelect}
               far={far}
             />
           ))}
