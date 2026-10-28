@@ -8,7 +8,8 @@ import { internBench } from './scene/layout.js';
 /**
  * Keeps a focus valid against the latest snapshot. The same reference comes
  * back while nothing it points at has gone, so a caller can compare and skip
- * the state update. A focused session leaving the office clears focus; a
+ * the state update. A focused session leaving the office clears focus — once
+ * it is removed, not while it lingers as `ended`, so you see it end; a
  * focused intern finishing hands focus back to its parent.
  *
  * @param {{ sessions: Record<number, object> }} office

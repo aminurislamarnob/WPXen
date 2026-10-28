@@ -119,7 +119,9 @@ export default function OfficePage() {
   // focus or panel change doesn't hand the scene a "new" office to re-plan.
   const roomOffice = useMemo(() => officeInRoom(shown, theme.kind), [shown, theme.kind]);
   const counts = roomCounts(shown);
-  const sessionCount = Object.keys(roomOffice.sessions).length;
+  // Live sessions: one lingering as ended is still drawn, but no longer counted.
+  const sessionCount = roomOffice.liveCount;
+  const roomEmpty = Object.keys(roomOffice.sessions).length === 0;
   const waiting = roomOffice.waitingCount;
 
   // Focus follows the snapshots: it clears when its session leaves the room
@@ -207,7 +209,7 @@ export default function OfficePage() {
           onSelect={setFocus}
           insetRight={insetRight}
         />
-        {sessionCount === 0 && (
+        {roomEmpty && (
           <div className="absolute left-1/2 bottom-10 -translate-x-1/2 z-10">
             <Card className="px-5 py-3.5 text-center shadow-md">
               <p className="text-[13px] font-medium text-foreground">

@@ -44,6 +44,12 @@ describe('office focus reconciliation', () => {
     expect(reconcileFocus(office(), { pid: 1, subagentId: 'a' })).toBeNull();
   });
 
+  it('keeps focus on a session lingering as ended; clears it once it is removed', () => {
+    const f = { pid: 1 };
+    expect(reconcileFocus(office(session(1, 'ended')), f)).toBe(f);
+    expect(reconcileFocus(office(), f)).toBeNull();
+  });
+
   it('falls back to the parent session when the focused intern finishes', () => {
     const later = office(session(1, 'working'));
     expect(reconcileFocus(later, { pid: 1, subagentId: 'a' })).toEqual({ pid: 1 });

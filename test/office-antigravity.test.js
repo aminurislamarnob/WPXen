@@ -10,6 +10,7 @@ import {
   workspaceDir,
 } from '../electron/services/office/antigravity.cjs';
 import { reduce, emptyOffice } from '../electron/services/office/reducer.cjs';
+import { ENDED_LINGER_MS } from '../electron/services/office/types.cjs';
 
 // The Antigravity adapter: brain-folder discovery across the three surfaces,
 // the 30-minute liveness window, synthetic negative pids, and workspace
@@ -163,6 +164,11 @@ describe('scanAntigravity', () => {
     fs.utimesSync(live, past, past);
     const later = await scanAntigravity(first.snapshot);
     office = later.events.reduce(reduce, office);
+    // Ended: shown as such for the linger, then gone.
+    expect(Object.values(office.sessions).map((s) => s.state)).toEqual(['ended']);
+    const now = Date.now();
+    office = reduce(office, { type: 'tick', now });
+    office = reduce(office, { type: 'tick', now: now + ENDED_LINGER_MS });
     expect(office.sessions).toEqual({});
   });
 

@@ -94,4 +94,24 @@ describe('office rooms', () => {
     expect(Object.keys(anti.sessions)).toEqual(['2']);
     expect(anti.waitingCount).toBe(1);
   });
+
+  it('an ended session lingering in a room is not counted as live', () => {
+    const office = {
+      sessions: {
+        1: session(1, 'working'),
+        2: session(2, 'ended'),
+        [-1]: session(-1, 'ended', { agent: 'antigravity' }),
+      },
+      waitingCount: 0,
+    };
+    expect(roomCounts(office)).toEqual([
+      { kind: 'claude', count: 1, waiting: 0 },
+      { kind: 'antigravity', count: 0, waiting: 0 },
+    ]);
+    const claude = officeInRoom(office, 'claude');
+    // Still on the floor (it is shown ended), but not live.
+    expect(Object.keys(claude.sessions)).toEqual(['1', '2']);
+    expect(claude.liveCount).toBe(1);
+    expect(officeInRoom(office, 'antigravity').liveCount).toBe(0);
+  });
 });

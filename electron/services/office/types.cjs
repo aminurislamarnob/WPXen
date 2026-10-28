@@ -66,6 +66,8 @@
  *   character leaves its desk
  * @property {'busy' | 'idle'} [registryStatus] Claude Code's own busy/idle flag
  *   from the session registry; overrides transcript inference
+ * @property {number} [endedAt] Epoch ms of the first tick after the session
+ *   ended; it leaves the office ENDED_LINGER_MS later
  */
 
 /**
@@ -187,8 +189,15 @@ const BREAK_THRESHOLD_MS = 5 * 60_000;
 /** A session's recent-event feed keeps at most this many entries. */
 const FEED_CAP = 20;
 
+/**
+ * An ended session stays this long, in the `ended` state, before it leaves —
+ * so it is visibly ended rather than vanishing (spec #178 story 8).
+ */
+const ENDED_LINGER_MS = 4000;
+
 module.exports = {
   WAITING_THRESHOLD_MS,
   BREAK_THRESHOLD_MS,
   FEED_CAP,
+  ENDED_LINGER_MS,
 };

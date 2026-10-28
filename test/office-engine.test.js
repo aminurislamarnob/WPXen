@@ -4,6 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import engine from '../electron/services/office/engine.cjs';
 import { projectSlug } from '../electron/services/office/scanner.cjs';
+import { ENDED_LINGER_MS } from '../electron/services/office/types.cjs';
+import { FileTailer } from '../electron/services/office/tailer.cjs';
 
 // The Office engine: 1 s poll loop (setTimeout chain), transcript-tailer
 // wiring, dispatch → reducer, broadcast-skip on same reference, ~100 ms
@@ -68,6 +70,30 @@ describe('engine.start', () => {
     await sleep(60);
     expect(scan.mock.calls.length).toBe(after);
   });
+
+  it('start({ onSnapshot }) is the production sink — no test seam involved', async () => {
+    engine.__setDeps({
+      scan: async (prev) => ({ events: [], snapshot: prev }),
+      scanAg: async (prev) => ({ events: [], snapshot: prev }),
+      pollIntervalMs: 60_000,
+      coalesceMs: 5,
+      createTailer: inertTailer,
+    });
+    const onSnapshot = vi.fn();
+    engine.start({ onSnapshot });
+
+    engine.dispatch({
+      type: 'session_appeared',
+      pid: 7,
+      sessionId: 's',
+      cwd: '/x',
+      name: 'n',
+      projectKey: 'x',
+      startedAt: 1,
+    });
+    await until(() => onSnapshot.mock.calls.length >= 1);
+    expect(onSnapshot.mock.calls.at(-1)[0].sessions[7]).toBeDefined();
+  });
 });
 
 describe('engine snapshots', () => {
@@ -126,6 +152,33 @@ describe('engine snapshots', () => {
     await until(() => onSnapshot.mock.calls.length === 2);
     expect(onSnapshot.mock.calls[1][0].sessions[4242].state).toBe('waiting_on_user');
     expect(onSnapshot.mock.calls[1][0].waitingCount).toBe(1);
+  });
+});
+
+describe('engine session end', () => {
+  it('stops the tailer at once but keeps the session, ended, until the linger passes', async () => {
+    const tailer = { on: () => {}, start: async () => {}, stop: vi.fn() };
+    let now = 1_700_000_000_000;
+    engine.__setDeps({ createTailer: () => tailer, now: () => now });
+
+    engine.dispatch({
+      type: 'session_appeared',
+      pid: 4242,
+      sessionId: 'aaa',
+      cwd: '/projects/acme-app',
+      name: 'demo',
+      projectKey: 'acme-app',
+      startedAt: now,
+    });
+    engine.dispatch({ type: 'session_ended', pid: 4242 });
+
+    expect(tailer.stop).toHaveBeenCalledTimes(1);
+    expect(engine.getOffice().sessions[4242].state).toBe('ended');
+
+    engine.dispatch({ type: 'tick', now });
+    expect(engine.getOffice().sessions[4242].state).toBe('ended');
+    engine.dispatch({ type: 'tick', now: now + ENDED_LINGER_MS });
+    expect(engine.getOffice().sessions[4242]).toBeUndefined();
   });
 });
 
@@ -248,6 +301,35 @@ describe('engine subagent discovery', () => {
     expect(subagents()['xyz']).toBeUndefined();
   });
 
+  it('does not rediscover the interns of a session lingering as ended', async () => {
+    const tailed = [];
+    engine.__setDeps({
+      pollIntervalMs: 25,
+      coalesceMs: 5,
+      createTailer: (file) => {
+        tailed.push(file);
+        return new FileTailer(file);
+      },
+    });
+    liveSession();
+    writeSubagent('xyz', [toolUseLine('Bash')]);
+
+    engine.start();
+    await until(() => subagents()['xyz']);
+
+    const before = tailed.length;
+    fs.rmSync(path.join(home, 'sessions', `${process.pid}.json`));
+    await until(() => engine.getOffice().sessions[process.pid]?.state === 'ended');
+    expect(subagents()).toEqual({});
+
+    // Several polls inside the linger: its interns stay gone, and no tailer is
+    // opened for them again.
+    await sleep(150);
+    expect(engine.getOffice().sessions[process.pid]?.state).toBe('ended');
+    expect(subagents()).toEqual({});
+    expect(tailed.length).toBe(before);
+  });
+
   it('treats a transcript idle past the 10 min threshold as finished — it never appears', async () => {
     engine.__setDeps({ pollIntervalMs: 25, coalesceMs: 5 });
     liveSession();
@@ -341,9 +423,12 @@ describe('engine with Antigravity', () => {
       title: 'Ship the coupon banner',
     });
 
-    // 30 minutes of transcript silence → the conversation has left the office.
+    // 30 minutes of transcript silence → the conversation ends, shows as
+    // ended for the linger, then leaves the office.
     const past = new Date(Date.now() - 31 * 60_000);
     fs.utimesSync(transcript, past, past);
+    await until(() => Object.values(engine.getOffice().sessions)[0]?.endedAt);
+    engine.__setDeps({ now: () => Date.now() + ENDED_LINGER_MS });
     await until(() => Object.keys(engine.getOffice().sessions).length === 0);
   });
 });
@@ -400,9 +485,13 @@ describe('engine end to end (registry + transcript + tick)', () => {
     // The pushed snapshot is the same object the handler would return.
     expect(onSnapshot).toHaveBeenCalled();
 
-    // Registry entry disappears → session ends and leaves the office.
+    // Registry entry disappears → the session ends: shown as ended (no longer
+    // waiting) for the linger, then it leaves the office.
     fs.rmSync(registryFile);
-    await until(() => !engine.getOffice().sessions[process.pid]);
+    await until(() => engine.getOffice().sessions[process.pid]?.endedAt);
+    expect(engine.getOffice().sessions[process.pid].state).toBe('ended');
     expect(engine.getOffice().waitingCount).toBe(0);
+    engine.__setDeps({ now: () => Date.now() + ENDED_LINGER_MS });
+    await until(() => !engine.getOffice().sessions[process.pid]);
   });
 });

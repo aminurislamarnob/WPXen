@@ -9,8 +9,9 @@ import installer from '../electron/services/office/hooksInstaller.cjs';
 // file real tools (Orca, Agent Flow, Superset) register their hooks in on this
 // machine — with the matcher-wrapper entry shape that file uses, a `# wpxen`
 // tag, legacy `# claude-agent-verse` cleanup on both install and uninstall,
-// and the backup/.tmp/diff/write sequence. Everything runs against temp files
-// through the deps/__setDeps seam: the real ~/.claude is never touched.
+// and the preview → apply sequence (backup, atomic .tmp → rename). Everything
+// runs against temp files through the deps/__setDeps seam: the real ~/.claude
+// is never touched.
 
 const {
   updateHooks,
@@ -271,26 +272,90 @@ describe('updateHooks coexistence shape preservation', () => {
   });
 });
 
-// ─── File-level install / uninstall / status ────────────────────────────────
+describe('updateHooks reinstall', () => {
+  it('install replaces a stale tagged entry in place rather than adding a second', () => {
+    // What an earlier build wrote: bare `node`, before node's path was pinned.
+    const stale = {
+      hooks: [{ type: 'command', command: `node "/old/fwd.cjs" ${WPXEN_HOOK_TAG}` }],
+    };
+    const theirs = { type: 'command', command: 'theirs.sh' };
+    const settings = { hooks: { PreToolUse: [stale, theirs], Stop: stale } };
 
-describe('install / uninstall / status against temp files', () => {
+    const { changed, nextSettings } = updateHooks(settings, 'install', forwarderCommand);
+
+    expect(changed).toBe(true);
+    expect(nextSettings.hooks.PreToolUse).toEqual([newHookEntry, theirs]);
+    // A bare value stays bare.
+    expect(nextSettings.hooks.Stop).toEqual(newHookEntry);
+  });
+
+  it('install collapses duplicate tagged entries to one', () => {
+    const settings = { hooks: { Stop: [newHookEntry, newHookEntry] } };
+    const { changed, nextSettings } = updateHooks(settings, 'install', forwarderCommand);
+    expect(changed).toBe(true);
+    expect(nextSettings.hooks.Stop).toEqual([newHookEntry]);
+  });
+});
+
+describe('forwarder command', () => {
+  const { forwarderCommandFor, parseForwarderCommand } = installer;
+
+  it('single-quotes both paths so spaces, $, ` and " stay literal', () => {
+    const cmd = forwarderCommandFor('/opt/my node/bin/node', '/a "b" $HOME `x`/fwd.cjs');
+    expect(cmd).toBe(
+      `'/opt/my node/bin/node' '/a "b" $HOME \`x\`/fwd.cjs' ${WPXEN_HOOK_TAG}`
+    );
+    expect(parseForwarderCommand(cmd)).toEqual({
+      nodePath: '/opt/my node/bin/node',
+      forwarderPath: '/a "b" $HOME `x`/fwd.cjs',
+    });
+  });
+
+  it('round-trips a path containing a single quote', () => {
+    const cmd = forwarderCommandFor("/Users/o'brien/node", "/Users/o'brien/fwd.cjs");
+    expect(cmd).toContain(`'/Users/o'\\''brien/node'`);
+    expect(parseForwarderCommand(cmd)).toEqual({
+      nodePath: "/Users/o'brien/node",
+      forwarderPath: "/Users/o'brien/fwd.cjs",
+    });
+  });
+
+  it('recognises the bare-node command an earlier build wrote', () => {
+    expect(parseForwarderCommand(`node "/x/y z/fwd.cjs" ${WPXEN_HOOK_TAG}`)).toEqual({
+      nodePath: null,
+      forwarderPath: '/x/y z/fwd.cjs',
+    });
+    expect(parseForwarderCommand('something else # wpxen')).toBeNull();
+  });
+});
+
+// ─── File-level preview / apply / status ────────────────────────────────────
+
+describe('preview / apply / status against temp files', () => {
   let tmp;
   let settingsPath;
   let userDataDir;
   let legacyPath;
   let binDir;
+  let nodeBin;
+  let fwdPath;
 
   // A PATH directory holding a fake executable `node`, for the install-time check.
   function makeFakeNode() {
-    fs.writeFileSync(path.join(binDir, 'node'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    fs.writeFileSync(nodeBin, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
   }
+  const read = (p) => fs.readFileSync(p, 'utf8');
+  const readJson = (p) => JSON.parse(read(p));
+  const writeJson = (p, v) => fs.writeFileSync(p, JSON.stringify(v, null, 2) + '\n');
 
   beforeEach(() => {
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wpxen-hooks-installer-'));
     settingsPath = path.join(tmp, 'claude', 'settings.json');
     legacyPath = path.join(tmp, '.claude.json');
     userDataDir = path.join(tmp, 'user data'); // spaces, like Application Support
-    binDir = path.join(tmp, 'bin');
+    binDir = path.join(tmp, 'bin dir');
+    nodeBin = path.join(binDir, 'node');
+    fwdPath = path.join(userDataDir, WPXEN_FORWARDER_FILENAME);
     fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
     fs.mkdirSync(userDataDir, { recursive: true });
     fs.mkdirSync(binDir, { recursive: true });
@@ -308,57 +373,135 @@ describe('install / uninstall / status against temp files', () => {
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 
-  it('install writes the forwarder, backs up, diffs, writes tagged entries; uninstall restores', () => {
-    makeFakeNode();
-    const original = {
-      hooks: { SessionStart: [{ hooks: [{ type: 'command', command: 'theirs.sh' }] }] },
-      otherSetting: 1,
-    };
-    fs.writeFileSync(settingsPath, JSON.stringify(original, null, 2) + '\n');
+  const original = {
+    hooks: { SessionStart: [{ hooks: [{ type: 'command', command: 'theirs.sh' }] }] },
+    otherSetting: 1,
+  };
 
-    const result = installer.install();
+  it('preview computes the install diff and writes nothing', () => {
+    makeFakeNode();
+    writeJson(settingsPath, original);
+    const before = read(settingsPath);
+
+    const p = installer.preview('install');
+
+    expect(p.changed).toBe(true);
+    expect(p.diff).toContain(WPXEN_HOOK_TAG);
+    // The command pins node's absolute path, resolved on the login-shell PATH.
+    expect(p.diff).toContain(nodeBin);
+    expect(p.nodeBin).toBe(nodeBin);
+    expect(typeof p.token).toBe('string');
+    // Nothing on disk moved: no write, no backup, no staging file, no forwarder.
+    expect(read(settingsPath)).toBe(before);
+    expect(fs.existsSync(`${settingsPath}.bak`)).toBe(false);
+    expect(fs.existsSync(`${settingsPath}.tmp`)).toBe(false);
+    expect(fs.existsSync(fwdPath)).toBe(false);
+  });
+
+  it('preview surfaces the legacy sweep diff without writing the legacy file', () => {
+    makeFakeNode();
+    writeJson(legacyPath, {
+      hooks: { Stop: { type: 'command', command: `tsx /old.ts ${LEGACY_HOOK_TAGS[0]}` } },
+      numStartups: 3,
+    });
+    const before = read(legacyPath);
+
+    const p = installer.preview('install');
+
+    expect(p.legacy).toHaveLength(1);
+    expect(p.legacy[0]).toMatchObject({ path: legacyPath, changed: true });
+    expect(p.legacy[0].diff).toContain(LEGACY_HOOK_TAGS[0]);
+    expect(read(legacyPath)).toBe(before);
+    expect(fs.existsSync(`${legacyPath}.bak`)).toBe(false);
+  });
+
+  it('apply install backs up, writes atomically, pins node, and copies the forwarder', () => {
+    makeFakeNode();
+    writeJson(settingsPath, original);
+    fs.chmodSync(settingsPath, 0o600);
+    const inodeBefore = fs.statSync(settingsPath).ino;
+
+    const { token } = installer.preview('install');
+    const result = installer.apply('install', { token });
     expect(result.changed).toBe(true);
 
     // Forwarder copied into userData.
-    const forwarderPath = path.join(userDataDir, WPXEN_FORWARDER_FILENAME);
-    expect(fs.existsSync(forwarderPath)).toBe(true);
-    expect(fs.readFileSync(forwarderPath, 'utf8')).toBe(
-      fs.readFileSync(
-        path.join(__dirname, '..', 'electron', 'services', 'office', 'forwarder.cjs'),
-        'utf8'
-      )
+    expect(read(fwdPath)).toBe(
+      read(path.join(__dirname, '..', 'electron', 'services', 'office', 'forwarder.cjs'))
     );
+    // Backup is the pre-install file.
+    expect(readJson(`${settingsPath}.bak`)).toEqual(original);
+    // Atomic: staged then renamed over — a new inode, no .tmp left behind,
+    // and the original's permissions carried over.
+    expect(fs.existsSync(`${settingsPath}.tmp`)).toBe(false);
+    expect(fs.statSync(settingsPath).ino).not.toBe(inodeBefore);
+    expect(fs.statSync(settingsPath).mode & 0o777).toBe(0o600);
 
-    // Backup is the pre-install file; a .tmp was staged; the diff names our tag.
-    expect(JSON.parse(fs.readFileSync(`${settingsPath}.bak`, 'utf8'))).toEqual(original);
-    expect(fs.existsSync(`${settingsPath}.tmp`)).toBe(true);
-    expect(result.diff).toContain(WPXEN_HOOK_TAG);
-
-    // Final write: ours tagged and quoted (userData has spaces), theirs intact.
-    const written = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+    const written = readJson(settingsPath);
     expect(written.hooks.SessionStart[0]).toEqual(original.hooks.SessionStart[0]);
     expect(written.hooks.SessionStart[1].hooks[0].command).toBe(
-      `node "${forwarderPath}" ${WPXEN_HOOK_TAG}`
+      installer.forwarderCommandFor(nodeBin, fwdPath)
     );
     expect(written.otherSetting).toBe(1);
 
-    // Status flips with the tag.
-    expect(installer.status().installed).toBe(true);
+    expect(installer.status()).toMatchObject({
+      installed: true,
+      healthy: true,
+      problem: null,
+      nodePath: nodeBin,
+      forwarderPresent: true,
+    });
+  });
 
-    // Uninstall restores the original settings deep-equal and drops the forwarder.
-    const removed = installer.uninstall();
+  it('apply writes through a symlinked settings file, keeping the link', () => {
+    makeFakeNode();
+    const real = path.join(tmp, 'dotfiles', 'settings.json');
+    fs.mkdirSync(path.dirname(real), { recursive: true });
+    writeJson(real, original);
+    fs.symlinkSync(real, settingsPath);
+
+    installer.apply('install');
+
+    expect(fs.lstatSync(settingsPath).isSymbolicLink()).toBe(true);
+    expect(read(real)).toContain(WPXEN_HOOK_TAG);
+  });
+
+  it('apply refuses when the files changed since the preview, touching nothing', () => {
+    makeFakeNode();
+    writeJson(settingsPath, original);
+    const { token } = installer.preview('install');
+
+    const edited = { ...original, editedElsewhere: true };
+    writeJson(settingsPath, edited);
+
+    expect(() => installer.apply('install', { token })).toThrow(/changed since/i);
+    expect(readJson(settingsPath)).toEqual(edited);
+    expect(fs.existsSync(fwdPath)).toBe(false);
+  });
+
+  it('uninstall restores the original settings and drops the forwarder', () => {
+    makeFakeNode();
+    writeJson(settingsPath, original);
+    installer.apply('install');
+
+    const p = installer.preview('uninstall');
+    expect(p.changed).toBe(true);
+    expect(p.diff).toContain(WPXEN_HOOK_TAG);
+
+    const removed = installer.apply('uninstall', { token: p.token });
     expect(removed.changed).toBe(true);
-    expect(JSON.parse(fs.readFileSync(settingsPath, 'utf8'))).toEqual(original);
-    expect(fs.existsSync(forwarderPath)).toBe(false);
-    expect(installer.status().installed).toBe(false);
+    expect(readJson(settingsPath)).toEqual(original);
+    expect(fs.existsSync(fwdPath)).toBe(false);
+    expect(fs.existsSync(`${settingsPath}.tmp`)).toBe(false);
+    expect(installer.status()).toMatchObject({ installed: false, healthy: false });
   });
 
   it('install with no settings file starts from {} and does not write a backup', () => {
     makeFakeNode();
-    const result = installer.install();
+    const result = installer.apply('install');
     expect(result.changed).toBe(true);
     expect(fs.existsSync(`${settingsPath}.bak`)).toBe(false);
-    const written = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+    const written = readJson(settingsPath);
     for (const hookName of HOOK_TYPES) {
       expect(JSON.stringify(written.hooks[hookName])).toContain(WPXEN_HOOK_TAG);
     }
@@ -366,13 +509,13 @@ describe('install / uninstall / status against temp files', () => {
 
   it('install fails with a clear hint when node is missing, touching nothing', () => {
     // No fake node in binDir.
-    const original = { hooks: {} };
-    fs.writeFileSync(settingsPath, JSON.stringify(original) + '\n');
+    const empty = { hooks: {} };
+    writeJson(settingsPath, empty);
 
-    expect(() => installer.install()).toThrow(/node/i);
-    expect(() => installer.install()).toThrow(/brew install node|nodejs\.org/i);
-    expect(JSON.parse(fs.readFileSync(settingsPath, 'utf8'))).toEqual(original);
-    expect(fs.existsSync(path.join(userDataDir, WPXEN_FORWARDER_FILENAME))).toBe(false);
+    expect(() => installer.preview('install')).toThrow(/brew install node|nodejs\.org/i);
+    expect(() => installer.apply('install')).toThrow(/node/i);
+    expect(readJson(settingsPath)).toEqual(empty);
+    expect(fs.existsSync(fwdPath)).toBe(false);
   });
 
   it('install and uninstall sweep legacy entries out of the legacy settings file', () => {
@@ -386,25 +529,127 @@ describe('install / uninstall / status against temp files', () => {
       },
       numStartups: 12,
     };
-    fs.writeFileSync(legacyPath, JSON.stringify(legacy, null, 2) + '\n');
+    writeJson(legacyPath, legacy);
 
-    installer.install();
+    installer.apply('install');
 
-    const swept = JSON.parse(fs.readFileSync(legacyPath, 'utf8'));
+    const swept = readJson(legacyPath);
     expect(JSON.stringify(swept)).not.toContain(LEGACY_HOOK_TAGS[0]);
     // Only a sweep — never an install into the legacy file.
     expect(JSON.stringify(swept)).not.toContain(WPXEN_HOOK_TAG);
     expect(swept.hooks.PreToolUse).toEqual([{ type: 'command', command: 'theirs.sh' }]);
     expect(swept.numStartups).toBe(12);
     expect(fs.existsSync(`${legacyPath}.bak`)).toBe(true);
+    expect(fs.existsSync(`${legacyPath}.tmp`)).toBe(false);
   });
 
   it('status reports not-installed on a missing or untagged settings file', () => {
-    expect(installer.status()).toMatchObject({ installed: false });
-    fs.writeFileSync(
-      settingsPath,
-      JSON.stringify({ hooks: { SessionStart: 'echo hi' } }) + '\n'
-    );
+    expect(installer.status()).toMatchObject({ installed: false, healthy: false });
+    writeJson(settingsPath, { hooks: { SessionStart: 'echo hi' } });
     expect(installer.status().installed).toBe(false);
+  });
+
+  it('status flags a pinned node that no longer exists, and reinstalling fixes it', () => {
+    makeFakeNode();
+    installer.apply('install');
+    fs.rmSync(nodeBin);
+
+    expect(installer.status()).toMatchObject({
+      installed: true,
+      healthy: false,
+      problem: { code: 'node-missing' },
+      nodePath: nodeBin,
+    });
+
+    // node moved: the login shell now finds it elsewhere.
+    const otherBin = path.join(tmp, 'other bin');
+    fs.mkdirSync(otherBin);
+    fs.writeFileSync(path.join(otherBin, 'node'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    installer.__setDeps({ shellEnv: () => ({ PATH: otherBin }) });
+
+    installer.apply('install');
+    expect(installer.status()).toMatchObject({
+      healthy: true,
+      nodePath: path.join(otherBin, 'node'),
+    });
+    // Replaced, not duplicated.
+    const written = readJson(settingsPath);
+    for (const hookName of HOOK_TYPES) {
+      expect(JSON.stringify(written.hooks[hookName]).split(WPXEN_HOOK_TAG)).toHaveLength(
+        2
+      );
+    }
+  });
+
+  it('status flags a missing forwarder, and reinstalling fixes it', () => {
+    makeFakeNode();
+    installer.apply('install');
+    fs.rmSync(fwdPath);
+
+    expect(installer.status()).toMatchObject({
+      installed: true,
+      healthy: false,
+      forwarderPresent: false,
+      problem: { code: 'forwarder-missing' },
+    });
+
+    // Settings already hold the right command: no diff, but apply still
+    // restores the forwarder.
+    expect(installer.preview('install').changed).toBe(false);
+    installer.apply('install');
+    expect(installer.status()).toMatchObject({ healthy: true, forwarderPresent: true });
+  });
+
+  it('recognises entries an earlier build wrote with bare node: flagged, replaced, removed', () => {
+    makeFakeNode();
+    fs.copyFileSync(
+      path.join(__dirname, '..', 'electron', 'services', 'office', 'forwarder.cjs'),
+      fwdPath
+    );
+    const bare = {
+      hooks: [{ type: 'command', command: `node "${fwdPath}" ${WPXEN_HOOK_TAG}` }],
+    };
+    writeJson(settingsPath, {
+      hooks: Object.fromEntries(HOOK_TYPES.map((h) => [h, [bare]])),
+    });
+
+    expect(installer.status()).toMatchObject({
+      installed: true,
+      healthy: false,
+      problem: { code: 'node-unpinned' },
+    });
+
+    // Uninstall finds them by the tag.
+    const p = installer.preview('uninstall');
+    expect(p.changed).toBe(true);
+    installer.apply('uninstall');
+    expect(fs.existsSync(settingsPath) ? read(settingsPath) : '').not.toContain(
+      WPXEN_HOOK_TAG
+    );
+  });
+
+  it('reinstall over bare-node entries pins node in place', () => {
+    makeFakeNode();
+    const bare = {
+      hooks: [{ type: 'command', command: `node "${fwdPath}" ${WPXEN_HOOK_TAG}` }],
+    };
+    writeJson(settingsPath, { hooks: { Stop: [bare] } });
+
+    installer.apply('install');
+
+    const written = readJson(settingsPath);
+    expect(written.hooks.Stop).toEqual([
+      {
+        hooks: [
+          { type: 'command', command: installer.forwarderCommandFor(nodeBin, fwdPath) },
+        ],
+      },
+    ]);
+    expect(installer.status().healthy).toBe(true);
+  });
+
+  it('preview and apply reject an unknown verb', () => {
+    expect(() => installer.preview('nuke')).toThrow();
+    expect(() => installer.apply('nuke')).toThrow();
   });
 });
