@@ -318,6 +318,44 @@ function stopAll() {
   }
 }
 
+// The supervised Remote Access tunnel (spec #136, #141): a token-based
+// remote-managed tunnel, so the hostname stays fixed while the phone is away.
+// Unlike the quick tunnels above it runs under procman (crash restart with
+// backoff, graceful stop, pid-file orphan cleanup) — never spawned directly.
+// Routing lives in the Cloudflare dashboard; WPXen never runs `login`, never
+// reads cert.pem, and never touches DNS or the Cloudflare API.
+const REMOTE_TUNNEL_NAME = 'wpxen-remote-tunnel';
+
+// Builds the procman spec for the Remote Access child. The token travels in
+// `TUNNEL_TOKEN`, never in argv, so it can't leak through `ps`. `fetchImpl`
+// is injectable for tests; production passes the global fetch.
+function buildRemoteTunnelSpec({ bin, token, port, metricsPort, fetchImpl = fetch }) {
+  if (!bin) throw new Error('cloudflared is not installed.');
+  if (!token) throw new Error('A tunnel token is required.');
+  return {
+    name: REMOTE_TUNNEL_NAME,
+    bin,
+    // The dashboard routes the public hostname at this child; --metrics serves
+    // /ready locally, which reads 200 once a Cloudflare connection is up.
+    args: ['tunnel', '--no-autoupdate', '--metrics', `127.0.0.1:${metricsPort}`, 'run'],
+    env: { ...process.env, TUNNEL_TOKEN: token },
+    meta: { port, metricsPort },
+    stopSignal: 'SIGTERM',
+    stopTimeoutMs: 10_000,
+    readyProbe: async () => {
+      try {
+        const res = await fetchImpl(`http://127.0.0.1:${metricsPort}/ready`, {
+          signal: AbortSignal.timeout(2000),
+        });
+        return res.ok;
+      } catch {
+        return false;
+      }
+    },
+    readyTimeoutMs: 60_000,
+  };
+}
+
 module.exports = {
   getCloudflaredPath,
   isInstalled,
@@ -328,4 +366,6 @@ module.exports = {
   stopAll,
   getTunnel,
   getAllTunnels,
+  REMOTE_TUNNEL_NAME,
+  buildRemoteTunnelSpec,
 };

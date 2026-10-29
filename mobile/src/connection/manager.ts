@@ -1,0 +1,265 @@
+// One host's connection lifecycle: connect on open, heartbeat while up,
+// exponential backoff with jitter after a drop — cut short when the app
+// returns to the foreground or the network comes back or changes
+// (revival.ts) — and no more retries once the Mac reports this device
+// revoked or a latch (dialPolicy.ts) says retrying is pointless. The states come
+// from state.ts so every screen agrees; the backoff schedule from
+// backoff.ts. The encrypted channel itself is the shared client half.
+
+import { backoffDelayMs } from './backoff';
+import { deriveConnectionState, type ConnectionState } from './state';
+import { judgeDialFailure, readDialFailure, type ConnectionLatch } from './dialPolicy';
+import { subscribeRevivalTriggers } from './revival';
+import { createClient, decodeBase64 } from '../protocol';
+import type { HostRecord } from '../hosts/hostList';
+import { secureRandomBytes } from '../crypto';
+
+export interface ConnectionUpdate {
+  state: ConnectionState;
+  // Last ping round-trip while connected, for the host screen's proof.
+  rttMs: number | null;
+  lastSeenAt: number | null;
+  // Set with 'update-required': which side to update.
+  update: 'desktop' | 'phone' | null;
+  // Failed dials since the last good connection (health.ts reads it).
+  attempts: number;
+}
+
+interface ManagerArgs {
+  host: HostRecord;
+  deviceId: string;
+  keys: { publicKey: string; secretKey: string };
+  socketCtor?: typeof WebSocket;
+  now?: () => number;
+  random?: () => number;
+  heartbeatMs?: number;
+  missedToLose?: number;
+  onUpdate: (update: ConnectionUpdate) => void;
+}
+
+const DEFAULT_HEARTBEAT_MS = 30_000;
+const DEFAULT_MISSED_TO_LOSE = 2;
+
+export class HostConnection {
+  private args: ManagerArgs;
+  private stopped = true;
+  private attempts = 0;
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  private retryTimer: ReturnType<typeof setTimeout> | null = null;
+  private client: ReturnType<typeof createClient> | null = null;
+  private lastSeenAt: number | null = null;
+  private rttMs: number | null = null;
+  private missed = 0;
+  private heartbeatLost = false;
+  private socket: 'open' | 'connecting' | 'closed' = 'closed';
+  private closeStatus: 'revoked' | 'closed' | null = null;
+  private revivalUnsub: (() => void) | null = null;
+  // Resolves the pending backoff wait early (a nudge).
+  private retryWake: (() => void) | null = null;
+  private latch: ConnectionLatch | null = null;
+  private refusals = 0;
+
+  constructor(args: ManagerArgs) {
+    this.args = {
+      heartbeatMs: DEFAULT_HEARTBEAT_MS,
+      missedToLose: DEFAULT_MISSED_TO_LOSE,
+      ...args,
+    };
+    this.lastSeenAt = args.host.lastSeen;
+    // The channel exists before any socket does, so screens can subscribe
+    // to events and queue nothing until connect() lands.
+    const { host, deviceId, keys, socketCtor = WebSocket } = this.args;
+    this.client = createClient({
+      url: host.url,
+      WebSocket: socketCtor,
+      keys: { publicKey: decodeBase64(keys.publicKey), secretKey: decodeBase64(keys.secretKey) },
+      hostPublicKey: decodeBase64(host.hostPublicKey),
+      deviceId,
+      randomBytes: secureRandomBytes,
+    });
+    this.client.onClose((status: 'revoked' | 'closed') => {
+      this.socket = 'closed';
+      this.closeStatus = status;
+      this.stopHeartbeat();
+      this.emit();
+      if (!this.stopped) this.loop();
+    });
+  }
+
+  request(op: string, params?: Record<string, unknown>): Promise<unknown> {
+    if (!this.client) throw new Error('Not connected.');
+    return this.client.request(op, params);
+  }
+
+  subscribe(event: string, cb: (payload: unknown) => void): () => void {
+    if (!this.client) return () => {};
+    return this.client.subscribe(event, cb);
+  }
+
+  private emit(): void {
+    this.args.onUpdate({
+      state: deriveConnectionState({
+        socket: this.socket,
+        closeStatus: this.closeStatus,
+        lastSeenAt: this.lastSeenAt,
+        heartbeatLost: this.heartbeatLost,
+        latch: this.latch,
+      }),
+      rttMs: this.rttMs,
+      lastSeenAt: this.lastSeenAt,
+      update: this.latch?.kind === 'update-required' ? this.latch.update : null,
+      attempts: this.attempts,
+    });
+  }
+
+  start(): void {
+    if (!this.stopped) return;
+    this.stopped = false;
+    this.loop();
+    this.revivalUnsub = subscribeRevivalTriggers(() => this.nudge());
+  }
+
+  // The app came back to the foreground, or the network came back or
+  // changed: a down connection redials now instead of waiting out its
+  // backoff, and an open one proves itself with a ping (a handoff can kill
+  // TCP while the socket still reads open).
+  private nudge(): void {
+    if (this.stopped || this.latch || this.closeStatus === 'revoked') return;
+    if (this.socket === 'open') {
+      this.probe();
+      return;
+    }
+    if (this.socket === 'connecting') return;
+    if (this.retryWake) {
+      if (this.retryTimer) clearTimeout(this.retryTimer);
+      this.retryTimer = null;
+      const wake = this.retryWake;
+      this.retryWake = null;
+      wake();
+      return;
+    }
+    this.loop();
+  }
+
+  private async probe(): Promise<void> {
+    const { heartbeatMs = DEFAULT_HEARTBEAT_MS } = this.args;
+    try {
+      await this.client?.request('ping', {}, { timeoutMs: Math.min(heartbeatMs, 5_000) });
+    } catch {
+      try {
+        this.client?.close();
+      } catch {
+        // The close handler restarts the loop.
+      }
+    }
+  }
+
+  stop(): void {
+    this.stopped = true;
+    this.revivalUnsub?.();
+    this.revivalUnsub = null;
+    this.retryWake = null;
+    if (this.retryTimer) clearTimeout(this.retryTimer);
+    this.retryTimer = null;
+    this.stopHeartbeat();
+    try {
+      this.client?.close();
+    } catch {
+      // Ignore.
+    }
+    this.socket = 'closed';
+  }
+
+  private stopHeartbeat(): void {
+    if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
+    this.heartbeatTimer = null;
+  }
+
+  private async loop(): Promise<void> {
+    if (this.stopped || this.socket === 'open' || this.socket === 'connecting') return;
+    // Revocation is terminal: the list screen owns the row from here. So is
+    // a latch: the Mac said why, and redialling won't change it.
+    if (this.closeStatus === 'revoked' || this.latch) return;
+    this.socket = 'connecting';
+    this.emit();
+    try {
+      await this.connectOnce();
+    } catch {
+      // connectOnce reports through onUpdate already.
+    }
+    // Snapshot through a cast: narrowing follows the initializer otherwise.
+    const socketAfter = this.socket as 'open' | 'connecting' | 'closed';
+    const closeAfter = this.closeStatus as 'revoked' | 'closed' | null;
+    if (this.stopped || closeAfter === 'revoked' || this.latch) return;
+    if (socketAfter === 'open') return;
+    this.attempts += 1;
+    this.emit();
+    const delay = backoffDelayMs(this.attempts, this.args.random ?? Math.random);
+    await new Promise<void>((resolve) => {
+      this.retryWake = resolve;
+      this.retryTimer = setTimeout(resolve, delay);
+    });
+    this.retryTimer = null;
+    this.retryWake = null;
+    this.loop();
+  }
+
+  private async connectOnce(): Promise<void> {
+    const { now = Date.now } = this.args;
+    const client = this.client;
+    if (!client) return;
+    try {
+      await client.connect();
+    } catch (err) {
+      this.socket = 'closed';
+      this.closeStatus = 'closed';
+      const judged = judgeDialFailure(readDialFailure(err), this.refusals);
+      this.refusals = judged.refusals;
+      if (judged.verdict.action === 'latch') this.latch = judged.verdict.latch;
+      this.emit();
+      return;
+    }
+    this.socket = 'open';
+    this.closeStatus = null;
+    this.refusals = 0;
+    this.heartbeatLost = false;
+    this.missed = 0;
+    this.attempts = 0;
+    this.lastSeenAt = now();
+    this.emit();
+    this.startHeartbeat();
+  }
+
+  private startHeartbeat(): void {
+    this.stopHeartbeat();
+    const { heartbeatMs = DEFAULT_HEARTBEAT_MS, missedToLose = DEFAULT_MISSED_TO_LOSE, now = Date.now } = this.args;
+    this.heartbeatTimer = setInterval(async () => {
+      if (this.stopped || this.socket !== 'open' || !this.client) return;
+      const started = now();
+      try {
+        // Options are the third argument; a second one is the op's params.
+        await this.client.request('ping', {}, { timeoutMs: heartbeatMs });
+        this.rttMs = now() - started;
+        this.missed = 0;
+        this.heartbeatLost = false;
+        this.lastSeenAt = now();
+      } catch {
+        this.missed += 1;
+        if (this.missed >= missedToLose) {
+          // Pings die unanswered although the socket looks open: asleep,
+          // not merely offline — and the dead socket goes so the loop
+          // redials instead of nursing it.
+          this.heartbeatLost = true;
+          this.emit();
+          try {
+            this.client?.close();
+          } catch {
+            // The close handler restarts the loop.
+          }
+          return;
+        }
+      }
+      this.emit();
+    }, heartbeatMs);
+  }
+}
