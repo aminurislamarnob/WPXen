@@ -1,0 +1,147 @@
+{
+  "generated": "2026-11-08",
+  "authors": ["aminur", "arnob", "claude"],
+  "repos": [
+    {
+      "name": "WPXen",
+      "path": "/Users/aiarnob/orca/WPXen",
+      "ref": "develop",
+      "commits": 292,
+      "mine": 292,
+      "team": 0,
+      "first_commit": "2026-06-26 00:43",
+      "my_first_commit": "2026-06-26 00:43",
+      "my_last_commit": "2026-10-27 16:42",
+      "team_authors": [],
+      "mine_coauthored": 264,
+      "decisions": {
+        "total": 1,
+        "mine": 1,
+        "files": {
+          "docs/adr/0001-main-process-pty-no-daemon.md": "Md. Aminur Islam <eng.aminurislam@gmail.com>"
+        }
+      },
+      "github": {
+        "slug": "aminurislamarnob/WPXen",
+        "merged_prs": 63,
+        "my_merged_prs": 63,
+        "issues": 94,
+        "my_issues": 94
+      }
+    }
+  ],
+  "totals": {
+    "commits": 292,
+    "mine": 292,
+    "team": 0,
+    "mine_coauthored": 264,
+    "merged_prs": 63,
+    "my_merged_prs": 63,
+    "issues": 94,
+    "my_issues": 94,
+    "decisions": 1,
+    "my_decisions": 1
+  },
+  "series": {
+    "granularity": "week",
+    "first": "2026-06-26",
+    "last": "2026-10-27",
+    "rows": [
+      {
+        "start": "2026-06-22",
+        "me": 7,
+        "team": 0
+      },
+      {
+        "start": "2026-06-29",
+        "me": 49,
+        "team": 0
+      },
+      {
+        "start": "2026-07-06",
+        "me": 6,
+        "team": 0
+      },
+      {
+        "start": "2026-07-13",
+        "me": 0,
+        "team": 0
+      },
+      {
+        "start": "2026-07-20",
+        "me": 54,
+        "team": 0
+      },
+      {
+        "start": "2026-07-27",
+        "me": 2,
+        "team": 0
+      },
+      {
+        "start": "2026-08-03",
+        "me": 0,
+        "team": 0
+      },
+      {
+        "start": "2026-08-10",
+        "me": 0,
+        "team": 0
+      },
+      {
+        "start": "2026-08-17",
+        "me": 24,
+        "team": 0
+      },
+      {
+        "start": "2026-08-24",
+        "me": 0,
+        "team": 0
+      },
+      {
+        "start": "2026-08-31",
+        "me": 0,
+        "team": 0
+      },
+      {
+        "start": "2026-09-07",
+        "me": 0,
+        "team": 0
+      },
+      {
+        "start": "2026-09-14",
+        "me": 0,
+        "team": 0
+      },
+      {
+        "start": "2026-09-21",
+        "me": 0,
+        "team": 0
+      },
+      {
+        "start": "2026-09-28",
+        "me": 65,
+        "team": 0
+      },
+      {
+        "start": "2026-10-05",
+        "me": 58,
+        "team": 0
+      },
+      {
+        "start": "2026-10-12",
+        "me": 0,
+        "team": 0
+      },
+      {
+        "start": "2026-10-19",
+        "me": 1,
+        "team": 0
+      },
+      {
+        "start": "2026-10-26",
+        "me": 26,
+        "team": 0
+      }
+    ]
+  }
+}

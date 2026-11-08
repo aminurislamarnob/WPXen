@@ -1,0 +1,77 @@
+<svg viewBox="0 0 1040 320" role="img" aria-label="WPXen architecture: the Electron main process supervises Homebrew nginx, PHP-FPM, MySQL and Mailpit through procman.cjs, hosts per-site node-pty sessions with an in-memory ring buffer, and tails agent transcripts. The renderer talks to the main process only through preload.cjs IPC.">
+  <defs>
+    <marker id="ah" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="d-m" d="M0 0L8 4L0 8z"/></marker>
+    <marker id="aa" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="d-ma" d="M0 0L8 4L0 8z"/></marker>
+  </defs>
+
+  <!-- Zone 1: Homebrew binaries supervised by procman -->
+  <rect class="d-zone" x="20" y="24" width="230" height="272" rx="8"/>
+  <text class="d-z" x="36" y="46">Homebrew · Local stack</text>
+
+  <rect class="d-box" x="36" y="66" width="198" height="48" rx="6"/>
+  <text class="d-t" x="135" y="88" text-anchor="middle">nginx + mkcert</text>
+  <text class="d-s" x="135" y="103" text-anchor="middle">per-site vhosts &amp; HTTPS</text>
+
+  <rect class="d-box" x="36" y="122" width="198" height="48" rx="6"/>
+  <text class="d-t" x="135" y="144" text-anchor="middle">PHP-FPM (7.4–8.4)</text>
+  <text class="d-s" x="135" y="159" text-anchor="middle">one pool &amp; socket per version</text>
+
+  <rect class="d-box" x="36" y="178" width="198" height="48" rx="6"/>
+  <text class="d-t" x="135" y="200" text-anchor="middle">MySQL + Mailpit</text>
+  <text class="d-s" x="135" y="215" text-anchor="middle">site DBs &amp; :8025 mail sink</text>
+
+  <rect class="d-box" x="36" y="234" width="198" height="48" rx="6"/>
+  <text class="d-t" x="135" y="256" text-anchor="middle">dnsmasq + WP-CLI</text>
+  <text class="d-s" x="135" y="271" text-anchor="middle">*.test DNS &amp; site ops</text>
+
+  <!-- Arrow from Main Process to Local stack -->
+  <line class="d-l" x1="290" y1="150" x2="235" y2="150" marker-end="url(#ah)"/>
+
+  <!-- Zone 2: Main Process -->
+  <rect class="d-zone" x="290" y="24" width="370" height="272" rx="8"/>
+  <text class="d-z" x="306" y="46">Electron 43 · Main process (electron/*.cjs)</text>
+
+  <rect class="d-box" x="306" y="66" width="160" height="60" rx="6"/>
+  <text class="d-t" x="386" y="91" text-anchor="middle">procman.cjs</text>
+  <text class="d-s" x="386" y="110" text-anchor="middle">child supervisor &amp; pids</text>
+
+  <rect class="d-box" x="484" y="66" width="160" height="60" rx="6"/>
+  <text class="d-t" x="564" y="91" text-anchor="middle">agents.cjs (node-pty)</text>
+  <text class="d-s" x="564" y="110" text-anchor="middle">in-process pty &amp; ring buffer</text>
+
+  <rect class="d-box" x="306" y="136" width="160" height="60" rx="6"/>
+  <text class="d-t" x="386" y="161" text-anchor="middle">agentChat.cjs</text>
+  <text class="d-s" x="386" y="180" text-anchor="middle">Claude, Codex, Antigravity</text>
+
+  <rect class="d-check" x="484" y="136" width="160" height="60" rx="6"/>
+  <text class="d-t" x="564" y="161" text-anchor="middle">siteops &amp; settings</text>
+  <text class="d-s" x="564" y="180" text-anchor="middle">zip, .wpress, JsonStore</text>
+
+  <rect class="d-box" x="306" y="206" width="338" height="50" rx="6"/>
+  <text class="d-t" x="475" y="228" text-anchor="middle">ipc.cjs &amp; preload.cjs (contextBridge)</text>
+  <text class="d-s" x="475" y="244" text-anchor="middle">whitelisted channels, no nodeIntegration</text>
+
+  <!-- Accent Arrow to Renderer -->
+  <line class="d-a" x1="660" y1="150" x2="719" y2="150" marker-end="url(#aa)"/>
+  <text class="d-at" x="690" y="140" text-anchor="middle">IPC</text>
+
+  <!-- Zone 3: Renderer -->
+  <rect class="d-zone" x="720" y="24" width="300" height="272" rx="8"/>
+  <text class="d-z" x="736" y="46">React · Renderer (src/**/*.jsx)</text>
+
+  <rect class="d-box" x="736" y="66" width="268" height="48" rx="6"/>
+  <text class="d-t" x="870" y="88" text-anchor="middle">Sites, PHP, Mail &amp; Services</text>
+  <text class="d-s" x="870" y="103" text-anchor="middle">wizard, blueprints, phpMyAdmin</text>
+
+  <rect class="d-box" x="736" y="122" width="268" height="48" rx="6"/>
+  <text class="d-t" x="870" y="144" text-anchor="middle">Agents: xterm.js &amp; CodeMirror</text>
+  <text class="d-s" x="870" y="159" text-anchor="middle">split panes, Files, git Changes</text>
+
+  <rect class="d-box" x="736" y="178" width="268" height="48" rx="6"/>
+  <text class="d-t" x="870" y="200" text-anchor="middle">Agent Chat &amp; In-App Browser</text>
+  <text class="d-s" x="870" y="215" text-anchor="middle">live transcripts &amp; cached webviews</text>
+
+  <rect class="d-box" x="736" y="234" width="268" height="48" rx="6"/>
+  <text class="d-t" x="870" y="256" text-anchor="middle">Tasks (GitHub Issues &amp; PRs)</text>
+  <text class="d-s" x="870" y="271" text-anchor="middle">+ 3D Office in PR #189</text>
+</svg>
