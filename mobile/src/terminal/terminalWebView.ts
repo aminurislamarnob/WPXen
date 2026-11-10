@@ -14,8 +14,13 @@
 // writes):
 //   RN → document: { type: 'init', theme, fontSize } | { type: 'write', data }
 //     | { type: 'reset' } | { type: 'theme', theme } | { type: 'grid', cols, rows }
-//     | { type: 'font-size', fontSize }
+//     | { type: 'font-size', fontSize } | { type: 'scroll-bottom' }
 //   document → RN: { type: 'ready' }
+//
+// 'scroll-bottom' is sent with every keystroke: phone input travels over the
+// remote protocol, not through xterm (disableStdin), so xterm's own
+// scroll-on-user-input never fires, and someone who scrolled back and then
+// typed would not see the echo (after Orca a7c63de35e2).
 
 import { XTERM_ENGINE_CSS, XTERM_ENGINE_JS, XTERM_ENGINE_VERSIONS } from './terminalEngine.generated';
 
@@ -167,6 +172,7 @@ export function buildTerminalHtml({ theme }: { theme: TerminalThemeName }): stri
     "    if (msg.type === 'theme') { term.options.theme = currentTheme(msg.theme); return; }",
     "    if (msg.type === 'grid') { try { term.resize(msg.cols, msg.rows); } catch (e) {} return; }",
     "    if (msg.type === 'font-size') { term.options.fontSize = msg.fontSize; return; }",
+    "    if (msg.type === 'scroll-bottom') { term.scrollToBottom(); return; }",
     '  }',
     '  document.addEventListener("message", function (event) { handle(JSON.parse(event.data)); });',
     '  window.addEventListener("message", function (event) { handle(JSON.parse(event.data)); });',

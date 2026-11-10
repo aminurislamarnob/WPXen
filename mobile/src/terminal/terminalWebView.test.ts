@@ -46,6 +46,13 @@ describe('terminal WebView document', () => {
     }
   });
 
+  it('scrolls back to the prompt on scroll-bottom', () => {
+    // Phone input bypasses xterm (disableStdin), so the page must be told.
+    const html = buildTerminalHtml({ theme: 'dark' });
+    expect(html).toContain('disableStdin: true');
+    expect(html).toContain("if (msg.type === 'scroll-bottom') { term.scrollToBottom(); return; }");
+  });
+
   // After Orca's terminal-webview-engine.test.ts. This page receives every
   // decrypted byte of terminal output, so nothing in it may come from, or
   // reach, the network.

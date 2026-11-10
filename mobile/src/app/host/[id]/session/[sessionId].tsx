@@ -38,7 +38,7 @@ import {
 import { BACKGROUND_GRACE_MS, stepBackgroundGrace, type GracePhase } from '../../../../terminal/backgroundGrace';
 
 interface Outgoing {
-  type: 'init' | 'write' | 'reset' | 'theme' | 'grid' | 'font-size';
+  type: 'init' | 'write' | 'reset' | 'theme' | 'grid' | 'font-size' | 'scroll-bottom';
   theme?: 'dark' | 'light';
   data?: string;
   cols?: number;
@@ -118,11 +118,15 @@ export default function SessionTerminalScreen() {
     webView.current?.postMessage(JSON.stringify(msg));
   }, []);
 
+  // Every keystroke and key-bar press lands here. Typing returns the view to
+  // the prompt the way a desktop terminal does — xterm can't see this input
+  // to do it itself (terminalWebView.ts, 'scroll-bottom').
   const sendWrite = useCallback(
     (data: string) => {
+      post({ type: 'scroll-bottom' });
       connection.current?.request('terminal.write', { sessionId, data }).catch(() => {});
     },
-    [sessionId]
+    [post, sessionId]
   );
 
   const attach = useCallback(async () => {
