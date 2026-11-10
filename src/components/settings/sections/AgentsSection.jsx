@@ -209,6 +209,15 @@ export default function AgentsSection() {
     </div>
   );
   const awakeMode = keepAwakeMode(settings['agents.keepAwake']);
+  const awakeReasons = Array.isArray(keepAwake.reasons) ? keepAwake.reasons : [];
+  const awakeReasonLabels = {
+    always: 'always on',
+    agent: 'agent working',
+    remote: 'remote access',
+  };
+  const awakeState = keepAwake.active
+    ? `Active${awakeReasons.length ? ` (${awakeReasons.map((r) => awakeReasonLabels[r] || r).join(', ')})` : ''}`
+    : 'Inactive';
 
   const chatViewRows = (!visible || visible.includes('agents.chatViewDefault')) && (
     <div>
@@ -240,9 +249,7 @@ export default function AgentsSection() {
               id="agents.keepAwake"
               visible={visible}
               title="Keep computer awake"
-              subtitle={`${awakeMode.description} · ${
-                keepAwake.active ? 'Active' : 'Inactive'
-              }`}
+              subtitle={`${awakeMode.description} · ${awakeState}`}
             >
               <SegmentedTabs
                 tabs={KEEP_AWAKE_MODES}

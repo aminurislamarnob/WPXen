@@ -155,6 +155,7 @@ app.whenReady().then(() => {
     });
   };
   const keepAwake = require('./services/keepAwake.cjs');
+  const remoteAccess = require('./services/remoteAccess.cjs');
   const trayCtl = createTray(
     win,
     () => getServiceStatus(),
@@ -168,11 +169,16 @@ app.whenReady().then(() => {
         getStatus: () => keepAwake.getStatus(),
         setMode: (mode) => setSetting('agents.keepAwake', mode),
       },
+      remoteAccess: {
+        getStatus: () => remoteAccess.getStatus(),
+        setEnabled: (enabled) => setSetting('remote.enabled', enabled),
+      },
     }
   );
   // Mode changes from anywhere, and the hold coming and going, show in the
   // tray at once rather than on the next 5 s refresh.
   keepAwake.onStatusChange(() => trayCtl.updateMenu());
+  remoteAccess.onStatusChange(() => trayCtl.updateMenu());
   let attentionKey = '';
   agents.onSessionsChanged((list) => {
     attention = list.filter((s) => s.unread);
@@ -207,6 +213,12 @@ app.whenReady().then(() => {
     try {
       await procman.reconcileOrphans();
     } catch {}
+    // Only now the Remote Access tunnel, when it was left on with a token
+    // saved: started before the reconcile, its own fresh pid file was taken
+    // for an orphan's and the tunnel killed on every launch.
+    require('./services/remoteAccess.cjs')
+      .syncTunnel()
+      .catch(() => {});
 
     // Which services come up on launch is a preference (Settings → Services);
     // Mailpit additionally needs to be installed. Falls back to the historical
@@ -343,6 +355,10 @@ app.on('before-quit', (e) => {
   // to notice the app is gone.
   try {
     require('./services/keepAwake.cjs').dispose();
+  } catch {}
+  // Close the Remote Access port so quitting never leaves it open.
+  try {
+    require('./services/remoteAccess.cjs').stop();
   } catch {}
 
   // Allow the window to actually close on quit

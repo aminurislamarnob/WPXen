@@ -499,6 +499,11 @@ async function stopAll({ deadlineMs = 25_000 } = {}) {
 // and kept running. Pid files record what we spawned; on startup, kill any
 // recorded pid that is still alive AND still runs the same binary (never a
 // recycled pid).
+// A pid file alone never condemns a process (after Orca's daemon rule): it
+// must be alive, running the recorded binary, and not a child this run
+// already supervises. The last check matters because something may start a
+// child before launch gets here — the Remote Access tunnel did, from
+// registerIpc — and its fresh pid file looks exactly like an orphan's.
 async function reconcileOrphans() {
   const runDir = path.join(getBaseDir(), 'run');
   let files = [];
@@ -507,10 +512,16 @@ async function reconcileOrphans() {
   } catch {
     return;
   }
+  const ours = new Set();
+  for (const entry of registry.values()) {
+    if (entry.child && entry.child.pid) ours.add(entry.child.pid);
+  }
   for (const file of files) {
     const p = path.join(runDir, file);
     try {
       const { pid, bin } = JSON.parse(fs.readFileSync(p, 'utf8'));
+      // This run's own child: its pid file is current, not an orphan's.
+      if (ours.has(pid)) continue;
       if (pid && pidAlive(pid)) {
         const cmd = pidCommand(pid);
         if (cmd && bin && cmd.includes(bin)) {

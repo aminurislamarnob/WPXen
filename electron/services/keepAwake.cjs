@@ -14,8 +14,11 @@ const proc = require('child_process');
 // and the display is still free to sleep and lock. `-w <our pid>` ties its
 // lifetime to the app, so even a hard crash can't orphan an assertion that
 // keeps the Mac awake forever. If caffeinate can't be spawned we fall back to
-// Electron's powerSaveBlocker ('prevent-display-sleep', as Orca does); only
-// one of the two is ever held.
+// Electron's powerSaveBlocker; only one of the two is ever held. The fallback
+// is 'prevent-app-suspension' — the system stays awake, the display still
+// sleeps and locks, matching caffeinate -i -s. Orca uses
+// 'prevent-display-sleep', but spec #150 says the display is free to sleep,
+// and keeping it lit would leave the screen of an unattended Mac unlocked.
 //
 // Lives in the main process alongside the ptys (ADR 0001), so it works with
 // the window hidden to the tray. Electron is resolved lazily — tests import
@@ -41,6 +44,20 @@ function countsAsWorking(session, now) {
     !!session &&
     session.isAgent === true &&
     session.state === 'working' &&
+    !session.exited &&
+    typeof session.lastOutputAt === 'number' &&
+    now - session.lastOutputAt < STALE_AFTER_MS
+  );
+}
+
+// The remote-access reason counts more: a Session waiting on you still keeps
+// the Mac up, because you may answer it from the phone. The stale cutoff and
+// the shell/exited exclusions stay exactly as in Agent mode.
+function countsForRemote(session, now) {
+  return (
+    !!session &&
+    session.isAgent === true &&
+    (session.state === 'working' || session.state === 'needs-input') &&
     !session.exited &&
     typeof session.lastOutputAt === 'number' &&
     now - session.lastOutputAt < STALE_AFTER_MS
@@ -84,6 +101,11 @@ function __setDeps(next) {
 
 let mode = 'off';
 let workingCount = 0;
+// The remote-access reason, set through setRemote(): Remote Access on with
+// its keep-awake setting, plus how many paired devices are connected now.
+let remoteEnabled = false;
+let remoteDevices = 0;
+let remoteWorkingCount = 0;
 let child = null; // live caffeinate process
 let blockerId = null; // powerSaveBlocker id, when on the fallback
 let retryTimer = null;
@@ -98,7 +120,15 @@ let unwatch = null;
 let staleTimer = null;
 
 function wanted() {
+  return modeWants() || remoteWants();
+}
+
+function modeWants() {
   return mode === 'on' || (mode === 'agent' && workingCount > 0);
+}
+
+function remoteWants() {
+  return remoteEnabled && (remoteWorkingCount > 0 || remoteDevices > 0);
 }
 
 function held() {
@@ -106,13 +136,17 @@ function held() {
 }
 
 function getStatus() {
-  return { mode, active: wanted() && held(), workingCount };
+  const reasons = [];
+  if (mode === 'on') reasons.push('always');
+  else if (mode === 'agent' && workingCount > 0) reasons.push('agent');
+  if (remoteWants()) reasons.push('remote');
+  return { mode, active: wanted() && held(), workingCount, reasons };
 }
 
 // Republishes only when something a viewer can see actually changed.
 function publish() {
   const status = getStatus();
-  const key = `${status.mode}|${status.active}|${status.workingCount}`;
+  const key = `${status.mode}|${status.active}|${status.workingCount}|${status.reasons.join(',')}`;
   if (key === lastPublished) return;
   lastPublished = key;
   for (const cb of listeners) {
@@ -134,7 +168,7 @@ function startFallback() {
   const blocker = deps.powerSaveBlocker;
   if (!blocker) return;
   try {
-    blockerId = blocker.start('prevent-display-sleep');
+    blockerId = blocker.start('prevent-app-suspension');
   } catch (err) {
     deps.log(`[keep-awake] powerSaveBlocker failed: ${err?.message || err}`);
     blockerId = null;
@@ -250,14 +284,28 @@ function recount() {
   clearStaleTimer();
   const now = Date.now();
   let count = 0;
+  let remoteCount = 0;
   let nextExpiry = Infinity;
   for (const s of (listSessions && listSessions()) || []) {
-    if (!countsAsWorking(s, now)) continue;
-    count += 1;
-    nextExpiry = Math.min(nextExpiry, s.lastOutputAt + STALE_AFTER_MS);
+    const staleAt =
+      s && typeof s.lastOutputAt === 'number'
+        ? s.lastOutputAt + STALE_AFTER_MS
+        : Infinity;
+    // A working Session counts for both reasons; needs-input only remote.
+    if (countsAsWorking(s, now)) {
+      count += 1;
+      nextExpiry = Math.min(nextExpiry, staleAt);
+    }
+    if (countsForRemote(s, now)) {
+      remoteCount += 1;
+      nextExpiry = Math.min(nextExpiry, staleAt);
+    }
   }
   workingCount = count;
-  if (count > 0) staleTimer = setTimeout(update, Math.max(0, nextExpiry - now));
+  remoteWorkingCount = remoteCount;
+  if (count + remoteCount > 0) {
+    staleTimer = setTimeout(update, Math.max(0, nextExpiry - now));
+  }
 }
 
 function update() {
@@ -286,6 +334,16 @@ function setMode(next) {
   apply();
 }
 
+// The remote-access reason: enabled once Remote Access is on with its
+// keep-awake setting, plus the live connected-device count. Set from ipc.cjs
+// whenever any of the three changes; the Session list already feeds recount.
+function setRemote({ enabled, connectedDevices }) {
+  remoteEnabled = !!enabled;
+  remoteDevices =
+    Number.isInteger(connectedDevices) && connectedDevices > 0 ? connectedDevices : 0;
+  update();
+}
+
 // After a wake from sleep the assertion may have been lost (caffeinate killed
 // while suspended) and Sessions may have gone stale while the clock ran on;
 // re-applying is idempotent when everything is still held.
@@ -302,6 +360,9 @@ function dispose() {
   listSessions = null;
   mode = 'off';
   workingCount = 0;
+  remoteEnabled = false;
+  remoteDevices = 0;
+  remoteWorkingCount = 0;
   lastPublished = null;
   listeners.clear();
 }
@@ -314,6 +375,7 @@ module.exports = {
   countsAsWorking,
   watchSessions,
   setMode,
+  setRemote,
   getStatus,
   onStatusChange,
   handleResume,

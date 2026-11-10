@@ -92,6 +92,30 @@ describe('registry integrity', () => {
   });
 });
 
+describe('Remote Access entries', () => {
+  it('finds the Mobile settings by feature, section and field names', () => {
+    expect(visibleItems('remote access')).toEqual(
+      expect.arrayContaining(['remote.enabled', 'remote.port'])
+    );
+    expect(visibleItems('mobile')).toEqual(
+      expect.arrayContaining(['remote.enabled', 'remote.port'])
+    );
+    expect(visibleItems('port')).toContain('remote.port');
+  });
+
+  it('finds the public hostname by its field and provider names', () => {
+    expect(visibleItems('hostname')).toContain('remote.hostname');
+    expect(visibleItems('cloudflare')).toContain('remote.hostname');
+  });
+
+  it('finds the keep-awake switch by its purpose', () => {
+    expect(visibleItems('keep awake')).toContain('remote.keepAwake');
+    expect(visibleItems('remote access')).toEqual(
+      expect.arrayContaining(['remote.enabled', 'remote.port', 'remote.keepAwake'])
+    );
+  });
+});
+
 describe('agents chat view default', () => {
   it('is findable by "chat"', () => {
     const found = SETTINGS_ITEMS.filter((i) => matchesQuery(i, 'chat'));

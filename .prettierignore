@@ -3,3 +3,5 @@ dist
 release
 package-lock.json
 assets/bin
+# WPXen Mobile formats itself (or not at all); the desktop gate ignores it.
+mobile

@@ -317,6 +317,42 @@ describe('agent status tracker — alert events', () => {
     expect(t.drainEvents()).toEqual(['error']);
   });
 
+  it('reports one bell per wait, however often the agent rings', () => {
+    const t = createTracker();
+    t.output(osc('⠐ Task'));
+    t.output('Allow edit? \x07');
+    t.output('\x07');
+    t.output('\x07');
+    expect(t.drainEvents()).toEqual(['needs-input', 'bell']);
+  });
+
+  it('keeps the bell when a permission title set needs-input first', () => {
+    // Claude's title flips to the permission glyph, then it rings: the bell
+    // is still this wait's first, so a bell-only alert setting hears it.
+    const t = createTracker();
+    t.output(osc('Codex: action required'));
+    t.output('\x07');
+    expect(t.drainEvents()).toEqual(['needs-input', 'bell']);
+  });
+
+  it('rings again for the next wait, after an answer or the agent moving on', () => {
+    const t = createTracker();
+    t.output(osc('⠐ Task'));
+    t.output('\x07');
+    t.typed();
+    t.output('\x07');
+    t.output(osc('⠐ Task'));
+    t.output('\x07');
+    expect(t.drainEvents().filter((e) => e === 'bell')).toEqual(['bell', 'bell', 'bell']);
+  });
+
+  it('reports every bell from a plain shell, which has no wait', () => {
+    const t = createTracker({ agent: false });
+    t.output('\x07');
+    t.output('\x07');
+    expect(t.drainEvents()).toEqual(['bell', 'bell']);
+  });
+
   it('reports nothing for work starting or a clean exit', () => {
     const t = createTracker();
     t.output(osc('⠐ Task'));
