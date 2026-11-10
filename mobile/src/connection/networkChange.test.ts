@@ -2,19 +2,19 @@ import { describe, expect, it } from 'vitest';
 import { networkChangeNudges } from './networkChange';
 
 describe('network change nudges', () => {
-  it('nudges on coming back online', () => {
-    expect(networkChangeNudges({ isConnected: false, type: 'NONE' }, { isConnected: true, type: 'WIFI' })).toBe(true);
+  it('nudges on every event that reports the phone connected', () => {
+    expect(networkChangeNudges({ isConnected: true, type: 'WIFI' })).toBe(true);
+    expect(networkChangeNudges({ isConnected: true, type: 'CELLULAR' })).toBe(true);
   });
 
-  it('nudges on a Wi-Fi / cellular handoff', () => {
-    expect(networkChangeNudges({ isConnected: true, type: 'WIFI' }, { isConnected: true, type: 'CELLULAR' })).toBe(
-      true
-    );
+  it('nudges when roaming keeps the same network type', () => {
+    // Access point to access point reads WIFI → WIFI, and still replaces the
+    // TCP path under an open socket.
+    expect(networkChangeNudges({ isConnected: true, type: 'WIFI' })).toBe(true);
   });
 
-  it('stays quiet going offline, on the first reading, and with nothing changed', () => {
-    expect(networkChangeNudges({ isConnected: true, type: 'WIFI' }, { isConnected: false, type: 'NONE' })).toBe(false);
-    expect(networkChangeNudges(null, { isConnected: true, type: 'WIFI' })).toBe(false);
-    expect(networkChangeNudges({ isConnected: true, type: 'WIFI' }, { isConnected: true, type: 'WIFI' })).toBe(false);
+  it('stays quiet while offline or unknown', () => {
+    expect(networkChangeNudges({ isConnected: false, type: 'NONE' })).toBe(false);
+    expect(networkChangeNudges({ isConnected: undefined, type: undefined })).toBe(false);
   });
 });

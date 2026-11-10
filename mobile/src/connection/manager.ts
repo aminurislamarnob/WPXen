@@ -9,7 +9,8 @@
 import { backoffDelayMs } from './backoff';
 import { deriveConnectionState, type ConnectionState } from './state';
 import { judgeDialFailure, readDialFailure, type ConnectionLatch } from './dialPolicy';
-import { subscribeRevivalTriggers } from './revival';
+import { subscribeRevivalTriggers, type RevivalReason } from './revival';
+import { createProbeGate } from './probeGate';
 import { createClient, decodeBase64 } from '../protocol';
 import type { HostRecord } from '../hosts/hostList';
 import { secureRandomBytes } from '../crypto';
@@ -58,6 +59,7 @@ export class HostConnection {
   private retryWake: (() => void) | null = null;
   private latch: ConnectionLatch | null = null;
   private refusals = 0;
+  private probes: ReturnType<typeof createProbeGate>;
 
   constructor(args: ManagerArgs) {
     this.args = {
@@ -66,6 +68,7 @@ export class HostConnection {
       ...args,
     };
     this.lastSeenAt = args.host.lastSeen;
+    this.probes = createProbeGate({ now: this.args.now });
     // The channel exists before any socket does, so screens can subscribe
     // to events and queue nothing until connect() lands.
     const { host, deviceId, keys, socketCtor = WebSocket } = this.args;
@@ -116,17 +119,18 @@ export class HostConnection {
     if (!this.stopped) return;
     this.stopped = false;
     this.loop();
-    this.revivalUnsub = subscribeRevivalTriggers(() => this.nudge());
+    this.revivalUnsub = subscribeRevivalTriggers((reason) => this.nudge(reason));
   }
 
   // The app came back to the foreground, or the network came back or
   // changed: a down connection redials now instead of waiting out its
   // backoff, and an open one proves itself with a ping (a handoff can kill
-  // TCP while the socket still reads open).
-  private nudge(): void {
+  // TCP while the socket still reads open) — one at a time and spaced apart
+  // (probeGate.ts), except that a return from the background probes at once.
+  private nudge(reason: RevivalReason): void {
     if (this.stopped || this.latch || this.closeStatus === 'revoked') return;
     if (this.socket === 'open') {
-      this.probe();
+      if (this.probes.tryStart({ afterBackground: reason === 'app-resume' })) this.probe();
       return;
     }
     if (this.socket === 'connecting') return;
@@ -151,6 +155,8 @@ export class HostConnection {
       } catch {
         // The close handler restarts the loop.
       }
+    } finally {
+      this.probes.finish();
     }
   }
 
@@ -220,6 +226,7 @@ export class HostConnection {
       return;
     }
     this.socket = 'open';
+    this.probes.reset();
     this.closeStatus = null;
     this.refusals = 0;
     this.heartbeatLost = false;
