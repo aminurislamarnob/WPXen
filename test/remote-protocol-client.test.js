@@ -152,4 +152,37 @@ describe('createClient connection lifecycle', () => {
     client.close();
     expect(closes).toBe(2);
   });
+
+  it('ignores a frame that arrives late on a socket it already replaced', async () => {
+    mac = fakeMac();
+    await mac.listening();
+    const keys = newKeyPair();
+    mac.pinDeviceKey(keys.publicKey);
+    // Record every socket the client dials so the test can reach a spent one.
+    const dialled = [];
+    class RecordingWebSocket extends WebSocket {
+      constructor(...args) {
+        super(...args);
+        dialled.push(this);
+      }
+    }
+    const client = createClient({
+      url: mac.url(),
+      WebSocket: RecordingWebSocket,
+      keys,
+      hostPublicKey: hostKeys.publicKey,
+      deviceId: 'device-1',
+    });
+    await client.connect();
+    client.close();
+    await client.connect();
+    expect(dialled).toHaveLength(2);
+
+    // A reply the first socket was still carrying when the heartbeat gave up
+    // on it. Garbage on the current socket closes the channel; on a socket
+    // already replaced it must not touch the new one.
+    dialled[0].onmessage({ data: 'not a frame' });
+    expect(await client.request('ping')).toMatchObject({ pong: true });
+    client.close();
+  });
 });

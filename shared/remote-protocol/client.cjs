@@ -158,6 +158,10 @@ function createClient({
   }
 
   function onSocketMessage(ws, raw) {
+    // A frame still in flight on a socket this client already gave up on
+    // (a heartbeat timeout, then a redial): the handshake state and close()
+    // belong to the current socket, so acting on it would kill the new dial.
+    if (ws !== socket) return;
     let outer;
     try {
       outer = JSON.parse(String(raw));
