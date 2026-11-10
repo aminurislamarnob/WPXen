@@ -151,6 +151,12 @@ function createTracker({ now = Date.now, agent = true } = {}) {
   let dirty = false;
   let onScreen = false; // selected in the Agents pane AND the window focused
   let beforeInput = 'idle'; // the state needs-input interrupted
+  // An agent that rings again and again while it waits on the same prompt
+  // gets one bell event for the wait, not one per BEL — each becomes a
+  // notification and a phone push once the cooldown lapses (after Orca
+  // 33a4b473bc9). Cleared when the wait ends: the user answers, or the agent
+  // moves on.
+  let bellAlerted = false;
   // Alert-worthy moments since the last drain — 'done' | 'needs-input' |
   // 'bell' | 'error'. Whether one becomes a notification is the notifier's
   // call (see createNotifier); the tracker only reports what happened.
@@ -171,6 +177,7 @@ function createTracker({ now = Date.now, agent = true } = {}) {
 
   const setState = (state) => {
     if (state === snap.state) return;
+    if (state !== 'needs-input') bellAlerted = false;
     if (state === 'needs-input')
       beforeInput = snap.state === 'working' ? 'done' : snap.state;
     snap.state = state;
@@ -215,6 +222,11 @@ function createTracker({ now = Date.now, agent = true } = {}) {
       if (ENDED.has(snap.state)) return;
       if (agent) apply({ state: 'needs-input', source: 'bell' });
       attention();
+      // A plain shell has no wait to dedupe against: each bell is its own.
+      if (agent && snap.state === 'needs-input') {
+        if (bellAlerted) return;
+        bellAlerted = true;
+      }
       events.push('bell');
     },
   });
@@ -254,6 +266,7 @@ function createTracker({ now = Date.now, agent = true } = {}) {
     typed() {
       setUnread(false);
       if (snap.state === 'needs-input') {
+        bellAlerted = false;
         snap.state = beforeInput;
         snap.changedAt = now();
         touch();
