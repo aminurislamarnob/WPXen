@@ -19,6 +19,7 @@ export const SECTIONS = [
     items: [
       { id: 'general', label: 'General', icon: 'sliders' },
       { id: 'agents', label: 'Agents', icon: 'cpu' },
+      { id: 'office', label: 'Office', icon: 'armchair' },
       { id: 'tools', label: 'External Tools', icon: 'wrench' },
     ],
   },
@@ -513,6 +514,30 @@ export const SETTINGS_ITEMS = [
       'where',
       'mode',
       'git',
+    ],
+  },
+
+  // ── Office ───────────────────────────────────────────────────────────────
+  // An action row (install/uninstall + live status), not a stored value — the
+  // dns.sudoers precedent.
+  {
+    id: 'office.hook',
+    section: 'office',
+    title: 'Claude Code hook',
+    description:
+      'Exact real-time session state in the Office — no inference lag on permission prompts',
+    keywords: [
+      'office',
+      'hook',
+      'hooks',
+      'claude',
+      'claude code',
+      'waiting',
+      'permission',
+      'real-time',
+      'install',
+      'forwarder',
+      'socket',
     ],
   },
 

@@ -1,5 +1,6 @@
 import { NavLink } from 'react-router-dom';
 import {
+  Armchair,
   Palette,
   SlidersHorizontal,
   Globe,
@@ -18,6 +19,7 @@ import {
 import { SECTIONS } from '../../lib/settingsRegistry';
 
 const ICONS = {
+  armchair: Armchair,
   palette: Palette,
   sliders: SlidersHorizontal,
   globe: Globe,

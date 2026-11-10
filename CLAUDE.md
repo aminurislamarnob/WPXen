@@ -58,7 +58,7 @@ call, both halves count, and neither is a bolt-on to the other.
 Two processes, separated by file extension:
 
 - **Main process** — `electron/*.cjs` (CommonJS). Node access, runs all system commands.
-- **Renderer** — `src/**/*.jsx` (React 18 + React Router 6 + Tailwind, built by Vite).
+- **Renderer** — `src/**/*.jsx` (React 19 + React Router 6 + Tailwind, built by Vite).
 
 ⚠️ **Only the renderer hot-reloads.** Vite HMR picks up `src/**` instantly, but
 the main process does not reload — `npm run dev` keeps running the `electron/**`
@@ -126,6 +126,10 @@ Node directly. When adding a feature that crosses the boundary you must touch th
     `externalTools.cjs` (which app opens a file/folder/terminal — maps each
     editor to its `$PATH` CLI shim, falling back to `shell.openPath`),
     `files.cjs`, `git.cjs`, `validation.cjs`, `errors.cjs`, `asyncExec.cjs`.
+  - **Office** — `office/` (see below): `engine.cjs` (poll loop) drives
+    `scanner.cjs` / `antigravity.cjs` / `tailer.cjs` / `projectKey.cjs` into the
+    pure `reducer.cjs` (typedefs in `types.cjs`); `hooksInstaller.cjs`,
+    `forwarder.cjs` and `hookSocket.cjs` are the optional Claude Code hook.
 
 ### Settings
 
@@ -245,6 +249,106 @@ DevTools, native context menus, key interception.
   anything but http/https. `src/lib/useOpenLink.js` is the renderer-side
   decision point for Settings → General → _Open links in_ (`system` vs `app`).
 
+### Office
+
+The **Office** section is a one-time port of the standalone claude-agent-verse
+project (`docs/adr/0002-office-native-port.md`): every live Claude Code session on
+the machine (not only WPXen's own Sessions) and every recently written Antigravity
+conversation is a character at a desk in a 3D room. It only observes. The engine
+under `services/office/` is electron-free and tested through `CLAUDE_HOME` /
+`ANTIGRAVITY_HOME` temp dirs plus `__setDeps`.
+
+- **Lifecycle.** Nothing is scanned before the first Office visit. The page calls
+  `officeStart` (`office-start`), which starts the engine once and returns the
+  current Office. From then on it stays warm until `before-quit` calls
+  `engine.stop()`, and switching sections never stops it. Snapshots arrive on
+  `office-update`. Each 1 s poll (a setTimeout chain) runs the Claude registry scan,
+  then the Antigravity scan, then subagent discovery, then a `tick`. `agSnapshot` is
+  assigned before its events dispatch because `tailAntigravity` reads the transcript
+  path from it.
+- ⚠️ **Same-reference contract.** `reduce(office, event)` returns the _same object_
+  when nothing changed, and `dispatch` pushes a snapshot only when
+  `office !== before` (then coalesces 100 ms). A branch that rebuilds the Office
+  unconditionally, on `tick` above all, still passes every `toEqual` test. It also
+  pushes a full snapshot every second, re-plans the floor, and keeps the shadow map
+  re-rendering, because `ShadowBudget` is keyed on the Office's identity. Put new
+  derivations in `computeOfficeState`, which commits a session only when a field
+  flips. The tick test asserts `toBe`, so keep it.
+- **`ended` linger.** `session_ended` keeps the session as `ended` (tool and interns
+  cleared, tailers stopped at once). The first tick stamps `endedAt`, and the first
+  tick `ENDED_LINGER_MS` later removes it. Ended sessions are skipped by the waiting
+  and break derivations and ignore every event but `session_appeared` (a reused pid
+  replaces it) and `tick`; the HUD counts only live ones, and focus clears on actual
+  removal.
+- **Snapshot sink.** `start({ onSnapshot })` binds production's sink once; `ipc.cjs`
+  resolves the windows when each snapshot is sent. `__setDeps({ onSnapshot })`
+  stays the test override.
+- **Credentials guardrails.** `scanner.cjs` reads only `*.json` in
+  `~/.claude/sessions/` and skips names containing `.key`, because the key files
+  beside them are credentials. `antigravity.cjs` lists only `<root>/brain/` folder
+  names and opens only `.system_generated/logs/transcript.jsonl`, because
+  `~/.gemini` holds OAuth credentials. Widening either filter is a credential
+  read, not a refactor.
+- **The hook** makes _waiting on you_ exact. It is optional: without it, a tool
+  running ≥ 15 s is read as waiting (always, for Antigravity). Settings → Office
+  drives `office-hooks-install` / `-uninstall` / `-status`. Like `dns.sudoers`, it
+  is an action row with a `settingsRegistry.js` entry and no schema key,
+  deliberately deviating from #187's "schema and registry": there is no stored
+  value, the state lives in the Claude file.
+  - `hooksInstaller.cjs` edits **`~/.claude/settings.json`** (`$CLAUDE_HOME`
+    overrides the dir). Claude Code and the tools coexisting there (Orca, Agent
+    Flow, Superset) register their hooks in that file. The source's `~/.claude.json`
+    is only swept for legacy entries. Each entry uses the file's matcher-wrapper
+    shape `{ hooks: [{ type: 'command', command }] }`, because Claude Code does not
+    run the source's bare `{ type, command }`. The command is
+    `'<abs node>' '<userData>/wpxen-hook-forwarder.cjs' # wpxen`.
+  - **The tag is the ownership record.** Install adds an entry only where none
+    bears `WPXEN_HOOK_TAG`. Uninstall removes exactly the tagged ones, and
+    `updateHooks` writes each key back in its original shape, so other tools' hooks
+    round-trip byte-identical. An entry edited by hand without the tag is invisible
+    to both, and uninstall leaves it firing forever. Both verbs also strip
+    `LEGACY_HOOK_TAGS` (`# claude-agent-verse`) in the same edit. Edits are
+    `office-hooks-preview` (diffs for `settings.json` and the legacy sweep, nothing
+    written) then, after a confirm in Settings, `office-hooks-apply` with the
+    preview's token (refused if a file changed since): `.bak` backup, `.tmp`, then
+    an atomic rename.
+  - Install refuses unless `node` resolves on the login-shell PATH, and pins its
+    **absolute path** (Claude Code's own PATH may lack nvm/Volta). If that node or
+    the forwarder is later deleted the hook silently dies: `status()` reports
+    `healthy: false` with a problem code, Settings polls it (focus + 5 s) and offers
+    Reinstall. Bare-`node` entries from older builds are still matched by the tag.
+    The system node is used rather than `ELECTRON_RUN_AS_NODE`, because a baked app
+    path goes stale when the app moves.
+  - ⚠️ `forwarder.cjs` is **copied** into userData at install time. Editing it
+    changes nothing on an installed machine until the hook is reinstalled. Keep it
+    node-core only, and make fixes on the receiving side: `hookSocket.toHookEvent`
+    maps Claude's `hook_event_name` / `session_id` onto the reducer's `type` /
+    `sessionId`. The forwarder sends its `ppid` as the pid, which need not be
+    Claude's own, so the reducer falls back to `sessionId`. Without that mapping,
+    every hook event silently matches no session.
+  - ⚠️ The forwarder runs on every tool call of every Claude session, whether or not
+    WPXen is running, so it must exit 0 fast. It exits before reading stdin when the
+    socket file is absent, and a 1 s `process.exit(0)` ceiling caps everything
+    else. A forwarder that hangs or exits non-zero stalls or breaks Claude Code.
+  - `hookSocket.cjs` listens on `<userData>/wpxen-hook.sock` only while the engine
+    runs, so events from before the first Office visit are dropped. The socket is
+    created under a `0o177` umask, and its 0600 mode is the only authentication.
+    `forwarder.cjs` repeats the name as a literal because it can't require
+    anything, and a test asserts the two match.
+- **Naming law.** `WPXEN_HOOK_TAG`, `WPXEN_FORWARDER_FILENAME` and
+  `LEGACY_HOOK_TAGS` sit together in `hooksInstaller.cjs`.
+  `WPXEN_HOOK_SOCKET_NAME` is in `hookSocket.cjs`. The selected room persists under
+  `wpxen.office.room` (`ROOM_STORAGE_KEY` in `OfficePage.jsx`).
+- **Renderer.** The HUD (room tabs, agent list, inspector, badges) is WPXen chrome
+  on tokens. The R3F scene in `src/components/office/scene/` keeps the source art
+  direction, so the hex palette in `src/lib/office/scene/theme.js` is deliberate and
+  stays untokenized. The tests cover the pure logic in `src/lib/office/` (layout,
+  breaks, pacing, focus, HUD order). The scene itself is checked with the dev-only
+  Preview menu, which `import.meta.env.DEV` strips from packaged builds.
+  `StaticBatch` rebuilds merged furniture only when its `version` string changes,
+  so a prop that changes how furniture looks must be part of `version` or the
+  furniture renders stale.
+
 ### Testing
 
 Tests live in `test/`, run under vitest, and cover main-process logic plus pure
@@ -280,11 +384,13 @@ renderer helpers.
 
 `src/components/` is flat except where a feature owns several files:
 `settings/` (`SettingsLayout`, `SettingsSidebar`, shared `controls.jsx`, and one
-file per section under `sections/`) and `browser/` (`BrowserPane`,
-`BrowserToolbar`, `BrowserErrorOverlay`). `src/lib/` holds the non-React logic:
+file per section under `sections/`), `browser/` (`BrowserPane`,
+`BrowserToolbar`, `BrowserErrorOverlay`) and `office/` (`OfficePage`, the HUD, and
+the R3F scene under `scene/`). `src/lib/` holds the non-React logic:
 `theme.js` / `editorTheme.js` / `typography.js` for appearance,
 `settingsRegistry.js` + `settingsSearch.js` for the settings index,
-`browser/` and `terminal/` for the two imperative surfaces.
+`browser/` and `terminal/` for the two imperative surfaces, and `office/` for the
+Office's pure derivations.
 
 ### Renderer UI conventions
 

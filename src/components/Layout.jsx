@@ -30,6 +30,7 @@ const TILE_COLORS = {
   gray: 'bg-[#8e8e93]',
   purple: 'bg-[#af52de]',
   orange: 'bg-[#ff9500]',
+  pink: 'bg-[#ff2d55]',
 };
 
 export default function Layout({ serviceStatus }) {

@@ -18,6 +18,9 @@ export default defineConfig({
       output: {
         manualChunks: {
           vendor: ['react', 'react-dom', 'react-router-dom'],
+          // The 3D office pulls in three.js and R3F; splitting them keeps the
+          // main bundle inspectable and lets the chunk cache independently.
+          three: ['three', 'three-stdlib', '@react-three/fiber', '@react-three/drei'],
         },
       },
     },

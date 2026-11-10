@@ -407,7 +407,8 @@ export function Tooltip({
     };
   }, [open, hide]);
 
-  const childRef = children.ref;
+  // React 19 moved an element's ref into props (element.ref is removed).
+  const childRef = children.props.ref;
   const trigger = cloneElement(children, {
     ref: (node) => {
       triggerRef.current = node;
