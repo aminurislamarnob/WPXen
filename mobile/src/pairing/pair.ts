@@ -26,7 +26,9 @@ export type PairFailureReason =
   | 'version-desktop'
   | 'version-phone'
   | 'rate-limited'
-  | 'invalid-secret';
+  | 'invalid-secret'
+  // The user cancelled, or left the screen, before the Mac answered.
+  | 'cancelled';
 
 export type PairResult =
   | { ok: true; host: HostRecord; keys: { publicKey: string; secretKey: string }; code: string }
@@ -63,7 +65,14 @@ export interface PairArgs {
   // Called with the 4-digit code before the request goes out, so the UI can
   // show it while the Mac waits for Allow.
   onCode?: (code: string) => void;
+  // Cancel and leaving the screen abort: the socket closes, which the Mac
+  // reads as the phone hanging up (it closes its Allow/Deny dialog and
+  // stores nothing), and a late Allow can no longer pair this phone (after
+  // Orca e0b5a428527).
+  signal?: AbortSignal;
 }
+
+const CANCELLED: PairResult = { ok: false, reason: 'cancelled' };
 
 export async function pairWithLink({
   link,
@@ -71,7 +80,9 @@ export async function pairWithLink({
   platform,
   socketCtor = WebSocket,
   onCode,
+  signal,
 }: PairArgs): Promise<PairResult> {
+  if (signal?.aborted) return CANCELLED;
   let offer;
   try {
     offer = parsePairingUrl(link.trim());
@@ -101,9 +112,24 @@ export async function pairWithLink({
   } catch {
     return { ok: false, reason: 'unreachable' };
   }
+  // Rejects whichever wait is pending when the signal fires, and hangs up.
+  let abortWait: (() => void) | null = null;
+  const onAbort = () => {
+    abortWait?.();
+    try {
+      socket.close();
+    } catch {
+      // Ignore.
+    }
+  };
+  signal?.addEventListener('abort', onAbort);
   try {
     await new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error('connect timeout')), CONNECT_TIMEOUT_MS);
+      abortWait = () => {
+        clearTimeout(timer);
+        reject(new Error('cancelled'));
+      };
       socket.onopen = () => {
         clearTimeout(timer);
         resolve();
@@ -119,13 +145,18 @@ export async function pairWithLink({
     } catch {
       // Ignore.
     }
-    return { ok: false, reason: 'unreachable' };
+    signal?.removeEventListener('abort', onAbort);
+    return signal?.aborted ? CANCELLED : { ok: false, reason: 'unreachable' };
   }
 
   let reply: { type?: string; reason?: string; update?: string; deviceId?: string; code?: string; nonce?: string; box?: string };
   try {
     reply = await new Promise((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error('reply timeout')), REPLY_TIMEOUT_MS);
+      abortWait = () => {
+        clearTimeout(timer);
+        reject(new Error('cancelled'));
+      };
       socket.onmessage = (event) => {
         clearTimeout(timer);
         try {
@@ -146,7 +177,20 @@ export async function pairWithLink({
     } catch {
       // Ignore.
     }
-    return { ok: false, reason: 'timeout' };
+    signal?.removeEventListener('abort', onAbort);
+    return signal?.aborted ? CANCELLED : { ok: false, reason: 'timeout' };
+  }
+  // The reply is in: from here on nothing waits, and a cancel that already
+  // landed wins over whatever the Mac said.
+  abortWait = null;
+  signal?.removeEventListener('abort', onAbort);
+  if (signal?.aborted) {
+    try {
+      socket.close();
+    } catch {
+      // Ignore.
+    }
+    return CANCELLED;
   }
 
   if (reply.type === 'pair-reject') {
@@ -233,6 +277,8 @@ export function pairFailureMessage(reason: PairFailureReason): string {
       return 'Too many attempts. Wait a few minutes and ask the Mac for a new code.';
     case 'invalid-secret':
       return 'Pairing failed. Ask the Mac for a new code and try again.';
+    case 'cancelled':
+      return 'Pairing cancelled.';
   }
 }
 
