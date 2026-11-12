@@ -321,6 +321,12 @@ function fpmAccepts(version) {
   return socket ? socketAccepts(socket) : Promise.resolve(false);
 }
 
+// The supervisor's capture of `version`'s PHP-FPM stdout/stderr — where a
+// config it can't load is reported (repair.cjs reads it for the 502 page).
+function fpmLogPath(version) {
+  return procman.getLogPath(fpmSlot(version));
+}
+
 async function stopAllPhpFpm() {
   await Promise.all([
     ...deps.installedVersions().map(stopPhpFpm),
@@ -991,6 +997,7 @@ module.exports = {
   stopPhpFpm,
   restartPhpFpm,
   fpmAccepts,
+  fpmLogPath,
   stopAllPhpFpm,
   getRunningFpmVersions,
   getFpmStatus,
