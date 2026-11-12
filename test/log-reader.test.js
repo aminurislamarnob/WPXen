@@ -1,0 +1,346 @@
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import {
+  readPage,
+  PAGE_MAX_ENTRIES,
+  PAGE_MAX_BYTES,
+  ENTRY_MAX_BYTES,
+} from '../electron/services/logReader.cjs';
+
+// Fixtures copy the line shapes PHP, PHP-FPM and nginx really write; every
+// path, message, pid and date is invented.
+
+let dir;
+
+beforeEach(() => {
+  dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wpxen-logs-'));
+});
+
+afterEach(() => {
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+function fixture(name, text) {
+  const p = path.join(dir, name);
+  fs.writeFileSync(p, text);
+  return p;
+}
+
+const FATAL_WITH_TRACE = [
+  '[12-Nov-2026 10:00:02 UTC] PHP Fatal error:  Uncaught Exception: Widget missing in /srv/demo/wp-content/plugins/acme/acme.php:12',
+  'Stack trace:',
+  '#0 /srv/demo/wp-includes/class-wp-hook.php(324): acme_boot()',
+  '#1 {main}',
+  '  thrown in /srv/demo/wp-content/plugins/acme/acme.php on line 12',
+].join('\n');
+
+describe('readPage: entries', () => {
+  it('keeps a PHP fatal and its whole stack trace in one entry', () => {
+    const p = fixture(
+      'debug.log',
+      [
+        '[12-Nov-2026 10:00:01 UTC] PHP Deprecated:  Function old_thing is deprecated in /srv/demo/a.php on line 3',
+        FATAL_WITH_TRACE,
+        '[12-Nov-2026 10:00:03 UTC] PHP Notice:  Undefined index: id in /srv/demo/b.php on line 9',
+        '',
+      ].join('\n')
+    );
+
+    const page = readPage(p, 'debug');
+
+    expect(page.exists).toBe(true);
+    expect(page.atStart).toBe(true);
+    expect(page.entries).toHaveLength(3);
+    const fatal = page.entries[1];
+    expect(fatal.time).toBe('12-Nov-2026 10:00:02 UTC');
+    expect(fatal.level).toBe('fatal');
+    expect(fatal.text).toBe(FATAL_WITH_TRACE.replace('[12-Nov-2026 10:00:02 UTC] ', ''));
+  });
+
+  it('reports a missing file as not existing, with no entries', () => {
+    const page = readPage(path.join(dir, 'nope.log'), 'debug');
+    expect(page).toMatchObject({ exists: false, size: 0, entries: [], atStart: true });
+  });
+});
+
+describe('readPage: levels', () => {
+  const levels = (p, kind) => readPage(p, kind).entries.map((e) => e.level);
+
+  it('normalises the WordPress debug log', () => {
+    const p = fixture(
+      'debug.log',
+      [
+        '[12-Nov-2026 10:00:01 UTC] PHP Fatal error:  Allowed memory size exhausted in /srv/demo/a.php on line 1',
+        '[12-Nov-2026 10:00:02 UTC] PHP Parse error:  syntax error, unexpected token "}" in /srv/demo/b.php on line 2',
+        '[12-Nov-2026 10:00:03 UTC] PHP Warning:  Undefined variable $x in /srv/demo/c.php on line 3',
+        '[12-Nov-2026 10:00:04 UTC] PHP Notice:  Function f was called incorrectly. in /srv/demo/d.php on line 4',
+        '[12-Nov-2026 10:00:05 UTC] PHP Deprecated:  Creation of dynamic property is deprecated in /srv/demo/e.php on line 5',
+        '[12-Nov-2026 10:00:06 UTC] WordPress database error Table demo.wp_acme does not exist for query SELECT 1',
+        '[12-Nov-2026 10:00:07 UTC] acme: cache warmed',
+        '',
+      ].join('\n')
+    );
+    expect(levels(p, 'debug')).toEqual([
+      'fatal',
+      'fatal',
+      'warning',
+      'notice',
+      'deprecated',
+      'other',
+      'other',
+    ]);
+  });
+
+  it('normalises the PHP-FPM log, preferring a quoted PHP message', () => {
+    const p = fixture(
+      'php-fpm.log',
+      [
+        '[29-Oct-2026 00:48:32] NOTICE: fpm is running, pid 4242',
+        '[29-Oct-2026 00:48:33] WARNING: [pool wpxen-8.4] server reached pm.max_children setting (5), consider raising it',
+        "[29-Oct-2026 00:48:34] ERROR: unable to bind listening socket for address '/opt/demo/php8.4-fpm.sock': Address already in use (48)",
+        '[29-Oct-2026 00:48:35] ALERT: [pool wpxen-8.3] child 4250 exited on signal 11 (SIGSEGV) after 3.000000 seconds from start',
+        '[29-Oct-2026 00:48:36] WARNING: [pool wpxen-8.4] child 4251 said into stderr: "PHP Deprecated:  strlen(): Passing null is deprecated"',
+        '[29-Oct-2026 00:48:37] DEBUG: pid 4242, fpm_scoreboard_update(), line 120',
+        '[29-Oct-2026 00:48:38 UTC] PHP Fatal error:  Uncaught Error: Call to undefined function acme() in /srv/demo/x.php:3',
+        '',
+      ].join('\n')
+    );
+    const page = readPage(p, 'php-error');
+    expect(page.entries.map((e) => e.level)).toEqual([
+      'notice',
+      'warning',
+      'fatal',
+      'fatal',
+      'deprecated',
+      'other',
+      'fatal',
+    ]);
+    expect(page.entries[0]).toMatchObject({
+      time: '29-Oct-2026 00:48:32',
+      text: 'NOTICE: fpm is running, pid 4242',
+    });
+  });
+
+  it('normalises the nginx error log, letting a relayed PHP message decide', () => {
+    const p = fixture(
+      'demo.test.error.log',
+      [
+        '2026/06/26 02:17:16 [crit] 19713#0: *1 connect() to unix:/opt/demo/php8.5-fpm.sock failed (2: No such file or directory) while connecting to upstream, client: 127.0.0.1, server: demo.test, request: "GET / HTTP/1.1", upstream: "fastcgi://unix:/opt/demo/php8.5-fpm.sock:", host: "demo.test"',
+        '2026/06/26 02:17:17 [error] 19713#0: *2 upstream timed out (60: Operation timed out) while reading response header from upstream, client: 127.0.0.1, server: demo.test',
+        '2026/06/26 02:17:18 [error] 19713#0: *3 FastCGI sent in stderr: "PHP message: PHP Deprecated:  Return type should be compatible; PHP message: PHP Warning:  Undefined array key "slug" in /srv/demo/f.php on line 8" while reading response header from upstream, client: 127.0.0.1',
+        '2026/06/26 02:17:19 [warn] 19713#0: *4 an upstream response is buffered to a temporary file',
+        '2026/06/26 02:17:20 [notice] 19700#0: signal process started',
+        '2026/06/26 02:17:21 [info] 19713#0: *5 client closed keepalive connection',
+        '2026/06/26 02:17:22 [emerg] 19700#0: bind() to 127.0.0.1:80 failed (48: Address already in use)',
+        '',
+      ].join('\n')
+    );
+    const page = readPage(p, 'nginx-error');
+    expect(page.entries.map((e) => e.level)).toEqual([
+      'fatal',
+      'fatal',
+      'warning',
+      'warning',
+      'notice',
+      'notice',
+      'fatal',
+    ]);
+    expect(page.entries[4]).toMatchObject({
+      time: '2026/06/26 02:17:20',
+      text: '[notice] 19700#0: signal process started',
+    });
+  });
+
+  it('reads the nginx access log as one entry per line with no level', () => {
+    const lines = [
+      '127.0.0.1 - - [12/Nov/2026:10:00:00 +0000] "GET / HTTP/1.1" 200 5120 "-" "Mozilla/5.0 (Macintosh)"',
+      '127.0.0.1 - - [12/Nov/2026:10:00:01 +0000] "POST /wp-admin/admin-ajax.php HTTP/1.1" 400 1 "https://demo.test/wp-admin/" "Mozilla/5.0 (Macintosh)"',
+      '127.0.0.1 - - [12/Nov/2026:10:00:02 +0000] "GET /favicon.ico HTTP/1.1" 302 0 "-" "Mozilla/5.0 (Macintosh)"',
+    ];
+    const p = fixture('demo.test.access.log', lines.join('\n') + '\n');
+    const page = readPage(p, 'nginx-access');
+    expect(page.entries).toEqual([
+      { offset: 0, time: '12/Nov/2026:10:00:00 +0000', level: null, text: lines[0] },
+      {
+        offset: lines[0].length + 1,
+        time: '12/Nov/2026:10:00:01 +0000',
+        level: null,
+        text: lines[1],
+      },
+      {
+        offset: lines[0].length + lines[1].length + 2,
+        time: '12/Nov/2026:10:00:02 +0000',
+        level: null,
+        text: lines[2],
+      },
+    ]);
+  });
+
+  it('rejects an unknown log kind', () => {
+    const p = fixture('x.log', 'hello\n');
+    expect(() => readPage(p, 'syslog')).toThrow(/Unknown log type/);
+  });
+});
+
+// Writes `count` debug-log entries and returns the file with what each entry
+// should read back as: every 7th a fatal with a stack trace of a varying
+// number of frames, the rest deprecation notices.
+function bigDebugLog(name, count, { frames = 3 } = {}) {
+  const expected = [];
+  const parts = [];
+  let offset = 0;
+  for (let i = 0; i < count; i++) {
+    const mm = String(Math.floor(i / 60) % 60).padStart(2, '0');
+    const ss = String(i % 60).padStart(2, '0');
+    const time = `12-Nov-2026 10:${mm}:${ss} UTC`;
+    let text;
+    if (i % 7 === 0) {
+      const trace = Array.from(
+        { length: frames + (i % 5) },
+        (_, f) =>
+          `#${f} /srv/demo/wp-includes/frame-${i}-${f}.php(${f + 10}): step_${f}()`
+      );
+      text = [
+        `PHP Fatal error:  Uncaught Error: entry ${i} in /srv/demo/x.php:${i}`,
+        'Stack trace:',
+        ...trace,
+        `  thrown in /srv/demo/x.php on line ${i}`,
+      ].join('\n');
+    } else {
+      text = `PHP Deprecated:  Function legacy_${i}() is deprecated in /srv/demo/y.php on line ${i}`;
+    }
+    const raw = `[${time}] ${text}\n`;
+    expected.push({ offset, time, text });
+    parts.push(raw);
+    offset += Buffer.byteLength(raw);
+  }
+  return { path: fixture(name, parts.join('')), expected, size: offset };
+}
+
+// Pages from the newest back to the first entry; returns every page.
+function pageToStart(p, kind) {
+  const pages = [readPage(p, kind)];
+  while (!pages[pages.length - 1].atStart) {
+    pages.push(readPage(p, kind, { end: pages[pages.length - 1].pageStart }));
+    if (pages.length > 10_000) throw new Error('paging never reached the start');
+  }
+  return pages;
+}
+
+describe('readPage: paging', () => {
+  it('returns the newest page by default, ending at the end of the file', () => {
+    const { path: p, expected, size } = bigDebugLog('debug.log', 2000);
+    const page = readPage(p, 'debug');
+    expect(page.size).toBe(size);
+    expect(page.end).toBe(size);
+    expect(page.atStart).toBe(false);
+    expect(page.entries.length).toBeGreaterThan(0);
+    expect(page.entries.length).toBeLessThan(expected.length);
+    expect(page.entries[page.entries.length - 1].text).toBe(
+      expected[expected.length - 1].text
+    );
+  });
+
+  it('starts every page on an entry start', () => {
+    const { path: p, expected } = bigDebugLog('debug.log', 2000);
+    const starts = new Set(expected.map((e) => e.offset));
+    for (const page of pageToStart(p, 'debug')) {
+      expect(page.entries[0].offset).toBe(page.pageStart);
+      expect(starts.has(page.pageStart)).toBe(true);
+    }
+  });
+
+  it('pages back to the first entry without splitting or repeating one', () => {
+    const { path: p, expected } = bigDebugLog('debug.log', 5000);
+    const pages = pageToStart(p, 'debug');
+    expect(pages.length).toBeGreaterThan(3);
+
+    const all = pages.reverse().flatMap((page) => page.entries);
+    expect(all.map(({ offset, time, text }) => ({ offset, time, text }))).toEqual(
+      expected
+    );
+    expect(all.some((e) => e.partial)).toBe(false);
+  });
+
+  it('bounds a page by the text it carries, not just its entry count', () => {
+    // ~40 KB stack traces: a page fills its byte budget long before 500 entries.
+    const { path: p, expected } = bigDebugLog('debug.log', 300, { frames: 600 });
+    const pages = pageToStart(p, 'debug');
+    for (const page of pages) {
+      const bytes = page.entries.reduce((n, e) => n + Buffer.byteLength(e.text), 0);
+      expect(bytes).toBeLessThan(PAGE_MAX_BYTES + ENTRY_MAX_BYTES);
+    }
+    expect(pages.length).toBeGreaterThan(1);
+    expect(pages.reverse().flatMap((page) => page.entries).length).toBe(expected.length);
+  });
+
+  it('clamps an end beyond the file (it shrank since) to its size', () => {
+    const p = fixture('debug.log', '[12-Nov-2026 10:00:00 UTC] PHP Notice:  one\n');
+    const page = readPage(p, 'debug', { end: 10_000 });
+    expect(page.end).toBe(page.size);
+    expect(page.entries).toHaveLength(1);
+  });
+
+  it('cuts a run of header-less lines longer than an entry into partial parts', () => {
+    const line = 'x'.repeat(99) + '\n';
+    const count = Math.ceil((ENTRY_MAX_BYTES * 2.5) / line.length);
+    const p = fixture(
+      'debug.log',
+      '[12-Nov-2026 10:00:00 UTC] PHP Warning:  dump follows\n' + line.repeat(count)
+    );
+    const all = pageToStart(p, 'debug')
+      .reverse()
+      .flatMap((page) => page.entries);
+
+    expect(all.length).toBeGreaterThan(2);
+    expect(all[0]).toMatchObject({ offset: 0, level: 'warning' });
+    expect(all[0].partial).toBeUndefined();
+    for (const e of all.slice(1)) {
+      expect(e).toMatchObject({ partial: true, time: null, level: 'other' });
+      expect(Buffer.byteLength(e.text)).toBeLessThanOrEqual(ENTRY_MAX_BYTES);
+    }
+    // Together the parts are the whole file, in order, nothing repeated.
+    const joined = all
+      .map((e, i) => (i === 0 ? `[${e.time}] ${e.text}` : e.text))
+      .join('\n');
+    expect(joined + '\n').toBe(fs.readFileSync(p, 'utf8'));
+  });
+});
+
+describe('readPage: large files', () => {
+  it('opens the newest page of a 200 MB debug log in under a second', () => {
+    const p = path.join(dir, 'debug.log');
+    const block = Buffer.from(
+      Array.from(
+        { length: 4096 },
+        (_, i) =>
+          `[12-Nov-2026 10:00:00 UTC] PHP Deprecated:  Function legacy_${i}() is deprecated in /srv/demo/y.php on line ${i}\n`
+      ).join('')
+    );
+    const fd = fs.openSync(p, 'w');
+    for (let written = 0; written < 200 * 1024 * 1024; written += block.length) {
+      fs.writeSync(fd, block);
+    }
+    fs.closeSync(fd);
+
+    const started = performance.now();
+    const page = readPage(p, 'debug');
+    expect(performance.now() - started).toBeLessThan(1000);
+    expect(page.entries.length).toBe(PAGE_MAX_ENTRIES);
+  });
+
+  it('opens a 200 MB file with no newline at all without scanning it', () => {
+    const p = path.join(dir, 'debug.log');
+    const fd = fs.openSync(p, 'w');
+    fs.ftruncateSync(fd, 200 * 1024 * 1024); // sparse: one 200 MB "line"
+    fs.closeSync(fd);
+
+    const started = performance.now();
+    const page = readPage(p, 'debug');
+    expect(performance.now() - started).toBeLessThan(1000);
+    expect(page.entries.length).toBeGreaterThan(0);
+    expect(page.atStart).toBe(false);
+  });
+});

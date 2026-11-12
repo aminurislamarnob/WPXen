@@ -28,6 +28,7 @@ const wordpress = require('./services/wordpress.cjs');
 const siteops = require('./services/siteops.cjs');
 const blueprints = require('./services/blueprints.cjs');
 const mkcert = require('./services/mkcert.cjs');
+const trustBundle = require('./services/trustBundle.cjs');
 const phpmyadmin = require('./services/phpmyadmin.cjs');
 const mailpit = require('./services/mailpit.cjs');
 const procman = require('./services/procman.cjs');
@@ -1368,6 +1369,9 @@ function registerHandlers(win, storeInstance) {
       const sites = store.get('sites', []);
       const serversDir = nginx.getServersDir();
       if (!serversDir || !fs.existsSync(serversDir)) return;
+      // The template includes the shared error-page snippet; it must be on
+      // disk before a vhost referencing it is written and reloaded.
+      nginx.ensureErrorPages();
       let changed = false;
       for (const site of sites) {
         try {
@@ -1389,6 +1393,16 @@ function registerHandlers(win, storeInstance) {
       }
     } catch {}
   }, 3000);
+
+  // Rebuild PHP's trust bundle if missing or stale, point every installed PHP
+  // version at it (versions installed from a terminal since last launch
+  // included), and make sure every Site carries the mu-plugin that points
+  // WordPress at it. Idempotent — writes and reloads only what differs.
+  setTimeout(() => {
+    try {
+      trustBundle.syncLocalTrust({ sites: store.get('sites', []) });
+    } catch {}
+  }, 4500);
 
   // Re-apply the Mailpit sendmail override shortly after startup so PHP
   // versions installed since the toggle was enabled also route mail() into
@@ -1794,6 +1808,25 @@ function registerHandlers(win, storeInstance) {
   ipcMain.handle('get-ca-status', async () => {
     try {
       return { success: true, ...mkcert.getCaStatus() };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  // Settings' "PHP trusts the local authority" row, and its Repair button —
+  // the same sync that runs on app start.
+  ipcMain.handle('get-php-trust-status', async () => {
+    try {
+      return { success: true, ...trustBundle.getTrustStatus() };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('repair-php-trust', async () => {
+    try {
+      trustBundle.syncLocalTrust({ sites: store.get('sites', []) });
+      return { success: true, ...trustBundle.getTrustStatus() };
     } catch (err) {
       return { success: false, error: humanize(err) };
     }
@@ -2239,11 +2272,13 @@ function registerHandlers(win, storeInstance) {
 
   // ─── Site logs ─────────────────────────────────────────────────────────
 
-  ipcMain.handle('get-site-log', async (_, id, kind) => {
+  // A page of parsed entries; `opts.end` (a previous page's `pageStart`)
+  // asks for the page before it, omitted for the newest.
+  ipcMain.handle('get-site-log-page', async (_, id, kind, opts) => {
     try {
       const site = findSite(id);
       if (!site) return { success: false, error: 'Site not found' };
-      return { success: true, log: logs.readLog(site, kind) };
+      return { success: true, page: logs.readLogPage(site, kind, { end: opts?.end }) };
     } catch (err) {
       return { success: false, error: humanize(err) };
     }
@@ -2769,6 +2804,10 @@ function registerHandlers(win, storeInstance) {
         if (settings.get('mail.catch') && mailpit.isInstalled()) {
           mailpit.setCatchEnabled(true);
         }
+      } catch {}
+      // …and the trust-bundle directives, so it trusts local HTTPS Sites too.
+      try {
+        trustBundle.syncLocalTrust();
       } catch {}
       return { success: true };
     } catch (err) {

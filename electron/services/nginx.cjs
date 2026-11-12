@@ -7,6 +7,7 @@ const brew = require('./brew.cjs');
 const phpService = require('./php.cjs');
 const execAsync = require('./asyncExec.cjs');
 const procman = require('./procman.cjs');
+const errorPages = require('./errorPages.cjs');
 
 function getNginxConfDir() {
   const prefix = brew.getBrewPrefix();
@@ -157,8 +158,19 @@ function removeForeignArtifacts() {
   } catch {}
 }
 
+// The shared error-page snippet and pages every vhost includes. Written before
+// any vhost or `nginx -t` can need them: a missing include target fails the
+// whole config, so start/restart write it too (a vhost on disk from before an
+// app update may already reference it).
+function ensureErrorPages() {
+  const confDir = getNginxConfDir();
+  if (!confDir) return null;
+  return errorPages.ensureErrorPages({ confDir, prefix: brew.getBrewPrefix() });
+}
+
 async function start() {
   removeForeignArtifacts();
+  ensureErrorPages();
   // Pre-flight the config so a typo yields "nginx -t" output instead of a
   // silent crash loop.
   const { valid, error } = validateConfig();
@@ -173,6 +185,7 @@ function stop() {
 }
 
 async function restart() {
+  ensureErrorPages();
   const { valid, error } = validateConfig();
   if (!valid) {
     throw new Error(`nginx config test failed: ${error}`);
@@ -204,6 +217,8 @@ function ensureServersDir() {
   if (dir && !fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
+  // Every vhost includes the error-page snippet, so it exists before one does.
+  ensureErrorPages();
 
   // Ensure servers directory is included in nginx.conf
   const confDir = getNginxConfDir();
@@ -259,6 +274,12 @@ function generateSiteConfig(site) {
   if (/[\n\r\0;{}\s]/.test(socketPath)) throw new Error('Unsafe PHP-FPM socket path');
   const fastcgiPass = `unix:${socketPath}`;
   const logDir = getNginxLogDir();
+  // The shared WPXen snippet (errorPages.cjs): the 502 page and the reserved
+  // /__wpxen/ locations. Absolute, so it doesn't depend on nginx's -p prefix.
+  const errorSnippet = errorPages.snippetPath(getNginxConfDir());
+  if (!errorSnippet || /[\n\r\0;{}\s]/.test(errorSnippet)) {
+    throw new Error('Unsafe error-page snippet path');
+  }
 
   // nginx rejects request bodies larger than client_max_body_size (default
   // 1M) with "413 Request Entity Too Large" before PHP ever sees them, which
@@ -292,6 +313,8 @@ function generateSiteConfig(site) {
 
     access_log ${logDir}/${domain}.access.log;
     error_log  ${logDir}/${domain}.error.log;
+
+    include ${errorSnippet};
 
     location / {
         try_files $uri $uri/ /index.php?$args;
@@ -413,4 +436,5 @@ module.exports = {
   siteConfigExists,
   validateConfig,
   ensureServersDir,
+  ensureErrorPages,
 };

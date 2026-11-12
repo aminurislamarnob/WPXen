@@ -8,6 +8,7 @@ const brew = require('./brew.cjs');
 const mysql = require('./mysql.cjs');
 const nginx = require('./nginx.cjs');
 const phpService = require('./php.cjs');
+const trustBundle = require('./trustBundle.cjs');
 const { validateSiteInput } = require('./validation.cjs');
 
 const DEFAULT_SITES_DIR = path.join(os.homedir(), 'Sites');
@@ -275,6 +276,10 @@ async function runCreate(siteData, progressCallback) {
   // lands on the latest Twenty* theme even if that ever changes.
   progress({ step: 'theme', message: 'Activating default theme...' });
   activateLatestDefaultTheme(sitePath);
+  // Lets wp_remote_get reach other local HTTPS Sites. Best-effort.
+  try {
+    ensureLocalTrustMuPlugin(sitePath);
+  } catch {}
 
   // 7. Create nginx config
   progress({ step: 'nginx', message: 'Configuring nginx...' });
@@ -497,6 +502,74 @@ add_filter('option_siteurl', 'wpxen_tunnel_filter_url');
   } catch {
     return false;
   }
+}
+
+// ─── Local HTTPS trust ─────────────────────────────────────────────────────
+//
+// WordPress's HTTP API doesn't read PHP's openssl.cafile / curl.cainfo: WP_Http
+// hands Requests its own `sslcertificates` file (wp-includes/certificates/
+// ca-bundle.crt), which knows nothing of the local authority. So
+// wp_remote_get to another local HTTPS Site — and Site Health's loopback
+// check — fail verification even once PHP trusts the local root. This
+// always-installed mu-plugin swaps in WPXen's trust bundle (the public roots
+// plus the local one) instead. Verification stays on; only the CA file moves.
+//
+// Name-carrying, written into every Site. The legacy prefixes above apply, and
+// its PHP function is named so it can't collide with the tunnel or magic-login
+// plugins' functions.
+const LOCAL_TRUST_MU_PLUGIN_SUFFIX = 'local-trust.php';
+const LOCAL_TRUST_MU_PLUGIN = `wpxen-${LOCAL_TRUST_MU_PLUGIN_SUFFIX}`;
+
+const phpSingleQuoted = (value) =>
+  `'${String(value).replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
+
+function buildLocalTrustMuPlugin(bundlePath) {
+  return `<?php
+/**
+ * Plugin Name: WPXen Local HTTPS Trust
+ * Description: Lets WordPress verify HTTPS requests to local WPXen Sites against WPXen's trust bundle. Managed by WPXen.
+ */
+if (!defined('ABSPATH')) {
+    exit;
+}
+
+/**
+ * Points WordPress's HTTP requests at WPXen's trust bundle — the public
+ * authorities plus WPXen's local one — when they would otherwise use the copy
+ * bundled with WordPress. A CA file a plugin chose itself is left alone, and so
+ * is WordPress's default when the bundle is missing. Verification stays on.
+ */
+function wpxen_local_trust_http_request_args($args) {
+    $bundle = ${phpSingleQuoted(bundlePath)};
+    $default = ABSPATH . WPINC . '/certificates/ca-bundle.crt';
+    if (!is_readable($bundle)) {
+        return $args;
+    }
+    if (empty($args['sslcertificates']) || $args['sslcertificates'] === $default) {
+        $args['sslcertificates'] = $bundle;
+    }
+    return $args;
+}
+add_filter('http_request_args', 'wpxen_local_trust_http_request_args', 10, 1);
+`;
+}
+
+// Writes the local-trust mu-plugin into `sitePath` when it's missing or
+// differs, and clears any pre-rename copy. Returns whether it wrote.
+// Best-effort: a folder with no wp-content isn't a WordPress install yet.
+function ensureLocalTrustMuPlugin(sitePath, bundlePath = trustBundle.getBundlePath()) {
+  if (!sitePath || !bundlePath) return false;
+  if (!fs.existsSync(path.join(sitePath, 'wp-content'))) return false;
+  const muDir = path.join(sitePath, 'wp-content', 'mu-plugins');
+  const file = path.join(muDir, LOCAL_TRUST_MU_PLUGIN);
+  const contents = buildLocalTrustMuPlugin(bundlePath);
+  removeLegacyMuPlugins(sitePath, LOCAL_TRUST_MU_PLUGIN_SUFFIX);
+  try {
+    if (fs.readFileSync(file, 'utf8') === contents) return false;
+  } catch {}
+  if (!fs.existsSync(muDir)) fs.mkdirSync(muDir, { recursive: true });
+  fs.writeFileSync(file, contents, 'utf8');
+  return true;
 }
 
 // ─── One-Click Admin (magic login) ─────────────────────────────────────────
@@ -1071,6 +1144,8 @@ module.exports = {
   selectExistingPlugins,
   restoreWpressActiveState,
   ensureTunnelMuPlugin,
+  buildLocalTrustMuPlugin,
+  ensureLocalTrustMuPlugin,
   listAdminUsers,
   ensureMagicLoginMuPlugin,
   removeMagicLoginMuPlugin,

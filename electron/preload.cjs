@@ -58,6 +58,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   cloneSite: (id, target) => ipcRenderer.invoke('clone-site', id, target),
   changeSiteUrl: (id, newDomain) => ipcRenderer.invoke('change-site-url', id, newDomain),
   getCaStatus: () => ipcRenderer.invoke('get-ca-status'),
+  getPhpTrustStatus: () => ipcRenderer.invoke('get-php-trust-status'),
+  repairPhpTrust: () => ipcRenderer.invoke('repair-php-trust'),
 
   // Blueprints
   getBlueprints: () => ipcRenderer.invoke('get-blueprints'),
@@ -106,7 +108,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('wp-theme-install', id, slug, activate),
 
   // Site logs
-  getSiteLog: (id, kind) => ipcRenderer.invoke('get-site-log', id, kind),
+  getSiteLogPage: (id, kind, opts) =>
+    ipcRenderer.invoke('get-site-log-page', id, kind, opts),
   clearSiteLog: (id, kind) => ipcRenderer.invoke('clear-site-log', id, kind),
   saveSiteLog: (id, kind) => ipcRenderer.invoke('save-site-log', id, kind),
 
