@@ -174,7 +174,7 @@ describe('runSiteUpgrades — the error-page pass', () => {
     expect(res.migrated).toBe(false);
     expect(res.error).toContain('unknown directive');
     expect(reloads(log)).toBe(0);
-    expect(migration.pendingSiteUpgrades(store)).toEqual([migration.ERROR_PAGES_FLAG]);
+    expect(migration.pendingSiteUpgrades(store)).toContain(migration.ERROR_PAGES_FLAG);
 
     const again = makeDeps();
     expect((await migration.runSiteUpgrades(store, again.deps)).migrated).toBe(true);
@@ -192,12 +192,160 @@ describe('runSiteUpgrades — the error-page pass', () => {
   });
 
   it('lists the error-page pass as pending until it has run', () => {
-    expect(migration.pendingSiteUpgrades(makeStore({}))).toEqual([
-      migration.ERROR_PAGES_FLAG,
-    ]);
+    expect(migration.pendingSiteUpgrades(makeStore({}))).toContain(
+      migration.ERROR_PAGES_FLAG
+    );
     expect(
       migration.pendingSiteUpgrades(makeStore({ [migration.ERROR_PAGES_FLAG]: true }))
-    ).toEqual([]);
+    ).not.toContain(migration.ERROR_PAGES_FLAG);
+  });
+});
+
+// #208: every Site certificate now covers `*.domain`. Certificates minted
+// before that are re-issued once, silently, before the vhosts are rewritten,
+// under their own flag — so the step runs once even on a machine that
+// already had the error-page pass from an earlier release.
+describe('runSiteUpgrades — the wildcard-certificate re-issue', () => {
+  const CERTS = '/opt/homebrew/etc/nginx/certs';
+  const httpsSite = (domain) =>
+    site({
+      domain,
+      https: true,
+      certPath: `${CERTS}/${domain}.pem`,
+      keyPath: `${CERTS}/${domain}-key.pem`,
+    });
+
+  // A fake mkcert on the same ordered log as nginx. `ca: false` stands in for
+  // a machine whose local authority is gone; `ensureCA` is there only so a
+  // test can prove nothing reached for it (it can show a keychain prompt).
+  const withMkcert = ({ ca = true, fail = {} } = {}) => {
+    const made = makeDeps();
+    made.deps.mkcert = {
+      hasCa: () => ca,
+      ensureCA: () => made.log.push('PROMPT'),
+      generateCert: (domain) => {
+        if (fail[domain]) throw new Error(fail[domain]);
+        made.log.push(`cert ${domain}`);
+        return {
+          certPath: `${CERTS}/${domain}.pem`,
+          keyPath: `${CERTS}/${domain}-key.pem`,
+        };
+      },
+    };
+    return made;
+  };
+
+  it('re-issues only HTTPS Sites, before any vhost is rewritten, with no prompt', async () => {
+    const store = makeStore({
+      sites: [
+        httpsSite('shop.test'),
+        site({ domain: 'plain.test' }),
+        httpsSite('b.test'),
+      ],
+    });
+    const { log, deps } = withMkcert();
+    const res = await migration.runSiteUpgrades(store, deps);
+
+    expect(res).toMatchObject({ migrated: true, failed: [] });
+    expect(res.upgraded).toContain(migration.WILDCARD_CERTS_FLAG);
+    expect(log).toEqual([
+      'pages',
+      'cert shop.test',
+      'cert b.test',
+      'vhost shop.test',
+      'vhost plain.test',
+      'vhost b.test',
+      'vhost pma',
+      'test',
+      'reload',
+    ]);
+    expect(store.get(migration.WILDCARD_CERTS_FLAG)).toBe(true);
+  });
+
+  it('runs once', async () => {
+    const store = makeStore({ sites: [httpsSite('shop.test')] });
+    await migration.runSiteUpgrades(store, withMkcert().deps);
+
+    const again = withMkcert();
+    expect(await migration.runSiteUpgrades(store, again.deps)).toEqual({
+      migrated: false,
+    });
+    expect(again.log).toEqual([]);
+  });
+
+  it('runs on its own when the error-page pass shipped in an earlier release', async () => {
+    const store = makeStore({
+      [migration.ERROR_PAGES_FLAG]: true,
+      sites: [httpsSite('shop.test')],
+    });
+    expect(migration.pendingSiteUpgrades(store)).toEqual([migration.WILDCARD_CERTS_FLAG]);
+
+    const { log, deps } = withMkcert();
+    const res = await migration.runSiteUpgrades(store, deps);
+    expect(res.upgraded).toEqual([migration.WILDCARD_CERTS_FLAG]);
+    expect(log).toEqual([
+      'cert shop.test',
+      'vhost shop.test',
+      'vhost pma',
+      'test',
+      'reload',
+    ]);
+  });
+
+  it('never reaches for mkcert when no Site has HTTPS', async () => {
+    const store = makeStore({ sites: [site()] });
+    const { log, deps } = makeDeps(); // no mkcert at all
+    const res = await migration.runSiteUpgrades(store, deps);
+    expect(res).toMatchObject({ migrated: true, failed: [] });
+    expect(log.some((l) => l.startsWith('cert'))).toBe(false);
+    expect(store.get(migration.WILDCARD_CERTS_FLAG)).toBe(true);
+  });
+
+  it('reports a Site whose certificate fails and still rewrites every vhost', async () => {
+    const store = makeStore({ sites: [httpsSite('bad.test'), httpsSite('shop.test')] });
+    const { log, deps } = withMkcert({ fail: { 'bad.test': 'mkcert exploded' } });
+    const res = await migration.runSiteUpgrades(store, deps);
+
+    expect(res.migrated).toBe(true);
+    expect(res.failed).toEqual([
+      { domain: 'bad.test', error: expect.stringMatching(/mkcert exploded/) },
+    ]);
+    expect(log).toContain('cert shop.test');
+    expect(log).toContain('vhost bad.test'); // keeps serving its old certificate
+    expect(reloads(log)).toBe(1);
+    expect(store.get(migration.WILDCARD_CERTS_FLAG)).toBe(true);
+  });
+
+  it('mints nothing without the local authority, rather than creating an untrusted one', async () => {
+    const store = makeStore({ sites: [httpsSite('shop.test')] });
+    const { log, deps } = withMkcert({ ca: false });
+    const res = await migration.runSiteUpgrades(store, deps);
+
+    expect(log.some((l) => l.startsWith('cert') || l === 'PROMPT')).toBe(false);
+    expect(res.failed).toEqual([
+      { domain: 'shop.test', error: expect.stringMatching(/certificate authority/) },
+    ]);
+    expect(log).toContain('vhost shop.test');
+  });
+
+  it("records the re-issued certificate's paths on the Site before its vhost is written", async () => {
+    // A Site whose record points somewhere else (an older prefix layout).
+    const stale = {
+      ...httpsSite('shop.test'),
+      certPath: '/old/shop.pem',
+      keyPath: '/old/shop-key.pem',
+    };
+    const store = makeStore({ sites: [stale] });
+    const { deps } = withMkcert();
+    const written = [];
+    deps.nginx.createSiteConfig = (s) => written.push(s);
+    await migration.runSiteUpgrades(store, deps);
+
+    expect(written[0]).toMatchObject({ certPath: `${CERTS}/shop.test.pem` });
+    expect(store.get('sites')[0]).toMatchObject({
+      certPath: `${CERTS}/shop.test.pem`,
+      keyPath: `${CERTS}/shop.test-key.pem`,
+    });
   });
 });
 

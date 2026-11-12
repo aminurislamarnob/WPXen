@@ -42,15 +42,31 @@ const MAX_REPAIRS_PER_SITE = 3;
 const REPAIR_WINDOW_MS = 60_000;
 
 // The Site a request's host names, with the PHP version it runs on. Only the
-// Site's own domain counts: a share-tunnel alias is a public hostname, and
-// visitors arriving through it mustn't be able to restart PHP. Pure.
+// Site's own domain and its subdomains count: a share-tunnel alias is a public
+// hostname, and visitors arriving through it mustn't be able to restart PHP.
+// Subdomains are matched the way nginx routes them to the vhost's `*.domain`
+// (nginx.cjs) — an exact Site first, then the longest parent domain — so the
+// 502 page on `en.shop.test` repairs shop.test, under shop.test's limit. Pure.
 function siteForHost(sites, host, activeVersion) {
   const name = String(host || '')
     .toLowerCase()
     .replace(/:\d+$/, '')
     .replace(/\.$/, '');
   if (!name) return null;
-  const site = (sites || []).find((s) => s && s.domain === name);
+  let site = null;
+  for (const s of sites || []) {
+    if (!s || !s.domain) continue;
+    if (s.domain === name) {
+      site = s;
+      break;
+    }
+    if (
+      name.endsWith(`.${s.domain}`) &&
+      (!site || s.domain.length > site.domain.length)
+    ) {
+      site = s;
+    }
+  }
   if (!site) return null;
   // A Site with no recorded version predates per-site PHP and runs on the
   // active one (as its vhost does, nginx.cjs). Taken as a thunk too, since

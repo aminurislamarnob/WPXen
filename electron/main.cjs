@@ -272,14 +272,15 @@ app.whenReady().then(() => {
     }
 
     // One-time, per app update: bring every existing Site's vhost up to the
-    // current template (the shared error-page snippet, for now), with one
-    // nginx reload. A Site that fails is reported here and doesn't stop the
-    // others; a failed `nginx -t` leaves the pass to retry next launch.
+    // current template (the shared error-page snippet, wildcard certificates
+    // and server names), with one nginx reload. A Site that fails is reported
+    // here and doesn't stop the others; a failed `nginx -t` leaves the pass to
+    // retry next launch.
     try {
       const upgrade = await migration.runSiteUpgrades(store);
       if (upgrade.error) console.error('Site upgrade pass:', upgrade.error);
       for (const { domain, error } of upgrade.failed || []) {
-        console.error(`Site upgrade pass: vhost for ${domain} not updated:`, error);
+        console.error(`Site upgrade pass: ${domain}:`, error);
       }
     } catch (err) {
       console.error('Site upgrade pass:', err.message);

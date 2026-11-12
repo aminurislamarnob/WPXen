@@ -271,8 +271,12 @@ function generateSiteConfig(site) {
     }
   }
 
-  // Space-separated list for the `server_name` directive.
-  const serverNames = [domain, ...aliases].join(' ');
+  // Space-separated list for the `server_name` directive. The wildcard routes
+  // subdomains (multisite) to this Site, matching the certificate, which
+  // covers `*.domain` too (mkcert.certArgs). nginx prefers an exact name over
+  // a wildcard, so a separate Site at `blog.shop.test` keeps its own vhost.
+  // Aliases are exact public hosts and get no wildcard.
+  const serverNames = [domain, `*.${domain}`, ...aliases].join(' ');
   if (/[\n\r\0;{}]/.test(sitePath)) {
     throw new Error(`Unsafe site path for nginx config: ${sitePath}`);
   }

@@ -85,16 +85,60 @@ async function migrateToPerSitePhp(store, deps = {}) {
 // steps in order, then one regeneration of every vhost (phpMyAdmin's
 // included), one `nginx -t`, one reload — and only then are their flags set.
 //
-// A step that must precede the vhost rewrite is one more entry here: #208's
-// wildcard-certificate re-issue (its own flag; re-issue only for HTTPS Sites,
-// collecting per-Site failures into ctx.failed) goes after the error pages.
-// `prepare(ctx)` gets { sites, nginx, phpmyadmin, deps, failed }; throwing
-// aborts the pass before any vhost is written.
+// A step that must precede the vhost rewrite is one more entry here.
+// `prepare(ctx)` gets { store, sites, nginx, phpmyadmin, deps, failed };
+// throwing aborts the pass before any vhost is written, and per-Site failures
+// go into ctx.failed without stopping it.
 //
 // The launch-time vhost rewrite in ipc.cjs defers to this pass while anything
 // is pending (pendingSiteUpgrades), so the upgrade launch has one writer and
 // one reload; afterwards that rewrite keeps healing drift as before.
 const ERROR_PAGES_FLAG = 'migratedToErrorPages';
+const WILDCARD_CERTS_FLAG = 'migratedToWildcardCerts';
+
+// #208: re-issue every HTTPS Site's certificate so it covers `*.domain` as
+// well (mkcert.certArgs), ahead of the vhost rewrite that adds the wildcard
+// server name. Silent: generateCert never prompts, and ensureCA — which can
+// show macOS's keychain prompt — is deliberately not called. With no local
+// authority on disk mkcert would quietly create a new, untrusted one, so
+// nothing is minted then; those Sites keep their old certificate until HTTPS
+// is next turned on (which goes through ensureCA).
+function reissueWildcardCerts({ store, sites, deps, failed }) {
+  const httpsSites = sites.filter((s) => s && s.https);
+  if (!httpsSites.length) return;
+  const mkcert = deps.mkcert || require('./mkcert.cjs');
+
+  if (!mkcert.hasCa()) {
+    for (const site of httpsSites) {
+      failed.push({
+        domain: site.domain,
+        error: 'certificate not re-issued: local certificate authority not found',
+      });
+    }
+    return;
+  }
+
+  let changed = false;
+  sites.forEach((site, i) => {
+    if (!site || !site.https) return;
+    try {
+      const { certPath, keyPath } = mkcert.generateCert(site.domain);
+      // Same deterministic paths as before in practice; recorded anyway so the
+      // vhost written next points at the files just minted.
+      if (site.certPath !== certPath || site.keyPath !== keyPath) {
+        sites[i] = { ...site, certPath, keyPath };
+        changed = true;
+      }
+    } catch (err) {
+      // The old single-name certificate stays on disk and keeps serving.
+      failed.push({
+        domain: site.domain,
+        error: `certificate not re-issued: ${err.message}`,
+      });
+    }
+  });
+  if (changed) store.set('sites', sites);
+}
 
 const SITE_UPGRADES = [
   {
@@ -106,6 +150,7 @@ const SITE_UPGRADES = [
       if (!nginx.ensureErrorPages()) throw new Error('nginx config folder not found');
     },
   },
+  { flag: WILDCARD_CERTS_FLAG, prepare: reissueWildcardCerts },
 ];
 
 function pendingSiteUpgrades(store) {
@@ -120,7 +165,7 @@ async function runSiteUpgrades(store, deps = {}) {
 
   const sites = store.get('sites', []);
   const failed = [];
-  const ctx = { sites, nginx, phpmyadmin, deps, failed };
+  const ctx = { store, sites, nginx, phpmyadmin, deps, failed };
   try {
     for (const upgrade of pending) await upgrade.prepare(ctx);
   } catch (err) {
@@ -172,4 +217,5 @@ module.exports = {
   runSiteUpgrades,
   pendingSiteUpgrades,
   ERROR_PAGES_FLAG,
+  WILDCARD_CERTS_FLAG,
 };

@@ -78,6 +78,39 @@ describe('identifying the Site', () => {
     expect(restarts).toEqual([]);
   });
 
+  // The vhost answers to `*.domain` (nginx.cjs), so a subdomain's 502 page
+  // asks on the parent Site's behalf. Same Site, same limit: many subdomains
+  // don't buy a hostile page more restarts.
+  it('maps a subdomain to the Site whose vhost serves it', async () => {
+    const r = make();
+    expect(r.status('en.shop.test')).toMatchObject({ phpVersion: '8.4' });
+    expect(r.status('a.b.old.test')).toMatchObject({ phpVersion: '8.2' });
+    expect(await r.repair('en.shop.test')).toMatchObject({ state: 'healthy' });
+    expect(restarts).toEqual(['8.4']);
+  });
+
+  it('prefers a Site at the exact subdomain over its parent, as nginx does', () => {
+    const sites = [
+      { domain: 'shop.test', phpVersion: '8.4' },
+      { domain: 'blog.shop.test', phpVersion: '8.2' },
+    ];
+    expect(repair.siteForHost(sites, 'blog.shop.test')).toEqual({
+      domain: 'blog.shop.test',
+      phpVersion: '8.2',
+    });
+    expect(repair.siteForHost(sites, 'x.blog.shop.test')).toMatchObject({
+      domain: 'blog.shop.test',
+    });
+    expect(repair.siteForHost(sites, 'en.shop.test')).toMatchObject({
+      domain: 'shop.test',
+    });
+  });
+
+  it('only matches a whole label, and never a share-tunnel subdomain', () => {
+    expect(make().status('myshop.test')).toBeNull();
+    expect(make().status('y.x.trycloudflare.com')).toBeNull();
+  });
+
   it('matches the domain case-insensitively', () => {
     expect(make().status('Shop.TEST')).toMatchObject({ phpVersion: '8.4' });
   });
