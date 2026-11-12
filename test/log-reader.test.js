@@ -5,6 +5,7 @@ import path from 'path';
 import {
   readPage,
   countLevels,
+  countLevelsAsync,
   PAGE_MAX_ENTRIES,
   PAGE_MAX_BYTES,
   ENTRY_MAX_BYTES,
@@ -502,6 +503,87 @@ describe('countLevels', () => {
 
   it('reports a missing file as not existing, with zero counts', () => {
     expect(countLevels(path.join(dir, 'nope.log'), 'debug')).toMatchObject({
+      exists: false,
+      size: 0,
+      counts: { fatal: 0, warning: 0, notice: 0, deprecated: 0, other: 0 },
+    });
+  });
+});
+
+// The longest stretch the event loop went without a turn while `work` ran:
+// a timer that should fire every few ms records how late each tick is.
+async function longestStall(work) {
+  let last = performance.now();
+  let worst = 0;
+  const timer = setInterval(() => {
+    const now = performance.now();
+    worst = Math.max(worst, now - last);
+    last = now;
+  }, 2);
+  try {
+    const result = await work();
+    worst = Math.max(worst, performance.now() - last);
+    return { result, worst };
+  } finally {
+    clearInterval(timer);
+  }
+}
+
+// Story 54: counting a big log must not freeze the main process, where every
+// IPC reply and every Agent terminal's output waits on the same event loop.
+describe('countLevelsAsync', () => {
+  it('counts exactly what countLevels counts, however finely it is sliced', async () => {
+    const { path: p } = bigDebugLog('debug.log', 5000);
+    // A slice budget of 0 yields at every check, so the walk is resumed many
+    // times — each resume must pick up at the same entry boundary.
+    expect(await countLevelsAsync(p, 'debug', { sliceMs: 0, cache: false })).toEqual(
+      countLevels(p, 'debug')
+    );
+  });
+
+  it('resumes inside a long header-less run without changing how it splits', async () => {
+    const run = Array.from({ length: 30_000 }, (_, i) => `  continued line ${i}`).join(
+      '\n'
+    );
+    const p = fixture(
+      'debug.log',
+      `${KNOWN_MIX}\n${run}\n[12-Nov-2026 11:00:00 UTC] PHP Warning:  after the run\n`
+    );
+    const sliced = await countLevelsAsync(p, 'debug', { sliceMs: 0, cache: false });
+    expect(sliced).toEqual(countLevels(p, 'debug'));
+    expect(sliced.counts.other).toBeGreaterThan(2); // the run was cut into parts
+  });
+
+  it('keeps the event loop turning while it counts a large file', async () => {
+    const p = path.join(dir, 'debug.log');
+    const { path: src } = bigDebugLog('seed.log', 20_000);
+    const block = fs.readFileSync(src);
+    const fd = fs.openSync(p, 'w');
+    for (let written = 0; written < 48 * 1024 * 1024; written += block.length) {
+      fs.writeSync(fd, block);
+    }
+    fs.closeSync(fd);
+
+    const { result, worst } = await longestStall(() =>
+      countLevelsAsync(p, 'debug', { cache: false })
+    );
+    expect(result.counts).toEqual(countLevels(p, 'debug').counts);
+    expect(worst).toBeLessThan(100);
+  });
+
+  it('answers an unchanged file again from its last count, and recounts once it changes', async () => {
+    const p = fixture('debug.log', KNOWN_MIX + '\n');
+    const first = await countLevelsAsync(p, 'debug');
+    expect(await countLevelsAsync(p, 'debug')).toEqual(first);
+
+    fs.appendFileSync(p, '[12-Nov-2026 11:00:00 UTC] PHP Fatal error:  appended\n');
+    const after = await countLevelsAsync(p, 'debug');
+    expect(after.counts.fatal).toBe(first.counts.fatal + 1);
+    expect(after.size).toBeGreaterThan(first.size);
+  });
+
+  it('reports a missing file as not existing, with zero counts', async () => {
+    expect(await countLevelsAsync(path.join(dir, 'nope.log'), 'debug')).toMatchObject({
       exists: false,
       size: 0,
       counts: { fatal: 0, warning: 0, notice: 0, deprecated: 0, other: 0 },

@@ -43,13 +43,17 @@ function readLogPage(site, kind, { end, levels } = {}) {
 // Entries per level across the whole of a Site's log (null for the access
 // log, which has no levels).
 function countLogLevels(site, kind) {
-  return logReader.countLevels(resolveLogPath(site, kind), kind);
+  return logReader.countLevelsAsync(resolveLogPath(site, kind), kind);
 }
 
 // A batch of entries matching `query` across the whole file, newest first;
 // `end` (a previous batch's `pageStart`) continues with older matches.
 function searchLog(site, kind, query, { end, levels } = {}) {
-  return logReader.searchLog(resolveLogPath(site, kind), kind, { query, end, levels });
+  return logReader.searchLogAsync(resolveLogPath(site, kind), kind, {
+    query,
+    end,
+    levels,
+  });
 }
 
 // Empties a log file in place (truncate, not delete — nginx/php-fpm keep the

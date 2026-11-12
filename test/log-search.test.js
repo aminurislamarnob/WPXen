@@ -5,6 +5,7 @@ import path from 'path';
 import {
   readPage,
   searchLog,
+  searchLogAsync,
   SEARCH_MAX_MATCHES,
   PAGE_MAX_ENTRIES,
 } from '../electron/services/logReader.cjs';
@@ -159,6 +160,57 @@ describe('searchLog', () => {
     const p = fixture('debug.log', buriedFatal(1).text);
     expect(() => searchLog(p, 'debug', { query: '   ' })).toThrow(/empty/);
     expect(() => searchLog(p, 'syslog', { query: 'x' })).toThrow(/Unknown log type/);
+  });
+});
+
+// Story 54: a search that matches nothing reads the whole file; on the main
+// process it must give the event loop a turn while it does.
+describe('searchLogAsync', () => {
+  it('returns exactly what searchLog returns, batch after batch, however finely it is sliced', async () => {
+    const { text } = buriedFatal(3000);
+    const p = fixture('debug.log', text + buriedFatal(2000).text);
+    let end;
+    for (let i = 0; i < 50; i++) {
+      const opts = { query: 'acme', end };
+      const sliced = await searchLogAsync(p, 'debug', { ...opts, sliceMs: 0 });
+      expect(sliced).toEqual(searchLog(p, 'debug', opts));
+      if (sliced.atStart) return;
+      end = sliced.pageStart;
+    }
+    throw new Error('search never reached the start of the file');
+  });
+
+  it('rejects the same bad input searchLog throws on', async () => {
+    const p = fixture('debug.log', deprecation(1) + '\n');
+    await expect(searchLogAsync(p, 'debug', { query: '   ' })).rejects.toThrow(/empty/);
+  });
+
+  it('keeps the event loop turning while a term with no match reads a large file', async () => {
+    const p = path.join(dir, 'debug.log');
+    const block = Buffer.from(
+      Array.from({ length: 4096 }, (_, i) => deprecation(i) + '\n').join('')
+    );
+    const fd = fs.openSync(p, 'w');
+    for (let written = 0; written < 48 * 1024 * 1024; written += block.length) {
+      fs.writeSync(fd, block);
+    }
+    fs.closeSync(fd);
+
+    let last = performance.now();
+    let worst = 0;
+    const timer = setInterval(() => {
+      const now = performance.now();
+      worst = Math.max(worst, now - last);
+      last = now;
+    }, 2);
+    try {
+      const result = await searchLogAsync(p, 'debug', { query: 'no such thing' });
+      worst = Math.max(worst, performance.now() - last);
+      expect(result).toMatchObject({ entries: [], atStart: true });
+    } finally {
+      clearInterval(timer);
+    }
+    expect(worst).toBeLessThan(100);
   });
 });
 

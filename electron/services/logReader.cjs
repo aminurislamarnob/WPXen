@@ -340,14 +340,66 @@ function readPage(filePath, kind, { end, levels } = {}) {
   }
 }
 
+// ── Whole-file scans, in slices ────────────────────────────────────────────
+// Counting and searching read the whole file — ~0.6 s for 200 MB — on the
+// main process, whose event loop also carries every IPC reply and every Agent
+// terminal's output. So each is a generator that yields whenever it has run
+// for `sliceMs`: the async drivers give the loop a turn there, the sync ones
+// just carry on. A walk stopped at an entry boundary and resumed from it
+// splits the file exactly as one uninterrupted walk does (its only state is
+// that boundary), so slicing never changes a result.
+const SLICE_MS = 20;
+// How often a walk looks at the clock: every this many entries, or bytes.
+const CLOCK_EVERY_ENTRIES = 64;
+const CLOCK_EVERY_BYTES = 64 * 1024;
+
+function sliceTimer(sliceMs) {
+  let started = performance.now();
+  let entries = 0;
+  let bytes = 0;
+  return {
+    // Called once per entry; true when the slice has used its budget.
+    spent(size) {
+      entries++;
+      bytes += size;
+      if (entries < CLOCK_EVERY_ENTRIES && bytes < CLOCK_EVERY_BYTES) return false;
+      entries = 0;
+      bytes = 0;
+      return performance.now() - started >= sliceMs;
+    },
+    restart() {
+      started = performance.now();
+      entries = 0;
+      bytes = 0;
+    },
+  };
+}
+
+function runSync(steps) {
+  for (;;) {
+    const { done, value } = steps.next();
+    if (done) return value;
+  }
+}
+
+async function runAsync(steps) {
+  for (;;) {
+    const { done, value } = steps.next();
+    if (done) return value;
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+}
+
 const zeroCounts = () => Object.fromEntries(LEVELS.map((level) => [level, 0]));
 
-// How many entries of each level the whole file holds, split exactly as
-// paging splits it, so a count always equals the rows that level shows.
-// Returns { path, exists, size, counts }; `counts` is null for a log with no
-// levels (the access log). This is the one whole-file scan opening a log
-// costs, so it's its own call and the newest page never waits on it.
-function countLevels(filePath, kind) {
+// The last few counts the main process asked for, by file identity:
+// reopening, refreshing or switching back to an unchanged log costs no scan.
+// Any write changes size or mtime. Only countLevelsAsync uses it.
+const COUNT_CACHE_MAX = 16;
+const countCache = new Map();
+const statKey = (kind, st) => `${kind}:${st.ino}:${st.size}:${st.mtimeMs}:${st.ctimeMs}`;
+
+function* countSteps(filePath, kind, { sliceMs = SLICE_MS, cache = false } = {}) {
   const format = formatFor(kind);
   let fd;
   try {
@@ -364,17 +416,54 @@ function countLevels(filePath, kind) {
     throw err;
   }
   try {
-    const { size } = fs.fstatSync(fd);
+    const st = fs.fstatSync(fd);
+    const { size } = st;
     if (!format.levels) return { path: filePath, exists: true, size, counts: null };
+    const key = statKey(kind, st);
+    const cached = cache ? countCache.get(filePath) : null;
+    if (cached && cached.key === key) {
+      return { path: filePath, exists: true, size, counts: { ...cached.counts } };
+    }
     const counts = zeroCounts();
-    walkEntriesBefore(fd, size, format, (_from, raw, partial) => {
-      counts[levelOf(format, raw, partial)]++;
-      return false;
-    });
+    const timer = sliceTimer(sliceMs);
+    let end = size;
+    while (end > 0) {
+      let paused = false;
+      end = walkEntriesBefore(fd, end, format, (_from, raw, partial) => {
+        counts[levelOf(format, raw, partial)]++;
+        paused = timer.spent(raw.length);
+        return paused;
+      });
+      if (!paused) break;
+      yield;
+      timer.restart();
+    }
+    if (cache) {
+      countCache.delete(filePath);
+      countCache.set(filePath, { key, counts: { ...counts } });
+      if (countCache.size > COUNT_CACHE_MAX)
+        countCache.delete(countCache.keys().next().value);
+    }
     return { path: filePath, exists: true, size, counts };
   } finally {
     fs.closeSync(fd);
   }
+}
+
+// How many entries of each level the whole file holds, split exactly as
+// paging splits it, so a count always equals the rows that level shows.
+// Returns { path, exists, size, counts }; `counts` is null for a log with no
+// levels (the access log). This is the one whole-file scan opening a log
+// costs, so it's its own call and the newest page never waits on it — and
+// the main process calls countLevelsAsync, which yields between slices.
+function countLevels(filePath, kind) {
+  return runSync(countSteps(filePath, kind));
+}
+
+// countLevels, giving the event loop a turn every `sliceMs` (20 by default),
+// and answering an unchanged file from the cache unless `cache: false`.
+function countLevelsAsync(filePath, kind, { sliceMs, cache = true } = {}) {
+  return runAsync(countSteps(filePath, kind, { sliceMs, cache }));
 }
 
 // ── Search ─────────────────────────────────────────────────────────────────
@@ -402,7 +491,17 @@ function entryMatches(entry, needle, levels) {
 // full the walk stops, and `pageStart` is the cursor: pass it back as `end`
 // for the next, older batch. Every batch ends on an entry boundary, so
 // batches never overlap. `atStart` means the file has no more matches.
-function searchLog(filePath, kind, { query, end, levels } = {}) {
+function searchLog(filePath, kind, opts) {
+  return runSync(searchSteps(filePath, kind, opts));
+}
+
+// searchLog, giving the event loop a turn every `sliceMs` (20 by default) —
+// what the main process calls.
+function searchLogAsync(filePath, kind, opts) {
+  return runAsync(searchSteps(filePath, kind, opts));
+}
+
+function* searchSteps(filePath, kind, { query, end, levels, sliceMs = SLICE_MS } = {}) {
   const format = formatFor(kind);
   const needle = String(query ?? '')
     .trim()
@@ -435,7 +534,13 @@ function searchLog(filePath, kind, { query, end, levels } = {}) {
     const newestFirst = [];
     let bytes = 0;
     let cursor = until;
+    let sliceStart = performance.now();
     scan: while (cursor > 0) {
+      // A page is at most ~1 MB of reading, so a slice overruns by little.
+      if (performance.now() - sliceStart >= sliceMs) {
+        yield;
+        sliceStart = performance.now();
+      }
       const page = readEntriesBefore(fd, cursor, format);
       for (let i = page.entries.length - 1; i >= 0; i--) {
         const entry = page.entries[i];
@@ -473,5 +578,7 @@ module.exports = {
   SEARCH_MAX_MATCHES,
   readPage,
   countLevels,
+  countLevelsAsync,
   searchLog,
+  searchLogAsync,
 };

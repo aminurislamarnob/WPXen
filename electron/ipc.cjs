@@ -2348,7 +2348,7 @@ function registerHandlers(win, storeInstance) {
     try {
       const site = findSite(id);
       if (!site) return { success: false, error: 'Site not found' };
-      return { success: true, counts: logs.countLogLevels(site, kind) };
+      return { success: true, counts: await logs.countLogLevels(site, kind) };
     } catch (err) {
       return { success: false, error: humanize(err) };
     }
@@ -2363,7 +2363,7 @@ function registerHandlers(win, storeInstance) {
       if (!site) return { success: false, error: 'Site not found' };
       return {
         success: true,
-        result: logs.searchLog(site, kind, query, {
+        result: await logs.searchLog(site, kind, query, {
           end: opts?.end,
           levels: opts?.levels,
         }),
