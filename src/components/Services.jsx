@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { Card, IconTile, Row, SectionLabel, Tooltip } from './ui';
 import { StatusBadge } from './StatusBadge';
+import { dnsHealthView, runDnsAction } from '../lib/dnsHealth';
 
 const SERVICE_CONFIG = [
   {
@@ -63,6 +64,10 @@ function ServiceRow({ config, status, onAction, loadingAction }) {
   const running = status?.running ?? false;
   const failed = status?.state === 'failed';
   const isLoading = loadingAction === config.id;
+  // dnsmasq can be up and still not resolve: its error comes from a real
+  // lookup (or a taken port), with the fix to offer beside it.
+  const dnsFix =
+    config.id === 'dnsmasq' && status?.error ? dnsHealthView(status).action : null;
 
   return (
     <Row
@@ -83,9 +88,22 @@ function ServiceRow({ config, status, onAction, loadingAction }) {
         </span>
       }
       subtitle={
-        failed && status?.error ? (
+        (failed || dnsFix) && status?.error ? (
           <span className="text-destructive">
             {status.error}{' '}
+            {dnsFix && (
+              <>
+                <span
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => !isLoading && onAction(dnsFix.kind, config.id)}
+                  className="underline cursor-pointer"
+                >
+                  {dnsFix.label}
+                </span>
+                {' · '}
+              </>
+            )}
             <span
               role="button"
               tabIndex={0}
@@ -148,6 +166,8 @@ export default function Services({ serviceStatus, refreshStatus }) {
       if (action === 'start') result = await window.electronAPI.startService(serviceId);
       else if (action === 'stop')
         result = await window.electronAPI.stopService(serviceId);
+      else if (action === 'repair' || action === 'change-port')
+        result = await runDnsAction(action);
       else result = await window.electronAPI.restartService(serviceId);
 
       if (!result.success) {

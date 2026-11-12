@@ -18,7 +18,9 @@
 // migrateToRootless(), offered by an in-app notice (#203).
 
 const { execSync } = require('child_process');
+const dgram = require('dgram');
 const dnsPromises = require('dns').promises;
+const net = require('net');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -65,9 +67,15 @@ const MODE_KEY = 'dns.mode';
 const PORT_KEY = 'dns.port';
 const MODES = ['legacy', 'rootless'];
 
-// Name the ready probe asks our own instance for. Under .test, so dnsmasq
-// answers it from config without any upstream.
+// The reserved name: the ready probe asks our own instance for it directly,
+// the health check asks the system resolver. Under .test, so dnsmasq answers
+// it from config without any upstream.
 const READY_PROBE_NAME = `wpxen-probe.${TLD}`;
+
+// "Use a different port" scans upward from the default for this many ports.
+const PORT_SEARCH_SPAN = 100;
+// Lookups tried right after a fix before it is reported as not working.
+const SETTLE_ATTEMPTS = 3;
 
 // Everything that touches the machine, swappable from tests (see __setDeps).
 // `store` is bound by ipc.cjs at startup.
@@ -83,6 +91,15 @@ const deps = {
   binExists: (p) => fs.existsSync(p),
   resolverExists: () => fs.existsSync(RESOLVER_FILE),
   legacySetupPresent: () => isLegacyConfigured(),
+  // System resolver (getaddrinfo), which honours /etc/resolver/* — unlike
+  // dns.resolve*, which asks the DNS servers directly (see cloudflared.cjs).
+  lookup: async (name) =>
+    (await dnsPromises.lookup(name, { family: 4, all: true })).map((r) => r.address),
+  lookupTimeoutMs: 3000,
+  // Pause between lookups right after a fix, while macOS picks up the new
+  // resolver file (see checkHealth's `settle`).
+  settleDelayMs: 1000,
+  portInUse: (port) => probePortInUse(port),
   sudoersPresent: () => sudoers.presentPaths().length > 0,
 };
 
@@ -237,8 +254,7 @@ function writeResolverFile(
   }
 }
 
-function configureRootless() {
-  const port = getPort();
+function configureRootless({ port = getPort() } = {}) {
   writeConfig();
   // Throws on a cancelled prompt — nothing is recorded then.
   writeResolverFile(buildResolverContent({ port }));
@@ -290,6 +306,236 @@ async function isLegacyRunningAsync() {
   } catch {
     return false;
   }
+}
+
+// ─── Health ─────────────────────────────────────────────────────────────────
+// A running process proves nothing on its own: the resolver file can be gone,
+// stale (wrong port) or overwritten by another tool. DNS is healthy only when
+// the reserved name resolves, through the system resolver, to the loopback
+// address.
+
+// Pure: the verdict for one lookup — its addresses, or the error it threw.
+function decideHealth({ addresses, error } = {}) {
+  if (error) {
+    const why = error.code || error.message || 'lookup failed';
+    return {
+      healthy: false,
+      message: `.${TLD} names don't resolve on this Mac (${why}).`,
+    };
+  }
+  const list = Array.isArray(addresses) ? addresses : [];
+  if (list.length > 0 && list.every((a) => a === LOOPBACK)) {
+    return { healthy: true, message: null };
+  }
+  return {
+    healthy: false,
+    message: list.length
+      ? `.${TLD} names resolve to ${list.join(', ')} instead of ${LOOPBACK}.`
+      : `.${TLD} names resolve to nothing.`,
+  };
+}
+
+// state:   unknown (never checked) | unconfigured | healthy | error
+// problem: null | 'lookup' (→ Repair) | 'port-conflict' (→ Use a different port)
+const UNKNOWN_HEALTH = Object.freeze({
+  state: 'unknown',
+  problem: null,
+  message: null,
+  addresses: null,
+  port: null,
+  checkedAt: null,
+});
+
+let health = { ...UNKNOWN_HEALTH };
+let checkInFlight = null;
+
+function setHealth(next) {
+  health = { ...UNKNOWN_HEALTH, ...next, checkedAt: Date.now() };
+  return health;
+}
+
+// getaddrinfo has no timeout of its own, and a resolver file pointing at a
+// dead port can keep it waiting for a long time.
+function lookupWithTimeout(name) {
+  const ms = deps.lookupTimeoutMs;
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(
+      () => reject(Object.assign(new Error('lookup timed out'), { code: 'timed out' })),
+      ms
+    );
+  });
+  return Promise.race([Promise.resolve().then(() => deps.lookup(name)), timeout]).finally(
+    () => clearTimeout(timer)
+  );
+}
+
+// Resolves the reserved name through the system resolver and records the
+// verdict — in either mode, since the question ("does .test reach this Mac?")
+// is the same. Before DNS has been set up there is nothing to check.
+// Concurrent callers share one lookup. Right after a fix (`settle`), a bad
+// result is retried a few times before it is reported.
+async function lookupOnce() {
+  try {
+    const addresses = await lookupWithTimeout(READY_PROBE_NAME);
+    const verdict = decideHealth({ addresses });
+    return {
+      state: verdict.healthy ? 'healthy' : 'error',
+      problem: verdict.healthy ? null : 'lookup',
+      message: verdict.message,
+      addresses,
+    };
+  } catch (error) {
+    return {
+      state: 'error',
+      problem: 'lookup',
+      message: decideHealth({ error }).message,
+    };
+  }
+}
+
+function checkHealth({ settle = false } = {}) {
+  const attempts = settle ? SETTLE_ATTEMPTS : 1;
+  if (checkInFlight) return checkInFlight;
+  checkInFlight = (async () => {
+    if (!hasBeenSetUp()) return setHealth({ state: 'unconfigured' });
+    // A port held by another program is the cause; the failing lookup that
+    // follows from it is only a symptom, and would hide the right fix.
+    if (health.problem === 'port-conflict' && !ownChildAlive()) return getHealth();
+    let result = await lookupOnce();
+    for (let i = 1; i < attempts && result.state !== 'healthy'; i++) {
+      await new Promise((r) => setTimeout(r, deps.settleDelayMs));
+      result = await lookupOnce();
+    }
+    return setHealth(result);
+  })().finally(() => {
+    checkInFlight = null;
+  });
+  return checkInFlight;
+}
+
+// The status poller's re-check, so a resolver file deleted or overwritten
+// while the app runs shows up without a relaunch. Only once the launch (or
+// setup) check has seeded a result — before that dnsmasq may still be coming
+// up — and no more often than maxAgeMs.
+function refreshHealth({ maxAgeMs }) {
+  if (health.checkedAt == null) return Promise.resolve(getHealth());
+  if (Date.now() - health.checkedAt < maxAgeMs) return Promise.resolve(getHealth());
+  return checkHealth();
+}
+
+function getHealth() {
+  return { ...health };
+}
+
+// What the status poller merges into the dnsmasq entry: the last check, the
+// one-click fix it calls for, and the message to show.
+function getStatusFields() {
+  const action =
+    health.problem === 'port-conflict'
+      ? 'change-port'
+      : health.problem === 'lookup'
+        ? 'repair'
+        : null;
+  return {
+    health: getHealth(),
+    action,
+    error: health.state === 'error' ? health.message : null,
+  };
+}
+
+// Setup has happened once a mode is recorded (legacy on detection, rootless
+// on success). Deliberately not "the resolver file exists": a deleted
+// resolver file is exactly what the check must catch.
+function hasBeenSetUp() {
+  getMode();
+  return !!deps.store && MODES.includes(deps.store.get(MODE_KEY, null));
+}
+
+// ─── Port conflict (rootless) ───────────────────────────────────────────────
+
+// True when another program already holds the loopback port, over UDP or TCP
+// (dnsmasq binds both and exits on either failing). Binds and releases
+// immediately.
+function probePortInUse(port) {
+  const udp = new Promise((resolve) => {
+    const sock = dgram.createSocket('udp4');
+    sock.once('error', () => {
+      try {
+        sock.close();
+      } catch {}
+      resolve(true);
+    });
+    sock.bind(port, LOOPBACK, () => sock.close(() => resolve(false)));
+  });
+  const tcp = new Promise((resolve) => {
+    const server = net.createServer();
+    server.once('error', () => resolve(true));
+    server.listen({ port, host: LOOPBACK, exclusive: true }, () =>
+      server.close(() => resolve(false))
+    );
+  });
+  return Promise.all([udp, tcp]).then(([u, t]) => u || t);
+}
+
+function ownChildAlive() {
+  return !!deps.procman.status('dnsmasq').pid;
+}
+
+function portConflictError(port) {
+  const err = new Error(
+    `Port ${port} is in use by another program, so DNS can’t start. Use a different port to fix it.`
+  );
+  err.code = 'DNS_PORT_IN_USE';
+  err.port = port;
+  return err;
+}
+
+// Starts our child, probing the port first unless our own instance is the
+// one holding it. A taken port becomes an error state with its own fix,
+// rather than a spawn that procman would crash-restart until it gave up.
+async function startRootless() {
+  const port = getPort();
+  if (!ownChildAlive() && (await deps.portInUse(port))) {
+    const err = portConflictError(port);
+    setHealth({ state: 'error', problem: 'port-conflict', port, message: err.message });
+    throw err;
+  }
+  writeConfig();
+  await deps.procman.start(buildSpec());
+  // The cause is gone; the next lookup check decides health again.
+  if (health.problem === 'port-conflict') health = { ...UNKNOWN_HEALTH };
+}
+
+// First free high port above the default, never the one in use now.
+async function pickFreePort({ exclude } = {}) {
+  for (let port = DNS_PORT + 1; port <= DNS_PORT + PORT_SEARCH_SPAN; port++) {
+    if (port === exclude) continue;
+    if (!(await deps.portInUse(port))) return port;
+  }
+  throw new Error('No free port found for DNS. Quit the program using it and try again.');
+}
+
+// "Use a different port": pick a free port, rewrite the resolver file for it
+// (the one prompt), persist it — only once the prompt succeeded — and bring
+// dnsmasq up there.
+async function useDifferentPort() {
+  if (getMode() !== 'rootless') {
+    throw new Error('Legacy DNS runs on port 53; migrate to change how DNS runs.');
+  }
+  const port = await pickFreePort({ exclude: getPort() });
+  configureRootless({ port }); // throws on cancel: old port kept
+  await deps.procman.stop('dnsmasq');
+  await startRootless();
+  return { port, health: await checkHealth({ settle: true }) };
+}
+
+// Repair: redo setup — config file and resolver file in one prompt — then
+// restart and look again. In legacy mode this is the legacy setup.
+async function repair() {
+  configureDnsmasq();
+  await restart();
+  return checkHealth({ settle: true });
 }
 
 // ─── Migration (legacy → rootless) ─────────────────────────────────────────
@@ -386,7 +632,8 @@ async function migrateToRootless() {
     deps.store.set(PORT_KEY, port);
     deps.store.set(MODE_KEY, 'rootless');
   }
-  await deps.procman.start(buildSpec());
+  // Probes the port first: a taken one surfaces as the port-conflict fix.
+  await startRootless();
 }
 
 // ─── Public, mode-aware ─────────────────────────────────────────────────────
@@ -398,8 +645,7 @@ async function start() {
     deps.brew.startBrewServiceSudo('dnsmasq');
     return;
   }
-  writeConfig();
-  await deps.procman.start(buildSpec());
+  await startRootless();
 }
 
 async function stop() {
@@ -415,8 +661,10 @@ async function restart() {
     deps.brew.restartBrewServiceSudo('dnsmasq');
     return;
   }
-  writeConfig();
-  await deps.procman.restart(buildSpec());
+  // Stop, then start: the port probe has to run once our instance has let go
+  // of the port, which procman.restart() gives no room for.
+  await deps.procman.stop('dnsmasq');
+  await startRootless();
 }
 
 // Rootless reports the supervisor's view of our own child; a pgrep would
@@ -427,7 +675,7 @@ async function isRunningAsync() {
 }
 
 function isConfigured() {
-  if (getMode() === 'legacy') return isLegacyConfigured();
+  if (getMode() === 'legacy') return deps.legacySetupPresent();
   return !!deps.store && deps.store.get(MODE_KEY, null) === 'rootless';
 }
 
@@ -458,6 +706,12 @@ function __setDeps(next) {
   Object.assign(deps, next);
 }
 
+// Test hook: forget the last health result between tests.
+function __resetHealth() {
+  health = { ...UNKNOWN_HEALTH };
+  checkInFlight = null;
+}
+
 module.exports = {
   TLD,
   DNS_PORT,
@@ -481,8 +735,17 @@ module.exports = {
   resolverFileExists,
   setupComplete,
   shouldAutoStart,
+  decideHealth,
+  checkHealth,
+  refreshHealth,
+  getHealth,
+  getStatusFields,
+  probePortInUse,
+  useDifferentPort,
+  repair,
   removeLegacyConfLines,
   migrationNeeded,
   migrateToRootless,
   __setDeps,
+  __resetHealth,
 };
