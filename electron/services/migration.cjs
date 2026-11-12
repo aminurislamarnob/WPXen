@@ -3,8 +3,9 @@
 // One-time migration from `brew services`-managed daemons to WPXen-supervised
 // child processes (see procman.cjs). `brew services stop` both unloads the
 // launchd job and deletes its LaunchAgent plist, which is what removes the
-// entries from macOS "App Background Activity". dnsmasq is deliberately left
-// alone — it stays a root LaunchDaemon (port 53 needs root).
+// entries from macOS "App Background Activity". dnsmasq is not handled here:
+// its root LaunchDaemon goes when the user accepts the DNS migration notice
+// (dnsmasq.migrateToRootless), which needs an admin prompt of its own.
 
 const brew = require('./brew.cjs');
 const mysql = require('./mysql.cjs');
@@ -15,11 +16,10 @@ const STORE_FLAG = 'migratedToChildProcs';
 async function migrateToChildProcs(store) {
   if (store.get(STORE_FLAG, false)) return;
 
-  // nginx ran as a *root* LaunchDaemon — stopping it needs the sudo path
-  // (silent when the WPXen sudoers file is installed, otherwise one admin
-  // prompt; acceptable for a one-time migration).
+  // nginx ran as a *root* LaunchDaemon — stopping it takes one admin prompt,
+  // acceptable for a one-time migration.
   try {
-    brew.stopBrewServiceSudo('nginx');
+    brew.stopBrewServiceAdmin('nginx');
   } catch {}
 
   // User-level LaunchAgents: every installed PHP version's formula, the MySQL

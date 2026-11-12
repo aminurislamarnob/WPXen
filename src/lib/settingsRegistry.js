@@ -632,22 +632,6 @@ export const SETTINGS_ITEMS = [
 
   // ── DNS & HTTPS ──────────────────────────────────────────────────────────
   {
-    id: 'dns.sudoers',
-    section: 'dns',
-    title: 'Passwordless DNS Control',
-    description: 'Let WPXen manage the dnsmasq resolver without a password prompt',
-    keywords: [
-      'sudo',
-      'sudoers',
-      'password',
-      'permission',
-      'admin',
-      'dnsmasq',
-      'privileges',
-      'prompt',
-    ],
-  },
-  {
     id: 'dns.resolver',
     section: 'dns',
     title: '*.test DNS Resolution',

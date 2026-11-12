@@ -2881,24 +2881,31 @@ function registerHandlers(win, storeInstance) {
     return { success: true };
   });
 
-  // ─── Sudoers / Permissions ────────────────────────────────────────────
+  // ─── Sudoers (removal only — WPXen no longer installs one) ───────────
 
   ipcMain.handle('check-sudoers', () => {
     return { configured: sudoers.isConfigured(), path: sudoers.SUDOERS_PATH };
   });
 
-  ipcMain.handle('install-sudoers', async () => {
+  ipcMain.handle('uninstall-sudoers', async () => {
     try {
-      sudoers.install();
+      sudoers.uninstall();
       return { success: true };
     } catch (err) {
       return { success: false, error: humanize(err) };
     }
   });
 
-  ipcMain.handle('uninstall-sudoers', async () => {
+  // Legacy → rootless DNS (#203). The notice asks only; the prompt appears
+  // when the user clicks it.
+  ipcMain.handle('get-dns-migration', () => ({
+    needed: dnsmasq.migrationNeeded(),
+    mode: dnsmasq.getMode(),
+  }));
+
+  ipcMain.handle('migrate-dns', async () => {
     try {
-      sudoers.uninstall();
+      await dnsmasq.migrateToRootless();
       return { success: true };
     } catch (err) {
       return { success: false, error: humanize(err) };
