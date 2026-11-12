@@ -52,4 +52,21 @@ describe('IPC surface', () => {
     ].map((m) => m[1]);
     expect(invoked.filter((c) => !handled.has(c))).toEqual([]);
   });
+
+  // #203: the passwordless sudoers grant is gone for good — no method, no
+  // channel, no service function can put one back. Removal stays.
+  it('offers no way to install a sudoers file', () => {
+    const main = walk('electron').map(read).join('\n');
+    expect(exposed.has('installSudoers')).toBe(false);
+    expect(main).not.toMatch(/'install-sudoers'/);
+    expect(read('electron/services/sudoers.cjs')).not.toMatch(/visudo|NOPASSWD:/);
+    for (const file of walk('src')) {
+      expect(read(file), file).not.toMatch(/installSudoers|install-sudoers/);
+    }
+  });
+
+  it('exposes the DNS migration the notice runs', () => {
+    expect(exposed.has('getDnsMigration')).toBe(true);
+    expect(exposed.has('migrateDns')).toBe(true);
+  });
 });
