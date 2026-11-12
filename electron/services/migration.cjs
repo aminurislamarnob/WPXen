@@ -88,7 +88,9 @@ async function migrateToPerSitePhp(store, deps = {}) {
 // A step that must precede the vhost rewrite is one more entry here.
 // `prepare(ctx)` gets { store, sites, nginx, phpmyadmin, deps, failed };
 // throwing aborts the pass before any vhost is written, and per-Site failures
-// go into ctx.failed without stopping it.
+// go into ctx.failed without stopping it. A prepare that returns
+// { retry: true } couldn't do its work yet: the pass carries on, but that
+// entry's flag stays unset so the next launch runs it again.
 //
 // The launch-time vhost rewrite in ipc.cjs defers to this pass while anything
 // is pending (pendingSiteUpgrades), so the upgrade launch has one writer and
@@ -101,8 +103,9 @@ const WILDCARD_CERTS_FLAG = 'migratedToWildcardCerts';
 // server name. Silent: generateCert never prompts, and ensureCA — which can
 // show macOS's keychain prompt — is deliberately not called. With no local
 // authority on disk mkcert would quietly create a new, untrusted one, so
-// nothing is minted then; those Sites keep their old certificate until HTTPS
-// is next turned on (which goes through ensureCA).
+// nothing is minted then and the re-issue stays pending: those Sites keep
+// their old certificate, and a later launch tries again once an authority
+// exists (turning HTTPS on goes through ensureCA).
 function reissueWildcardCerts({ store, sites, deps, failed }) {
   const httpsSites = sites.filter((s) => s && s.https);
   if (!httpsSites.length) return;
@@ -115,7 +118,7 @@ function reissueWildcardCerts({ store, sites, deps, failed }) {
         error: 'certificate not re-issued: local certificate authority not found',
       });
     }
-    return;
+    return { retry: true };
   }
 
   let changed = false;
@@ -153,12 +156,14 @@ const SITE_UPGRADES = [
   { flag: WILDCARD_CERTS_FLAG, prepare: reissueWildcardCerts },
 ];
 
+const pendingUpgrades = (store) => SITE_UPGRADES.filter((u) => !store.get(u.flag, false));
+
 function pendingSiteUpgrades(store) {
-  return SITE_UPGRADES.filter((u) => !store.get(u.flag, false)).map((u) => u.flag);
+  return pendingUpgrades(store).map((u) => u.flag);
 }
 
 async function runSiteUpgrades(store, deps = {}) {
-  const pending = SITE_UPGRADES.filter((u) => !store.get(u.flag, false));
+  const pending = pendingUpgrades(store);
   if (!pending.length) return { migrated: false };
   const nginx = deps.nginx || require('./nginx.cjs');
   const phpmyadmin = deps.phpmyadmin || require('./phpmyadmin.cjs');
@@ -166,8 +171,12 @@ async function runSiteUpgrades(store, deps = {}) {
   const sites = store.get('sites', []);
   const failed = [];
   const ctx = { store, sites, nginx, phpmyadmin, deps, failed };
+  const done = [];
   try {
-    for (const upgrade of pending) await upgrade.prepare(ctx);
+    for (const upgrade of pending) {
+      const outcome = await upgrade.prepare(ctx);
+      if (!(outcome && outcome.retry)) done.push(upgrade);
+    }
   } catch (err) {
     return { migrated: false, error: err.message, failed };
   }
@@ -205,8 +214,21 @@ async function runSiteUpgrades(store, deps = {}) {
     } catch {}
   }
 
-  for (const upgrade of pending) store.set(upgrade.flag, true);
-  return { migrated: true, upgraded: pending.map((u) => u.flag), failed };
+  for (const upgrade of done) store.set(upgrade.flag, true);
+  return { migrated: true, upgraded: done.map((u) => u.flag), failed };
+}
+
+// What the Dashboard tells the user about a pass, from its result: the error
+// that stopped it and every Site it couldn't bring up to date. Null when
+// there is nothing to say.
+function siteUpgradeReport(result) {
+  const failed = (result && result.failed) || [];
+  const error = (result && result.error) || null;
+  if (!error && !failed.length) return null;
+  return {
+    error,
+    failed: failed.map(({ domain, error: why }) => ({ domain, error: why })),
+  };
 }
 
 module.exports = {
@@ -216,6 +238,7 @@ module.exports = {
   PER_SITE_PHP_FLAG,
   runSiteUpgrades,
   pendingSiteUpgrades,
+  siteUpgradeReport,
   ERROR_PAGES_FLAG,
   WILDCARD_CERTS_FLAG,
 };

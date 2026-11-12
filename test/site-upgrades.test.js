@@ -25,6 +25,39 @@ const makeStore = (data) => ({
 
 const site = (over = {}) => ({ name: 'shop', domain: 'shop.test', ...over });
 
+// #207: a Site the pass couldn't bring up to date is reported to the user
+// (a Dashboard notice), not only to the console.
+describe('the report the Dashboard shows', () => {
+  it('is nothing when every Site came through', () => {
+    expect(migration.siteUpgradeReport({ migrated: false })).toBeNull();
+    expect(migration.siteUpgradeReport({ migrated: true, failed: [] })).toBeNull();
+    expect(migration.siteUpgradeReport(undefined)).toBeNull();
+  });
+
+  it('names each Site that failed, and why', () => {
+    const report = migration.siteUpgradeReport({
+      migrated: true,
+      failed: [{ domain: 'bad.test', error: 'disk full' }],
+    });
+    expect(report).toEqual({
+      error: null,
+      failed: [{ domain: 'bad.test', error: 'disk full' }],
+    });
+  });
+
+  it('carries a pass-wide error, such as a refused nginx config', () => {
+    const report = migration.siteUpgradeReport({
+      migrated: false,
+      error: 'nginx config test failed: unknown directive',
+      failed: [],
+    });
+    expect(report).toEqual({
+      error: 'nginx config test failed: unknown directive',
+      failed: [],
+    });
+  });
+});
+
 // Every collaborator call lands in one ordered log, so a test can assert what
 // was written, in which order, and how many times nginx was reloaded.
 const makeDeps = ({ pma = true } = {}) => {
@@ -326,6 +359,23 @@ describe('runSiteUpgrades — the wildcard-certificate re-issue', () => {
       { domain: 'shop.test', error: expect.stringMatching(/certificate authority/) },
     ]);
     expect(log).toContain('vhost shop.test');
+  });
+
+  it('retries the re-issue on a later launch once the local authority is back', async () => {
+    const store = makeStore({ sites: [httpsSite('shop.test')] });
+    const res = await migration.runSiteUpgrades(store, withMkcert({ ca: false }).deps);
+
+    // The error pages shipped; the wildcard re-issue is still owed.
+    expect(res.upgraded).toEqual([migration.ERROR_PAGES_FLAG]);
+    expect(store.get(migration.ERROR_PAGES_FLAG)).toBe(true);
+    expect(store.get(migration.WILDCARD_CERTS_FLAG, false)).toBe(false);
+    expect(migration.pendingSiteUpgrades(store)).toEqual([migration.WILDCARD_CERTS_FLAG]);
+
+    const later = withMkcert();
+    const again = await migration.runSiteUpgrades(store, later.deps);
+    expect(again).toMatchObject({ migrated: true, failed: [] });
+    expect(later.log).toContain('cert shop.test');
+    expect(store.get(migration.WILDCARD_CERTS_FLAG)).toBe(true);
   });
 
   it("records the re-issued certificate's paths on the Site before its vhost is written", async () => {

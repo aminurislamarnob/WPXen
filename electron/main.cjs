@@ -14,6 +14,7 @@ const {
   getServiceStatus,
   getSetting,
   setSetting,
+  setSiteUpgradeReport,
 } = require('./ipc.cjs');
 
 const isDev = process.env.NODE_ENV === 'development';
@@ -273,17 +274,19 @@ app.whenReady().then(() => {
 
     // One-time, per app update: bring every existing Site's vhost up to the
     // current template (the shared error-page snippet, wildcard certificates
-    // and server names), with one nginx reload. A Site that fails is reported
-    // here and doesn't stop the others; a failed `nginx -t` leaves the pass to
-    // retry next launch.
+    // and server names), with one nginx reload. A Site that fails doesn't stop
+    // the others, and is reported on the Dashboard; a failed `nginx -t` leaves
+    // the pass to retry next launch.
     try {
       const upgrade = await migration.runSiteUpgrades(store);
       if (upgrade.error) console.error('Site upgrade pass:', upgrade.error);
       for (const { domain, error } of upgrade.failed || []) {
         console.error(`Site upgrade pass: ${domain}:`, error);
       }
+      setSiteUpgradeReport(migration.siteUpgradeReport(upgrade));
     } catch (err) {
       console.error('Site upgrade pass:', err.message);
+      setSiteUpgradeReport(migration.siteUpgradeReport({ error: err.message }));
     }
   })();
 

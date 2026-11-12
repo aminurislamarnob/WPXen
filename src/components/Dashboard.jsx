@@ -12,9 +12,10 @@ import {
   Plus,
   ExternalLink,
   ShieldAlert,
+  AlertTriangle,
   Loader,
 } from 'lucide-react';
-import { Card, IconTile, Row, SectionLabel, Tooltip } from './ui';
+import { Button, Card, IconTile, Row, SectionLabel, Tooltip } from './ui';
 import { StatusBadge } from './StatusBadge';
 
 const SERVICE_ROWS = [
@@ -34,11 +35,20 @@ export default function Dashboard({ serviceStatus, sites, refreshStatus }) {
   const [migrating, setMigrating] = useState(false);
   const [migrationError, setMigrationError] = useState(null);
 
+  // What the launch-time Site upgrade pass couldn't do (#207). Pushed when
+  // the pass finishes, which can be after this page has mounted.
+  const [upgradeReport, setUpgradeReport] = useState(null);
+
   useEffect(() => {
     window.electronAPI
       .getDnsMigration()
       .then(setDnsMigration)
       .catch(() => {});
+    window.electronAPI
+      .getSiteUpgradeReport()
+      .then(setUpgradeReport)
+      .catch(() => {});
+    return window.electronAPI.on('site-upgrade-report', setUpgradeReport);
   }, []);
 
   async function handleMigrateDns() {
@@ -100,16 +110,27 @@ export default function Dashboard({ serviceStatus, sites, refreshStatus }) {
               'DNS for .test sites now runs inside WPXen, as you. Update once — macOS asks for your password to remove the old root service and its passwordless permission.'
             }
           >
-            <button
+            <Button
+              variant="warning"
               onClick={handleMigrateDns}
               disabled={migrating}
-              className="text-xs font-semibold text-status-warning bg-status-warning/10 hover:bg-status-warning/20 px-3 py-1.5 rounded-md transition-colors flex-shrink-0 inline-flex items-center gap-1.5"
+              className="flex-shrink-0"
             >
-              {migrating && <Loader size={12} className="animate-spin" />}
+              {migrating && <Loader size={13} className="animate-spin" />}
               Update DNS…
-            </button>
+            </Button>
           </Row>
         </Card>
+      )}
+
+      {upgradeReport && (
+        <SiteUpgradeNotice
+          report={upgradeReport}
+          onDismiss={() => {
+            setUpgradeReport(null);
+            window.electronAPI.dismissSiteUpgradeReport().catch(() => {});
+          }}
+        />
       )}
 
       {/* Services */}
@@ -243,5 +264,42 @@ export default function Dashboard({ serviceStatus, sites, refreshStatus }) {
         ))}
       </div>
     </div>
+  );
+}
+
+// The launch-time upgrade pass brings every Site's nginx config up to the
+// current template once per app update. A Site it couldn't update keeps
+// serving with its old config; this says which, and why.
+function SiteUpgradeNotice({ report, onDismiss }) {
+  const failed = report.failed || [];
+  const title = report.error
+    ? "Sites couldn't be updated for this version of WPXen"
+    : failed.length === 1
+      ? `${failed[0].domain} couldn't be fully updated for this version of WPXen`
+      : `${failed.length} Sites couldn't be fully updated for this version of WPXen`;
+  const lines = [
+    report.error && `${report.error}. WPXen will try again next launch.`,
+    ...failed.map(({ domain, error }) => `${domain}: ${error}`),
+  ].filter(Boolean);
+  return (
+    <Card className="mb-4 !bg-status-warning/10">
+      <Row
+        icon={<AlertTriangle size={18} className="text-status-warning flex-shrink-0" />}
+        title={<span className="font-semibold text-status-warning">{title}</span>}
+        subtitle={
+          <span className="block space-y-0.5 whitespace-normal">
+            {lines.map((line) => (
+              <span key={line} className="block break-words">
+                {line}
+              </span>
+            ))}
+          </span>
+        }
+      >
+        <Button variant="ghost" onClick={onDismiss} className="flex-shrink-0">
+          Dismiss
+        </Button>
+      </Row>
+    </Card>
   );
 }

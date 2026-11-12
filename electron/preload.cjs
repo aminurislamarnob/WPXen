@@ -38,6 +38,7 @@ const VALID_EVENT_CHANNELS = [
   'settings-updated',
   'keep-awake-status-update',
   'site-log-follow-update',
+  'site-upgrade-report',
 ];
 
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -170,6 +171,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Legacy → rootless DNS migration: { needed, mode }, then one admin prompt.
   getDnsMigration: () => ipcRenderer.invoke('get-dns-migration'),
   migrateDns: () => ipcRenderer.invoke('migrate-dns'),
+  // What the launch-time Site upgrade pass couldn't do: { error, failed } or
+  // null. Also pushed on 'site-upgrade-report' when the pass finishes.
+  getSiteUpgradeReport: () => ipcRenderer.invoke('get-site-upgrade-report'),
+  dismissSiteUpgradeReport: () => ipcRenderer.invoke('dismiss-site-upgrade-report'),
 
   // First-run onboarding
   installCoreDeps: () => ipcRenderer.invoke('install-core-deps'),

@@ -147,6 +147,21 @@ function broadcastSettings(all) {
   }
 }
 
+// What the launch-time Site upgrade pass (migration.runSiteUpgrades, run from
+// main.cjs) couldn't do: { error, failed: [{ domain, error }] } or null. Kept
+// until dismissed, and pushed, since the pass can finish after the Dashboard
+// has already asked.
+let siteUpgradeReport = null;
+
+function setSiteUpgradeReport(report) {
+  siteUpgradeReport = report || null;
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed() && win.webContents) {
+      win.webContents.send('site-upgrade-report', siteUpgradeReport);
+    }
+  }
+}
+
 // Synchronous, instant — returns the last computed snapshot. Used by the tray
 // and the get-service-status IPC reply so neither blocks on subprocesses.
 function getServiceStatus() {
@@ -2982,6 +2997,13 @@ function registerHandlers(win, storeInstance) {
   // Legacy → rootless DNS (#203). The notice asks only; the prompt appears
   // when the user clicks it. It is also the only way a leftover sudoers file
   // is removed (WPXen no longer installs one).
+  ipcMain.handle('get-site-upgrade-report', () => siteUpgradeReport);
+
+  ipcMain.handle('dismiss-site-upgrade-report', () => {
+    setSiteUpgradeReport(null);
+    return { success: true };
+  });
+
   ipcMain.handle('get-dns-migration', () => ({
     needed: dnsmasq.migrationNeeded(),
     mode: dnsmasq.getMode(),
@@ -3156,4 +3178,5 @@ module.exports = {
   getServiceStatus,
   getSetting,
   setSetting,
+  setSiteUpgradeReport,
 };
