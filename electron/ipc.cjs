@@ -28,13 +28,15 @@ const wordpress = require('./services/wordpress.cjs');
 const siteops = require('./services/siteops.cjs');
 const blueprints = require('./services/blueprints.cjs');
 const mkcert = require('./services/mkcert.cjs');
+const trustBundle = require('./services/trustBundle.cjs');
 const phpmyadmin = require('./services/phpmyadmin.cjs');
+const migration = require('./services/migration.cjs');
 const mailpit = require('./services/mailpit.cjs');
 const procman = require('./services/procman.cjs');
 const cloudflared = require('./services/cloudflared.cjs');
-const sudoers = require('./services/sudoers.cjs');
 const setup = require('./services/setup.cjs');
 const logs = require('./services/logs.cjs');
+const logFollow = require('./services/logFollow.cjs');
 const validation = require('./services/validation.cjs');
 const agents = require('./services/agents.cjs');
 const notes = require('./services/notes.cjs');
@@ -85,12 +87,24 @@ function applyHttps(site, enabled) {
       url: `https://${site.domain}`,
     };
   } else {
+    // The certificate goes with HTTPS (below), so the record stops naming it.
     updated = { ...site, https: false, url: `http://${site.domain}` };
+    delete updated.certPath;
+    delete updated.keyPath;
   }
 
   // Rewrite the vhost for the new scheme and reload nginx.
   nginx.createSiteConfig(updated);
   nginx.reload();
+
+  // Off means the cert files are orphans: remove them, after the http-only
+  // vhost is written so nginx never references a missing file. Turning HTTPS
+  // back on mints a fresh pair at the same two paths.
+  if (!enabled) {
+    try {
+      mkcert.removeCert(site.domain);
+    } catch {}
+  }
 
   // Point WordPress at the new URL so it stops redirecting to the old
   // scheme. Best-effort — nginx already serves the right scheme regardless.
@@ -133,11 +147,29 @@ function broadcastSettings(all) {
   }
 }
 
+// What the launch-time Site upgrade pass (migration.runSiteUpgrades, run from
+// main.cjs) couldn't do: { error, failed: [{ domain, error }] } or null. Kept
+// until dismissed, and pushed, since the pass can finish after the Dashboard
+// has already asked.
+let siteUpgradeReport = null;
+
+function setSiteUpgradeReport(report) {
+  siteUpgradeReport = report || null;
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed() && win.webContents) {
+      win.webContents.send('site-upgrade-report', siteUpgradeReport);
+    }
+  }
+}
+
 // Synchronous, instant — returns the last computed snapshot. Used by the tray
 // and the get-service-status IPC reply so neither blocks on subprocesses.
 function getServiceStatus() {
   return serviceStatusCache;
 }
+
+// How stale the last DNS lookup may get before the poller repeats it.
+const DNS_RECHECK_MS = 30_000;
 
 // Recomputes the snapshot using non-blocking async probes run in parallel, so
 // the main-thread event loop stays free (no macOS spinning-wait cursor).
@@ -158,14 +190,9 @@ async function computeServiceStatus() {
     mailpit.isRunningAsync(),
   ]);
 
-  // Supervisor view of each converted service: whether WPXen owns the
-  // process, its lifecycle state, and any crash-loop error for the UI. The
-  // probe-based `running` booleans above stay the source of truth (they also
-  // see instances we didn't spawn).
-  const procInfo = (name) => {
-    const s = procman.status(name);
-    return { managed: procman.isSupervised(name), state: s.state, error: s.error };
-  };
+  // Re-run the DNS lookup now and then without holding up this snapshot; its
+  // result lands in the next one.
+  dnsmasq.refreshHealth({ maxAgeMs: DNS_RECHECK_MS }).catch(() => {});
 
   serviceStatusCache = {
     nginx: { running: nginxRunning, name: 'nginx', ...procInfo('nginx') },
@@ -178,7 +205,12 @@ async function computeServiceStatus() {
       ...phpService.getFpmStatus(),
     },
     mysql: { running: mysqlRunning, name: 'MySQL', ...procInfo('mysql') },
-    dnsmasq: { running: dnsmasqRunning, name: 'dnsmasq' },
+    // Rootless dnsmasq is a procman child like the others; legacy is the root
+    // brew service, so its supervisor fields just read 'stopped'. `mode`
+    // lets the UI tell the two apart. `health` is the last real lookup of a
+    // .test name and `action` the fix it calls for (repair | change-port):
+    // a running process alone doesn't mean *.test resolves.
+    dnsmasq: dnsmasqStatus(dnsmasqRunning, procInfo('dnsmasq')),
     mailpit: {
       running: mailpitRunning,
       name: 'Mailpit',
@@ -187,6 +219,32 @@ async function computeServiceStatus() {
     },
   };
   return serviceStatusCache;
+}
+
+// Supervisor view of each converted service: whether WPXen owns the process,
+// its lifecycle state, and any crash-loop error for the UI. The probe-based
+// `running` booleans stay the source of truth (they also see instances we
+// didn't spawn).
+function procInfo(name) {
+  const s = procman.status(name);
+  return { managed: procman.isSupervised(name), state: s.state, error: s.error };
+}
+
+// The dnsmasq entry of the status snapshot. A crash-loop error from procman
+// outranks the lookup's message; either way the UI shows one error.
+function dnsmasqStatus(running, proc) {
+  const mode = dnsmasq.getMode();
+  const { health, action, error } = dnsmasq.getStatusFields();
+  return {
+    running,
+    name: 'dnsmasq',
+    mode,
+    port: mode === 'rootless' ? dnsmasq.getPort() : 53,
+    ...proc,
+    health,
+    action,
+    error: proc.error || error,
+  };
 }
 
 // Coalesces concurrent refreshes (poller + on-demand IPC) into one in-flight
@@ -251,6 +309,8 @@ async function startPhpService() {
 function registerHandlers(win, storeInstance) {
   mainWindow = win;
   store = storeInstance;
+  // The DNS mode and port live in the store (see dnsmasq.cjs).
+  dnsmasq.bindStore(storeInstance);
   // The in-app browser pushes guest events (new windows, and later console
   // output) back to the renderer through this window.
   browser.setWindow(win);
@@ -258,10 +318,12 @@ function registerHandlers(win, storeInstance) {
   win.webContents.on('did-start-navigation', (e, url, isInPlace, isMainFrame) => {
     if (isMainFrame && !isInPlace) {
       agents.closeAllChats();
+      logFollow.closeAll();
     }
   });
   win.on('closed', () => {
     agents.closeAllChats();
+    logFollow.closeAll();
   });
 
   // Bind the settings schema to the store. Side effects that used to live in
@@ -1353,11 +1415,18 @@ function registerHandlers(win, storeInstance) {
   // Heal per-site vhosts shortly after startup: regenerate each from the
   // current template and rewrite only the ones that differ (e.g. sites created
   // before client_max_body_size / PHP_VALUE support), then reload nginx once.
+  // On a launch where a one-time Site upgrade is still pending, the upgrade
+  // pass (migration.cjs runSiteUpgrades, run from main.cjs) regenerates every
+  // vhost itself — stand aside so that launch has one writer and one reload.
   setTimeout(() => {
     try {
+      if (migration.pendingSiteUpgrades(store).length) return;
       const sites = store.get('sites', []);
       const serversDir = nginx.getServersDir();
       if (!serversDir || !fs.existsSync(serversDir)) return;
+      // The template includes the shared error-page snippet; it must be on
+      // disk before a vhost referencing it is written and reloaded.
+      nginx.ensureErrorPages();
       let changed = false;
       for (const site of sites) {
         try {
@@ -1379,6 +1448,16 @@ function registerHandlers(win, storeInstance) {
       }
     } catch {}
   }, 3000);
+
+  // Rebuild PHP's trust bundle if missing or stale, point every installed PHP
+  // version at it (versions installed from a terminal since last launch
+  // included), and make sure every Site carries the mu-plugin that points
+  // WordPress at it. Idempotent — writes and reloads only what differs.
+  setTimeout(() => {
+    try {
+      trustBundle.syncLocalTrust({ sites: store.get('sites', []) });
+    } catch {}
+  }, 4500);
 
   // Re-apply the Mailpit sendmail override shortly after startup so PHP
   // versions installed since the toggle was enabled also route mail() into
@@ -1784,6 +1863,25 @@ function registerHandlers(win, storeInstance) {
   ipcMain.handle('get-ca-status', async () => {
     try {
       return { success: true, ...mkcert.getCaStatus() };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  // Settings' "PHP trusts the local authority" row, and its Repair button —
+  // the same sync that runs on app start.
+  ipcMain.handle('get-php-trust-status', async () => {
+    try {
+      return { success: true, ...trustBundle.getTrustStatus() };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('repair-php-trust', async () => {
+    try {
+      trustBundle.syncLocalTrust({ sites: store.get('sites', []) });
+      return { success: true, ...trustBundle.getTrustStatus() };
     } catch (err) {
       return { success: false, error: humanize(err) };
     }
@@ -2229,14 +2327,79 @@ function registerHandlers(win, storeInstance) {
 
   // ─── Site logs ─────────────────────────────────────────────────────────
 
-  ipcMain.handle('get-site-log', async (_, id, kind) => {
+  // A page of parsed entries; `opts.end` (a previous page's `pageStart`)
+  // asks for the page before it, omitted for the newest. `opts.levels`
+  // limits it to those levels (logReader drops anything it doesn't know).
+  ipcMain.handle('get-site-log-page', async (_, id, kind, opts) => {
     try {
       const site = findSite(id);
       if (!site) return { success: false, error: 'Site not found' };
-      return { success: true, log: logs.readLog(site, kind) };
+      return {
+        success: true,
+        page: logs.readLogPage(site, kind, { end: opts?.end, levels: opts?.levels }),
+      };
     } catch (err) {
       return { success: false, error: humanize(err) };
     }
+  });
+
+  // Entries per level across the whole file, for the level filters.
+  ipcMain.handle('get-site-log-counts', async (_, id, kind) => {
+    try {
+      const site = findSite(id);
+      if (!site) return { success: false, error: 'Site not found' };
+      return { success: true, counts: await logs.countLogLevels(site, kind) };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  // A capped batch of whole entries matching `query` anywhere in the file,
+  // newest first; `opts.end` (a previous batch's `pageStart`) continues with
+  // the older matches, `opts.levels` keeps only those levels.
+  ipcMain.handle('search-site-log', async (_, id, kind, query, opts) => {
+    try {
+      const site = findSite(id);
+      if (!site) return { success: false, error: 'Site not found' };
+      return {
+        success: true,
+        result: await logs.searchLog(site, kind, query, {
+          end: opts?.end,
+          levels: opts?.levels,
+        }),
+      };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  // Live follow: the open log view's watcher, released by
+  // `site-log-unfollow` when the view closes (and by closeAll above when the
+  // window goes). `opts` is `{ from, end }` from the page the view shows.
+  // Ids are the renderer's, scoped to its webContents.
+  ipcMain.handle('site-log-follow', async (event, watchId, id, kind, opts) => {
+    try {
+      const site = findSite(id);
+      if (!site) return { success: false, error: 'Site not found' };
+      const sender = event.sender;
+      logFollow.follow(
+        `${sender.id}:${watchId}`,
+        logs.resolveLogPath(site, kind),
+        kind,
+        { from: opts?.from, end: opts?.end },
+        (data) => {
+          if (!sender.isDestroyed())
+            sender.send('site-log-follow-update', { watchId, ...data });
+        }
+      );
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.on('site-log-unfollow', (event, watchId) => {
+    logFollow.unfollow(`${event.sender.id}:${watchId}`);
   });
 
   ipcMain.handle('clear-site-log', async (_, id, kind) => {
@@ -2559,7 +2722,7 @@ function registerHandlers(win, storeInstance) {
       await nginx.start();
       await startPhpService();
       await mysql.start();
-      dnsmasq.start();
+      await dnsmasq.start();
       // Optional service — start it only when installed, and never let a
       // Mailpit hiccup fail the whole "Start All".
       if (mailpit.isInstalled()) {
@@ -2578,7 +2741,7 @@ function registerHandlers(win, storeInstance) {
       await nginx.stop();
       await phpService.stopAllPhpFpm();
       await mysql.stop();
-      dnsmasq.stop();
+      await dnsmasq.stop();
       if (mailpit.isInstalled()) {
         try {
           await mailpit.stop();
@@ -2603,7 +2766,7 @@ function registerHandlers(win, storeInstance) {
           await mysql.start();
           break;
         case 'dnsmasq':
-          dnsmasq.start();
+          await dnsmasq.start();
           break;
         case 'mailpit':
           await mailpit.start();
@@ -2630,7 +2793,7 @@ function registerHandlers(win, storeInstance) {
           await mysql.stop();
           break;
         case 'dnsmasq':
-          dnsmasq.stop();
+          await dnsmasq.stop();
           break;
         case 'mailpit':
           await mailpit.stop();
@@ -2648,7 +2811,7 @@ function registerHandlers(win, storeInstance) {
   // viewer — surfaced in the UI when a service enters the 'failed' state.
   ipcMain.handle('open-service-log', async (_, name) => {
     try {
-      if (!['nginx', 'php', 'mysql', 'mailpit'].includes(name)) {
+      if (!['nginx', 'php', 'mysql', 'mailpit', 'dnsmasq'].includes(name)) {
         return { success: false, error: `Unknown service: ${name}` };
       }
       // PHP-FPM logs per version: open the failing one, else the active one.
@@ -2683,7 +2846,7 @@ function registerHandlers(win, storeInstance) {
           await mysql.restart();
           break;
         case 'dnsmasq':
-          dnsmasq.restart();
+          await dnsmasq.restart();
           break;
         case 'mailpit':
           await mailpit.restart();
@@ -2760,6 +2923,10 @@ function registerHandlers(win, storeInstance) {
           mailpit.setCatchEnabled(true);
         }
       } catch {}
+      // …and the trust-bundle directives, so it trusts local HTTPS Sites too.
+      try {
+        trustBundle.syncLocalTrust();
+      } catch {}
       return { success: true };
     } catch (err) {
       return { success: false, error: humanize(err) };
@@ -2827,39 +2994,65 @@ function registerHandlers(win, storeInstance) {
     return { success: true };
   });
 
-  // ─── Sudoers / Permissions ────────────────────────────────────────────
+  // Legacy → rootless DNS (#203). The notice asks only; the prompt appears
+  // when the user clicks it. It is also the only way a leftover sudoers file
+  // is removed (WPXen no longer installs one).
+  ipcMain.handle('get-site-upgrade-report', () => siteUpgradeReport);
 
-  ipcMain.handle('check-sudoers', () => {
-    return { configured: sudoers.isConfigured(), path: sudoers.SUDOERS_PATH };
+  ipcMain.handle('dismiss-site-upgrade-report', () => {
+    setSiteUpgradeReport(null);
+    return { success: true };
   });
 
-  ipcMain.handle('install-sudoers', async () => {
+  ipcMain.handle('get-dns-migration', () => ({
+    needed: dnsmasq.migrationNeeded(),
+    mode: dnsmasq.getMode(),
+  }));
+
+  ipcMain.handle('migrate-dns', async () => {
     try {
-      sudoers.install();
+      await dnsmasq.migrateToRootless();
+      // Prove the new setup with a real lookup (#204).
+      await dnsmasq.checkHealth({ settle: true });
       return { success: true };
     } catch (err) {
       return { success: false, error: humanize(err) };
     }
   });
 
-  ipcMain.handle('uninstall-sudoers', async () => {
+  // DNS handlers answer with the dnsmasq status entry, so the caller can show
+  // the fresh health (and the right fix on failure) without another round trip.
+  const dnsResult = async (run) => {
     try {
-      sudoers.uninstall();
-      return { success: true };
+      await run();
+      return { success: true, dnsmasq: await dnsmasqSnapshot() };
     } catch (err) {
-      return { success: false, error: humanize(err) };
+      return { success: false, error: humanize(err), dnsmasq: await dnsmasqSnapshot() };
     }
-  });
+  };
+  const dnsmasqSnapshot = async () =>
+    dnsmasqStatus(await dnsmasq.isRunningAsync(), procInfo('dnsmasq'));
 
-  ipcMain.handle('setup-dnsmasq', async () => {
-    try {
+  ipcMain.handle('setup-dnsmasq', () =>
+    dnsResult(async () => {
+      // One admin prompt (the resolver file); then start the mode's dnsmasq
+      // and look a .test name up to prove it works.
       dnsmasq.configureDnsmasq();
-      dnsmasq.start();
-      return { success: true };
-    } catch (err) {
-      return { success: false, error: humanize(err) };
-    }
-  });
+      await dnsmasq.start();
+      await dnsmasq.checkHealth({ settle: true });
+    })
+  );
+
+  // Fresh lookup on demand (Settings → DNS opening).
+  ipcMain.handle('check-dns', () => dnsResult(() => dnsmasq.checkHealth()));
+
+  // Repair: config file, resolver file (one prompt), restart, look again.
+  ipcMain.handle('repair-dns', () => dnsResult(() => dnsmasq.repair()));
+
+  // Port taken by another program: move to a free high port (one prompt).
+  ipcMain.handle('dns-use-different-port', () =>
+    dnsResult(() => dnsmasq.useDifferentPort())
+  );
 
   // ─── Settings ────────────────────────────────────────────────────────
 
@@ -2985,4 +3178,5 @@ module.exports = {
   getServiceStatus,
   getSetting,
   setSetting,
+  setSiteUpgradeReport,
 };

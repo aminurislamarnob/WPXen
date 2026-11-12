@@ -3,10 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const brew = require('./brew.cjs');
-
-// How much of a log file to show: the last 256 KB is plenty for a viewer and
-// keeps huge access logs from flooding the IPC channel.
-const MAX_READ_BYTES = 256 * 1024;
+const logReader = require('./logReader.cjs');
 
 const LOG_KINDS = ['debug', 'nginx-error', 'nginx-access', 'php-error'];
 
@@ -36,39 +33,27 @@ function resolveLogPath(site, kind) {
   }
 }
 
-// Reads the tail of a log file (last MAX_READ_BYTES). Returns exists=false
-// rather than throwing when the file isn't there yet — that's a normal state
-// (e.g. debug.log before WP_DEBUG_LOG is enabled).
-function readLog(site, kind) {
-  const p = resolveLogPath(site, kind);
-  if (!fs.existsSync(p)) {
-    return { path: p, exists: false, content: '', size: 0, truncated: false };
-  }
+// A page of a Site's log as entries — the newest page, or with `end` (a
+// previous page's `pageStart`) the one before it. The parsing and paging
+// live in the pure logReader.cjs; this only resolves which file.
+function readLogPage(site, kind, { end, levels } = {}) {
+  return logReader.readPage(resolveLogPath(site, kind), kind, { end, levels });
+}
 
-  const stat = fs.statSync(p);
-  const start = Math.max(0, stat.size - MAX_READ_BYTES);
-  const length = stat.size - start;
+// Entries per level across the whole of a Site's log (null for the access
+// log, which has no levels).
+function countLogLevels(site, kind) {
+  return logReader.countLevelsAsync(resolveLogPath(site, kind), kind);
+}
 
-  let content = '';
-  if (length > 0) {
-    const fd = fs.openSync(p, 'r');
-    try {
-      const buf = Buffer.alloc(length);
-      fs.readSync(fd, buf, 0, length, start);
-      content = buf.toString('utf8');
-    } finally {
-      fs.closeSync(fd);
-    }
-  }
-
-  const truncated = start > 0;
-  if (truncated) {
-    // Drop the likely-partial first line so the view starts on a clean entry.
-    const nl = content.indexOf('\n');
-    if (nl !== -1) content = content.slice(nl + 1);
-  }
-
-  return { path: p, exists: true, content, size: stat.size, truncated };
+// A batch of entries matching `query` across the whole file, newest first;
+// `end` (a previous batch's `pageStart`) continues with older matches.
+function searchLog(site, kind, query, { end, levels } = {}) {
+  return logReader.searchLogAsync(resolveLogPath(site, kind), kind, {
+    query,
+    end,
+    levels,
+  });
 }
 
 // Empties a log file in place (truncate, not delete — nginx/php-fpm keep the
@@ -79,4 +64,11 @@ function clearLog(site, kind) {
   fs.truncateSync(p, 0);
 }
 
-module.exports = { LOG_KINDS, resolveLogPath, readLog, clearLog };
+module.exports = {
+  LOG_KINDS,
+  resolveLogPath,
+  readLogPage,
+  countLogLevels,
+  searchLog,
+  clearLog,
+};

@@ -23,6 +23,13 @@ const BUTTON_VARIANTS = {
   secondary: 'btn-secondary',
   danger: 'btn-danger',
   ghost: 'btn-ghost',
+  // The action on a warning notice (status-warning tint).
+  warning: 'btn-warning',
+  // An on/off filter chip; pass aria-pressed — off renders dashed and dimmed.
+  toggle: 'btn-toggle',
+  // Floats over scrolling content (a "jump to newest" pill), so it needs an
+  // opaque surface — secondary is translucent in dark mode.
+  floating: 'btn-floating',
 };
 
 export function Button({
@@ -126,6 +133,26 @@ export function IconTile({ icon: Icon, color = 'blue', size = 26, className = ''
       style={{ width: size, height: size, borderRadius: radius }}
     >
       <Icon size={Math.round(size * 0.54)} strokeWidth={2.2} />
+    </span>
+  );
+}
+
+// A row's status word ("Trusted", "Working", "Not set up"), tinted by tone.
+const PILL_TONES = {
+  ok: 'bg-status-running/10 text-status-running',
+  error: 'bg-destructive/10 text-destructive',
+  pending: 'bg-muted text-muted-foreground',
+  neutral: 'bg-muted text-muted-foreground',
+};
+
+export function StatusPill({ tone = 'neutral', children }) {
+  return (
+    <span
+      className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${
+        PILL_TONES[tone] || PILL_TONES.neutral
+      }`}
+    >
+      {children}
     </span>
   );
 }

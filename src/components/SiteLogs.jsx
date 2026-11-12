@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
 import {
   Loader,
   RefreshCw,
@@ -6,8 +6,37 @@ import {
   Download,
   CheckCircle,
   AlertTriangle,
+  ChevronUp,
+  ArrowDown,
+  Search,
+  X,
 } from 'lucide-react';
-import { Tooltip } from './ui';
+import { Button, Tooltip } from './ui';
+import {
+  prependOlder,
+  formatLogSize,
+  matchSummary,
+  FILTER_LEVELS,
+  hasLevelFilters,
+  visibleLevels,
+  toggleHiddenLevel,
+  readHiddenLevels,
+  saveHiddenLevels,
+  searchLevels,
+} from '../lib/logView';
+import {
+  followLive,
+  mergeLive,
+  followStart,
+  liveForView,
+  countLive,
+} from '../lib/logFollow';
+import { shouldStickToBottom } from '../lib/chatList';
+
+// A filtered page that comes back empty only means the level is rare in
+// that stretch of the file, so a load keeps reading back this many pages
+// (16 MB each) before showing "none yet" with Load older.
+const FILTERED_PAGE_TRIES = 8;
 
 const LOG_TABS = [
   { id: 'debug', label: 'Debug Log' },
@@ -16,28 +45,205 @@ const LOG_TABS = [
   { id: 'php-error', label: 'PHP Error Log' },
 ];
 
+// The normalised levels logReader.cjs assigns: each entry's badge, and the
+// matching dot on its level filter. The access log has no levels
+// (`level: null`) and gets none. Severity colors only — `highlight` is the
+// brand blue, not a level.
+const LEVELS = {
+  fatal: {
+    label: 'Fatal',
+    badge: 'bg-destructive/10 text-destructive',
+    dot: 'bg-destructive',
+  },
+  warning: {
+    label: 'Warning',
+    badge: 'bg-status-warning/10 text-status-warning',
+    dot: 'bg-status-warning',
+  },
+  notice: {
+    label: 'Notice',
+    badge: 'bg-foreground/10 text-foreground',
+    dot: 'bg-foreground',
+  },
+  deprecated: {
+    label: 'Deprecated',
+    badge: 'bg-muted text-muted-foreground',
+    dot: 'bg-muted-foreground',
+  },
+  other: {
+    label: 'Other',
+    badge: 'bg-muted text-muted-foreground',
+    dot: 'bg-muted-foreground/50',
+  },
+};
+
 export default function SiteLogs({ site }) {
   const [tab, setTab] = useState('debug');
-  const [log, setLog] = useState(null);
+  const [view, setView] = useState(null); // logReader page, grown by Load older
   const [loading, setLoading] = useState(true);
+  const [loadingOlder, setLoadingOlder] = useState(false);
   const [busy, setBusy] = useState(null); // 'clear' | 'download'
   const [message, setMessage] = useState(null);
   const viewerRef = useRef(null);
+  // Bumped by every fresh load, so a page that lands after the tab changed
+  // (or after a newer load) is dropped rather than shown under the wrong tab.
+  const requestRef = useRef(0);
+  // What the next layout should do with the scroll position: 'end' after a
+  // fresh load, or the distance from the bottom to keep after Load older.
+  const scrollRef = useRef(null);
+  // Levels hidden by the filter (the error logs only), remembered per viewer.
+  const [hidden, setHidden] = useState(readHiddenLevels);
+  const [counts, setCounts] = useState(null); // logReader countLevels result
+  const countsRequestRef = useRef(0);
+
+  // A page ending at `end` (the newest when omitted), at the filter's levels.
+  // A filtered page with nothing in it reads on further back, a few times.
+  // `follow` is where a live follow of it starts: the first (newest) window
+  // read, not the older one the page came from.
+  const fetchPage = useCallback(
+    async (kind, end) => {
+      if (!hasLevelFilters(kind)) {
+        const result = await window.electronAPI.getSiteLogPage(site.id, kind, { end });
+        return result.success ? { ...result, follow: followStart(result.page) } : result;
+      }
+      const levels = visibleLevels(hidden);
+      let result;
+      let follow;
+      for (let tries = 0; tries < FILTERED_PAGE_TRIES; tries++) {
+        result = await window.electronAPI.getSiteLogPage(site.id, kind, { end, levels });
+        if (!result.success) break;
+        if (!follow) follow = followStart(result.page);
+        if (result.page.entries.length || result.page.atStart) break;
+        end = result.page.pageStart;
+      }
+      return result.success ? { ...result, follow } : result;
+    },
+    [site.id, hidden]
+  );
+
+  const loadCounts = useCallback(
+    async (kind) => {
+      const request = ++countsRequestRef.current;
+      setCounts(null);
+      if (!hasLevelFilters(kind)) return;
+      const result = await window.electronAPI.getSiteLogCounts(site.id, kind);
+      if (request === countsRequestRef.current && result.success)
+        setCounts(result.counts);
+    },
+    [site.id]
+  );
+
+  // Counts cover the whole file, independent of the filter: fetched per tab,
+  // and again whenever the file is reloaded (Refresh, Clear).
+  useEffect(() => {
+    loadCounts(tab);
+  }, [tab, loadCounts]);
+
+  function toggleLevel(level) {
+    const next = toggleHiddenLevel(hidden, level);
+    setHidden(next);
+    saveHiddenLevels(next);
+  }
+
+  // Live follow. `followFrom` is where the watcher starts after a fresh
+  // page, and the filter that page was read at (re-set by every load, which
+  // reopens it — a level toggle reloads too); `followRef` the follow rule's
+  // state; `marker` whether New entries shows.
+  const [followFrom, setFollowFrom] = useState(null);
+  const followRef = useRef({ atBottom: true, marker: false });
+  const [marker, setMarker] = useState(false);
+  const viewRef = useRef(null);
+  const instanceRef = useRef(Math.random().toString(36).slice(2));
+
+  // Whole-file search. Results are a separate view laid over the paged one,
+  // which stays mounted underneath, so clearing the search lands the reader
+  // back exactly where they were.
+  const [query, setQuery] = useState('');
+  const [search, setSearch] = useState(null); // searchLog batch + its `kind`
+  const [searching, setSearching] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const searchRequestRef = useRef(0);
+  const resultsRef = useRef(null);
+  const resultsScrollRef = useRef(null);
+  const term = query.trim();
 
   const load = useCallback(
     async (kind) => {
+      const request = ++requestRef.current;
       setLoading(true);
-      const result = await window.electronAPI.getSiteLog(site.id, kind);
+      const result = await fetchPage(kind);
+      if (request !== requestRef.current) return;
       if (result.success) {
-        setLog(result.log);
+        scrollRef.current = 'end';
+        setView(result.page);
+        applyFollow({ type: 'reset' });
+        setFollowFrom({ kind, request, start: result.follow, hidden });
       } else {
-        setLog(null);
+        setView(null);
         setMessage({ type: 'error', text: result.error });
       }
       setLoading(false);
     },
-    [site.id]
+    [fetchPage, hidden]
   );
+
+  function applyFollow(event) {
+    const next = followLive(followRef.current, event);
+    followRef.current = { atBottom: next.atBottom, marker: next.marker };
+    setMarker(next.marker);
+    if (next.scrollToEnd) scrollRef.current = 'end';
+  }
+
+  // While a page is shown, the main process follows its file and pushes new
+  // entries; the watcher is released when the page is replaced (tab change,
+  // Refresh, Clear), and when the view unmounts.
+  useEffect(() => {
+    if (!followFrom) return;
+    const api = window.electronAPI;
+    const { kind, request, start, hidden: pageHidden } = followFrom;
+    const watchId = `${instanceRef.current}:${kind}:${request}`;
+    const unsub = api.on('site-log-follow-update', (raw) => {
+      // A watcher for a page that's since been replaced may still deliver one.
+      if (raw.watchId !== watchId || request !== requestRef.current) return;
+      if (raw.reset) {
+        // Cleared, rotated or a burst: a new file, so new counts too.
+        setView(liveForView(raw, kind, pageHidden).page);
+        applyFollow({ type: 'reset' });
+        loadCounts(kind);
+        return;
+      }
+      // Every level counts; only the filter's levels are shown.
+      setCounts((current) => countLive(current, raw.entries));
+      const data = liveForView(raw, kind, pageHidden);
+      const { added } = mergeLive(viewRef.current || { entries: [] }, data);
+      setView((current) => (current ? mergeLive(current, data).view : current));
+      applyFollow({ type: 'entries', added });
+    });
+    api.followSiteLog(watchId, site.id, kind, start);
+    return () => {
+      unsub();
+      api.unfollowSiteLog(watchId);
+    };
+  }, [followFrom, site.id, loadCounts]);
+
+  function handleViewerScroll() {
+    const el = viewerRef.current;
+    if (!el) return;
+    const atBottom = shouldStickToBottom({
+      scrollTop: el.scrollTop,
+      scrollHeight: el.scrollHeight,
+      clientHeight: el.clientHeight,
+    });
+    if (atBottom !== followRef.current.atBottom)
+      applyFollow({ type: 'scroll', atBottom });
+  }
+
+  function jumpToNewest() {
+    applyFollow({ type: 'jump' });
+    const el = viewerRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+    scrollRef.current = null;
+  }
 
   // Load on mount and whenever the active tab changes.
   useEffect(() => {
@@ -45,11 +251,100 @@ export default function SiteLogs({ site }) {
     load(tab);
   }, [tab, load]);
 
-  // Follow the tail: scroll to the bottom whenever new content lands.
-  useEffect(() => {
+  async function loadOlder() {
+    if (!view || view.atStart || loadingOlder) return;
+    const request = requestRef.current;
+    setLoadingOlder(true);
+    const result = await fetchPage(tab, view.pageStart);
+    setLoadingOlder(false);
+    if (request !== requestRef.current) return;
+    if (result.success) {
+      const el = viewerRef.current;
+      if (el) scrollRef.current = { fromBottom: el.scrollHeight - el.scrollTop };
+      setView((current) => prependOlder(current, result.page));
+    } else {
+      setMessage({ type: 'error', text: result.error });
+    }
+  }
+
+  // A fresh page opens at its newest entry; an older page is added above
+  // without moving what the reader is looking at.
+  useLayoutEffect(() => {
+    viewRef.current = view;
     const el = viewerRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [log]);
+    const intent = scrollRef.current;
+    scrollRef.current = null;
+    if (!el || !intent) return;
+    el.scrollTop =
+      intent === 'end' ? el.scrollHeight : el.scrollHeight - intent.fromBottom;
+  }, [view]);
+
+  const runSearch = useCallback(
+    async (kind, text) => {
+      const request = ++searchRequestRef.current;
+      if (!text) {
+        setSearch(null);
+        setSearching(false);
+        return;
+      }
+      setSearching(true);
+      // A filtered view searches only the levels it shows.
+      const levels = searchLevels(kind, hidden);
+      const result = await window.electronAPI.searchSiteLog(site.id, kind, text, {
+        levels,
+      });
+      if (request !== searchRequestRef.current) return;
+      if (result.success) {
+        resultsScrollRef.current = 'end';
+        setSearch({ ...result.result, kind, levels });
+      } else {
+        setSearch(null);
+        setMessage({ type: 'error', text: result.error });
+      }
+      setSearching(false);
+    },
+    [site.id, hidden]
+  );
+
+  // Search as the term settles, and again on another tab or a level toggle.
+  // Clearing it is immediate.
+  useEffect(() => {
+    const timer = setTimeout(() => runSearch(tab, term), term ? 250 : 0);
+    return () => clearTimeout(timer);
+  }, [tab, term, runSearch]);
+
+  async function loadMoreMatches() {
+    if (!search || search.atStart || loadingMore) return;
+    const request = searchRequestRef.current;
+    setLoadingMore(true);
+    // The batch's own term and levels, not the box's or the filter's: the
+    // cursor belongs to them.
+    const { kind, query: batchQuery, levels, pageStart } = search;
+    const result = await window.electronAPI.searchSiteLog(site.id, kind, batchQuery, {
+      end: pageStart,
+      levels,
+    });
+    setLoadingMore(false);
+    if (request !== searchRequestRef.current) return;
+    if (result.success) {
+      const el = resultsRef.current;
+      if (el) resultsScrollRef.current = { fromBottom: el.scrollHeight - el.scrollTop };
+      setSearch((current) => prependOlder(current, result.result));
+    } else {
+      setMessage({ type: 'error', text: result.error });
+    }
+  }
+
+  // Same rule as the paged view: a fresh batch opens at its newest match,
+  // older matches are added above without moving the reader.
+  useLayoutEffect(() => {
+    const el = resultsRef.current;
+    const intent = resultsScrollRef.current;
+    resultsScrollRef.current = null;
+    if (!el || !intent) return;
+    el.scrollTop =
+      intent === 'end' ? el.scrollHeight : el.scrollHeight - intent.fromBottom;
+  }, [search]);
 
   async function handleClear() {
     setBusy('clear');
@@ -57,7 +352,9 @@ export default function SiteLogs({ site }) {
     const result = await window.electronAPI.clearSiteLog(site.id, tab);
     if (result.success) {
       setMessage({ type: 'success', text: 'Log cleared.' });
+      loadCounts(tab);
       await load(tab);
+      if (term) await runSearch(tab, term);
     } else {
       setMessage({ type: 'error', text: result.error });
     }
@@ -77,11 +374,19 @@ export default function SiteLogs({ site }) {
   }
 
   const isBusy = !!busy;
-  const hasContent = log?.exists && log.content.trim().length > 0;
+  // A batch from another tab is stale until that tab's search lands.
+  const searchResult = search && search.kind === tab ? search : null;
+  const filtered = hasLevelFilters(tab) && hidden.length > 0;
+  // A filtered page can be empty while the file isn't: what's on screen
+  // only proves emptiness for an unfiltered page that reaches the start.
+  const hasContent =
+    !!view?.exists &&
+    view.size > 0 &&
+    (filtered || !view.atStart || view.entries.some((e) => e.text.trim().length > 0));
 
-  const placeholder = !log
+  const placeholder = !view
     ? ''
-    : !log.exists
+    : !view.exists
       ? tab === 'debug'
         ? '-- The log file does not exist yet.\n-- Enable "Debug Log" in Configurations → WP Config to start logging.'
         : '-- The log file does not exist yet.'
@@ -117,7 +422,7 @@ export default function SiteLogs({ site }) {
           <Tooltip label="Download log">
             <button
               onClick={handleDownload}
-              disabled={isBusy || loading || !log?.exists}
+              disabled={isBusy || loading || !view?.exists}
               aria-label="Download log"
               className="btn-secondary text-sm"
             >
@@ -133,6 +438,8 @@ export default function SiteLogs({ site }) {
               onClick={() => {
                 setMessage(null);
                 load(tab);
+                loadCounts(tab);
+                if (term) runSearch(tab, term);
               }}
               disabled={isBusy || loading}
               aria-label="Refresh"
@@ -178,40 +485,221 @@ export default function SiteLogs({ site }) {
         ))}
       </div>
 
+      {/* Search */}
+      <div className="flex items-center gap-3 mb-3">
+        <div className="relative w-72">
+          <Search
+            size={13}
+            className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+          />
+          <input
+            type="text"
+            aria-label="Search the whole log"
+            placeholder="Search the whole log…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => e.key === 'Escape' && setQuery('')}
+            className="form-input !text-xs !pl-7 !pr-7"
+          />
+          {query && (
+            <button
+              type="button"
+              onClick={() => setQuery('')}
+              aria-label="Clear search"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            >
+              <X size={13} />
+            </button>
+          )}
+        </div>
+        {term && (
+          <p className="text-xs text-muted-foreground truncate">
+            {searching ? 'Searching…' : matchSummary(searchResult)}
+          </p>
+        )}
+      </div>
+
+      {hasLevelFilters(tab) && (
+        <LevelFilters
+          hidden={hidden}
+          counts={counts?.counts}
+          onToggle={toggleLevel}
+          disabled={!view?.exists}
+        />
+      )}
+
       {/* Viewer */}
       <div className="relative">
-        {loading && (
-          <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/60 rounded-xl">
-            <Loader size={22} className="animate-spin text-white" />
+        {term && searching && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/60 rounded-lg">
+            <Loader size={22} className="animate-spin text-foreground" />
           </div>
         )}
-        <pre
+        {term && (
+          <div
+            ref={resultsRef}
+            className="absolute inset-0 z-[5] overflow-auto font-mono text-xs leading-relaxed rounded-lg border border-border bg-background text-foreground select-text scrollbar-thin"
+          >
+            {!searchResult ? null : !searchResult.exists ? (
+              <pre className="p-4 whitespace-pre-wrap break-words">
+                -- The log file does not exist yet.
+              </pre>
+            ) : searchResult.entries.length === 0 ? (
+              <pre className="p-4 whitespace-pre-wrap break-words">
+                {`-- No entries match "${term}".`}
+              </pre>
+            ) : (
+              <>
+                {!searchResult.atStart && (
+                  <div className="flex justify-center py-2 border-b border-border">
+                    <Button
+                      variant="ghost"
+                      onClick={loadMoreMatches}
+                      disabled={loadingMore}
+                    >
+                      {loadingMore ? (
+                        <Loader size={13} className="animate-spin" />
+                      ) : (
+                        <ChevronUp size={13} />
+                      )}
+                      Load more matches
+                    </Button>
+                  </div>
+                )}
+                <ol className="divide-y divide-border">
+                  {searchResult.entries.map((entry) => (
+                    <LogEntry key={entry.offset} entry={entry} />
+                  ))}
+                </ol>
+              </>
+            )}
+          </div>
+        )}
+        {loading && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/60 rounded-lg">
+            <Loader size={22} className="animate-spin text-foreground" />
+          </div>
+        )}
+        <div
           ref={viewerRef}
-          className="w-full h-[26rem] overflow-auto font-mono text-xs leading-relaxed p-4 rounded-lg border border-border bg-background text-foreground whitespace-pre-wrap break-words select-text scrollbar-thin"
+          onScroll={handleViewerScroll}
+          className="w-full h-[26rem] overflow-auto font-mono text-xs leading-relaxed rounded-lg border border-border bg-background text-foreground select-text scrollbar-thin"
         >
-          {placeholder ?? log.content}
-        </pre>
+          {placeholder !== null ? (
+            <pre className="p-4 whitespace-pre-wrap break-words">{placeholder}</pre>
+          ) : (
+            <>
+              {!view.atStart && (
+                <div className="flex justify-center py-2 border-b border-border">
+                  <Button variant="ghost" onClick={loadOlder} disabled={loadingOlder}>
+                    {loadingOlder ? (
+                      <Loader size={13} className="animate-spin" />
+                    ) : (
+                      <ChevronUp size={13} />
+                    )}
+                    Load older
+                  </Button>
+                </div>
+              )}
+              {view.entries.length === 0 && (
+                <p className="px-4 py-3 text-muted-foreground">
+                  {view.atStart
+                    ? '-- No entries at the selected levels.'
+                    : '-- No entries at the selected levels yet. Load older reads further back.'}
+                </p>
+              )}
+              <ol className="divide-y divide-border">
+                {view.entries.map((entry) => (
+                  <LogEntry key={entry.offset} entry={entry} />
+                ))}
+              </ol>
+            </>
+          )}
+        </div>
+        {/* Search results lie over the paged view; their own list doesn't follow. */}
+        {marker && !term && (
+          <div className="absolute bottom-3 inset-x-0 z-10 flex justify-center pointer-events-none">
+            <Button
+              variant="floating"
+              onClick={jumpToNewest}
+              className="pointer-events-auto"
+            >
+              <ArrowDown size={13} />
+              New entries
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* Footer info */}
-      {log && (
+      {view && (
         <div className="flex items-center justify-between mt-2">
           <p
             className="text-xs text-muted-foreground font-mono truncate"
-            title={log.path}
+            title={view.path}
           >
-            {log.path}
+            {view.path}
           </p>
           <p className="text-xs text-muted-foreground flex-shrink-0 ml-3">
-            {log.truncated
-              ? 'Showing the last 256 KB'
-              : log.exists
-                ? `${(log.size / 1024).toFixed(1)} KB`
-                : ''}
+            {view.exists ? formatLogSize(view.size) : ''}
             {tab === 'php-error' ? ' • global PHP-FPM log (all sites)' : ''}
           </p>
         </div>
       )}
     </div>
+  );
+}
+
+// One toggle per level, with how many entries of it the whole file holds.
+// Counts are blank until the whole-file count lands.
+function LevelFilters({ hidden, counts, onToggle, disabled }) {
+  return (
+    <div
+      className="flex flex-wrap items-center gap-1.5 mb-3"
+      role="group"
+      aria-label="Levels"
+    >
+      {FILTER_LEVELS.map((level) => {
+        const on = !hidden.includes(level);
+        return (
+          <Button
+            key={level}
+            variant="toggle"
+            aria-pressed={on}
+            disabled={disabled}
+            onClick={() => onToggle(level)}
+          >
+            <span
+              className={`w-2 h-2 rounded-full ${LEVELS[level].dot} ${on ? '' : 'opacity-40'}`}
+            />
+            {LEVELS[level].label}
+            <span className="tabular-nums text-muted-foreground">
+              {counts ? counts[level].toLocaleString() : ''}
+            </span>
+          </Button>
+        );
+      })}
+    </div>
+  );
+}
+
+// One entry: timestamp, level badge (error logs only), then the message with
+// its continuation lines — a stack trace stays under its error.
+function LogEntry({ entry }) {
+  const badge = entry.level ? LEVELS[entry.level] : null;
+  return (
+    <li className="flex items-start gap-3 px-4 py-1.5">
+      <span className="flex-shrink-0 w-48 text-muted-foreground whitespace-nowrap truncate">
+        {entry.time ?? (entry.partial ? '…continued' : '')}
+      </span>
+      {badge && (
+        <span
+          className={`flex-shrink-0 w-[4.75rem] text-center rounded-sm px-1.5 text-[11px] font-sans font-medium ${badge.badge}`}
+        >
+          {badge.label}
+        </span>
+      )}
+      <pre className="min-w-0 flex-1 whitespace-pre-wrap break-words">{entry.text}</pre>
+    </li>
   );
 }

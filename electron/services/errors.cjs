@@ -41,14 +41,6 @@ function humanize(err, fallback) {
     return 'Homebrew is not installed. Install it from https://brew.sh, then try again.';
   }
 
-  if (
-    lower.includes('visudo') ||
-    lower.includes('rejected the syntax') ||
-    lower.includes('sudoers file was not written')
-  ) {
-    return 'Could not set up permissions — the system rejected the change. Please try again.';
-  }
-
   // AppleScript surfaces the real cause as "execution error: <msg>. (-N)".
   const m = raw.match(/execution error:\s*(.+?)\s*\(-?\d+\)/i);
   if (m) return m[1].trim().replace(/\.$/, '') + '.';

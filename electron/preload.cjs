@@ -37,6 +37,8 @@ const VALID_EVENT_CHANNELS = [
   'browser-shortcut',
   'settings-updated',
   'keep-awake-status-update',
+  'site-log-follow-update',
+  'site-upgrade-report',
 ];
 
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -58,6 +60,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   cloneSite: (id, target) => ipcRenderer.invoke('clone-site', id, target),
   changeSiteUrl: (id, newDomain) => ipcRenderer.invoke('change-site-url', id, newDomain),
   getCaStatus: () => ipcRenderer.invoke('get-ca-status'),
+  getPhpTrustStatus: () => ipcRenderer.invoke('get-php-trust-status'),
+  repairPhpTrust: () => ipcRenderer.invoke('repair-php-trust'),
 
   // Blueprints
   getBlueprints: () => ipcRenderer.invoke('get-blueprints'),
@@ -106,9 +110,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('wp-theme-install', id, slug, activate),
 
   // Site logs
-  getSiteLog: (id, kind) => ipcRenderer.invoke('get-site-log', id, kind),
+  getSiteLogPage: (id, kind, opts) =>
+    ipcRenderer.invoke('get-site-log-page', id, kind, opts),
+  searchSiteLog: (id, kind, query, opts) =>
+    ipcRenderer.invoke('search-site-log', id, kind, query, opts),
+  getSiteLogCounts: (id, kind) => ipcRenderer.invoke('get-site-log-counts', id, kind),
   clearSiteLog: (id, kind) => ipcRenderer.invoke('clear-site-log', id, kind),
   saveSiteLog: (id, kind) => ipcRenderer.invoke('save-site-log', id, kind),
+  // Live follow: entries pushed on 'site-log-follow-update' until unfollowed.
+  followSiteLog: (watchId, id, kind, opts) =>
+    ipcRenderer.invoke('site-log-follow', watchId, id, kind, opts),
+  unfollowSiteLog: (watchId) => ipcRenderer.send('site-log-unfollow', watchId),
 
   // Mailpit (email catching)
   getMailpitStatus: () => ipcRenderer.invoke('get-mailpit-status'),
@@ -151,17 +163,24 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Dependencies & Setup
   checkDependencies: () => ipcRenderer.invoke('check-dependencies'),
   setupDnsmasq: () => ipcRenderer.invoke('setup-dnsmasq'),
+  // DNS health (a real .test lookup) and its two fixes. Each resolves with
+  // { success, error?, dnsmasq } — dnsmasq being the fresh status entry.
+  checkDns: () => ipcRenderer.invoke('check-dns'),
+  repairDns: () => ipcRenderer.invoke('repair-dns'),
+  useDifferentDnsPort: () => ipcRenderer.invoke('dns-use-different-port'),
+  // Legacy → rootless DNS migration: { needed, mode }, then one admin prompt.
+  getDnsMigration: () => ipcRenderer.invoke('get-dns-migration'),
+  migrateDns: () => ipcRenderer.invoke('migrate-dns'),
+  // What the launch-time Site upgrade pass couldn't do: { error, failed } or
+  // null. Also pushed on 'site-upgrade-report' when the pass finishes.
+  getSiteUpgradeReport: () => ipcRenderer.invoke('get-site-upgrade-report'),
+  dismissSiteUpgradeReport: () => ipcRenderer.invoke('dismiss-site-upgrade-report'),
 
   // First-run onboarding
   installCoreDeps: () => ipcRenderer.invoke('install-core-deps'),
   openHomebrewInstaller: () => ipcRenderer.invoke('open-homebrew-installer'),
   getOnboardingState: () => ipcRenderer.invoke('get-onboarding-state'),
   setOnboardingComplete: () => ipcRenderer.invoke('set-onboarding-complete'),
-
-  // Sudoers / Permissions
-  checkSudoers: () => ipcRenderer.invoke('check-sudoers'),
-  installSudoers: () => ipcRenderer.invoke('install-sudoers'),
-  uninstallSudoers: () => ipcRenderer.invoke('uninstall-sudoers'),
 
   // Settings
   // Schema-backed settings. `setSettings` takes a patch of dotted keys and
