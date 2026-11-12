@@ -78,6 +78,9 @@ beforeEach(() => {
       return ['127.0.0.1'];
     },
     portInUse: async () => false,
+    sudoersPresent: () => false,
+    rootServicePresent: () => false,
+    readResolver: () => null,
     lookupTimeoutMs: 3000,
     settleDelayMs: 0,
   });

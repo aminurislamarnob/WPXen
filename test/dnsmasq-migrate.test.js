@@ -6,10 +6,10 @@ import dnsmasq from '../electron/services/dnsmasq.cjs';
 import { adminOsascript } from '../electron/services/admin.cjs';
 
 // Migration from the legacy root dnsmasq to rootless (#203). One admin step
-// stops and unregisters the root service, deletes every WPXen-generation
-// sudoers file and rewrites the resolver with the port; only after it
-// succeeds does the app clean Homebrew's shared config, record the mode and
-// start the rootless child. The privileged command is captured, never run;
+// rewrites the resolver with the port and, only once that copy succeeded,
+// stops and unregisters the root service and deletes every WPXen-generation
+// sudoers file; then the app cleans Homebrew's shared config, records the
+// mode and starts the rootless child. The privileged command is captured, never run;
 // the "data folder" and "Homebrew prefix" are temp directories.
 
 let dataDir;
@@ -48,6 +48,9 @@ beforeEach(() => {
     resolverExists: () => true,
     legacySetupPresent: () => true,
     sudoersPresent: () => false,
+    rootServicePresent: () => false,
+    // What /etc/resolver/test holds after a failed step: the old content.
+    readResolver: () => '# WPXen DNS resolver for .test domains\nnameserver 127.0.0.1\n',
     // Never probe the real port (see dnsmasq-health.test.js).
     portInUse: async () => false,
     execSync: (cmd) => {
@@ -79,9 +82,14 @@ const ROOT_STOP =
 const rootStop = () => ROOT_STOP.replaceAll('PREFIX', prefix);
 const SUDOERS_RM =
   "rm -f '/etc/sudoers.d/wpxen' '/etc/sudoers.d/wpdevpilot' '/etc/sudoers.d/wpherd'";
-const resolverWrite = (tmp) =>
-  `mkdir -p /etc/resolver && cp '${tmp}' '/etc/resolver/test' && chmod 644 '/etc/resolver/test'` +
-  ' && dscacheutil -flushcache && killall -HUP mDNSResponder';
+const resolverCopy = (tmp) =>
+  `mkdir -p /etc/resolver && cp '${tmp}' '/etc/resolver/test' && chmod 644 '/etc/resolver/test'`;
+// Everything destructive runs after the copy, best-effort: once the resolver
+// names the high port the step has happened, whatever a cleanup step does.
+const afterCopy = (...steps) =>
+  `(${[...steps, 'dscacheutil -flushcache', 'killall -HUP mDNSResponder', 'true'].join('; ')})`;
+const NEW_RESOLVER =
+  '# WPXen DNS resolver for .test domains\nnameserver 127.0.0.1\nport 53535\n';
 const MIGRATE_REASON =
   'WPXen wants to move .test DNS off its root service and remove the ' +
   'passwordless permission it installed. It will not need your password for ' +
@@ -108,7 +116,7 @@ describe('the notice', () => {
 });
 
 describe('the privileged migration step', () => {
-  it('stops and unregisters the root service, removes every sudoers file and writes the resolver with the port, in one prompt', async () => {
+  it('writes the resolver with the port, then stops and unregisters the root service and removes every sudoers file, in one prompt', async () => {
     let staged = null;
     dnsmasq.__setDeps({
       execSync: (cmd) => {
@@ -124,10 +132,14 @@ describe('the privileged migration step', () => {
     const tmp = path.join(dataDir, 'wpxen-resolver-test');
     expect(privileged[0].cmd).toBe(
       adminOsascript(
-        `${rootStop()} && ${SUDOERS_RM} && ${resolverWrite(tmp)}`,
+        `${resolverCopy(tmp)} && ${afterCopy(rootStop(), SUDOERS_RM)}`,
         MIGRATE_REASON
       )
     );
+    // Nothing destructive runs unless the copy succeeded.
+    const cmd = privileged[0].cmd;
+    expect(cmd.indexOf('cp ')).toBeLessThan(cmd.indexOf('services stop dnsmasq'));
+    expect(cmd.indexOf('cp ')).toBeLessThan(cmd.indexOf('/etc/sudoers.d/'));
     expect(staged).toBe(
       '# WPXen DNS resolver for .test domains\nnameserver 127.0.0.1\nport 53535\n'
     );
@@ -142,7 +154,7 @@ describe('the privileged migration step', () => {
 
     const tmp = path.join(dataDir, 'wpxen-resolver-test');
     expect(calls.filter((c) => c.cmd).map((c) => c.cmd)).toEqual([
-      adminOsascript(`${SUDOERS_RM} && ${resolverWrite(tmp)}`, MIGRATE_REASON),
+      adminOsascript(`${resolverCopy(tmp)} && ${afterCopy(SUDOERS_RM)}`, MIGRATE_REASON),
     ]);
   });
 
@@ -222,6 +234,41 @@ describe('cancel or failure', () => {
       { brew: 'start', n: 'dnsmasq' },
       { brew: 'stop', n: 'dnsmasq' },
     ]);
+  });
+
+  it('a step that failed after the resolver moved is recorded as migrated, never as legacy', async () => {
+    // The copy went through, then the prompt reported an error: the resolver
+    // already names the high port, so legacy DNS is gone either way.
+    dnsmasq.__setDeps({
+      execSync: () => {
+        throw new Error('launchctl: something odd');
+      },
+      readResolver: () => NEW_RESOLVER,
+    });
+
+    await dnsmasq.migrateToRootless();
+
+    expect(store.data['dns.mode']).toBe('rootless');
+    expect(store.data['dns.port']).toBe(53535);
+    expect(calls.filter((c) => c.procman === 'start')).toHaveLength(1);
+  });
+
+  it('keeps the notice, and retries the root service stop, while a cleanup step was left undone', async () => {
+    // Resolver copied, but the root daemon's plist and a sudoers file survived.
+    dnsmasq.__setDeps({ rootServicePresent: () => true, sudoersPresent: () => true });
+    await dnsmasq.migrateToRootless();
+    expect(store.data['dns.mode']).toBe('rootless');
+    expect(dnsmasq.migrationNeeded()).toBe(true);
+
+    // Retried from the notice: the root service is still WPXen's to stop.
+    calls = [];
+    dnsmasq.__setDeps({ rootServicePresent: () => false, sudoersPresent: () => false });
+    await dnsmasq.migrateToRootless();
+    const tmp = path.join(dataDir, 'wpxen-resolver-test');
+    expect(calls.filter((c) => c.cmd).map((c) => c.cmd)).toEqual([
+      adminOsascript(`${resolverCopy(tmp)} && ${afterCopy(rootStop(), SUDOERS_RM)}`, MIGRATE_REASON),
+    ]);
+    expect(dnsmasq.migrationNeeded()).toBe(false);
   });
 
   it('asks for no password when dnsmasq is not installed', async () => {

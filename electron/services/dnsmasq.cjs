@@ -58,13 +58,12 @@ const LEGACY_CONF_COMMENT_NAMES = ['WPXen', 'WPDevPilot', 'WPHerd'];
 const ROOT_SERVICE_LABEL = 'homebrew.mxcl.dnsmasq';
 const ROOT_SERVICE_PLIST = `/Library/LaunchDaemons/${ROOT_SERVICE_LABEL}.plist`;
 
-// Every sudoers file any app generation installed. Migration deletes all of
-// them in its one privileged step — each is a live NOPASSWD grant.
-const ALL_SUDOERS_PATHS = [sudoers.SUDOERS_PATH, ...sudoers.LEGACY_SUDOERS_PATHS];
-
 // Store keys (top-level `dns` object in wpxen-data.json).
 const MODE_KEY = 'dns.mode';
 const PORT_KEY = 'dns.port';
+// Set when a migration moved the resolver but the root service survived its
+// best-effort stop: it is still WPXen's to remove, so the notice stays.
+const ROOT_SERVICE_LEFT_KEY = 'dns.rootServiceLeft';
 const MODES = ['legacy', 'rootless'];
 
 // The reserved name: the ready probe asks our own instance for it directly,
@@ -101,6 +100,15 @@ const deps = {
   settleDelayMs: 1000,
   portInUse: (port) => probePortInUse(port),
   sudoersPresent: () => sudoers.presentPaths().length > 0,
+  rootServicePresent: () => fs.existsSync(ROOT_SERVICE_PLIST),
+  // The resolver file is world-readable; null when missing.
+  readResolver: () => {
+    try {
+      return fs.readFileSync(RESOLVER_FILE, 'utf8');
+    } catch {
+      return null;
+    }
+  },
 };
 
 function bindStore(store) {
@@ -228,23 +236,26 @@ function buildSpec() {
 // DNS cache flush rides in the same step so macOS drops any negative result
 // it cached for *.test, without a second prompt.
 //
-// `before` is shell run as root ahead of the resolver write, in the same
-// prompt (migration's stop-and-cleanup); `reason` is the dialog text.
+// `after` is shell run as root once the resolver copy has succeeded, in the
+// same prompt (migration's stop-and-cleanup). Those steps are best-effort and
+// never fail the prompt: once the copy is in place the new setup is live, and
+// a failing cleanup step must not make the caller record the old one.
+// `reason` is the dialog text.
 function writeResolverFile(
   content,
   {
-    before = [],
+    after = [],
     reason = `WPXen wants to configure macOS so that .${TLD} sites resolve to your ` +
       'local machine.',
   } = {}
 ) {
   const tmpFile = path.join(deps.tmpdir(), RESOLVER_STAGING_NAME);
   fs.writeFileSync(tmpFile, content, 'utf8');
-  const shellCmd = [
-    ...before,
-    `mkdir -p ${RESOLVER_DIR} && cp '${tmpFile}' '${RESOLVER_FILE}' && chmod 644 '${RESOLVER_FILE}'` +
-      ` && dscacheutil -flushcache && killall -HUP mDNSResponder`,
-  ].join(' && ');
+  const copy = `mkdir -p ${RESOLVER_DIR} && cp '${tmpFile}' '${RESOLVER_FILE}' && chmod 644 '${RESOLVER_FILE}'`;
+  const flush = ['dscacheutil -flushcache', 'killall -HUP mDNSResponder'];
+  const shellCmd = after.length
+    ? `${copy} && (${[...after, ...flush, 'true'].join('; ')})`
+    : `${copy} && ${flush.join(' && ')}`;
   try {
     deps.execSync(adminOsascript(shellCmd, reason), { stdio: 'pipe' });
   } finally {
@@ -586,9 +597,14 @@ function cleanSharedConfig() {
 
 // Shown as an in-app notice while true. Legacy installs need it; so does a
 // rootless install that still carries a sudoers grant (Settings no longer
-// has a control that could remove one).
+// has a control that could remove one), or whose migration left the root
+// service behind.
+function rootServiceLeft() {
+  return !!deps.store && deps.store.get(ROOT_SERVICE_LEFT_KEY, false) === true;
+}
+
 function migrationNeeded() {
-  return getMode() === 'legacy' || deps.sudoersPresent();
+  return getMode() === 'legacy' || rootServiceLeft() || deps.sudoersPresent();
 }
 
 // Shell run as root to take the legacy daemon down for good. `brew services
@@ -604,32 +620,43 @@ function buildRootServiceStop() {
   return `(${steps.join(' || ')}) && rm -f '${ROOT_SERVICE_PLIST}'`;
 }
 
-// One click, one prompt: stop and unregister the root dnsmasq (legacy only —
-// on a rootless install any root dnsmasq is the user's own), delete every
-// sudoers file, and rewrite the resolver with the port. Throws on a
-// cancelled prompt or a failed step, and nothing is recorded then.
+// One click, one prompt: rewrite the resolver with the port, and only once
+// that copy succeeded stop and unregister the root dnsmasq (legacy only — on
+// a rootless install any root dnsmasq is the user's own) and delete every
+// sudoers file. Cancelled, or failed before the copy: nothing changed on the
+// machine, nothing is recorded, legacy keeps working, and this throws.
 //
-// After it succeeds: WPXen's lines come out of the shared config, the mode
-// is recorded, then the rootless child starts. The mode is recorded before
-// the start on purpose — the root daemon is gone and the resolver names the
-// high port, so a start failure is a rootless problem to retry, not a reason
-// to fall back to a legacy setup that no longer exists.
+// Once the resolver names the high port the step has happened, whatever the
+// prompt reports after it: WPXen's lines come out of the shared config, the
+// mode is recorded, then the rootless child starts. Cleanup the root shell
+// couldn't finish (the root service, a sudoers file) keeps the notice up for
+// a retry. The mode is recorded before the start on purpose — a start
+// failure is a rootless problem to retry, not a reason to fall back to a
+// legacy setup the resolver no longer points at.
 async function migrateToRootless() {
   const port = getPort();
   // Fails fast (no prompt) when dnsmasq isn't installed.
   buildSpec();
   writeConfig();
 
-  const before = [];
-  if (getMode() === 'legacy') before.push(buildRootServiceStop());
-  before.push(`rm -f ${ALL_SUDOERS_PATHS.map((p) => `'${p}'`).join(' ')}`);
-  writeResolverFile(buildResolverContent({ port }), {
-    before,
-    reason:
-      `WPXen wants to move .${TLD} DNS off its root service and remove the ` +
-      'passwordless permission it installed. It will not need your password for ' +
-      'DNS again.',
-  });
+  const stopRoot = getMode() === 'legacy' || rootServiceLeft();
+  const after = [];
+  if (stopRoot) after.push(buildRootServiceStop());
+  after.push(`rm -f ${sudoers.ALL_SUDOERS_PATHS.map((p) => `'${p}'`).join(' ')}`);
+  const content = buildResolverContent({ port });
+  try {
+    writeResolverFile(content, {
+      after,
+      reason:
+        `WPXen wants to move .${TLD} DNS off its root service and remove the ` +
+        'passwordless permission it installed. It will not need your password for ' +
+        'DNS again.',
+    });
+  } catch (err) {
+    // The copy never happened: the legacy setup is untouched.
+    if (deps.readResolver() !== content) throw err;
+    console.warn('[dnsmasq] migration step reported an error after the resolver moved:', err.message);
+  }
 
   try {
     cleanSharedConfig();
@@ -640,6 +667,7 @@ async function migrateToRootless() {
   if (deps.store) {
     deps.store.set(PORT_KEY, port);
     deps.store.set(MODE_KEY, 'rootless');
+    if (stopRoot) deps.store.set(ROOT_SERVICE_LEFT_KEY, deps.rootServicePresent());
   }
   // Probes the port first: a taken one surfaces as the port-conflict fix.
   await startRootless();
