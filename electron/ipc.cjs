@@ -2229,11 +2229,13 @@ function registerHandlers(win, storeInstance) {
 
   // ─── Site logs ─────────────────────────────────────────────────────────
 
-  ipcMain.handle('get-site-log', async (_, id, kind) => {
+  // A page of parsed entries; `opts.end` (a previous page's `pageStart`)
+  // asks for the page before it, omitted for the newest.
+  ipcMain.handle('get-site-log-page', async (_, id, kind, opts) => {
     try {
       const site = findSite(id);
       if (!site) return { success: false, error: 'Site not found' };
-      return { success: true, log: logs.readLog(site, kind) };
+      return { success: true, page: logs.readLogPage(site, kind, { end: opts?.end }) };
     } catch (err) {
       return { success: false, error: humanize(err) };
     }
