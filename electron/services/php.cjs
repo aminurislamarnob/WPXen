@@ -307,6 +307,20 @@ function stopPhpFpm(version) {
   return deps.procman.stop(fpmSlot(version));
 }
 
+// Stop-then-start of one version's FPM — what a 502 repair does (repair.cjs).
+// Works from any state, including `failed` after a crash loop or `starting`
+// on a crash-restart backoff, and never touches another version.
+async function restartPhpFpm(version) {
+  await stopPhpFpm(version);
+  return startPhpFpm(version);
+}
+
+// Does `version`'s socket accept connections right now — what nginx needs.
+function fpmAccepts(version) {
+  const socket = fpmSocketPath(version);
+  return socket ? socketAccepts(socket) : Promise.resolve(false);
+}
+
 async function stopAllPhpFpm() {
   await Promise.all([
     ...deps.installedVersions().map(stopPhpFpm),
@@ -975,6 +989,8 @@ module.exports = {
   isPhpFpmRunningAsync,
   startPhpFpm,
   stopPhpFpm,
+  restartPhpFpm,
+  fpmAccepts,
   stopAllPhpFpm,
   getRunningFpmVersions,
   getFpmStatus,
@@ -983,6 +999,7 @@ module.exports = {
   neededPhpVersions,
   setSitesProvider,
   fpmSocketPath,
+  FPM_RUN_DIR,
   buildFpmConfig,
   phpKegDir,
   getInstalledPhpVersionsWithDetails,
