@@ -395,9 +395,15 @@ async function lookupOnce() {
 }
 
 function checkHealth({ settle = false } = {}) {
+  if (checkInFlight) {
+    // Join a check already running — unless this one follows a fix and that
+    // one won't settle: it may have started before the fix and would hand
+    // back a stale verdict with no retries. Look again once it is done.
+    if (checkInFlight.settle || !settle) return checkInFlight.promise;
+    return checkInFlight.promise.then(() => checkHealth({ settle }));
+  }
   const attempts = settle ? SETTLE_ATTEMPTS : 1;
-  if (checkInFlight) return checkInFlight;
-  checkInFlight = (async () => {
+  const promise = (async () => {
     if (!hasBeenSetUp()) return setHealth({ state: 'unconfigured' });
     // A port held by another program is the cause; the failing lookup that
     // follows from it is only a symptom, and would hide the right fix.
@@ -411,7 +417,8 @@ function checkHealth({ settle = false } = {}) {
   })().finally(() => {
     checkInFlight = null;
   });
-  return checkInFlight;
+  checkInFlight = { promise, settle };
+  return promise;
 }
 
 // The status poller's re-check, so a resolver file deleted or overwritten
@@ -503,8 +510,10 @@ async function startRootless() {
   }
   writeConfig();
   await deps.procman.start(buildSpec());
-  // The cause is gone; the next lookup check decides health again.
-  if (health.problem === 'port-conflict') health = { ...UNKNOWN_HEALTH };
+  // The cause is gone; the next lookup check decides health again. Marked
+  // "checked long ago" rather than never-checked, so the status poller's
+  // refreshHealth looks again on its next tick.
+  if (health.problem === 'port-conflict') health = { ...UNKNOWN_HEALTH, checkedAt: 0 };
 }
 
 // First free high port above the default, never the one in use now.

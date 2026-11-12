@@ -194,6 +194,45 @@ describe('lookup check', () => {
     expect(lookups).toHaveLength(2);
   });
 
+  it('a check right after a fix still settles when the poller already has a lookup in flight', async () => {
+    rootlessSetUp();
+    // The poller's lookup started before the fix: it answers with the old,
+    // broken state once the fix has been made.
+    let answerStale;
+    const answers = [
+      () => new Promise((resolve) => (answerStale = () => resolve(['10.0.0.9']))),
+      async () => {
+        throw Object.assign(new Error('nope'), { code: 'ENOTFOUND' });
+      },
+      async () => ['127.0.0.1'],
+    ];
+    dnsmasq.__setDeps({ lookup: (name) => (lookups.push(name), answers.shift()()) });
+
+    const polled = dnsmasq.checkHealth();
+    const afterFix = dnsmasq.checkHealth({ settle: true });
+    while (!answerStale) await new Promise((r) => setTimeout(r, 0));
+    answerStale();
+
+    expect((await polled).state).toBe('error');
+    // Its own lookups, retried until the fix shows — not the poller's stale verdict.
+    expect((await afterFix).state).toBe('healthy');
+    expect(lookups).toHaveLength(3);
+  });
+
+  it('is re-checked from the poller once a port conflict clears and dnsmasq starts', async () => {
+    rootlessSetUp();
+    dnsmasq.__setDeps({ portInUse: async () => true });
+    await expect(dnsmasq.start()).rejects.toThrow(/in use/);
+
+    // The other program quit; the user starts DNS from Services.
+    dnsmasq.__setDeps({ portInUse: async () => false });
+    await dnsmasq.start();
+    await dnsmasq.refreshHealth({ maxAgeMs: 30_000 });
+
+    expect(lookups).toHaveLength(1);
+    expect(dnsmasq.getHealth().state).toBe('healthy');
+  });
+
   it('skips the lookup before DNS has been set up', async () => {
     dnsmasq.__setDeps({ resolverExists: () => false });
     const result = await dnsmasq.checkHealth();
