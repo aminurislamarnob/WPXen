@@ -34,7 +34,6 @@ const migration = require('./services/migration.cjs');
 const mailpit = require('./services/mailpit.cjs');
 const procman = require('./services/procman.cjs');
 const cloudflared = require('./services/cloudflared.cjs');
-const sudoers = require('./services/sudoers.cjs');
 const setup = require('./services/setup.cjs');
 const logs = require('./services/logs.cjs');
 const logFollow = require('./services/logFollow.cjs');
@@ -2980,23 +2979,9 @@ function registerHandlers(win, storeInstance) {
     return { success: true };
   });
 
-  // ─── Sudoers (removal only — WPXen no longer installs one) ───────────
-
-  ipcMain.handle('check-sudoers', () => {
-    return { configured: sudoers.isConfigured(), path: sudoers.SUDOERS_PATH };
-  });
-
-  ipcMain.handle('uninstall-sudoers', async () => {
-    try {
-      sudoers.uninstall();
-      return { success: true };
-    } catch (err) {
-      return { success: false, error: humanize(err) };
-    }
-  });
-
   // Legacy → rootless DNS (#203). The notice asks only; the prompt appears
-  // when the user clicks it.
+  // when the user clicks it. It is also the only way a leftover sudoers file
+  // is removed (WPXen no longer installs one).
   ipcMain.handle('get-dns-migration', () => ({
     needed: dnsmasq.migrationNeeded(),
     mode: dnsmasq.getMode(),

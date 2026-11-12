@@ -177,10 +177,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getOnboardingState: () => ipcRenderer.invoke('get-onboarding-state'),
   setOnboardingComplete: () => ipcRenderer.invoke('set-onboarding-complete'),
 
-  // Sudoers — detection and removal only; WPXen no longer installs one.
-  checkSudoers: () => ipcRenderer.invoke('check-sudoers'),
-  uninstallSudoers: () => ipcRenderer.invoke('uninstall-sudoers'),
-
   // Settings
   // Schema-backed settings. `setSettings` takes a patch of dotted keys and
   // resolves with { ok, applied, rejected } — it never throws on a bad value.

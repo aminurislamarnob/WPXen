@@ -2,19 +2,20 @@
 
 // WPXen no longer installs a sudoers rule (spec #201): the grant let any
 // process running as an admin user drive `brew services` as root with no
-// password. What remains is detection and removal — DNS migration deletes
-// every path below in its one privileged step (see dnsmasq.cjs), and
-// `uninstall()` removes them on its own.
+// password. What remains is detection — legacy DNS start/stop still uses a
+// grant while one exists (brew.cjs), and the DNS migration notice stays up
+// while any file below is on disk. DNS migration deletes them all in its one
+// privileged step (see dnsmasq.cjs).
 
-const { execSync } = require('child_process');
 const fs = require('fs');
-const { adminOsascript } = require('./admin.cjs');
 
 const SUDOERS_PATH = '/etc/sudoers.d/wpxen';
 // Pre-rename paths. Their rules are still live sudo grants, so removal clears
 // them in the same privileged step rather than leaving a stray NOPASSWD file
 // behind that the app no longer knows about.
 const LEGACY_SUDOERS_PATHS = ['/etc/sudoers.d/wpdevpilot', '/etc/sudoers.d/wpherd'];
+// Every file any app generation installed, newest first.
+const ALL_SUDOERS_PATHS = [SUDOERS_PATH, ...LEGACY_SUDOERS_PATHS];
 const MARKER = '# WPXen sudoers';
 
 function isConfigured() {
@@ -39,23 +40,13 @@ function isConfigured() {
 
 // Every WPXen-generation sudoers file still on disk.
 function presentPaths() {
-  return [SUDOERS_PATH, ...LEGACY_SUDOERS_PATHS].filter((p) => fs.existsSync(p));
-}
-
-function uninstall() {
-  const present = presentPaths();
-  if (present.length === 0) return;
-  const reason = 'WPXen wants to remove its passwordless permissions.';
-  const targets = present.map((p) => `'${p}'`).join(' ');
-  execSync(adminOsascript(`rm -f ${targets}`, reason), {
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
+  return ALL_SUDOERS_PATHS.filter((p) => fs.existsSync(p));
 }
 
 module.exports = {
   isConfigured,
   presentPaths,
-  uninstall,
   SUDOERS_PATH,
   LEGACY_SUDOERS_PATHS,
+  ALL_SUDOERS_PATHS,
 };
