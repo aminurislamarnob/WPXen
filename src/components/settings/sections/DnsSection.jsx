@@ -1,12 +1,11 @@
 import { useEffect, useState } from 'react';
-import { CheckCircle, Loader, Lock, RefreshCw, Wifi } from 'lucide-react';
+import { CheckCircle, Loader, Lock, RefreshCw } from 'lucide-react';
 import { Button, Card, SectionLabel, SettingsRow } from '../../ui';
 import { useSettingsContext } from '../SettingsLayout';
+import DnsResolverRow from './DnsResolverRow';
 
 export default function DnsSection() {
   const { visible } = useSettingsContext();
-  const [dnsLoading, setDnsLoading] = useState(false);
-  const [dnsMessage, setDnsMessage] = useState(null);
   const [caStatus, setCaStatus] = useState(null);
   const [phpTrust, setPhpTrust] = useState(null);
   const [phpTrustLoading, setPhpTrustLoading] = useState(false);
@@ -37,41 +36,11 @@ export default function DnsSection() {
     }
   }
 
-  async function handleSetupDns() {
-    setDnsLoading(true);
-    setDnsMessage(null);
-    const result = await window.electronAPI.setupDnsmasq();
-    setDnsLoading(false);
-    setDnsMessage(
-      result.success
-        ? {
-            type: 'success',
-            text: '*.test DNS configured! Sites will resolve to localhost.',
-          }
-        : { type: 'error', text: result.error }
-    );
-  }
-
   return (
     <div>
       <SectionLabel>DNS &amp; HTTPS</SectionLabel>
       <Card>
-        <SettingsRow
-          id="dns.resolver"
-          visible={visible}
-          icon={<Wifi size={18} className="text-muted-foreground flex-shrink-0" />}
-          title="*.test DNS Resolution"
-          subtitle="Route *.test domains to localhost via dnsmasq (admin privileges required)"
-        >
-          <button
-            onClick={handleSetupDns}
-            disabled={dnsLoading}
-            className="btn-secondary text-xs"
-          >
-            {dnsLoading ? <Loader size={12} className="animate-spin" /> : null}
-            Set Up…
-          </button>
-        </SettingsRow>
+        <DnsResolverRow visible={visible} />
 
         <SettingsRow
           id="dns.ca"
@@ -139,7 +108,7 @@ export default function DnsSection() {
         </SettingsRow>
       </Card>
 
-      {[dnsMessage, phpTrustMessage].filter(Boolean).map((m, i) => (
+      {[phpTrustMessage].filter(Boolean).map((m, i) => (
         <div
           key={i}
           className={`flex items-start gap-2 px-3 py-2.5 rounded-lg mt-2 text-[13px] ${

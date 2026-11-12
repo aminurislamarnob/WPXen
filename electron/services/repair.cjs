@@ -8,6 +8,7 @@
 // Site's PHP version; nothing else (a command, a path, a version) is taken
 // from the request.
 
+const fs = require('fs');
 const brew = require('./brew.cjs');
 const php = require('./php.cjs');
 const repairServer = require('./repairServer.cjs');
@@ -76,26 +77,120 @@ function siteForHost(sites, host, activeVersion) {
   return phpVersion ? { domain: site.domain, phpVersion } : null;
 }
 
+// PHP-FPM's own words for why it's down, from its process log (procman's
+// capture of its stdout/stderr: a config it can't parse is reported there,
+// before FPM opens its own error_log). Routine NOTICE/DEBUG chatter is
+// dropped; anything else is kept — a loader failure (`dyld: Library not
+// loaded`) has no level at all. The last few lines, or null. Pure.
+const MAX_ERROR_LINES = 8;
+const MAX_ERROR_CHARS = 2000;
+
+function fpmErrorText(text) {
+  const lines = String(text || '')
+    .split(/\r?\n/)
+    .map((l) => l.trimEnd())
+    .filter((l) => l.trim() && !/\b(NOTICE|DEBUG): /.test(l));
+  if (!lines.length) return null;
+  const out = lines.slice(-MAX_ERROR_LINES).join('\n');
+  return out.length > MAX_ERROR_CHARS ? out.slice(-MAX_ERROR_CHARS) : out;
+}
+
+// A log's current end — taken before a repair so only what that repair's
+// restart wrote is reported, never an error from an earlier run.
+function logMark(filePath) {
+  try {
+    return fs.statSync(filePath).size;
+  } catch {
+    return 0;
+  }
+}
+
+// What `filePath` gained since `mark`, at most its last `maxBytes`, starting
+// on a whole line. A log smaller than the mark was rotated (procman renames
+// it aside on spawn) and is read from its start. Sync: status answers sync.
+function readLogSince(filePath, mark, maxBytes = 16 * 1024) {
+  let fd;
+  try {
+    const { size } = fs.statSync(filePath);
+    const from = size < mark ? 0 : mark;
+    const start = Math.max(from, size - maxBytes);
+    const len = size - start;
+    if (len <= 0) return '';
+    fd = fs.openSync(filePath, 'r');
+    const buf = Buffer.alloc(len);
+    fs.readSync(fd, buf, 0, len, start);
+    let text = buf.toString('utf8');
+    if (start > from) text = text.slice(text.indexOf('\n') + 1);
+    return text;
+  } catch {
+    return '';
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
+}
+
+// The steps a repair escalates through, lightest first. Each later one runs
+// only if the Site's PHP-FPM socket still refuses connections after the one
+// before; the first after which it accepts ends the repair. No step touches
+// another PHP version or MySQL.
+const STEPS = ['restart-php', 'reload-nginx', 'restart-nginx'];
+
 // The repair engine. Collaborators are injected so it runs under plain Node:
 //   sites()             → the store's Sites
 //   activePhpVersion()  → the version a Site with none runs on
 //   restartFpm(version) → restart that one version's FPM (throws on failure)
 //   fpmAccepts(version) → does its socket accept connections now
+//   fpmLogMark(version) → the end of that version's PHP-FPM process log
+//   fpmLogSince(version, mark) → what the log gained since the mark
+//   reloadNginx()       → reload nginx's config (throws on failure)
+//   restartNginx()      → restart nginx (throws on failure)
 //
 // status(host) / repair(host) return null for a host that is no known Site;
 // otherwise { state, step, phpVersion, error } where state is idle |
-// repairing | healthy | failed | limited and step names what's running.
+// repairing | healthy | failed | limited and step (one of STEPS) names what's
+// running while repairing.
 function createRepairer({
   sites,
   activePhpVersion,
   restartFpm,
   fpmAccepts,
+  fpmLogMark = () => 0,
+  fpmLogSince = () => '',
+  reloadNginx,
+  restartNginx,
   now = Date.now,
   maxPerSite = MAX_REPAIRS_PER_SITE,
   windowMs = REPAIR_WINDOW_MS,
 }) {
-  const records = new Map(); // domain -> { state, error, history: [ts] }
-  const inflight = new Map(); // version -> { domains: Set, promise }
+  const records = new Map(); // domain -> { state, error, history: [ts], job }
+  const inflight = new Map(); // version -> { domains: Set, step, promise }
+  // nginx is one process for every version: two versions escalating at once
+  // share the reload or restart already running rather than doing it twice.
+  const nginxRuns = new Map(); // step -> promise
+  const nginxSteps = { 'reload-nginx': reloadNginx, 'restart-nginx': restartNginx };
+
+  function nginx(step) {
+    let p = nginxRuns.get(step);
+    if (!p) {
+      p = Promise.resolve()
+        .then(() => nginxSteps[step]())
+        .finally(() => nginxRuns.delete(step));
+      nginxRuns.set(step, p);
+    }
+    return p;
+  }
+
+  const accepts = (version) => Promise.resolve(fpmAccepts(version)).catch(() => false);
+  const message = (err) => (err && err.message) || String(err);
+
+  // PHP-FPM's error text from what this job's restart wrote to its log.
+  function logError(version, job) {
+    try {
+      return fpmErrorText(fpmLogSince(version, job.mark));
+    } catch {
+      return null;
+    }
+  }
 
   const resolve = (host) => siteForHost(sites(), host, activePhpVersion);
 
@@ -110,30 +205,58 @@ function createRepairer({
 
   function view(site) {
     const rec = records.get(site.domain) || { state: 'idle', error: null };
+    const job = rec.state === 'repairing' ? rec.job : null;
     return {
       state: rec.state,
-      step: rec.state === 'repairing' ? 'restart-php' : null,
+      step: job ? job.step : null,
       phpVersion: site.phpVersion,
-      error: rec.error,
+      // While a restart runs, whatever PHP-FPM has complained about so far:
+      // a broken config shows on the page in seconds, not after the
+      // supervisor's ready window runs out.
+      error: job ? logError(site.phpVersion, job) : rec.error,
     };
   }
 
-  // Restarts `version` once and settles every Site that joined meanwhile.
+  // Repairs `version` once, escalating through STEPS, and settles every Site
+  // that joined meanwhile.
   async function run(version, job) {
     let error = null;
     try {
-      await restartFpm(version);
-      if (!(await fpmAccepts(version))) {
-        error = `PHP ${version} restarted but isn't accepting connections.`;
-      }
-    } catch (err) {
-      error = (err && err.message) || String(err);
+      job.mark = fpmLogMark(version);
+    } catch {
+      job.mark = 0;
     }
+    let ok = false;
+    let fpmFailed = false;
+    try {
+      await restartFpm(version);
+      ok = await accepts(version);
+      if (!ok) error = `PHP ${version} restarted but isn't accepting connections.`;
+    } catch (err) {
+      // PHP-FPM couldn't even start (a broken config, a missing binary):
+      // nothing nginx does can fix that, so don't disturb every other Site.
+      error = message(err);
+      fpmFailed = true;
+    }
+    for (const step of STEPS.slice(1)) {
+      if (ok || fpmFailed) break;
+      job.step = step;
+      try {
+        await nginx(step);
+      } catch (err) {
+        error = `${error} ${step === 'reload-nginx' ? 'Reloading' : 'Restarting'} nginx failed: ${message(err)}`;
+        continue;
+      }
+      ok = await accepts(version);
+    }
+    // On failure PHP-FPM's own words beat any summary of ours.
+    if (!ok) error = logError(version, job) || error;
     if (inflight.get(version) === job) inflight.delete(version);
     for (const domain of job.domains) {
       const rec = record(domain);
-      rec.state = error ? 'failed' : 'healthy';
-      rec.error = error;
+      rec.state = ok ? 'healthy' : 'failed';
+      rec.error = ok ? null : error;
+      rec.job = null;
     }
   }
 
@@ -166,10 +289,11 @@ function createRepairer({
     if (job) {
       job.domains.add(site.domain);
     } else {
-      job = { domains: new Set([site.domain]), promise: null };
+      job = { domains: new Set([site.domain]), step: STEPS[0], mark: 0, promise: null };
       inflight.set(version, job);
-      job.promise = run(version, job);
     }
+    rec.job = job;
+    if (!job.promise) job.promise = run(version, job);
     return job.promise.then(() => view(site));
   }
 
@@ -189,6 +313,11 @@ function startRepairService({ sites }) {
     activePhpVersion: () => brew.getActivePhpVersion(),
     restartFpm: (version) => php.restartPhpFpm(version),
     fpmAccepts: (version) => php.fpmAccepts(version),
+    fpmLogMark: (version) => logMark(php.fpmLogPath(version)),
+    fpmLogSince: (version, mark) => readLogSince(php.fpmLogPath(version), mark),
+    // Required here, not at the top: nginx.cjs → errorPages.cjs → this module.
+    reloadNginx: () => require('./nginx.cjs').reloadChecked(),
+    restartNginx: () => require('./nginx.cjs').restart(),
   });
   service = repairServer.listen({ socketPath, repairer }).catch((err) => {
     service = null;
@@ -209,6 +338,10 @@ module.exports = {
   RESERVED_PREFIX,
   MAX_REPAIRS_PER_SITE,
   REPAIR_WINDOW_MS,
+  STEPS,
+  fpmErrorText,
+  logMark,
+  readLogSince,
   repairSocketPath,
   siteForHost,
   createRepairer,

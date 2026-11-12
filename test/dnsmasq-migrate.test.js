@@ -48,6 +48,8 @@ beforeEach(() => {
     resolverExists: () => true,
     legacySetupPresent: () => true,
     sudoersPresent: () => false,
+    // Never probe the real port (see dnsmasq-health.test.js).
+    portInUse: async () => false,
     execSync: (cmd) => {
       calls.push({ cmd });
     },

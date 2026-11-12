@@ -157,6 +157,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Dependencies & Setup
   checkDependencies: () => ipcRenderer.invoke('check-dependencies'),
   setupDnsmasq: () => ipcRenderer.invoke('setup-dnsmasq'),
+  // DNS health (a real .test lookup) and its two fixes. Each resolves with
+  // { success, error?, dnsmasq } — dnsmasq being the fresh status entry.
+  checkDns: () => ipcRenderer.invoke('check-dns'),
+  repairDns: () => ipcRenderer.invoke('repair-dns'),
+  useDifferentDnsPort: () => ipcRenderer.invoke('dns-use-different-port'),
   // Legacy → rootless DNS migration: { needed, mode }, then one admin prompt.
   getDnsMigration: () => ipcRenderer.invoke('get-dns-migration'),
   migrateDns: () => ipcRenderer.invoke('migrate-dns'),
