@@ -85,14 +85,24 @@ Node directly. When adding a feature that crosses the boundary you must touch th
   close listener so the app can actually exit.
 - `ipc.cjs` — all IPC handlers; also owns `getServiceStatus()` and `startStatusPoller()`
   which pushes `service-status-update` events to the renderer on an interval.
-- `services/procman.cjs` — child-process supervisor. nginx, PHP-FPM, MySQL, and
-  Mailpit run as supervised **children of the app** (spawned from spec objects each
-  service module builds), NOT via `brew services` — this keeps them out of macOS
-  "App Background Activity". Crash restart with backoff, graceful-stop escalation,
-  pid-file orphan reconciliation after a hard app crash. Services stop on quit and
-  auto-start on launch (`main.cjs`). Only dnsmasq still uses `brew services` (root
-  LaunchDaemon, port 53). `services/migration.cjs` unregisters the old brew services
-  once per machine.
+- `services/procman.cjs` — child-process supervisor. nginx, PHP-FPM, MySQL,
+  Mailpit and (rootless) dnsmasq run as supervised **children of the app**
+  (spawned from spec objects each service module builds), NOT via `brew services`
+  — this keeps them out of macOS "App Background Activity". Crash restart with
+  backoff, graceful-stop escalation, pid-file orphan reconciliation after a hard
+  app crash. Services stop on quit and auto-start on launch (`main.cjs`).
+  `services/migration.cjs` unregisters the old brew services once per machine, and
+  runs the per-update Site upgrade pass (`SITE_UPGRADES`: one vhost rewrite, one
+  `nginx -t`, one reload; failures reach the Dashboard).
+- **DNS modes** (`dnsmasq.cjs`, store key `dns.mode`). _Rootless_ (fresh
+  installs): dnsmasq as the user on `127.0.0.1:53535`, config in
+  `<userData>/dnsmasq/`, and `/etc/resolver/test` carrying the port is the one
+  privileged write. _Legacy_: the old root LaunchDaemon on port 53, still
+  driven by `brew services`, kept until the user accepts the Dashboard
+  migration notice — one prompt that copies the resolver first and only then
+  stops the root service and deletes the sudoers files. Health is a real
+  system-resolver lookup of `wpxen-probe.test`, not "process running"; fixes
+  are Repair and Use a different port.
 - `store.cjs` — `JsonStore`, a dependency-free JSON persistence layer at
   `userData/wpxen-data.json`. Supports dotted key paths (`get('a.b', default)`).
   Sites and settings live here.
@@ -104,8 +114,17 @@ Node directly. When adding a feature that crosses the boundary you must touch th
     `brew.getBrewPrefix()`. `nginx.cjs` generates per-site vhosts in
     `{prefix}/etc/nginx/servers/<domain>.conf`. Plus `php.cjs`, `mysql.cjs`,
     `dnsmasq.cjs`, `wordpress.cjs` (WP-CLI install flow), `logs.cjs`
-    (which Site log file; parsing into entries and paging back from a byte
-    offset live in the pure `logReader.cjs`), `setup.cjs`.
+    (which Site log file; parsing into entries, paging back from a byte
+    offset, level counts and search live in the pure `logReader.cjs` — the
+    whole-file scans run sliced through its `*Async` drivers so a 200 MB log
+    never stalls the main process; `logFollow.cjs` polls the open log for live
+    entries), `setup.cjs`.
+  - **Self-healing 502** — `errorPages.cjs` writes one shared nginx snippet
+    plus the 502/504 pages into `{prefix}/etc/nginx/wpxen/`, included by every
+    vhost; its `/__wpxen/repair` and `/__wpxen/status` routes answer loopback
+    only and proxy to `repairServer.cjs`, a Unix socket (no TCP listener).
+    `repair.cjs` maps the host to its Site and escalates: restart that PHP-FPM,
+    then reload, then restart nginx, rate-limited per Site.
   - **Site lifecycle** — `siteops.cjs` is the shared engine behind Export,
     Import, Clone and Blueprints; every entry point streams `{step, message}`
     progress like `createWordPressSite` does, and long WP-CLI calls run through
@@ -116,12 +135,17 @@ Node directly. When adding a feature that crosses the boundary you must touch th
     `mail()` in via a `sendmail_path` override written into every installed PHP
     version's conf.d, and wraps Mailpit's REST API for the in-app Mail page),
     `phpmyadmin.cjs` (serves phpmyadmin.test, auto-logs-in with the stored
-    credentials), `mkcert.cjs` (locally-trusted CA for per-site HTTPS),
-    `cloudflared.cjs` (public tunnels).
+    credentials), `mkcert.cjs` (locally-trusted CA; each HTTPS Site's cert
+    covers `domain` and `*.domain`), `trustBundle.cjs` (public CAs + the mkcert
+    root at `{prefix}/etc/wpxen/ca-bundle.pem`, wired into PHP via
+    `zz-wpxen.ini` and into WordPress via the `wpxen-local-trust.php`
+    mu-plugin, so Sites can call each other over HTTPS), `cloudflared.cjs`
+    (public tunnels).
   - **Privilege** — `admin.cjs` builds the osascript "with administrator
     privileges" command; its prompt text is customizable, but the bold app name
     in the macOS dialog is not, without shipping a signed privileged helper.
-    `sudoers.cjs` installs `/etc/sudoers.d/wpxen`.
+    WPXen installs **no** sudoers grant any more: `sudoers.cjs` only detects
+    leftovers (`ALL_SUDOERS_PATHS`), which the DNS migration deletes.
   - **Support** — `settings.cjs` (see below), `agents.cjs` (see below),
     `browser.cjs` / `browserHistory.cjs` / `safeUrl.cjs` (see below),
     `externalTools.cjs` (which app opens a file/folder/terminal — maps each
@@ -373,8 +397,9 @@ in-app switcher.
 - Adding a site is a multi-step pipeline in `wordpress.cjs`/`ipc.cjs` that streams
   progress via the `site-create-progress` channel (download WP → create DB → wp-config →
   install → write nginx vhost → reload nginx).
-- `dnsmasq` setup writes `/etc/resolver/test`, which requires sudo — it triggers a macOS
-  admin password dialog. This is intentionally a one-click action from Settings.
+- DNS setup, Repair, a port change and the legacy migration each write
+  `/etc/resolver/test` in one macOS admin prompt, on a click from Settings or
+  the Dashboard — never at launch.
 - **Homebrew 6 tap trust.** Homebrew 6.0 enables `HOMEBREW_REQUIRE_TAP_TRUST` by
   default and refuses formulae from untrusted taps. EOL PHP versions (8.0, 7.4)
   come from the `shivammathur/php` tap, so `php.cjs` runs `ensurePhpTapTrusted()`
@@ -416,10 +441,17 @@ upgraded through every name. These shims are deliberate — don't tidy them away
   (`LEGACY_PREFIXES`) — multiple copies redeclare the same PHP functions and
   fatal the site, and an old magic-login plugin would keep honouring a stale
   secret.
-- `sudoers.cjs` removes every `LEGACY_SUDOERS_PATHS` entry inside the same
-  privileged step that installs (or removes) `/etc/sudoers.d/wpxen`. They are
+- The DNS migration's privileged step deletes `/etc/sudoers.d/wpxen` and every
+  `LEGACY_SUDOERS_PATHS` entry together (`sudoers.ALL_SUDOERS_PATHS`). They are
   live `NOPASSWD` grants, so leaving one behind is a real permission the app no
-  longer knows about.
+  longer knows about; the notice stays up while any is on disk.
+- `dnsmasq.cjs` removes WPXen's block from Homebrew's shared `dnsmasq.conf`
+  under any generation's comment (`LEGACY_CONF_COMMENT_NAMES`) when migrating.
+
+Names the app now writes outside its bundle, each a constant at the top of its
+module: the nginx folder `wpxen/` with `wpxen-errors.conf`, the reserved
+`/__wpxen/` URL prefix, `wpxen-repair.sock`, `{prefix}/etc/wpxen/ca-bundle.pem`,
+the `wpxen-local-trust.php` mu-plugin, and the `/etc/resolver/test` comment line.
 
 Not carried over, deliberately: the browser partition
 (`persist:wpxen-browser`) and the `wpxen.*` localStorage keys start fresh, and
