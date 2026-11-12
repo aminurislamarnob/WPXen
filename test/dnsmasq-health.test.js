@@ -377,6 +377,20 @@ describe('port conflict', () => {
     expect(dnsmasq.buildResolverContent()).toContain('port 53536\n');
   });
 
+  it('a migration onto a taken port ends in the port-conflict fix, not a crash loop', async () => {
+    store.set('dns.mode', 'legacy');
+    dnsmasq.__setDeps({
+      legacySetupPresent: () => true,
+      sudoersPresent: () => false,
+      getBrewPath: () => `${prefix}/bin/brew`,
+      portInUse: async (port) => port === 53535,
+    });
+    await expect(dnsmasq.migrateToRootless()).rejects.toThrow(/Port 53535 is in use/);
+    expect(store.data['dns.mode']).toBe('rootless');
+    expect(calls.some((c) => c.procman === 'start')).toBe(false);
+    expect(dnsmasq.getStatusFields().action).toBe('change-port');
+  });
+
   it('is rootless-only: the legacy root daemon sits on port 53', async () => {
     store.set('dns.mode', 'legacy');
     dnsmasq.__setDeps({ portInUse: async () => true });

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
 import {
   Loader,
   RefreshCw,
@@ -6,8 +6,10 @@ import {
   Download,
   CheckCircle,
   AlertTriangle,
+  ChevronUp,
 } from 'lucide-react';
-import { Tooltip } from './ui';
+import { Button, Tooltip } from './ui';
+import { prependOlder, formatLogSize } from '../lib/logView';
 
 const LOG_TABS = [
   { id: 'debug', label: 'Debug Log' },
@@ -16,22 +18,42 @@ const LOG_TABS = [
   { id: 'php-error', label: 'PHP Error Log' },
 ];
 
+// The normalised levels logReader.cjs assigns, as badges. The access log has
+// no levels (`level: null`) and gets none.
+const LEVEL_BADGES = {
+  fatal: { label: 'Fatal', className: 'bg-destructive/10 text-destructive' },
+  warning: { label: 'Warning', className: 'bg-status-warning/10 text-status-warning' },
+  notice: { label: 'Notice', className: 'bg-highlight/10 text-highlight' },
+  deprecated: { label: 'Deprecated', className: 'bg-muted text-muted-foreground' },
+  other: { label: 'Other', className: 'bg-muted text-muted-foreground' },
+};
+
 export default function SiteLogs({ site }) {
   const [tab, setTab] = useState('debug');
-  const [log, setLog] = useState(null);
+  const [view, setView] = useState(null); // logReader page, grown by Load older
   const [loading, setLoading] = useState(true);
+  const [loadingOlder, setLoadingOlder] = useState(false);
   const [busy, setBusy] = useState(null); // 'clear' | 'download'
   const [message, setMessage] = useState(null);
   const viewerRef = useRef(null);
+  // Bumped by every fresh load, so a page that lands after the tab changed
+  // (or after a newer load) is dropped rather than shown under the wrong tab.
+  const requestRef = useRef(0);
+  // What the next layout should do with the scroll position: 'end' after a
+  // fresh load, or the distance from the bottom to keep after Load older.
+  const scrollRef = useRef(null);
 
   const load = useCallback(
     async (kind) => {
+      const request = ++requestRef.current;
       setLoading(true);
-      const result = await window.electronAPI.getSiteLog(site.id, kind);
+      const result = await window.electronAPI.getSiteLogPage(site.id, kind);
+      if (request !== requestRef.current) return;
       if (result.success) {
-        setLog(result.log);
+        scrollRef.current = 'end';
+        setView(result.page);
       } else {
-        setLog(null);
+        setView(null);
         setMessage({ type: 'error', text: result.error });
       }
       setLoading(false);
@@ -45,11 +67,34 @@ export default function SiteLogs({ site }) {
     load(tab);
   }, [tab, load]);
 
-  // Follow the tail: scroll to the bottom whenever new content lands.
-  useEffect(() => {
+  async function loadOlder() {
+    if (!view || view.atStart || loadingOlder) return;
+    const request = requestRef.current;
+    setLoadingOlder(true);
+    const result = await window.electronAPI.getSiteLogPage(site.id, tab, {
+      end: view.pageStart,
+    });
+    setLoadingOlder(false);
+    if (request !== requestRef.current) return;
+    if (result.success) {
+      const el = viewerRef.current;
+      if (el) scrollRef.current = { fromBottom: el.scrollHeight - el.scrollTop };
+      setView((current) => prependOlder(current, result.page));
+    } else {
+      setMessage({ type: 'error', text: result.error });
+    }
+  }
+
+  // A fresh page opens at its newest entry; an older page is added above
+  // without moving what the reader is looking at.
+  useLayoutEffect(() => {
     const el = viewerRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [log]);
+    const intent = scrollRef.current;
+    scrollRef.current = null;
+    if (!el || !intent) return;
+    el.scrollTop =
+      intent === 'end' ? el.scrollHeight : el.scrollHeight - intent.fromBottom;
+  }, [view]);
 
   async function handleClear() {
     setBusy('clear');
@@ -77,11 +122,11 @@ export default function SiteLogs({ site }) {
   }
 
   const isBusy = !!busy;
-  const hasContent = log?.exists && log.content.trim().length > 0;
+  const hasContent = !!view?.exists && view.entries.some((e) => e.text.trim().length > 0);
 
-  const placeholder = !log
+  const placeholder = !view
     ? ''
-    : !log.exists
+    : !view.exists
       ? tab === 'debug'
         ? '-- The log file does not exist yet.\n-- Enable "Debug Log" in Configurations → WP Config to start logging.'
         : '-- The log file does not exist yet.'
@@ -117,7 +162,7 @@ export default function SiteLogs({ site }) {
           <Tooltip label="Download log">
             <button
               onClick={handleDownload}
-              disabled={isBusy || loading || !log?.exists}
+              disabled={isBusy || loading || !view?.exists}
               aria-label="Download log"
               className="btn-secondary text-sm"
             >
@@ -181,37 +226,76 @@ export default function SiteLogs({ site }) {
       {/* Viewer */}
       <div className="relative">
         {loading && (
-          <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/60 rounded-xl">
-            <Loader size={22} className="animate-spin text-white" />
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/60 rounded-lg">
+            <Loader size={22} className="animate-spin text-foreground" />
           </div>
         )}
-        <pre
+        <div
           ref={viewerRef}
-          className="w-full h-[26rem] overflow-auto font-mono text-xs leading-relaxed p-4 rounded-lg border border-border bg-background text-foreground whitespace-pre-wrap break-words select-text scrollbar-thin"
+          className="w-full h-[26rem] overflow-auto font-mono text-xs leading-relaxed rounded-lg border border-border bg-background text-foreground select-text scrollbar-thin"
         >
-          {placeholder ?? log.content}
-        </pre>
+          {placeholder !== null ? (
+            <pre className="p-4 whitespace-pre-wrap break-words">{placeholder}</pre>
+          ) : (
+            <>
+              {!view.atStart && (
+                <div className="flex justify-center py-2 border-b border-border">
+                  <Button variant="ghost" onClick={loadOlder} disabled={loadingOlder}>
+                    {loadingOlder ? (
+                      <Loader size={13} className="animate-spin" />
+                    ) : (
+                      <ChevronUp size={13} />
+                    )}
+                    Load older
+                  </Button>
+                </div>
+              )}
+              <ol className="divide-y divide-border">
+                {view.entries.map((entry) => (
+                  <LogEntry key={entry.offset} entry={entry} />
+                ))}
+              </ol>
+            </>
+          )}
+        </div>
       </div>
 
       {/* Footer info */}
-      {log && (
+      {view && (
         <div className="flex items-center justify-between mt-2">
           <p
             className="text-xs text-muted-foreground font-mono truncate"
-            title={log.path}
+            title={view.path}
           >
-            {log.path}
+            {view.path}
           </p>
           <p className="text-xs text-muted-foreground flex-shrink-0 ml-3">
-            {log.truncated
-              ? 'Showing the last 256 KB'
-              : log.exists
-                ? `${(log.size / 1024).toFixed(1)} KB`
-                : ''}
+            {view.exists ? formatLogSize(view.size) : ''}
             {tab === 'php-error' ? ' • global PHP-FPM log (all sites)' : ''}
           </p>
         </div>
       )}
     </div>
+  );
+}
+
+// One entry: timestamp, level badge (error logs only), then the message with
+// its continuation lines — a stack trace stays under its error.
+function LogEntry({ entry }) {
+  const badge = entry.level ? LEVEL_BADGES[entry.level] : null;
+  return (
+    <li className="flex items-start gap-3 px-4 py-1.5">
+      <span className="flex-shrink-0 w-48 text-muted-foreground whitespace-nowrap truncate">
+        {entry.time ?? (entry.partial ? '…continued' : '')}
+      </span>
+      {badge && (
+        <span
+          className={`flex-shrink-0 w-[4.75rem] text-center rounded-sm px-1.5 text-[11px] font-sans font-medium ${badge.className}`}
+        >
+          {badge.label}
+        </span>
+      )}
+      <pre className="min-w-0 flex-1 whitespace-pre-wrap break-words">{entry.text}</pre>
+    </li>
   );
 }

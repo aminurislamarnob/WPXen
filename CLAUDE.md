@@ -103,8 +103,9 @@ Node directly. When adding a feature that crosses the boundary you must touch th
     versions; most other modules derive their config paths from
     `brew.getBrewPrefix()`. `nginx.cjs` generates per-site vhosts in
     `{prefix}/etc/nginx/servers/<domain>.conf`. Plus `php.cjs`, `mysql.cjs`,
-    `dnsmasq.cjs`, `wordpress.cjs` (WP-CLI install flow), `logs.cjs`,
-    `setup.cjs`.
+    `dnsmasq.cjs`, `wordpress.cjs` (WP-CLI install flow), `logs.cjs`
+    (which Site log file; parsing into entries and paging back from a byte
+    offset live in the pure `logReader.cjs`), `setup.cjs`.
   - **Site lifecycle** — `siteops.cjs` is the shared engine behind Export,
     Import, Clone and Blueprints; every entry point streams `{step, message}`
     progress like `createWordPressSite` does, and long WP-CLI calls run through
