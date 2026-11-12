@@ -23,6 +23,10 @@ const PAGE_MAX_BYTES = 1024 * 1024;
 // bounds the scan, so opening a 200 MB file reads O(page), never the file.
 const ENTRY_MAX_BYTES = 256 * 1024;
 const READ_CHUNK = 64 * 1024;
+// How far back one filtered page reads. Hidden entries fill nothing, so
+// without it a level the file barely holds would scan the whole file for a
+// single page; at the read rate here this is well under 100 ms.
+const PAGE_SCAN_BYTES = 16 * 1024 * 1024;
 // How much of a line the header test looks at.
 const HEAD_BYTES = 256;
 
@@ -195,21 +199,32 @@ function toEntry(format, offset, bytes, partial) {
   return { offset, time, level, text: text + rest };
 }
 
-// The page of whole entries ending at `end`, newest last. `pageStart` is
-// where the next older page ends.
-function readEntriesBefore(fd, end, format) {
+// An entry's level without building the entry: only its first line is
+// decoded, which is all `parse` reads a level from. A partial part is
+// 'other', the badge it's shown with.
+function levelOf(format, bytes, partial) {
+  if (!format.levels) return null;
+  if (partial) return 'other';
+  const nl = bytes.indexOf(0x0a);
+  const first = (nl === -1 ? bytes : bytes.subarray(0, nl)).toString('utf8');
+  return format.parse(first.replace(/\r$/, '')).level;
+}
+
+// Walks the file backwards from `end`, one whole entry at a time, calling
+// `visit(from, bytes, partial)` with each entry's start offset and bytes
+// (valid only during the call), newest first, until `visit` returns true or
+// the start of the file is reached. Returns the start of the oldest entry
+// visited — where a page that stopped here ends.
+function walkEntriesBefore(fd, end, format, visit) {
   const win = backwardWindow(fd, end);
-  const newestFirst = [];
-  let bytes = 0;
   let entryEnd = end; // end of the entry being assembled
   let cursor = end; // start of its oldest line found so far
 
   const emit = (from, partial) => {
-    newestFirst.push(toEntry(format, from, win.slice(from, entryEnd), partial));
-    bytes += entryEnd - from;
+    const stop = visit(from, win.slice(from, entryEnd), partial);
     entryEnd = from;
     win.trimTo(entryEnd);
-    return newestFirst.length >= PAGE_MAX_ENTRIES || bytes >= PAGE_MAX_BYTES;
+    return stop;
   };
 
   while (cursor > 0) {
@@ -231,7 +246,35 @@ function readEntriesBefore(fd, end, format) {
     if ((isHeader || lineStart === 0) && emit(lineStart, !isHeader)) break;
   }
 
-  return { entries: newestFirst.reverse(), pageStart: entryEnd };
+  return entryEnd;
+}
+
+// The page of whole entries ending at `end`, newest last. `pageStart` is
+// where the next older page ends. With `levels` (a Set), entries of any
+// other level are skipped, not returned — and since skipping costs a scan
+// but fills nothing, a filtered page also stops after PAGE_SCAN_BYTES.
+function readEntriesBefore(fd, end, format, levels) {
+  const newestFirst = [];
+  let bytes = 0;
+  const pageStart = walkEntriesBefore(fd, end, format, (from, raw, partial) => {
+    if (!levels || levels.has(levelOf(format, raw, partial))) {
+      newestFirst.push(toEntry(format, from, raw, partial));
+      bytes += raw.length;
+    }
+    return (
+      newestFirst.length >= PAGE_MAX_ENTRIES ||
+      bytes >= PAGE_MAX_BYTES ||
+      (levels && end - from >= PAGE_SCAN_BYTES)
+    );
+  });
+  return { entries: newestFirst.reverse(), pageStart };
+}
+
+// A caller's level filter as a Set of known levels, or null for none. Only
+// logs with levels filter; anything that isn't an array means "all".
+function levelFilter(format, levels) {
+  if (!format.levels || !Array.isArray(levels)) return null;
+  return new Set(levels.filter((level) => LEVELS.includes(level)));
 }
 
 // ── Public ─────────────────────────────────────────────────────────────────
@@ -242,7 +285,12 @@ function readEntriesBefore(fd, end, format) {
 // { offset, time, level, text, partial? }, `offset` unique within the file.
 // A missing file is `exists: false`, a normal state (debug.log before
 // WP_DEBUG_LOG is on), not an error.
-function readPage(filePath, kind, { end } = {}) {
+//
+// `levels` (an array of LEVELS) returns only entries of those levels, the
+// paging staying the same: pass the same `levels` with `end: pageStart` for
+// the page before. A filtered page can hold few or no entries yet not be
+// `atStart` — its scan budget ran out — and the next page carries on.
+function readPage(filePath, kind, { end, levels } = {}) {
   const format = formatFor(kind);
   let fd;
   try {
@@ -264,7 +312,12 @@ function readPage(filePath, kind, { end } = {}) {
   try {
     const { size } = fs.fstatSync(fd);
     const until = Number.isInteger(end) ? Math.max(0, Math.min(end, size)) : size;
-    const { entries, pageStart } = readEntriesBefore(fd, until, format);
+    const { entries, pageStart } = readEntriesBefore(
+      fd,
+      until,
+      format,
+      levelFilter(format, levels)
+    );
     return {
       path: filePath,
       exists: true,
@@ -279,10 +332,49 @@ function readPage(filePath, kind, { end } = {}) {
   }
 }
 
+const zeroCounts = () => Object.fromEntries(LEVELS.map((level) => [level, 0]));
+
+// How many entries of each level the whole file holds, split exactly as
+// paging splits it, so a count always equals the rows that level shows.
+// Returns { path, exists, size, counts }; `counts` is null for a log with no
+// levels (the access log). This is the one whole-file scan opening a log
+// costs, so it's its own call and the newest page never waits on it.
+function countLevels(filePath, kind) {
+  const format = formatFor(kind);
+  let fd;
+  try {
+    fd = fs.openSync(filePath, 'r');
+  } catch (err) {
+    if (err.code === 'ENOENT') {
+      return {
+        path: filePath,
+        exists: false,
+        size: 0,
+        counts: format.levels ? zeroCounts() : null,
+      };
+    }
+    throw err;
+  }
+  try {
+    const { size } = fs.fstatSync(fd);
+    if (!format.levels) return { path: filePath, exists: true, size, counts: null };
+    const counts = zeroCounts();
+    walkEntriesBefore(fd, size, format, (_from, raw, partial) => {
+      counts[levelOf(format, raw, partial)]++;
+      return false;
+    });
+    return { path: filePath, exists: true, size, counts };
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
 module.exports = {
   LEVELS,
   PAGE_MAX_ENTRIES,
   PAGE_MAX_BYTES,
   ENTRY_MAX_BYTES,
+  PAGE_SCAN_BYTES,
   readPage,
+  countLevels,
 };

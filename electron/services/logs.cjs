@@ -36,8 +36,14 @@ function resolveLogPath(site, kind) {
 // A page of a Site's log as entries — the newest page, or with `end` (a
 // previous page's `pageStart`) the one before it. The parsing and paging
 // live in the pure logReader.cjs; this only resolves which file.
-function readLogPage(site, kind, { end } = {}) {
-  return logReader.readPage(resolveLogPath(site, kind), kind, { end });
+function readLogPage(site, kind, { end, levels } = {}) {
+  return logReader.readPage(resolveLogPath(site, kind), kind, { end, levels });
+}
+
+// Entries per level across the whole of a Site's log (null for the access
+// log, which has no levels).
+function countLogLevels(site, kind) {
+  return logReader.countLevels(resolveLogPath(site, kind), kind);
 }
 
 // Empties a log file in place (truncate, not delete — nginx/php-fpm keep the
@@ -48,4 +54,4 @@ function clearLog(site, kind) {
   fs.truncateSync(p, 0);
 }
 
-module.exports = { LOG_KINDS, resolveLogPath, readLogPage, clearLog };
+module.exports = { LOG_KINDS, resolveLogPath, readLogPage, countLogLevels, clearLog };
