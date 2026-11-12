@@ -1358,6 +1358,9 @@ function registerHandlers(win, storeInstance) {
       const sites = store.get('sites', []);
       const serversDir = nginx.getServersDir();
       if (!serversDir || !fs.existsSync(serversDir)) return;
+      // The template includes the shared error-page snippet; it must be on
+      // disk before a vhost referencing it is written and reloaded.
+      nginx.ensureErrorPages();
       let changed = false;
       for (const site of sites) {
         try {
