@@ -212,6 +212,24 @@ function reload() {
   }
 }
 
+// The reload a 502 repair escalates to (repair.cjs). Unlike reload(), which
+// is best-effort for callers that just wrote a vhost, a failure here is
+// reported rather than swallowed — the repair moves on to a restart — and
+// nothing is started in its place. SIGHUP with a bad config would silently
+// keep the old one, so the config is tested first.
+function reloadChecked() {
+  ensureErrorPages();
+  const { valid, error } = validateConfig();
+  if (!valid) {
+    throw new Error(`nginx config test failed: ${error}`);
+  }
+  if (procman.isSupervised('nginx')) {
+    procman.signal('nginx', 'SIGHUP');
+    return;
+  }
+  execSync(`${getNginxBinPath()} -s reload`, { stdio: 'pipe' });
+}
+
 function ensureServersDir() {
   const dir = getServersDir();
   if (dir && !fs.existsSync(dir)) {
@@ -430,6 +448,7 @@ module.exports = {
   stop,
   restart,
   reload,
+  reloadChecked,
   generateSiteConfig,
   createSiteConfig,
   removeSiteConfig,

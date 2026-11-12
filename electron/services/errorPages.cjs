@@ -19,6 +19,7 @@ const repair = require('./repair.cjs');
 const ERROR_PAGES_DIR = 'wpxen'; // {prefix}/etc/nginx/<dir>/
 const ERROR_SNIPPET_NAME = 'wpxen-errors.conf';
 const PAGE_502_NAME = '502.html';
+const PAGE_504_NAME = '504.html';
 
 // The page's own repair budget, per tab: automatic repair stops after this
 // many attempts in the window, and the page offers Try again instead. The app
@@ -62,17 +63,23 @@ function buildErrorSnippet({ socketPath, pagesDir }) {
     proxy_read_timeout 10s;
     access_log off;
 }`;
+  const page = (name) => `location = ${RESERVED}${name} {
+    internal;
+    alias ${pagesDir}/${name};
+    default_type text/html;
+    add_header Cache-Control "no-store" always;
+}`;
   return `# Managed by WPXen — rewritten whenever nginx starts; edits are overwritten.
 # Included inside every Site's server {} block.
 
+# 502: PHP-FPM is down — the page repairs it. 504: PHP is slow, not dead —
+# the page only explains, and restarts PHP when asked.
 error_page 502 ${RESERVED}${PAGE_502_NAME};
+error_page 504 ${RESERVED}${PAGE_504_NAME};
 
-location = ${RESERVED}${PAGE_502_NAME} {
-    internal;
-    alias ${pagesDir}/${PAGE_502_NAME};
-    default_type text/html;
-    add_header Cache-Control "no-store" always;
-}
+${page(PAGE_502_NAME)}
+
+${page(PAGE_504_NAME)}
 
 ${route('repair')}
 
@@ -97,23 +104,24 @@ function nextAttempt(history, now, max = 2, windowMs = 60000) {
   return { allowed: true, history: recent.concat(now) };
 }
 
+// What the page says is running, from a status. Pure and self-contained like
+// nextAttempt: its source is embedded verbatim in both pages. The steps are
+// repair.cjs STEPS.
+function stepMessage(st) {
+  const php = st && st.phpVersion ? 'PHP ' + st.phpVersion : 'PHP';
+  const step = st && st.step;
+  if (step === 'reload-nginx') return php + " still isn't answering. Reloading nginx…";
+  if (step === 'restart-nginx') return php + " still isn't answering. Restarting nginx…";
+  return 'Restarting ' + php + '…';
+}
+
 const escapeHtml = (s) =>
   String(s).replace(
     /[&<>"']/g,
     (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]
   );
 
-// The static 502 page. Self-contained (no network but its own Site), styled
-// after the app's tokens, light/dark by the system appearance.
-function build502Page({ logPath }) {
-  return `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="robots" content="noindex">
-<title>PHP isn't responding · WPXen</title>
-<style>
+const PAGE_STYLE = `
   :root { --bg: #ffffff; --fg: #252525; --card: #f7f7f7; --border: #e7e7e7;
     --muted: #828282; --blue: #0a60ff; --danger: #dc2626; --btn: #343434; --btn-fg: #fbfbfb; }
   @media (prefers-color-scheme: dark) {
@@ -137,52 +145,37 @@ function build502Page({ logPath }) {
   pre { margin: 12px 0 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px;
     background: var(--bg); color: var(--danger); font: 12px/1.5 ui-monospace, Menlo, monospace;
     white-space: pre-wrap; word-break: break-word; max-height: 220px; overflow: auto; }
-  .actions { margin-top: 16px; }
+  .actions { margin-top: 16px; display: flex; flex-wrap: wrap; gap: 8px; }
+  .actions .log { flex-basis: 100%; }
   button { height: 32px; padding: 0 12px; border: 0; border-radius: 8px; background: var(--btn);
     color: var(--btn-fg); font: inherit; font-size: 13px; cursor: pointer; }
-  .log { margin-top: 12px; font-size: 12px; }
+  .log { margin-top: 4px; font-size: 12px; }
   code { font: 12px ui-monospace, Menlo, monospace; color: var(--fg); word-break: break-all; }
-</style>
-</head>
-<body>
-<main>
-  <h1>This Site's PHP stopped responding</h1>
-  <p>WPXen restarts it, then reloads this page on its own.</p>
-  <div class="status"><span class="spinner" id="spinner"></span><span id="message">Asking WPXen to restart PHP…</span></div>
-  <pre id="error" hidden></pre>
-  <div class="actions" id="stopped" hidden>
-    <button type="button" id="retry">Try again</button>
-    <p class="log">PHP error log: <code>${escapeHtml(logPath)}</code></p>
-  </div>
-  <noscript><p class="log">Turn on JavaScript to let this page repair PHP, or restart PHP from the WPXen app.</p></noscript>
-</main>
-<script>
-(function () {
-  var KEY = 'wpxen.repairAttempts';
-  var MAX = ${PAGE_MAX_ATTEMPTS};
-  var WINDOW_MS = ${PAGE_WINDOW_MS};
-  var POLL_MS = 1000;
-  var POLL_LIMIT_MS = 30000;
+`;
 
-  ${nextAttempt.toString()}
+// What both pages' scripts share: the status line, the two app routes, and
+// one repair run — POST, then poll status until it settles.
+const CLIENT_CORE = `
+  var POLL_MS = 1000;
+  // A repair that escalates to restarting nginx can take a while: PHP-FPM's
+  // stop and ready windows, then nginx's.
+  var POLL_LIMIT_MS = 60000;
+
+  ${stepMessage.toString()}
 
   var $ = function (id) { return document.getElementById(id); };
   var sleep = function (ms) { return new Promise(function (r) { setTimeout(r, ms); }); };
 
-  function loadHistory() {
-    try { return JSON.parse(sessionStorage.getItem(KEY)); } catch (e) { return []; }
-  }
-  function saveHistory(h) {
-    try { sessionStorage.setItem(KEY, JSON.stringify(h)); } catch (e) {}
-  }
-
-  function show(text) {
+  function show(text, error) {
+    $('status').hidden = false;
     $('message').textContent = text;
     $('spinner').hidden = false;
     $('stopped').hidden = true;
-    $('error').hidden = true;
+    $('error').textContent = error || '';
+    $('error').hidden = !error;
   }
   function stop(text, error) {
+    $('status').hidden = false;
     $('message').textContent = text;
     $('spinner').hidden = true;
     $('stopped').hidden = false;
@@ -200,6 +193,82 @@ function build502Page({ logPath }) {
     return body;
   }
 
+  function phpLabel(st) {
+    return st && st.phpVersion ? 'PHP ' + st.phpVersion : 'PHP';
+  }
+
+  // Asks for a repair and follows it, showing each step and whatever PHP-FPM
+  // has reported so far. A failed poll is retried until the deadline:
+  // restarting nginx drops the very connection the poll travels through.
+  async function repairAndWait() {
+    var st = await call('POST', '/__wpxen/repair');
+    var deadline = Date.now() + POLL_LIMIT_MS;
+    while (st.state === 'repairing' && Date.now() < deadline) {
+      show(stepMessage(st), st.error);
+      await sleep(POLL_MS);
+      try {
+        st = await call('GET', '/__wpxen/status');
+      } catch (e) {
+        if (Date.now() >= deadline) throw e;
+      }
+    }
+    return st;
+  }
+`;
+
+function pageHtml({ title, body, script }) {
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>${title} · WPXen</title>
+<style>${PAGE_STYLE}</style>
+</head>
+<body>
+<main>
+${body}
+</main>
+<script>
+(function () {
+${CLIENT_CORE}
+${script}
+})();
+</script>
+</body>
+</html>
+`;
+}
+
+// The static 502 page. Self-contained (no network but its own Site), styled
+// after the app's tokens, light/dark by the system appearance.
+function build502Page({ logPath }) {
+  return pageHtml({
+    title: "PHP isn't responding",
+    body: `  <h1>This Site's PHP stopped responding</h1>
+  <p>WPXen restarts it, then reloads this page on its own.</p>
+  <div class="status" id="status"><span class="spinner" id="spinner"></span><span id="message">Asking WPXen to restart PHP…</span></div>
+  <pre id="error" hidden></pre>
+  <div class="actions" id="stopped" hidden>
+    <button type="button" id="retry">Try again</button>
+    <p class="log">PHP error log: <code>${escapeHtml(logPath)}</code></p>
+  </div>
+  <noscript><p class="log">Turn on JavaScript to let this page repair PHP, or restart PHP from the WPXen app.</p></noscript>`,
+    script: `
+  var KEY = 'wpxen.repairAttempts';
+  var MAX = ${PAGE_MAX_ATTEMPTS};
+  var WINDOW_MS = ${PAGE_WINDOW_MS};
+
+  ${nextAttempt.toString()}
+
+  function loadHistory() {
+    try { return JSON.parse(sessionStorage.getItem(KEY)); } catch (e) { return []; }
+  }
+  function saveHistory(h) {
+    try { sessionStorage.setItem(KEY, JSON.stringify(h)); } catch (e) {}
+  }
+
   // The Site is back once the original URL stops answering 502.
   async function siteUp() {
     try {
@@ -210,21 +279,11 @@ function build502Page({ logPath }) {
     }
   }
 
-  function phpLabel(st) {
-    return st && st.phpVersion ? 'PHP ' + st.phpVersion : 'PHP';
-  }
-
   async function attempt() {
     show('Asking WPXen to restart PHP…');
     var st;
     try {
-      st = await call('POST', '/__wpxen/repair');
-      var deadline = Date.now() + POLL_LIMIT_MS;
-      while (st.state === 'repairing' && Date.now() < deadline) {
-        show('Restarting ' + phpLabel(st) + '…');
-        await sleep(POLL_MS);
-        st = await call('GET', '/__wpxen/status');
-      }
+      st = await repairAndWait();
     } catch (e) {
       return auto(e.message);
     }
@@ -253,26 +312,70 @@ function build502Page({ logPath }) {
   $('retry').addEventListener('click', function () { attempt(); });
 
   auto(null);
-})();
-</script>
-</body>
-</html>
-`;
+`,
+  });
 }
 
-// Writes the snippet and the page, rewriting only what changed. Must run
+// The static 504 page. A timeout usually means PHP is busy, not dead — a long
+// import, a slow query, a paused debugger — so this page never repairs on its
+// own: restarting would kill the very request that's still working. Restart
+// PHP is the user's call, through the same repair route as the 502 page, and
+// the slow request is never re-run behind their back (Reload is a button).
+function build504Page({ logPath }) {
+  return pageHtml({
+    title: 'Request timed out',
+    body: `  <h1>This request took too long</h1>
+  <p>PHP didn't answer within nginx's time limit. A long import, a slow query or a paused debugger usually causes this, so WPXen leaves PHP running. If PHP is stuck, restart it.</p>
+  <div class="status" id="status" hidden><span class="spinner" id="spinner"></span><span id="message"></span></div>
+  <pre id="error" hidden></pre>
+  <div class="actions" id="stopped">
+    <button type="button" id="restart">Restart PHP</button>
+    <button type="button" id="reload" hidden>Reload</button>
+    <p class="log">PHP error log: <code>${escapeHtml(logPath)}</code></p>
+  </div>
+  <noscript><p class="log">Turn on JavaScript to restart PHP from this page, or restart PHP from the WPXen app.</p></noscript>`,
+    script: `
+  async function restart() {
+    show('Asking WPXen to restart PHP…');
+    var st;
+    try {
+      st = await repairAndWait();
+    } catch (e) {
+      return stop("Couldn't restart PHP.", e.message);
+    }
+    if (st.state === 'healthy') {
+      stop(phpLabel(st) + ' restarted. Reload to try the request again.');
+      $('reload').hidden = false;
+      return;
+    }
+    if (st.state === 'limited') {
+      return stop('WPXen stopped restarting ' + phpLabel(st) + ' for now.', st.error);
+    }
+    if (st.state === 'repairing') return stop(phpLabel(st) + ' is taking too long to restart.');
+    stop('Restarting ' + phpLabel(st) + ' didn\\'t help.', st.error);
+  }
+
+  $('restart').addEventListener('click', function () { restart(); });
+  $('reload').addEventListener('click', function () { location.reload(); });
+`,
+  });
+}
+
+// Writes the snippet and the pages, rewriting only what changed. Must run
 // before any vhost that includes the snippet is written or nginx is tested —
 // an include of a missing file fails `nginx -t`. Returns the snippet path.
 function ensureErrorPages({ confDir, prefix }) {
   const dir = errorPagesDir(confDir);
   if (!dir || !prefix) throw new Error('nginx config folder not found');
   fs.mkdirSync(dir, { recursive: true });
+  const logPath = `${prefix}/var/log/php-fpm.log`;
   const files = {
     [ERROR_SNIPPET_NAME]: buildErrorSnippet({
       socketPath: repair.repairSocketPath(prefix),
       pagesDir: dir,
     }),
-    [PAGE_502_NAME]: build502Page({ logPath: `${prefix}/var/log/php-fpm.log` }),
+    [PAGE_502_NAME]: build502Page({ logPath }),
+    [PAGE_504_NAME]: build504Page({ logPath }),
   };
   for (const [name, content] of Object.entries(files)) {
     const p = path.join(dir, name);
@@ -289,9 +392,12 @@ module.exports = {
   ERROR_PAGES_DIR,
   ERROR_SNIPPET_NAME,
   PAGE_502_NAME,
+  PAGE_504_NAME,
   snippetPath,
   buildErrorSnippet,
   build502Page,
+  build504Page,
   nextAttempt,
+  stepMessage,
   ensureErrorPages,
 };
