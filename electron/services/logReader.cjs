@@ -279,10 +279,99 @@ function readPage(filePath, kind, { end } = {}) {
   }
 }
 
+// ── Search ─────────────────────────────────────────────────────────────────
+// A batch of matches is capped like a page, so a term that matches thousands
+// of entries comes back quickly and stays small for IPC.
+const SEARCH_MAX_MATCHES = 200;
+const SEARCH_MAX_QUERY = 1000;
+
+function entryMatches(entry, needle, levels) {
+  if (levels && entry.level !== null && !levels.has(entry.level)) return false;
+  return (
+    entry.text.toLowerCase().includes(needle) ||
+    (entry.time !== null && entry.time.toLowerCase().includes(needle))
+  );
+}
+
+// Searches the whole file, case-insensitively, newest match first — walking
+// back from byte offset `end` (the end of the file by default) page by page,
+// so entries are split exactly as readPage splits them and a match is always
+// a whole entry. `levels`, when given, keeps only entries of those levels on
+// the logs that have levels (the access log has none, so it never applies).
+//
+// Returns the page shape — { path, exists, size, query, entries, pageStart,
+// end, atStart } — with `entries` the matches oldest-first. Once the batch is
+// full the walk stops, and `pageStart` is the cursor: pass it back as `end`
+// for the next, older batch. Every batch ends on an entry boundary, so
+// batches never overlap. `atStart` means the file has no more matches.
+function searchLog(filePath, kind, { query, end, levels } = {}) {
+  const format = formatFor(kind);
+  const needle = String(query ?? '')
+    .trim()
+    .toLowerCase();
+  if (!needle) throw new Error('Search term is empty.');
+  if (needle.length > SEARCH_MAX_QUERY) throw new Error('Search term is too long.');
+  const levelSet = Array.isArray(levels) && format.levels ? new Set(levels) : null;
+
+  let fd;
+  try {
+    fd = fs.openSync(filePath, 'r');
+  } catch (err) {
+    if (err.code === 'ENOENT') {
+      return {
+        path: filePath,
+        exists: false,
+        size: 0,
+        query: needle,
+        entries: [],
+        pageStart: 0,
+        end: 0,
+        atStart: true,
+      };
+    }
+    throw err;
+  }
+  try {
+    const { size } = fs.fstatSync(fd);
+    const until = Number.isInteger(end) ? Math.max(0, Math.min(end, size)) : size;
+    const newestFirst = [];
+    let bytes = 0;
+    let cursor = until;
+    scan: while (cursor > 0) {
+      const page = readEntriesBefore(fd, cursor, format);
+      for (let i = page.entries.length - 1; i >= 0; i--) {
+        const entry = page.entries[i];
+        cursor = entry.offset;
+        if (!entryMatches(entry, needle, levelSet)) continue;
+        newestFirst.push(entry);
+        bytes += Buffer.byteLength(entry.text);
+        if (newestFirst.length >= SEARCH_MAX_MATCHES || bytes >= PAGE_MAX_BYTES) {
+          break scan;
+        }
+      }
+      cursor = page.pageStart;
+    }
+    return {
+      path: filePath,
+      exists: true,
+      size,
+      query: needle,
+      entries: newestFirst.reverse(),
+      pageStart: cursor,
+      end: until,
+      atStart: cursor === 0,
+    };
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
 module.exports = {
   LEVELS,
   PAGE_MAX_ENTRIES,
   PAGE_MAX_BYTES,
   ENTRY_MAX_BYTES,
+  SEARCH_MAX_MATCHES,
   readPage,
+  searchLog,
 };

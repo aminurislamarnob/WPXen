@@ -21,3 +21,14 @@ export function formatLogSize(bytes) {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
+
+// The line above search results. A batch (logReader's searchLog) has the
+// page shape, so Load more matches grows it with prependOlder like Load
+// older does; `atStart` false means older matches may remain.
+export function matchSummary(result) {
+  if (!result) return '';
+  const n = result.entries.length;
+  if (n === 0) return 'No matches';
+  const count = `${n} ${n === 1 ? 'match' : 'matches'}`;
+  return result.atStart ? count : `${count} so far — more in older entries`;
+}

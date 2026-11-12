@@ -2305,6 +2305,25 @@ function registerHandlers(win, storeInstance) {
     }
   });
 
+  // A capped batch of whole entries matching `query` anywhere in the file,
+  // newest first; `opts.end` (a previous batch's `pageStart`) continues with
+  // the older matches, `opts.levels` keeps only those levels.
+  ipcMain.handle('search-site-log', async (_, id, kind, query, opts) => {
+    try {
+      const site = findSite(id);
+      if (!site) return { success: false, error: 'Site not found' };
+      return {
+        success: true,
+        result: logs.searchLog(site, kind, query, {
+          end: opts?.end,
+          levels: opts?.levels,
+        }),
+      };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
   ipcMain.handle('clear-site-log', async (_, id, kind) => {
     try {
       const site = findSite(id);
