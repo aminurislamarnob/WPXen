@@ -242,8 +242,16 @@ app.whenReady().then(() => {
     try {
       if (dnsmasq.shouldAutoStart()) await dnsmasq.start();
     } catch (err) {
+      // A port held by another program lands here; dnsmasq records it as an
+      // error with a "Use a different port" fix instead of crash-looping.
       console.error('auto-start dnsmasq:', err.message);
     }
+    // DNS health is a real lookup of a .test name, in either mode — "running"
+    // alone can hide a missing or overwritten resolver file. The status
+    // poller re-checks from here on.
+    try {
+      await dnsmasq.checkHealth();
+    } catch {}
 
     // One-time: vhosts from the single-FPM era point PHP at 127.0.0.1:9000,
     // which nothing serves any more — repoint each at its version's socket.

@@ -139,6 +139,9 @@ function getServiceStatus() {
   return serviceStatusCache;
 }
 
+// How stale the last DNS lookup may get before the poller repeats it.
+const DNS_RECHECK_MS = 30_000;
+
 // Recomputes the snapshot using non-blocking async probes run in parallel, so
 // the main-thread event loop stays free (no macOS spinning-wait cursor).
 async function computeServiceStatus() {
@@ -158,14 +161,9 @@ async function computeServiceStatus() {
     mailpit.isRunningAsync(),
   ]);
 
-  // Supervisor view of each converted service: whether WPXen owns the
-  // process, its lifecycle state, and any crash-loop error for the UI. The
-  // probe-based `running` booleans above stay the source of truth (they also
-  // see instances we didn't spawn).
-  const procInfo = (name) => {
-    const s = procman.status(name);
-    return { managed: procman.isSupervised(name), state: s.state, error: s.error };
-  };
+  // Re-run the DNS lookup now and then without holding up this snapshot; its
+  // result lands in the next one.
+  dnsmasq.refreshHealth({ maxAgeMs: DNS_RECHECK_MS }).catch(() => {});
 
   serviceStatusCache = {
     nginx: { running: nginxRunning, name: 'nginx', ...procInfo('nginx') },
@@ -180,13 +178,10 @@ async function computeServiceStatus() {
     mysql: { running: mysqlRunning, name: 'MySQL', ...procInfo('mysql') },
     // Rootless dnsmasq is a procman child like the others; legacy is the root
     // brew service, so its supervisor fields just read 'stopped'. `mode`
-    // lets the UI tell the two apart.
-    dnsmasq: {
-      running: dnsmasqRunning,
-      name: 'dnsmasq',
-      mode: dnsmasq.getMode(),
-      ...procInfo('dnsmasq'),
-    },
+    // lets the UI tell the two apart. `health` is the last real lookup of a
+    // .test name and `action` the fix it calls for (repair | change-port):
+    // a running process alone doesn't mean *.test resolves.
+    dnsmasq: dnsmasqStatus(dnsmasqRunning, procInfo('dnsmasq')),
     mailpit: {
       running: mailpitRunning,
       name: 'Mailpit',
@@ -195,6 +190,32 @@ async function computeServiceStatus() {
     },
   };
   return serviceStatusCache;
+}
+
+// Supervisor view of each converted service: whether WPXen owns the process,
+// its lifecycle state, and any crash-loop error for the UI. The probe-based
+// `running` booleans stay the source of truth (they also see instances we
+// didn't spawn).
+function procInfo(name) {
+  const s = procman.status(name);
+  return { managed: procman.isSupervised(name), state: s.state, error: s.error };
+}
+
+// The dnsmasq entry of the status snapshot. A crash-loop error from procman
+// outranks the lookup's message; either way the UI shows one error.
+function dnsmasqStatus(running, proc) {
+  const mode = dnsmasq.getMode();
+  const { health, action, error } = dnsmasq.getStatusFields();
+  return {
+    running,
+    name: 'dnsmasq',
+    mode,
+    port: mode === 'rootless' ? dnsmasq.getPort() : 53,
+    ...proc,
+    health,
+    action,
+    error: proc.error || error,
+  };
 }
 
 // Coalesces concurrent refreshes (poller + on-demand IPC) into one in-flight
@@ -2861,16 +2882,39 @@ function registerHandlers(win, storeInstance) {
     }
   });
 
-  ipcMain.handle('setup-dnsmasq', async () => {
+  // DNS handlers answer with the dnsmasq status entry, so the caller can show
+  // the fresh health (and the right fix on failure) without another round trip.
+  const dnsResult = async (run) => {
     try {
-      // One admin prompt (the resolver file); then start the mode's dnsmasq.
+      await run();
+      return { success: true, dnsmasq: await dnsmasqSnapshot() };
+    } catch (err) {
+      return { success: false, error: humanize(err), dnsmasq: await dnsmasqSnapshot() };
+    }
+  };
+  const dnsmasqSnapshot = async () =>
+    dnsmasqStatus(await dnsmasq.isRunningAsync(), procInfo('dnsmasq'));
+
+  ipcMain.handle('setup-dnsmasq', () =>
+    dnsResult(async () => {
+      // One admin prompt (the resolver file); then start the mode's dnsmasq
+      // and look a .test name up to prove it works.
       dnsmasq.configureDnsmasq();
       await dnsmasq.start();
-      return { success: true };
-    } catch (err) {
-      return { success: false, error: humanize(err) };
-    }
-  });
+      await dnsmasq.checkHealth({ settle: true });
+    })
+  );
+
+  // Fresh lookup on demand (Settings → DNS opening).
+  ipcMain.handle('check-dns', () => dnsResult(() => dnsmasq.checkHealth()));
+
+  // Repair: config file, resolver file (one prompt), restart, look again.
+  ipcMain.handle('repair-dns', () => dnsResult(() => dnsmasq.repair()));
+
+  // Port taken by another program: move to a free high port (one prompt).
+  ipcMain.handle('dns-use-different-port', () =>
+    dnsResult(() => dnsmasq.useDifferentPort())
+  );
 
   // ─── Settings ────────────────────────────────────────────────────────
 

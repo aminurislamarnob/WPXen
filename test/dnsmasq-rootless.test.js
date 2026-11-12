@@ -40,6 +40,9 @@ beforeEach(() => {
     binExists: () => true,
     resolverExists: () => false,
     legacySetupPresent: () => false,
+    // Never probe or resolve for real (see dnsmasq-health.test.js).
+    portInUse: async () => false,
+    lookup: async () => ['127.0.0.1'],
     execSync: (cmd) => {
       calls.push({ cmd });
     },
@@ -214,7 +217,8 @@ describe('start / stop by mode', () => {
 
     await dnsmasq.stop();
     await dnsmasq.restart();
-    expect(calls.slice(1).map((c) => c.procman)).toEqual(['stop', 'restart']);
+    // Restart is stop + start so the port can be probed in between (#204).
+    expect(calls.slice(1).map((c) => c.procman)).toEqual(['stop', 'stop', 'start']);
   });
 
   it('keeps the root brew service in legacy mode, exactly as before', async () => {

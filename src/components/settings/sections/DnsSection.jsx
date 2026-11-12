@@ -6,18 +6,16 @@ import {
   ShieldAlert,
   ShieldCheck,
   ShieldOff,
-  Wifi,
 } from 'lucide-react';
 import { Card, SectionLabel, SettingsRow } from '../../ui';
 import { useSettingsContext } from '../SettingsLayout';
+import DnsResolverRow from './DnsResolverRow';
 
 export default function DnsSection() {
   const { visible } = useSettingsContext();
   const [sudoers, setSudoers] = useState(null);
   const [sudoersLoading, setSudoersLoading] = useState(false);
   const [sudoersMessage, setSudoersMessage] = useState(null);
-  const [dnsLoading, setDnsLoading] = useState(false);
-  const [dnsMessage, setDnsMessage] = useState(null);
   const [caStatus, setCaStatus] = useState(null);
 
   useEffect(() => {
@@ -61,21 +59,6 @@ export default function DnsSection() {
       setSudoersMessage({ type: 'error', text: result.error });
     }
     setSudoersLoading(false);
-  }
-
-  async function handleSetupDns() {
-    setDnsLoading(true);
-    setDnsMessage(null);
-    const result = await window.electronAPI.setupDnsmasq();
-    setDnsLoading(false);
-    setDnsMessage(
-      result.success
-        ? {
-            type: 'success',
-            text: '*.test DNS configured! Sites will resolve to localhost.',
-          }
-        : { type: 'error', text: result.error }
-    );
   }
 
   return (
@@ -128,22 +111,7 @@ export default function DnsSection() {
           )}
         </SettingsRow>
 
-        <SettingsRow
-          id="dns.resolver"
-          visible={visible}
-          icon={<Wifi size={18} className="text-muted-foreground flex-shrink-0" />}
-          title="*.test DNS Resolution"
-          subtitle="Route *.test domains to localhost via dnsmasq (admin privileges required)"
-        >
-          <button
-            onClick={handleSetupDns}
-            disabled={dnsLoading}
-            className="btn-secondary text-xs"
-          >
-            {dnsLoading ? <Loader size={12} className="animate-spin" /> : null}
-            Set Up…
-          </button>
-        </SettingsRow>
+        <DnsResolverRow visible={visible} />
 
         <SettingsRow
           id="dns.ca"
@@ -181,7 +149,7 @@ export default function DnsSection() {
         dnsmasq — the other services run inside WPXen and need no privileges.
       </p>
 
-      {[sudoersMessage, dnsMessage].filter(Boolean).map((m, i) => (
+      {[sudoersMessage].filter(Boolean).map((m, i) => (
         <div
           key={i}
           className={`flex items-start gap-2 px-3 py-2.5 rounded-lg mt-2 text-[13px] ${

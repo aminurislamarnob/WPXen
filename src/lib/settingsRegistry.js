@@ -661,6 +661,9 @@ export const SETTINGS_ITEMS = [
       'localhost',
       'hosts',
       'tld',
+      'repair',
+      'port',
+      'health',
     ],
   },
   {
