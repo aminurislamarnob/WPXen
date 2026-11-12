@@ -266,7 +266,10 @@ describe('cancel or failure', () => {
     await dnsmasq.migrateToRootless();
     const tmp = path.join(dataDir, 'wpxen-resolver-test');
     expect(calls.filter((c) => c.cmd).map((c) => c.cmd)).toEqual([
-      adminOsascript(`${resolverCopy(tmp)} && ${afterCopy(rootStop(), SUDOERS_RM)}`, MIGRATE_REASON),
+      adminOsascript(
+        `${resolverCopy(tmp)} && ${afterCopy(rootStop(), SUDOERS_RM)}`,
+        MIGRATE_REASON
+      ),
     ]);
     expect(dnsmasq.migrationNeeded()).toBe(false);
   });

@@ -88,7 +88,9 @@ describe('snippet', () => {
 
   it('answers the repair and status routes only to this machine, never the LAN', () => {
     for (const route of ['repair', 'status']) {
-      const block = snippet.match(new RegExp(`location = /__wpxen/${route} \\{[^}]*\\}`))[0];
+      const block = snippet.match(
+        new RegExp(`location = /__wpxen/${route} \\{[^}]*\\}`)
+      )[0];
       expect(block).toMatch(/allow 127\.0\.0\.1;\s*allow ::1;\s*deny all;/);
       // The access check comes before the proxy, so a denied request never reaches the app.
       expect(block.indexOf('deny all;')).toBeLessThan(block.indexOf('proxy_pass'));

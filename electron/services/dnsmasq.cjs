@@ -655,7 +655,10 @@ async function migrateToRootless() {
   } catch (err) {
     // The copy never happened: the legacy setup is untouched.
     if (deps.readResolver() !== content) throw err;
-    console.warn('[dnsmasq] migration step reported an error after the resolver moved:', err.message);
+    console.warn(
+      '[dnsmasq] migration step reported an error after the resolver moved:',
+      err.message
+    );
   }
 
   try {
