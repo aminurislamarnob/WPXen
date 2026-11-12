@@ -68,8 +68,9 @@ export default function Dashboard({ serviceStatus, sites, refreshStatus }) {
 
   return (
     <div className="px-6 pb-6 max-w-[735px] mx-auto animate-fade-in">
-      {/* Permissions banner */}
-      {!sudoersConfigured && (
+      {/* Permissions banner — legacy DNS only; rootless dnsmasq needs no password
+          to start or stop. */}
+      {!sudoersConfigured && serviceStatus?.dnsmasq?.mode !== 'rootless' && (
         <Card className="mb-4 !bg-status-warning/10">
           <Row
             icon={<ShieldAlert size={18} className="text-status-warning flex-shrink-0" />}

@@ -85,6 +85,13 @@ function ensureCA() {
   if (!isCaTrusted()) {
     throw new Error('The local certificate authority was not trusted by macOS.');
   }
+
+  // A new (or re-created) root means PHP's trust bundle is stale: rebuild it
+  // and point every PHP version at it. Lazily required — trustBundle.cjs reaches
+  // back here for getCaRoot(). Never fails the HTTPS switch that got us here.
+  try {
+    require('./trustBundle.cjs').syncLocalTrust();
+  } catch {}
 }
 
 // `security` arguments that trust the CA root for the current user.

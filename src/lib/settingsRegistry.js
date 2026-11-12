@@ -680,6 +680,28 @@ export const SETTINGS_ITEMS = [
       'lock',
     ],
   },
+  {
+    id: 'dns.phpTrust',
+    section: 'dns',
+    title: 'PHP trusts the local authority',
+    description: 'PHP and WordPress verify HTTPS calls to local Sites',
+    keywords: [
+      'https',
+      'ssl',
+      'tls',
+      'certificate',
+      'ca',
+      'bundle',
+      'cafile',
+      'curl',
+      'openssl',
+      'php',
+      'wp_remote_get',
+      'loopback',
+      'site health',
+      'trust',
+    ],
+  },
 
   // ── Blueprints ───────────────────────────────────────────────────────────
   {
