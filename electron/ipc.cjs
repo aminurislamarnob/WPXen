@@ -87,12 +87,24 @@ function applyHttps(site, enabled) {
       url: `https://${site.domain}`,
     };
   } else {
+    // The certificate goes with HTTPS (below), so the record stops naming it.
     updated = { ...site, https: false, url: `http://${site.domain}` };
+    delete updated.certPath;
+    delete updated.keyPath;
   }
 
   // Rewrite the vhost for the new scheme and reload nginx.
   nginx.createSiteConfig(updated);
   nginx.reload();
+
+  // Off means the cert files are orphans: remove them, after the http-only
+  // vhost is written so nginx never references a missing file. Turning HTTPS
+  // back on mints a fresh pair at the same two paths.
+  if (!enabled) {
+    try {
+      mkcert.removeCert(site.domain);
+    } catch {}
+  }
 
   // Point WordPress at the new URL so it stops redirecting to the old
   // scheme. Best-effort — nginx already serves the right scheme regardless.
