@@ -253,10 +253,13 @@ function walkEntriesBefore(fd, end, format, visit) {
 // where the next older page ends. With `levels` (a Set), entries of any
 // other level are skipped, not returned — and since skipping costs a scan
 // but fills nothing, a filtered page also stops after PAGE_SCAN_BYTES.
+// `lastOffset` is the newest entry visited, whatever its level.
 function readEntriesBefore(fd, end, format, levels) {
   const newestFirst = [];
   let bytes = 0;
+  let lastOffset = null;
   const pageStart = walkEntriesBefore(fd, end, format, (from, raw, partial) => {
+    if (lastOffset === null) lastOffset = from;
     if (!levels || levels.has(levelOf(format, raw, partial))) {
       newestFirst.push(toEntry(format, from, raw, partial));
       bytes += raw.length;
@@ -267,7 +270,7 @@ function readEntriesBefore(fd, end, format, levels) {
       (levels && end - from >= PAGE_SCAN_BYTES)
     );
   });
-  return { entries: newestFirst.reverse(), pageStart };
+  return { entries: newestFirst.reverse(), pageStart, lastOffset };
 }
 
 // A caller's level filter as a Set of known levels, or null for none. Only
@@ -281,8 +284,9 @@ function levelFilter(format, levels) {
 
 // A page of entries ending at byte offset `end` — the newest page when it's
 // omitted; pass a previous page's `pageStart` for the one before it. Returns
-// { path, exists, size, entries, pageStart, end, atStart }; each entry is
-// { offset, time, level, text, partial? }, `offset` unique within the file.
+// { path, exists, size, entries, pageStart, end, atStart, lastOffset }; each
+// entry is { offset, time, level, text, partial? }, `offset` unique within the
+// file.
 // A missing file is `exists: false`, a normal state (debug.log before
 // WP_DEBUG_LOG is on), not an error.
 //
@@ -290,6 +294,8 @@ function levelFilter(format, levels) {
 // paging staying the same: pass the same `levels` with `end: pageStart` for
 // the page before. A filtered page can hold few or no entries yet not be
 // `atStart` — its scan budget ran out — and the next page carries on.
+// `lastOffset` ignores the filter: the newest entry before `end` of any level
+// (null when there is none), where a live follow of the page starts.
 function readPage(filePath, kind, { end, levels } = {}) {
   const format = formatFor(kind);
   let fd;
@@ -305,6 +311,7 @@ function readPage(filePath, kind, { end, levels } = {}) {
         pageStart: 0,
         end: 0,
         atStart: true,
+        lastOffset: null,
       };
     }
     throw err;
@@ -312,7 +319,7 @@ function readPage(filePath, kind, { end, levels } = {}) {
   try {
     const { size } = fs.fstatSync(fd);
     const until = Number.isInteger(end) ? Math.max(0, Math.min(end, size)) : size;
-    const { entries, pageStart } = readEntriesBefore(
+    const { entries, pageStart, lastOffset } = readEntriesBefore(
       fd,
       until,
       format,
@@ -326,6 +333,7 @@ function readPage(filePath, kind, { end, levels } = {}) {
       pageStart,
       end: until,
       atStart: pageStart === 0,
+      lastOffset,
     };
   } finally {
     fs.closeSync(fd);

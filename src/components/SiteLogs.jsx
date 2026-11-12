@@ -7,6 +7,7 @@ import {
   CheckCircle,
   AlertTriangle,
   ChevronUp,
+  ArrowDown,
   Search,
   X,
 } from 'lucide-react';
@@ -23,6 +24,14 @@ import {
   saveHiddenLevels,
   searchLevels,
 } from '../lib/logView';
+import {
+  followLive,
+  mergeLive,
+  followStart,
+  liveForView,
+  countLive,
+} from '../lib/logFollow';
+import { shouldStickToBottom } from '../lib/chatList';
 
 // A filtered page that comes back empty only means the level is rare in
 // that stretch of the file, so a load keeps reading back this many pages
@@ -76,19 +85,25 @@ export default function SiteLogs({ site }) {
 
   // A page ending at `end` (the newest when omitted), at the filter's levels.
   // A filtered page with nothing in it reads on further back, a few times.
+  // `follow` is where a live follow of it starts: the first (newest) window
+  // read, not the older one the page came from.
   const fetchPage = useCallback(
     async (kind, end) => {
       if (!hasLevelFilters(kind)) {
-        return window.electronAPI.getSiteLogPage(site.id, kind, { end });
+        const result = await window.electronAPI.getSiteLogPage(site.id, kind, { end });
+        return result.success ? { ...result, follow: followStart(result.page) } : result;
       }
       const levels = visibleLevels(hidden);
       let result;
+      let follow;
       for (let tries = 0; tries < FILTERED_PAGE_TRIES; tries++) {
         result = await window.electronAPI.getSiteLogPage(site.id, kind, { end, levels });
-        if (!result.success || result.page.entries.length || result.page.atStart) break;
+        if (!result.success) break;
+        if (!follow) follow = followStart(result.page);
+        if (result.page.entries.length || result.page.atStart) break;
         end = result.page.pageStart;
       }
-      return result;
+      return result.success ? { ...result, follow } : result;
     },
     [site.id, hidden]
   );
@@ -117,6 +132,16 @@ export default function SiteLogs({ site }) {
     saveHiddenLevels(next);
   }
 
+  // Live follow. `followFrom` is where the watcher starts after a fresh
+  // page, and the filter that page was read at (re-set by every load, which
+  // reopens it — a level toggle reloads too); `followRef` the follow rule's
+  // state; `marker` whether New entries shows.
+  const [followFrom, setFollowFrom] = useState(null);
+  const followRef = useRef({ atBottom: true, marker: false });
+  const [marker, setMarker] = useState(false);
+  const viewRef = useRef(null);
+  const instanceRef = useRef(Math.random().toString(36).slice(2));
+
   // Whole-file search. Results are a separate view laid over the paged one,
   // which stays mounted underneath, so clearing the search lands the reader
   // back exactly where they were.
@@ -138,14 +163,74 @@ export default function SiteLogs({ site }) {
       if (result.success) {
         scrollRef.current = 'end';
         setView(result.page);
+        applyFollow({ type: 'reset' });
+        setFollowFrom({ kind, request, start: result.follow, hidden });
       } else {
         setView(null);
         setMessage({ type: 'error', text: result.error });
       }
       setLoading(false);
     },
-    [fetchPage]
+    [fetchPage, hidden]
   );
+
+  function applyFollow(event) {
+    const next = followLive(followRef.current, event);
+    followRef.current = { atBottom: next.atBottom, marker: next.marker };
+    setMarker(next.marker);
+    if (next.scrollToEnd) scrollRef.current = 'end';
+  }
+
+  // While a page is shown, the main process follows its file and pushes new
+  // entries; the watcher is released when the page is replaced (tab change,
+  // Refresh, Clear), and when the view unmounts.
+  useEffect(() => {
+    if (!followFrom) return;
+    const api = window.electronAPI;
+    const { kind, request, start, hidden: pageHidden } = followFrom;
+    const watchId = `${instanceRef.current}:${kind}:${request}`;
+    const unsub = api.on('site-log-follow-update', (raw) => {
+      // A watcher for a page that's since been replaced may still deliver one.
+      if (raw.watchId !== watchId || request !== requestRef.current) return;
+      if (raw.reset) {
+        // Cleared, rotated or a burst: a new file, so new counts too.
+        setView(liveForView(raw, kind, pageHidden).page);
+        applyFollow({ type: 'reset' });
+        loadCounts(kind);
+        return;
+      }
+      // Every level counts; only the filter's levels are shown.
+      setCounts((current) => countLive(current, raw.entries));
+      const data = liveForView(raw, kind, pageHidden);
+      const { added } = mergeLive(viewRef.current || { entries: [] }, data);
+      setView((current) => (current ? mergeLive(current, data).view : current));
+      applyFollow({ type: 'entries', added });
+    });
+    api.followSiteLog(watchId, site.id, kind, start);
+    return () => {
+      unsub();
+      api.unfollowSiteLog(watchId);
+    };
+  }, [followFrom, site.id, loadCounts]);
+
+  function handleViewerScroll() {
+    const el = viewerRef.current;
+    if (!el) return;
+    const atBottom = shouldStickToBottom({
+      scrollTop: el.scrollTop,
+      scrollHeight: el.scrollHeight,
+      clientHeight: el.clientHeight,
+    });
+    if (atBottom !== followRef.current.atBottom)
+      applyFollow({ type: 'scroll', atBottom });
+  }
+
+  function jumpToNewest() {
+    applyFollow({ type: 'jump' });
+    const el = viewerRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+    scrollRef.current = null;
+  }
 
   // Load on mount and whenever the active tab changes.
   useEffect(() => {
@@ -172,6 +257,7 @@ export default function SiteLogs({ site }) {
   // A fresh page opens at its newest entry; an older page is added above
   // without moving what the reader is looking at.
   useLayoutEffect(() => {
+    viewRef.current = view;
     const el = viewerRef.current;
     const intent = scrollRef.current;
     scrollRef.current = null;
@@ -483,6 +569,7 @@ export default function SiteLogs({ site }) {
         )}
         <div
           ref={viewerRef}
+          onScroll={handleViewerScroll}
           className="w-full h-[26rem] overflow-auto font-mono text-xs leading-relaxed rounded-lg border border-border bg-background text-foreground select-text scrollbar-thin"
         >
           {placeholder !== null ? (
@@ -516,6 +603,15 @@ export default function SiteLogs({ site }) {
             </>
           )}
         </div>
+        {/* Search results lie over the paged view; their own list doesn't follow. */}
+        {marker && !term && (
+          <div className="absolute bottom-3 inset-x-0 z-10 flex justify-center pointer-events-none">
+            <Button onClick={jumpToNewest} className="pointer-events-auto shadow-sm">
+              <ArrowDown size={13} />
+              New entries
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* Footer info */}

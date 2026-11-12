@@ -37,6 +37,7 @@ const VALID_EVENT_CHANNELS = [
   'browser-shortcut',
   'settings-updated',
   'keep-awake-status-update',
+  'site-log-follow-update',
 ];
 
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -115,6 +116,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getSiteLogCounts: (id, kind) => ipcRenderer.invoke('get-site-log-counts', id, kind),
   clearSiteLog: (id, kind) => ipcRenderer.invoke('clear-site-log', id, kind),
   saveSiteLog: (id, kind) => ipcRenderer.invoke('save-site-log', id, kind),
+  // Live follow: entries pushed on 'site-log-follow-update' until unfollowed.
+  followSiteLog: (watchId, id, kind, opts) =>
+    ipcRenderer.invoke('site-log-follow', watchId, id, kind, opts),
+  unfollowSiteLog: (watchId) => ipcRenderer.send('site-log-unfollow', watchId),
 
   // Mailpit (email catching)
   getMailpitStatus: () => ipcRenderer.invoke('get-mailpit-status'),
