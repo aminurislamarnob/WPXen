@@ -200,6 +200,7 @@ app.whenReady().then(() => {
     const phpService = require('./services/php.cjs');
     const mysql = require('./services/mysql.cjs');
     const mailpit = require('./services/mailpit.cjs');
+    const dnsmasq = require('./services/dnsmasq.cjs');
 
     try {
       await migration.migrateToChildProcs(store);
@@ -233,6 +234,15 @@ app.whenReady().then(() => {
         // others; procman surfaces the failure in the UI.
         console.error('auto-start:', err.message);
       }
+    }
+
+    // Rootless dnsmasq comes up whenever DNS is set up, regardless of the
+    // auto-start preference: without it no *.test Site resolves. It needs no
+    // prompt. (A legacy root daemon is launchd's to start.)
+    try {
+      if (dnsmasq.shouldAutoStart()) await dnsmasq.start();
+    } catch (err) {
+      console.error('auto-start dnsmasq:', err.message);
     }
 
     // One-time: vhosts from the single-FPM era point PHP at 127.0.0.1:9000,
