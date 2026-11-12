@@ -178,7 +178,15 @@ async function computeServiceStatus() {
       ...phpService.getFpmStatus(),
     },
     mysql: { running: mysqlRunning, name: 'MySQL', ...procInfo('mysql') },
-    dnsmasq: { running: dnsmasqRunning, name: 'dnsmasq' },
+    // Rootless dnsmasq is a procman child like the others; legacy is the root
+    // brew service, so its supervisor fields just read 'stopped'. `mode`
+    // lets the UI tell the two apart.
+    dnsmasq: {
+      running: dnsmasqRunning,
+      name: 'dnsmasq',
+      mode: dnsmasq.getMode(),
+      ...procInfo('dnsmasq'),
+    },
     mailpit: {
       running: mailpitRunning,
       name: 'Mailpit',
@@ -251,6 +259,8 @@ async function startPhpService() {
 function registerHandlers(win, storeInstance) {
   mainWindow = win;
   store = storeInstance;
+  // The DNS mode and port live in the store (see dnsmasq.cjs).
+  dnsmasq.bindStore(storeInstance);
   // The in-app browser pushes guest events (new windows, and later console
   // output) back to the renderer through this window.
   browser.setWindow(win);
@@ -2559,7 +2569,7 @@ function registerHandlers(win, storeInstance) {
       await nginx.start();
       await startPhpService();
       await mysql.start();
-      dnsmasq.start();
+      await dnsmasq.start();
       // Optional service — start it only when installed, and never let a
       // Mailpit hiccup fail the whole "Start All".
       if (mailpit.isInstalled()) {
@@ -2578,7 +2588,7 @@ function registerHandlers(win, storeInstance) {
       await nginx.stop();
       await phpService.stopAllPhpFpm();
       await mysql.stop();
-      dnsmasq.stop();
+      await dnsmasq.stop();
       if (mailpit.isInstalled()) {
         try {
           await mailpit.stop();
@@ -2603,7 +2613,7 @@ function registerHandlers(win, storeInstance) {
           await mysql.start();
           break;
         case 'dnsmasq':
-          dnsmasq.start();
+          await dnsmasq.start();
           break;
         case 'mailpit':
           await mailpit.start();
@@ -2630,7 +2640,7 @@ function registerHandlers(win, storeInstance) {
           await mysql.stop();
           break;
         case 'dnsmasq':
-          dnsmasq.stop();
+          await dnsmasq.stop();
           break;
         case 'mailpit':
           await mailpit.stop();
@@ -2648,7 +2658,7 @@ function registerHandlers(win, storeInstance) {
   // viewer — surfaced in the UI when a service enters the 'failed' state.
   ipcMain.handle('open-service-log', async (_, name) => {
     try {
-      if (!['nginx', 'php', 'mysql', 'mailpit'].includes(name)) {
+      if (!['nginx', 'php', 'mysql', 'mailpit', 'dnsmasq'].includes(name)) {
         return { success: false, error: `Unknown service: ${name}` };
       }
       // PHP-FPM logs per version: open the failing one, else the active one.
@@ -2683,7 +2693,7 @@ function registerHandlers(win, storeInstance) {
           await mysql.restart();
           break;
         case 'dnsmasq':
-          dnsmasq.restart();
+          await dnsmasq.restart();
           break;
         case 'mailpit':
           await mailpit.restart();
@@ -2853,8 +2863,9 @@ function registerHandlers(win, storeInstance) {
 
   ipcMain.handle('setup-dnsmasq', async () => {
     try {
+      // One admin prompt (the resolver file); then start the mode's dnsmasq.
       dnsmasq.configureDnsmasq();
-      dnsmasq.start();
+      await dnsmasq.start();
       return { success: true };
     } catch (err) {
       return { success: false, error: humanize(err) };
