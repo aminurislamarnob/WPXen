@@ -7,9 +7,12 @@ import {
   CheckCircle,
   AlertTriangle,
   ChevronUp,
+  ArrowDown,
 } from 'lucide-react';
 import { Button, Tooltip } from './ui';
 import { prependOlder, formatLogSize } from '../lib/logView';
+import { followLive, mergeLive } from '../lib/logFollow';
+import { shouldStickToBottom } from '../lib/chatList';
 
 const LOG_TABS = [
   { id: 'debug', label: 'Debug Log' },
@@ -42,6 +45,14 @@ export default function SiteLogs({ site }) {
   // What the next layout should do with the scroll position: 'end' after a
   // fresh load, or the distance from the bottom to keep after Load older.
   const scrollRef = useRef(null);
+  // Live follow. `followFrom` is the fresh page the watcher starts after
+  // (re-set by every load, which reopens it); `followRef` the follow rule's
+  // state; `marker` whether New entries shows.
+  const [followFrom, setFollowFrom] = useState(null);
+  const followRef = useRef({ atBottom: true, marker: false });
+  const [marker, setMarker] = useState(false);
+  const viewRef = useRef(null);
+  const instanceRef = useRef(Math.random().toString(36).slice(2));
 
   const load = useCallback(
     async (kind) => {
@@ -52,6 +63,8 @@ export default function SiteLogs({ site }) {
       if (result.success) {
         scrollRef.current = 'end';
         setView(result.page);
+        applyFollow({ type: 'reset' });
+        setFollowFrom({ kind, request, page: result.page });
       } else {
         setView(null);
         setMessage({ type: 'error', text: result.error });
@@ -60,6 +73,63 @@ export default function SiteLogs({ site }) {
     },
     [site.id]
   );
+
+  function applyFollow(event) {
+    const next = followLive(followRef.current, event);
+    followRef.current = { atBottom: next.atBottom, marker: next.marker };
+    setMarker(next.marker);
+    if (next.scrollToEnd) scrollRef.current = 'end';
+  }
+
+  // While a page is shown, the main process follows its file and pushes new
+  // entries; the watcher is released when the page is replaced (tab change,
+  // Refresh, Clear), and when the view unmounts.
+  useEffect(() => {
+    if (!followFrom) return;
+    const api = window.electronAPI;
+    const { kind, request, page } = followFrom;
+    const watchId = `${instanceRef.current}:${kind}:${request}`;
+    const unsub = api.on('site-log-follow-update', (data) => {
+      // A watcher for a page that's since been replaced may still deliver one.
+      if (data.watchId !== watchId || request !== requestRef.current) return;
+      if (data.reset) {
+        setView(data.page);
+        applyFollow({ type: 'reset' });
+        return;
+      }
+      const { added } = mergeLive(viewRef.current || { entries: [] }, data);
+      setView((current) => (current ? mergeLive(current, data).view : current));
+      applyFollow({ type: 'entries', added });
+    });
+    const last = page.entries[page.entries.length - 1];
+    api.followSiteLog(watchId, site.id, kind, {
+      from: last ? last.offset : page.end,
+      end: page.end,
+    });
+    return () => {
+      unsub();
+      api.unfollowSiteLog(watchId);
+    };
+  }, [followFrom, site.id]);
+
+  function handleViewerScroll() {
+    const el = viewerRef.current;
+    if (!el) return;
+    const atBottom = shouldStickToBottom({
+      scrollTop: el.scrollTop,
+      scrollHeight: el.scrollHeight,
+      clientHeight: el.clientHeight,
+    });
+    if (atBottom !== followRef.current.atBottom)
+      applyFollow({ type: 'scroll', atBottom });
+  }
+
+  function jumpToNewest() {
+    applyFollow({ type: 'jump' });
+    const el = viewerRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+    scrollRef.current = null;
+  }
 
   // Load on mount and whenever the active tab changes.
   useEffect(() => {
@@ -88,6 +158,7 @@ export default function SiteLogs({ site }) {
   // A fresh page opens at its newest entry; an older page is added above
   // without moving what the reader is looking at.
   useLayoutEffect(() => {
+    viewRef.current = view;
     const el = viewerRef.current;
     const intent = scrollRef.current;
     scrollRef.current = null;
@@ -232,6 +303,7 @@ export default function SiteLogs({ site }) {
         )}
         <div
           ref={viewerRef}
+          onScroll={handleViewerScroll}
           className="w-full h-[26rem] overflow-auto font-mono text-xs leading-relaxed rounded-lg border border-border bg-background text-foreground select-text scrollbar-thin"
         >
           {placeholder !== null ? (
@@ -258,6 +330,14 @@ export default function SiteLogs({ site }) {
             </>
           )}
         </div>
+        {marker && (
+          <div className="absolute bottom-3 inset-x-0 z-10 flex justify-center pointer-events-none">
+            <Button onClick={jumpToNewest} className="pointer-events-auto shadow-sm">
+              <ArrowDown size={13} />
+              New entries
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* Footer info */}

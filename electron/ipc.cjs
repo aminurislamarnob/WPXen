@@ -36,6 +36,7 @@ const cloudflared = require('./services/cloudflared.cjs');
 const sudoers = require('./services/sudoers.cjs');
 const setup = require('./services/setup.cjs');
 const logs = require('./services/logs.cjs');
+const logFollow = require('./services/logFollow.cjs');
 const validation = require('./services/validation.cjs');
 const agents = require('./services/agents.cjs');
 const notes = require('./services/notes.cjs');
@@ -269,10 +270,12 @@ function registerHandlers(win, storeInstance) {
   win.webContents.on('did-start-navigation', (e, url, isInPlace, isMainFrame) => {
     if (isMainFrame && !isInPlace) {
       agents.closeAllChats();
+      logFollow.closeAll();
     }
   });
   win.on('closed', () => {
     agents.closeAllChats();
+    logFollow.closeAll();
   });
 
   // Bind the settings schema to the store. Side effects that used to live in
@@ -2279,6 +2282,35 @@ function registerHandlers(win, storeInstance) {
     } catch (err) {
       return { success: false, error: humanize(err) };
     }
+  });
+
+  // Live follow: the open log view's watcher, released by
+  // `site-log-unfollow` when the view closes (and by closeAll above when the
+  // window goes). `opts` is `{ from, end }` from the page the view shows.
+  // Ids are the renderer's, scoped to its webContents.
+  ipcMain.handle('site-log-follow', async (event, watchId, id, kind, opts) => {
+    try {
+      const site = findSite(id);
+      if (!site) return { success: false, error: 'Site not found' };
+      const sender = event.sender;
+      logFollow.follow(
+        `${sender.id}:${watchId}`,
+        logs.resolveLogPath(site, kind),
+        kind,
+        { from: opts?.from, end: opts?.end },
+        (data) => {
+          if (!sender.isDestroyed())
+            sender.send('site-log-follow-update', { watchId, ...data });
+        }
+      );
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.on('site-log-unfollow', (event, watchId) => {
+    logFollow.unfollow(`${event.sender.id}:${watchId}`);
   });
 
   ipcMain.handle('clear-site-log', async (_, id, kind) => {

@@ -349,6 +349,10 @@ app.on('before-quit', (e) => {
   try {
     require('./services/browser.cjs').unregisterAll();
   } catch {}
+  // Stop any open log view's file watcher.
+  try {
+    require('./services/logFollow.cjs').closeAll();
+  } catch {}
   // Release the sleep assertion now rather than waiting for caffeinate's -w
   // to notice the app is gone.
   try {
