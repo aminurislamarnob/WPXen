@@ -151,6 +151,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Dependencies & Setup
   checkDependencies: () => ipcRenderer.invoke('check-dependencies'),
   setupDnsmasq: () => ipcRenderer.invoke('setup-dnsmasq'),
+  // Legacy → rootless DNS migration: { needed, mode }, then one admin prompt.
+  getDnsMigration: () => ipcRenderer.invoke('get-dns-migration'),
+  migrateDns: () => ipcRenderer.invoke('migrate-dns'),
 
   // First-run onboarding
   installCoreDeps: () => ipcRenderer.invoke('install-core-deps'),
@@ -158,9 +161,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getOnboardingState: () => ipcRenderer.invoke('get-onboarding-state'),
   setOnboardingComplete: () => ipcRenderer.invoke('set-onboarding-complete'),
 
-  // Sudoers / Permissions
+  // Sudoers — detection and removal only; WPXen no longer installs one.
   checkSudoers: () => ipcRenderer.invoke('check-sudoers'),
-  installSudoers: () => ipcRenderer.invoke('install-sudoers'),
   uninstallSudoers: () => ipcRenderer.invoke('uninstall-sudoers'),
 
   // Settings

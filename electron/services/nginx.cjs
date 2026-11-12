@@ -106,11 +106,11 @@ function buildSpec() {
       } catch {}
     },
     // A pre-migration launchd instance (root daemon) can't be cleared without
-    // sudo; the takeover uses the sudo path (silent when sudoers installed).
+    // root; the takeover asks through the administrator prompt.
     conflictProbe: isRunningAsync,
     takeover: async () => {
       try {
-        brew.stopBrewServiceSudo('nginx');
+        brew.stopBrewServiceAdmin('nginx');
       } catch {}
       try {
         brew.stopBrewService('nginx');
