@@ -30,6 +30,7 @@ const blueprints = require('./services/blueprints.cjs');
 const mkcert = require('./services/mkcert.cjs');
 const trustBundle = require('./services/trustBundle.cjs');
 const phpmyadmin = require('./services/phpmyadmin.cjs');
+const migration = require('./services/migration.cjs');
 const mailpit = require('./services/mailpit.cjs');
 const procman = require('./services/procman.cjs');
 const cloudflared = require('./services/cloudflared.cjs');
@@ -1364,8 +1365,12 @@ function registerHandlers(win, storeInstance) {
   // Heal per-site vhosts shortly after startup: regenerate each from the
   // current template and rewrite only the ones that differ (e.g. sites created
   // before client_max_body_size / PHP_VALUE support), then reload nginx once.
+  // On a launch where a one-time Site upgrade is still pending, the upgrade
+  // pass (migration.cjs runSiteUpgrades, run from main.cjs) regenerates every
+  // vhost itself — stand aside so that launch has one writer and one reload.
   setTimeout(() => {
     try {
+      if (migration.pendingSiteUpgrades(store).length) return;
       const sites = store.get('sites', []);
       const serversDir = nginx.getServersDir();
       if (!serversDir || !fs.existsSync(serversDir)) return;
