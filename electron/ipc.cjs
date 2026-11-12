@@ -28,6 +28,7 @@ const wordpress = require('./services/wordpress.cjs');
 const siteops = require('./services/siteops.cjs');
 const blueprints = require('./services/blueprints.cjs');
 const mkcert = require('./services/mkcert.cjs');
+const trustBundle = require('./services/trustBundle.cjs');
 const phpmyadmin = require('./services/phpmyadmin.cjs');
 const mailpit = require('./services/mailpit.cjs');
 const procman = require('./services/procman.cjs');
@@ -178,7 +179,15 @@ async function computeServiceStatus() {
       ...phpService.getFpmStatus(),
     },
     mysql: { running: mysqlRunning, name: 'MySQL', ...procInfo('mysql') },
-    dnsmasq: { running: dnsmasqRunning, name: 'dnsmasq' },
+    // Rootless dnsmasq is a procman child like the others; legacy is the root
+    // brew service, so its supervisor fields just read 'stopped'. `mode`
+    // lets the UI tell the two apart.
+    dnsmasq: {
+      running: dnsmasqRunning,
+      name: 'dnsmasq',
+      mode: dnsmasq.getMode(),
+      ...procInfo('dnsmasq'),
+    },
     mailpit: {
       running: mailpitRunning,
       name: 'Mailpit',
@@ -251,6 +260,8 @@ async function startPhpService() {
 function registerHandlers(win, storeInstance) {
   mainWindow = win;
   store = storeInstance;
+  // The DNS mode and port live in the store (see dnsmasq.cjs).
+  dnsmasq.bindStore(storeInstance);
   // The in-app browser pushes guest events (new windows, and later console
   // output) back to the renderer through this window.
   browser.setWindow(win);
@@ -1380,6 +1391,16 @@ function registerHandlers(win, storeInstance) {
     } catch {}
   }, 3000);
 
+  // Rebuild PHP's trust bundle if missing or stale, point every installed PHP
+  // version at it (versions installed from a terminal since last launch
+  // included), and make sure every Site carries the mu-plugin that points
+  // WordPress at it. Idempotent — writes and reloads only what differs.
+  setTimeout(() => {
+    try {
+      trustBundle.syncLocalTrust({ sites: store.get('sites', []) });
+    } catch {}
+  }, 4500);
+
   // Re-apply the Mailpit sendmail override shortly after startup so PHP
   // versions installed since the toggle was enabled also route mail() into
   // Mailpit. Idempotent — only rewrites/reloads when something differs.
@@ -1784,6 +1805,25 @@ function registerHandlers(win, storeInstance) {
   ipcMain.handle('get-ca-status', async () => {
     try {
       return { success: true, ...mkcert.getCaStatus() };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  // Settings' "PHP trusts the local authority" row, and its Repair button —
+  // the same sync that runs on app start.
+  ipcMain.handle('get-php-trust-status', async () => {
+    try {
+      return { success: true, ...trustBundle.getTrustStatus() };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('repair-php-trust', async () => {
+    try {
+      trustBundle.syncLocalTrust({ sites: store.get('sites', []) });
+      return { success: true, ...trustBundle.getTrustStatus() };
     } catch (err) {
       return { success: false, error: humanize(err) };
     }
@@ -2561,7 +2601,7 @@ function registerHandlers(win, storeInstance) {
       await nginx.start();
       await startPhpService();
       await mysql.start();
-      dnsmasq.start();
+      await dnsmasq.start();
       // Optional service — start it only when installed, and never let a
       // Mailpit hiccup fail the whole "Start All".
       if (mailpit.isInstalled()) {
@@ -2580,7 +2620,7 @@ function registerHandlers(win, storeInstance) {
       await nginx.stop();
       await phpService.stopAllPhpFpm();
       await mysql.stop();
-      dnsmasq.stop();
+      await dnsmasq.stop();
       if (mailpit.isInstalled()) {
         try {
           await mailpit.stop();
@@ -2605,7 +2645,7 @@ function registerHandlers(win, storeInstance) {
           await mysql.start();
           break;
         case 'dnsmasq':
-          dnsmasq.start();
+          await dnsmasq.start();
           break;
         case 'mailpit':
           await mailpit.start();
@@ -2632,7 +2672,7 @@ function registerHandlers(win, storeInstance) {
           await mysql.stop();
           break;
         case 'dnsmasq':
-          dnsmasq.stop();
+          await dnsmasq.stop();
           break;
         case 'mailpit':
           await mailpit.stop();
@@ -2650,7 +2690,7 @@ function registerHandlers(win, storeInstance) {
   // viewer — surfaced in the UI when a service enters the 'failed' state.
   ipcMain.handle('open-service-log', async (_, name) => {
     try {
-      if (!['nginx', 'php', 'mysql', 'mailpit'].includes(name)) {
+      if (!['nginx', 'php', 'mysql', 'mailpit', 'dnsmasq'].includes(name)) {
         return { success: false, error: `Unknown service: ${name}` };
       }
       // PHP-FPM logs per version: open the failing one, else the active one.
@@ -2685,7 +2725,7 @@ function registerHandlers(win, storeInstance) {
           await mysql.restart();
           break;
         case 'dnsmasq':
-          dnsmasq.restart();
+          await dnsmasq.restart();
           break;
         case 'mailpit':
           await mailpit.restart();
@@ -2761,6 +2801,10 @@ function registerHandlers(win, storeInstance) {
         if (settings.get('mail.catch') && mailpit.isInstalled()) {
           mailpit.setCatchEnabled(true);
         }
+      } catch {}
+      // …and the trust-bundle directives, so it trusts local HTTPS Sites too.
+      try {
+        trustBundle.syncLocalTrust();
       } catch {}
       return { success: true };
     } catch (err) {
@@ -2855,8 +2899,9 @@ function registerHandlers(win, storeInstance) {
 
   ipcMain.handle('setup-dnsmasq', async () => {
     try {
+      // One admin prompt (the resolver file); then start the mode's dnsmasq.
       dnsmasq.configureDnsmasq();
-      dnsmasq.start();
+      await dnsmasq.start();
       return { success: true };
     } catch (err) {
       return { success: false, error: humanize(err) };

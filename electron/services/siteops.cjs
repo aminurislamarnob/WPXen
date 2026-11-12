@@ -499,6 +499,11 @@ async function runImport(archivePath, target, onProgress) {
       } catch {}
     }
 
+    // Lets wp_remote_get reach other local HTTPS Sites. Best-effort.
+    try {
+      wordpress.ensureLocalTrustMuPlugin(target.path);
+    } catch {}
+
     // nginx vhost
     progress({ step: 'nginx', message: 'Configuring nginx...' });
     nginx.createSiteConfig({
@@ -636,6 +641,10 @@ async function runClone(source, target, onProgress) {
     await wordpress.wpAsync(['config', 'set', 'DB_NAME', target.dbName], target.path);
     // Don't leak the source's magic-login secret into the clone.
     wordpress.removeMagicLoginMuPlugin(target.path);
+    // The copy usually carries it already; a source from before it existed doesn't.
+    try {
+      wordpress.ensureLocalTrustMuPlugin(target.path);
+    } catch {}
 
     progress({ step: 'urls', message: 'Updating site URLs...' });
     await searchReplaceHost(target.path, source.domain, target.domain);
