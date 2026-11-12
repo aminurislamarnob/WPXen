@@ -27,6 +27,9 @@ const BUTTON_VARIANTS = {
   warning: 'btn-warning',
   // An on/off filter chip; pass aria-pressed — off renders dashed and dimmed.
   toggle: 'btn-toggle',
+  // Floats over scrolling content (a "jump to newest" pill), so it needs an
+  // opaque surface — secondary is translucent in dark mode.
+  floating: 'btn-floating',
 };
 
 export function Button({

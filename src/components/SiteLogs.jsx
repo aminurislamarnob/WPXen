@@ -619,7 +619,11 @@ export default function SiteLogs({ site }) {
         {/* Search results lie over the paged view; their own list doesn't follow. */}
         {marker && !term && (
           <div className="absolute bottom-3 inset-x-0 z-10 flex justify-center pointer-events-none">
-            <Button onClick={jumpToNewest} className="pointer-events-auto shadow-sm">
+            <Button
+              variant="floating"
+              onClick={jumpToNewest}
+              className="pointer-events-auto"
+            >
               <ArrowDown size={13} />
               New entries
             </Button>

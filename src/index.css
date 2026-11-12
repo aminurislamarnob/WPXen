@@ -288,6 +288,11 @@ textarea:focus {
     @apply btn font-semibold bg-status-warning/10 text-status-warning hover:bg-status-warning/20;
   }
 
+  /* Floats over scrolling content; opaque so the text underneath can't show through */
+  .btn-floating {
+    @apply btn border border-border bg-popover text-popover-foreground shadow-md hover:bg-accent hover:text-accent-foreground;
+  }
+
   /* On/off filter chip, driven by aria-pressed */
   .btn-toggle {
     @apply btn border border-border bg-card text-foreground;
