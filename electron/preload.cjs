@@ -58,6 +58,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   cloneSite: (id, target) => ipcRenderer.invoke('clone-site', id, target),
   changeSiteUrl: (id, newDomain) => ipcRenderer.invoke('change-site-url', id, newDomain),
   getCaStatus: () => ipcRenderer.invoke('get-ca-status'),
+  getPhpTrustStatus: () => ipcRenderer.invoke('get-php-trust-status'),
+  repairPhpTrust: () => ipcRenderer.invoke('repair-php-trust'),
 
   // Blueprints
   getBlueprints: () => ipcRenderer.invoke('get-blueprints'),
