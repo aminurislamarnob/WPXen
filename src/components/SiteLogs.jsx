@@ -8,9 +8,11 @@ import {
   AlertTriangle,
   ChevronUp,
   ArrowDown,
+  Search,
+  X,
 } from 'lucide-react';
 import { Button, Tooltip } from './ui';
-import { prependOlder, formatLogSize } from '../lib/logView';
+import { prependOlder, formatLogSize, matchSummary } from '../lib/logView';
 import { followLive, mergeLive } from '../lib/logFollow';
 import { shouldStickToBottom } from '../lib/chatList';
 
@@ -53,6 +55,18 @@ export default function SiteLogs({ site }) {
   const [marker, setMarker] = useState(false);
   const viewRef = useRef(null);
   const instanceRef = useRef(Math.random().toString(36).slice(2));
+
+  // Whole-file search. Results are a separate view laid over the paged one,
+  // which stays mounted underneath, so clearing the search lands the reader
+  // back exactly where they were.
+  const [query, setQuery] = useState('');
+  const [search, setSearch] = useState(null); // searchLog batch + its `kind`
+  const [searching, setSearching] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const searchRequestRef = useRef(0);
+  const resultsRef = useRef(null);
+  const resultsScrollRef = useRef(null);
+  const term = query.trim();
 
   const load = useCallback(
     async (kind) => {
@@ -167,6 +181,67 @@ export default function SiteLogs({ site }) {
       intent === 'end' ? el.scrollHeight : el.scrollHeight - intent.fromBottom;
   }, [view]);
 
+  const runSearch = useCallback(
+    async (kind, text) => {
+      const request = ++searchRequestRef.current;
+      if (!text) {
+        setSearch(null);
+        setSearching(false);
+        return;
+      }
+      setSearching(true);
+      const result = await window.electronAPI.searchSiteLog(site.id, kind, text);
+      if (request !== searchRequestRef.current) return;
+      if (result.success) {
+        resultsScrollRef.current = 'end';
+        setSearch({ ...result.result, kind });
+      } else {
+        setSearch(null);
+        setMessage({ type: 'error', text: result.error });
+      }
+      setSearching(false);
+    },
+    [site.id]
+  );
+
+  // Search as the term settles, and again on another tab. Clearing it is
+  // immediate.
+  useEffect(() => {
+    const timer = setTimeout(() => runSearch(tab, term), term ? 250 : 0);
+    return () => clearTimeout(timer);
+  }, [tab, term, runSearch]);
+
+  async function loadMoreMatches() {
+    if (!search || search.atStart || loadingMore) return;
+    const request = searchRequestRef.current;
+    setLoadingMore(true);
+    // The batch's own term, not the box's: the cursor belongs to it.
+    const { kind, query: batchQuery, pageStart } = search;
+    const result = await window.electronAPI.searchSiteLog(site.id, kind, batchQuery, {
+      end: pageStart,
+    });
+    setLoadingMore(false);
+    if (request !== searchRequestRef.current) return;
+    if (result.success) {
+      const el = resultsRef.current;
+      if (el) resultsScrollRef.current = { fromBottom: el.scrollHeight - el.scrollTop };
+      setSearch((current) => prependOlder(current, result.result));
+    } else {
+      setMessage({ type: 'error', text: result.error });
+    }
+  }
+
+  // Same rule as the paged view: a fresh batch opens at its newest match,
+  // older matches are added above without moving the reader.
+  useLayoutEffect(() => {
+    const el = resultsRef.current;
+    const intent = resultsScrollRef.current;
+    resultsScrollRef.current = null;
+    if (!el || !intent) return;
+    el.scrollTop =
+      intent === 'end' ? el.scrollHeight : el.scrollHeight - intent.fromBottom;
+  }, [search]);
+
   async function handleClear() {
     setBusy('clear');
     setMessage(null);
@@ -174,6 +249,7 @@ export default function SiteLogs({ site }) {
     if (result.success) {
       setMessage({ type: 'success', text: 'Log cleared.' });
       await load(tab);
+      if (term) await runSearch(tab, term);
     } else {
       setMessage({ type: 'error', text: result.error });
     }
@@ -193,6 +269,8 @@ export default function SiteLogs({ site }) {
   }
 
   const isBusy = !!busy;
+  // A batch from another tab is stale until that tab's search lands.
+  const searchResult = search && search.kind === tab ? search : null;
   const hasContent = !!view?.exists && view.entries.some((e) => e.text.trim().length > 0);
 
   const placeholder = !view
@@ -249,6 +327,7 @@ export default function SiteLogs({ site }) {
               onClick={() => {
                 setMessage(null);
                 load(tab);
+                if (term) runSearch(tab, term);
               }}
               disabled={isBusy || loading}
               aria-label="Refresh"
@@ -294,8 +373,87 @@ export default function SiteLogs({ site }) {
         ))}
       </div>
 
+      {/* Search */}
+      <div className="flex items-center gap-3 mb-3">
+        <div className="relative w-72">
+          <Search
+            size={13}
+            className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+          />
+          <input
+            type="text"
+            aria-label="Search the whole log"
+            placeholder="Search the whole log…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => e.key === 'Escape' && setQuery('')}
+            className="form-input !text-xs !pl-7 !pr-7"
+          />
+          {query && (
+            <button
+              type="button"
+              onClick={() => setQuery('')}
+              aria-label="Clear search"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            >
+              <X size={13} />
+            </button>
+          )}
+        </div>
+        {term && (
+          <p className="text-xs text-muted-foreground truncate">
+            {searching ? 'Searching…' : matchSummary(searchResult)}
+          </p>
+        )}
+      </div>
+
       {/* Viewer */}
       <div className="relative">
+        {term && searching && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/60 rounded-lg">
+            <Loader size={22} className="animate-spin text-foreground" />
+          </div>
+        )}
+        {term && (
+          <div
+            ref={resultsRef}
+            className="absolute inset-0 z-[5] overflow-auto font-mono text-xs leading-relaxed rounded-lg border border-border bg-background text-foreground select-text scrollbar-thin"
+          >
+            {!searchResult ? null : !searchResult.exists ? (
+              <pre className="p-4 whitespace-pre-wrap break-words">
+                -- The log file does not exist yet.
+              </pre>
+            ) : searchResult.entries.length === 0 ? (
+              <pre className="p-4 whitespace-pre-wrap break-words">
+                {`-- No entries match "${term}".`}
+              </pre>
+            ) : (
+              <>
+                {!searchResult.atStart && (
+                  <div className="flex justify-center py-2 border-b border-border">
+                    <Button
+                      variant="ghost"
+                      onClick={loadMoreMatches}
+                      disabled={loadingMore}
+                    >
+                      {loadingMore ? (
+                        <Loader size={13} className="animate-spin" />
+                      ) : (
+                        <ChevronUp size={13} />
+                      )}
+                      Load more matches
+                    </Button>
+                  </div>
+                )}
+                <ol className="divide-y divide-border">
+                  {searchResult.entries.map((entry) => (
+                    <LogEntry key={entry.offset} entry={entry} />
+                  ))}
+                </ol>
+              </>
+            )}
+          </div>
+        )}
         {loading && (
           <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/60 rounded-lg">
             <Loader size={22} className="animate-spin text-foreground" />
@@ -330,7 +488,8 @@ export default function SiteLogs({ site }) {
             </>
           )}
         </div>
-        {marker && (
+        {/* Search results lie over the paged view; their own list doesn't follow. */}
+        {marker && !term && (
           <div className="absolute bottom-3 inset-x-0 z-10 flex justify-center pointer-events-none">
             <Button onClick={jumpToNewest} className="pointer-events-auto shadow-sm">
               <ArrowDown size={13} />

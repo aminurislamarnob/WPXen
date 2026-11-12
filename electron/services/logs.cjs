@@ -40,6 +40,12 @@ function readLogPage(site, kind, { end } = {}) {
   return logReader.readPage(resolveLogPath(site, kind), kind, { end });
 }
 
+// A batch of entries matching `query` across the whole file, newest first;
+// `end` (a previous batch's `pageStart`) continues with older matches.
+function searchLog(site, kind, query, { end, levels } = {}) {
+  return logReader.searchLog(resolveLogPath(site, kind), kind, { query, end, levels });
+}
+
 // Empties a log file in place (truncate, not delete — nginx/php-fpm keep the
 // file handle open, so deleting would detach their writes until a reload).
 function clearLog(site, kind) {
@@ -48,4 +54,4 @@ function clearLog(site, kind) {
   fs.truncateSync(p, 0);
 }
 
-module.exports = { LOG_KINDS, resolveLogPath, readLogPage, clearLog };
+module.exports = { LOG_KINDS, resolveLogPath, readLogPage, searchLog, clearLog };

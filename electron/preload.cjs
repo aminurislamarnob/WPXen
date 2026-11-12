@@ -111,6 +111,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Site logs
   getSiteLogPage: (id, kind, opts) =>
     ipcRenderer.invoke('get-site-log-page', id, kind, opts),
+  searchSiteLog: (id, kind, query, opts) =>
+    ipcRenderer.invoke('search-site-log', id, kind, query, opts),
   clearSiteLog: (id, kind) => ipcRenderer.invoke('clear-site-log', id, kind),
   saveSiteLog: (id, kind) => ipcRenderer.invoke('save-site-log', id, kind),
   // Live follow: entries pushed on 'site-log-follow-update' until unfollowed.
@@ -159,6 +161,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Dependencies & Setup
   checkDependencies: () => ipcRenderer.invoke('check-dependencies'),
   setupDnsmasq: () => ipcRenderer.invoke('setup-dnsmasq'),
+  // Legacy → rootless DNS migration: { needed, mode }, then one admin prompt.
+  getDnsMigration: () => ipcRenderer.invoke('get-dns-migration'),
+  migrateDns: () => ipcRenderer.invoke('migrate-dns'),
 
   // First-run onboarding
   installCoreDeps: () => ipcRenderer.invoke('install-core-deps'),
@@ -166,9 +171,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getOnboardingState: () => ipcRenderer.invoke('get-onboarding-state'),
   setOnboardingComplete: () => ipcRenderer.invoke('set-onboarding-complete'),
 
-  // Sudoers / Permissions
+  // Sudoers — detection and removal only; WPXen no longer installs one.
   checkSudoers: () => ipcRenderer.invoke('check-sudoers'),
-  installSudoers: () => ipcRenderer.invoke('install-sudoers'),
   uninstallSudoers: () => ipcRenderer.invoke('uninstall-sudoers'),
 
   // Settings

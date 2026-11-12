@@ -202,6 +202,16 @@ app.whenReady().then(() => {
     const mailpit = require('./services/mailpit.cjs');
     const dnsmasq = require('./services/dnsmasq.cjs');
 
+    // The endpoint the 502 page asks for repairs through (repair.cjs). Up
+    // before nginx, so a Site that 502s on launch can already be repaired.
+    try {
+      await require('./services/repair.cjs').startRepairService({
+        sites: () => store.get('sites', []),
+      });
+    } catch (err) {
+      console.error('repair endpoint:', err.message);
+    }
+
     try {
       await migration.migrateToChildProcs(store);
     } catch {}
@@ -376,9 +386,15 @@ app.on('before-quit', (e) => {
   const gitClone = require('./services/gitClone.cjs');
 
   const procman = require('./services/procman.cjs');
+  // Closing the repair endpoint removes its socket file.
+  const repairService = require('./services/repair.cjs');
   const deadline = new Promise((r) => setTimeout(r, 30_000));
   Promise.race([
-    Promise.all([procman.stopAll({ deadlineMs: 25_000 }), gitClone.stopAll()]),
+    Promise.all([
+      procman.stopAll({ deadlineMs: 25_000 }),
+      gitClone.stopAll(),
+      repairService.stopRepairService().catch(() => {}),
+    ]),
     deadline,
   ]).finally(() => app.exit(0));
 });

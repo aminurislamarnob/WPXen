@@ -14,7 +14,8 @@
 //
 // The mode is recorded in the store. Legacy is recorded the moment it is
 // detected (so the install can't drift out of it); rootless only once its
-// setup has succeeded.
+// setup has succeeded. Legacy installs move to rootless through
+// migrateToRootless(), offered by an in-app notice (#203).
 
 const { execSync } = require('child_process');
 const dnsPromises = require('dns').promises;
@@ -24,6 +25,7 @@ const os = require('os');
 const brew = require('./brew.cjs');
 const procman = require('./procman.cjs');
 const execAsync = require('./asyncExec.cjs');
+const sudoers = require('./sudoers.cjs');
 const { adminOsascript } = require('./admin.cjs');
 
 const TLD = 'test';
@@ -47,6 +49,16 @@ const RESOLVER_STAGING_NAME = `wpxen-resolver-${TLD}`;
 // WPDevPilot, WPXen); the address line is the same under every name.
 const LEGACY_ADDRESS_LINE = `address=/.${TLD}/${LOOPBACK}`;
 const LEGACY_CONF_COMMENT = `# WPXen: Route *.${TLD} to localhost`;
+const LEGACY_CONF_COMMENT_NAMES = ['WPXen', 'WPDevPilot', 'WPHerd'];
+
+// What `sudo brew services` registered for the legacy daemon. Homebrew's
+// names, not ours: migration unregisters it.
+const ROOT_SERVICE_LABEL = 'homebrew.mxcl.dnsmasq';
+const ROOT_SERVICE_PLIST = `/Library/LaunchDaemons/${ROOT_SERVICE_LABEL}.plist`;
+
+// Every sudoers file any app generation installed. Migration deletes all of
+// them in its one privileged step — each is a live NOPASSWD grant.
+const ALL_SUDOERS_PATHS = [sudoers.SUDOERS_PATH, ...sudoers.LEGACY_SUDOERS_PATHS];
 
 // Store keys (top-level `dns` object in wpxen-data.json).
 const MODE_KEY = 'dns.mode';
@@ -66,10 +78,12 @@ const deps = {
   brew,
   getDataDir: () => procman.getBaseDir(),
   getBrewPrefix: () => brew.getBrewPrefix(),
+  getBrewPath: () => brew.getBrewPath(),
   tmpdir: () => os.tmpdir(),
   binExists: (p) => fs.existsSync(p),
   resolverExists: () => fs.existsSync(RESOLVER_FILE),
   legacySetupPresent: () => isLegacyConfigured(),
+  sudoersPresent: () => sudoers.presentPaths().length > 0,
 };
 
 function bindStore(store) {
@@ -196,15 +210,24 @@ function buildSpec() {
 // nested AppleScript/shell quoting, which silently corrupts the command. The
 // DNS cache flush rides in the same step so macOS drops any negative result
 // it cached for *.test, without a second prompt.
-function writeResolverFile(content) {
+//
+// `before` is shell run as root ahead of the resolver write, in the same
+// prompt (migration's stop-and-cleanup); `reason` is the dialog text.
+function writeResolverFile(
+  content,
+  {
+    before = [],
+    reason = `WPXen wants to configure macOS so that .${TLD} sites resolve to your ` +
+      'local machine.',
+  } = {}
+) {
   const tmpFile = path.join(deps.tmpdir(), RESOLVER_STAGING_NAME);
   fs.writeFileSync(tmpFile, content, 'utf8');
-  const shellCmd =
+  const shellCmd = [
+    ...before,
     `mkdir -p ${RESOLVER_DIR} && cp '${tmpFile}' '${RESOLVER_FILE}' && chmod 644 '${RESOLVER_FILE}'` +
-    ` && dscacheutil -flushcache && killall -HUP mDNSResponder`;
-  const reason =
-    `WPXen wants to configure macOS so that .${TLD} sites resolve to your ` +
-    'local machine.';
+      ` && dscacheutil -flushcache && killall -HUP mDNSResponder`,
+  ].join(' && ');
   try {
     deps.execSync(adminOsascript(shellCmd, reason), { stdio: 'pipe' });
   } finally {
@@ -269,11 +292,109 @@ async function isLegacyRunningAsync() {
   }
 }
 
+// ─── Migration (legacy → rootless) ─────────────────────────────────────────
+
+// Pure: drops the block configureLegacy() appended to the shared config —
+// the comment line under any app generation's name and the address line
+// right after it — plus the newline the append started with, when that
+// newline is ours to take: the blank line before the block, or (block at the
+// end of the file) the terminator added to a last line that had none.
+// Everything else stays byte-for-byte; an address line not under our
+// comment isn't provably ours and is left.
+const escapeRe = (str) => str.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
+const LEGACY_BLOCK_RE = new RegExp(
+  `(^|\\n)# (?:${LEGACY_CONF_COMMENT_NAMES.join('|')}): ` +
+    `${escapeRe(`Route *.${TLD} to localhost`)}\\n${escapeRe(LEGACY_ADDRESS_LINE)}(?:\\n|$)`
+);
+
+function removeLegacyConfLines(content) {
+  let out = content;
+  for (let m = out.match(LEGACY_BLOCK_RE); m; m = out.match(LEGACY_BLOCK_RE)) {
+    const end = m.index + m[0].length;
+    const lead = m[1];
+    const blankBefore = m.index === 0 || out[m.index - 1] === '\n';
+    // Keep the lead newline when it still terminates the line above.
+    const keep = lead && !blankBefore && end < out.length ? lead : '';
+    out = out.slice(0, m.index) + keep + out.slice(end);
+  }
+  return out;
+}
+
+// No root needed: Homebrew keeps its prefix user-owned.
+function cleanSharedConfig() {
+  const confPath = getSharedConfPath();
+  if (!confPath || !fs.existsSync(confPath)) return;
+  const content = fs.readFileSync(confPath, 'utf8');
+  const cleaned = removeLegacyConfLines(content);
+  if (cleaned !== content) fs.writeFileSync(confPath, cleaned, 'utf8');
+}
+
+// Shown as an in-app notice while true. Legacy installs need it; so does a
+// rootless install that still carries a sudoers grant (Settings no longer
+// has a control that could remove one).
+function migrationNeeded() {
+  return getMode() === 'legacy' || deps.sudoersPresent();
+}
+
+// Shell run as root to take the legacy daemon down for good. `brew services
+// stop` both unloads the LaunchDaemon and deletes its plist; the bootout and
+// the rm cover a brew that refuses or a job it no longer knows about.
+function buildRootServiceStop() {
+  const brewBin = deps.getBrewPath();
+  const steps = [];
+  if (brewBin) {
+    steps.push(`PATH=${deps.getBrewPrefix()}/bin:$PATH ${brewBin} services stop dnsmasq`);
+  }
+  steps.push(`launchctl bootout system/${ROOT_SERVICE_LABEL}`, 'true');
+  return `(${steps.join(' || ')}) && rm -f '${ROOT_SERVICE_PLIST}'`;
+}
+
+// One click, one prompt: stop and unregister the root dnsmasq (legacy only —
+// on a rootless install any root dnsmasq is the user's own), delete every
+// sudoers file, and rewrite the resolver with the port. Throws on a
+// cancelled prompt or a failed step, and nothing is recorded then.
+//
+// After it succeeds: WPXen's lines come out of the shared config, the mode
+// is recorded, then the rootless child starts. The mode is recorded before
+// the start on purpose — the root daemon is gone and the resolver names the
+// high port, so a start failure is a rootless problem to retry, not a reason
+// to fall back to a legacy setup that no longer exists.
+async function migrateToRootless() {
+  const port = getPort();
+  // Fails fast (no prompt) when dnsmasq isn't installed.
+  buildSpec();
+  writeConfig();
+
+  const before = [];
+  if (getMode() === 'legacy') before.push(buildRootServiceStop());
+  before.push(`rm -f ${ALL_SUDOERS_PATHS.map((p) => `'${p}'`).join(' ')}`);
+  writeResolverFile(buildResolverContent({ port }), {
+    before,
+    reason:
+      `WPXen wants to move .${TLD} DNS off its root service and remove the ` +
+      'passwordless permission it installed. It will not need your password for ' +
+      'DNS again.',
+  });
+
+  try {
+    cleanSharedConfig();
+  } catch (err) {
+    // Rootless never reads that file; leftover lines there are cosmetic.
+    console.warn('[dnsmasq] could not clean the shared config:', err.message);
+  }
+  if (deps.store) {
+    deps.store.set(PORT_KEY, port);
+    deps.store.set(MODE_KEY, 'rootless');
+  }
+  await deps.procman.start(buildSpec());
+}
+
 // ─── Public, mode-aware ─────────────────────────────────────────────────────
 
 async function start() {
   if (getMode() === 'legacy') {
-    // Binds port 53 — a root LaunchDaemon (admin prompt or sudoers).
+    // Binds port 53 — a root LaunchDaemon. Uses an existing sudoers grant
+    // until migration deletes it; WPXen can no longer install one.
     deps.brew.startBrewServiceSudo('dnsmasq');
     return;
   }
@@ -360,5 +481,8 @@ module.exports = {
   resolverFileExists,
   setupComplete,
   shouldAutoStart,
+  removeLegacyConfLines,
+  migrationNeeded,
+  migrateToRootless,
   __setDeps,
 };
