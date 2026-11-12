@@ -30,6 +30,7 @@ const blueprints = require('./services/blueprints.cjs');
 const mkcert = require('./services/mkcert.cjs');
 const trustBundle = require('./services/trustBundle.cjs');
 const phpmyadmin = require('./services/phpmyadmin.cjs');
+const migration = require('./services/migration.cjs');
 const mailpit = require('./services/mailpit.cjs');
 const procman = require('./services/procman.cjs');
 const cloudflared = require('./services/cloudflared.cjs');
@@ -1364,8 +1365,12 @@ function registerHandlers(win, storeInstance) {
   // Heal per-site vhosts shortly after startup: regenerate each from the
   // current template and rewrite only the ones that differ (e.g. sites created
   // before client_max_body_size / PHP_VALUE support), then reload nginx once.
+  // On a launch where a one-time Site upgrade is still pending, the upgrade
+  // pass (migration.cjs runSiteUpgrades, run from main.cjs) regenerates every
+  // vhost itself — stand aside so that launch has one writer and one reload.
   setTimeout(() => {
     try {
+      if (migration.pendingSiteUpgrades(store).length) return;
       const sites = store.get('sites', []);
       const serversDir = nginx.getServersDir();
       if (!serversDir || !fs.existsSync(serversDir)) return;
@@ -2284,6 +2289,25 @@ function registerHandlers(win, storeInstance) {
     }
   });
 
+  // A capped batch of whole entries matching `query` anywhere in the file,
+  // newest first; `opts.end` (a previous batch's `pageStart`) continues with
+  // the older matches, `opts.levels` keeps only those levels.
+  ipcMain.handle('search-site-log', async (_, id, kind, query, opts) => {
+    try {
+      const site = findSite(id);
+      if (!site) return { success: false, error: 'Site not found' };
+      return {
+        success: true,
+        result: logs.searchLog(site, kind, query, {
+          end: opts?.end,
+          levels: opts?.levels,
+        }),
+      };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
   ipcMain.handle('clear-site-log', async (_, id, kind) => {
     try {
       const site = findSite(id);
@@ -2876,24 +2900,31 @@ function registerHandlers(win, storeInstance) {
     return { success: true };
   });
 
-  // ─── Sudoers / Permissions ────────────────────────────────────────────
+  // ─── Sudoers (removal only — WPXen no longer installs one) ───────────
 
   ipcMain.handle('check-sudoers', () => {
     return { configured: sudoers.isConfigured(), path: sudoers.SUDOERS_PATH };
   });
 
-  ipcMain.handle('install-sudoers', async () => {
+  ipcMain.handle('uninstall-sudoers', async () => {
     try {
-      sudoers.install();
+      sudoers.uninstall();
       return { success: true };
     } catch (err) {
       return { success: false, error: humanize(err) };
     }
   });
 
-  ipcMain.handle('uninstall-sudoers', async () => {
+  // Legacy → rootless DNS (#203). The notice asks only; the prompt appears
+  // when the user clicks it.
+  ipcMain.handle('get-dns-migration', () => ({
+    needed: dnsmasq.migrationNeeded(),
+    mode: dnsmasq.getMode(),
+  }));
+
+  ipcMain.handle('migrate-dns', async () => {
     try {
-      sudoers.uninstall();
+      await dnsmasq.migrateToRootless();
       return { success: true };
     } catch (err) {
       return { success: false, error: humanize(err) };

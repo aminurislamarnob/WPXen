@@ -325,11 +325,30 @@ function restartBrewService(name) {
   execBrew(`services restart ${name}`);
 }
 
-// Runs `brew services <action> <name>` as root.
-//
-// If the WPXen sudoers file is installed (/etc/sudoers.d/wpxen), sudo runs
-// silently with no password prompt. Otherwise falls back to an osascript
-// admin-privileges dialog — acceptable for the first run before setup.
+// Runs `brew services <action> <name>` as root behind the macOS
+// administrator prompt. WPXen holds no standing root permission (spec #201),
+// so every privileged caller (e.g. stopping a root nginx left by very old
+// versions) asks here.
+function execBrewServiceAdmin(action, name) {
+  const brewBin = getBrewPath();
+  if (!brewBin) throw new Error('Homebrew is not installed');
+  const { adminOsascript } = require('./admin.cjs');
+  const prefix = getBrewPrefix();
+  const shellCmd = `PATH=${prefix}/bin:$PATH ${brewBin} services ${action} ${name}`;
+  const reason = `WPXen wants to ${action} the ${name} service.`;
+  execSync(adminOsascript(shellCmd, reason), {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+}
+
+function stopBrewServiceAdmin(name) {
+  execBrewServiceAdmin('stop', name);
+}
+
+// The legacy root dnsmasq's start/stop/restart, unchanged until the install
+// migrates to rootless DNS: a sudoers grant an older version installed
+// (/etc/sudoers.d/wpxen) still runs it silently, otherwise the administrator
+// prompt. WPXen can no longer install that grant, and migration deletes it.
 function execBrewServiceSudo(action, name) {
   const brewBin = getBrewPath();
   if (!brewBin) throw new Error('Homebrew is not installed');
@@ -351,14 +370,7 @@ function execBrewServiceSudo(action, name) {
     }
   }
 
-  // Sudoers not set up (or no longer valid) — prompt via osascript.
-  const { adminOsascript } = require('./admin.cjs');
-  const prefix = getBrewPrefix();
-  const shellCmd = `PATH=${prefix}/bin:$PATH ${brewBin} services ${action} ${name}`;
-  const reason = `WPXen wants to ${action} the ${name} service.`;
-  execSync(adminOsascript(shellCmd, reason), {
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
+  execBrewServiceAdmin(action, name);
 }
 
 function startBrewServiceSudo(name) {
@@ -455,6 +467,7 @@ module.exports = {
   startBrewService,
   stopBrewService,
   restartBrewService,
+  stopBrewServiceAdmin,
   startBrewServiceSudo,
   stopBrewServiceSudo,
   restartBrewServiceSudo,
