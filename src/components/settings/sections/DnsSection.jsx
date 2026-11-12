@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { CheckCircle, Loader, Lock, RefreshCw } from 'lucide-react';
-import { Button, Card, SectionLabel, SettingsRow } from '../../ui';
+import { Button, Card, SectionLabel, SettingsRow, StatusPill } from '../../ui';
 import { useSettingsContext } from '../SettingsLayout';
 import DnsResolverRow from './DnsResolverRow';
 
@@ -60,15 +60,9 @@ export default function DnsSection() {
               : 'Not installed yet. Enabling HTTPS on any site sets it up automatically.'
           }
         >
-          <span
-            className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${
-              caStatus?.trusted
-                ? 'bg-status-running/10 text-status-running'
-                : 'bg-muted text-muted-foreground'
-            }`}
-          >
+          <StatusPill tone={caStatus?.trusted ? 'ok' : 'neutral'}>
             {caStatus?.trusted ? 'Trusted' : 'Not installed'}
-          </span>
+          </StatusPill>
         </SettingsRow>
 
         <SettingsRow
@@ -86,15 +80,9 @@ export default function DnsSection() {
           subtitle={phpTrustSubtitle(phpTrust)}
         >
           {phpTrust?.trusted || !phpTrust?.localAuthority ? (
-            <span
-              className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${
-                phpTrust?.trusted
-                  ? 'bg-status-running/10 text-status-running'
-                  : 'bg-muted text-muted-foreground'
-              }`}
-            >
+            <StatusPill tone={phpTrust?.trusted ? 'ok' : 'neutral'}>
               {phpTrust?.trusted ? 'Trusted' : 'Not installed'}
-            </span>
+            </StatusPill>
           ) : (
             <Button onClick={handleRepairPhpTrust} disabled={phpTrustLoading}>
               {phpTrustLoading ? (
@@ -108,19 +96,18 @@ export default function DnsSection() {
         </SettingsRow>
       </Card>
 
-      {[phpTrustMessage].filter(Boolean).map((m, i) => (
+      {phpTrustMessage && (
         <div
-          key={i}
           className={`flex items-start gap-2 px-3 py-2.5 rounded-lg mt-2 text-[13px] ${
-            m.type === 'error'
+            phpTrustMessage.type === 'error'
               ? 'bg-destructive/10 text-destructive'
               : 'bg-status-running/10 text-status-running'
           }`}
         >
           <CheckCircle size={14} className="flex-shrink-0 mt-0.5" />
-          {m.text}
+          {phpTrustMessage.text}
         </div>
-      ))}
+      )}
     </div>
   );
 }

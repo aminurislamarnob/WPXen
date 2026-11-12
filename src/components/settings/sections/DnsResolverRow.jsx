@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { CheckCircle, Loader, Wifi } from 'lucide-react';
-import { SettingsRow } from '../../ui';
+import { SettingsRow, StatusPill } from '../../ui';
 import { dnsHealthView, runDnsAction } from '../../../lib/dnsHealth';
 
 const TONE_TEXT = {
@@ -8,13 +8,6 @@ const TONE_TEXT = {
   error: 'text-destructive',
   pending: 'text-muted-foreground',
   neutral: 'text-muted-foreground',
-};
-
-const TONE_PILL = {
-  ok: 'bg-status-running/10 text-status-running',
-  error: 'bg-destructive/10 text-destructive',
-  pending: 'bg-muted text-muted-foreground',
-  neutral: 'bg-muted text-muted-foreground',
 };
 
 // "*.test DNS Resolution": the real lookup's verdict, with the fix it calls
@@ -87,11 +80,7 @@ export default function DnsResolverRow({ visible }) {
           )
         }
       >
-        <span
-          className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${TONE_PILL[view.tone]}`}
-        >
-          {view.label}
-        </span>
+        <StatusPill tone={view.tone}>{view.label}</StatusPill>
         {view.action ? (
           <button
             onClick={() => handleAction(view.action.kind)}

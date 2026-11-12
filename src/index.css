@@ -283,6 +283,19 @@ textarea:focus {
     @apply btn text-muted-foreground hover:bg-accent hover:text-accent-foreground;
   }
 
+  /* The action on a warning notice card */
+  .btn-warning {
+    @apply btn font-semibold bg-status-warning/10 text-status-warning hover:bg-status-warning/20;
+  }
+
+  /* On/off filter chip, driven by aria-pressed */
+  .btn-toggle {
+    @apply btn border border-border bg-card text-foreground;
+  }
+  .btn-toggle[aria-pressed='false'] {
+    @apply border-dashed bg-transparent text-muted-foreground hover:text-foreground;
+  }
+
   /* ── Surfaces ─────────────────────────────────────────────────────────────
    Flat and hairline-bordered — no blur, no translucency anywhere. */
 

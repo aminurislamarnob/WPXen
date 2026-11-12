@@ -45,23 +45,36 @@ const LOG_TABS = [
   { id: 'php-error', label: 'PHP Error Log' },
 ];
 
-// The normalised levels logReader.cjs assigns, as badges. The access log has
-// no levels (`level: null`) and gets none.
-const LEVEL_BADGES = {
-  fatal: { label: 'Fatal', className: 'bg-destructive/10 text-destructive' },
-  warning: { label: 'Warning', className: 'bg-status-warning/10 text-status-warning' },
-  notice: { label: 'Notice', className: 'bg-highlight/10 text-highlight' },
-  deprecated: { label: 'Deprecated', className: 'bg-muted text-muted-foreground' },
-  other: { label: 'Other', className: 'bg-muted text-muted-foreground' },
-};
-
-// The colored dot on each level filter, matching its badge.
-const LEVEL_DOTS = {
-  fatal: 'bg-destructive',
-  warning: 'bg-status-warning',
-  notice: 'bg-highlight',
-  deprecated: 'bg-muted-foreground',
-  other: 'bg-muted-foreground/50',
+// The normalised levels logReader.cjs assigns: each entry's badge, and the
+// matching dot on its level filter. The access log has no levels
+// (`level: null`) and gets none. Severity colors only — `highlight` is the
+// brand blue, not a level.
+const LEVELS = {
+  fatal: {
+    label: 'Fatal',
+    badge: 'bg-destructive/10 text-destructive',
+    dot: 'bg-destructive',
+  },
+  warning: {
+    label: 'Warning',
+    badge: 'bg-status-warning/10 text-status-warning',
+    dot: 'bg-status-warning',
+  },
+  notice: {
+    label: 'Notice',
+    badge: 'bg-foreground/10 text-foreground',
+    dot: 'bg-foreground',
+  },
+  deprecated: {
+    label: 'Deprecated',
+    badge: 'bg-muted text-muted-foreground',
+    dot: 'bg-muted-foreground',
+  },
+  other: {
+    label: 'Other',
+    badge: 'bg-muted text-muted-foreground',
+    dot: 'bg-muted-foreground/50',
+  },
 };
 
 export default function SiteLogs({ site }) {
@@ -645,26 +658,21 @@ function LevelFilters({ hidden, counts, onToggle, disabled }) {
       {FILTER_LEVELS.map((level) => {
         const on = !hidden.includes(level);
         return (
-          <button
+          <Button
             key={level}
-            type="button"
+            variant="toggle"
             aria-pressed={on}
             disabled={disabled}
             onClick={() => onToggle(level)}
-            className={`inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md border text-xs transition-colors disabled:opacity-50 ${
-              on
-                ? 'border-border bg-card text-foreground'
-                : 'border-dashed border-border text-muted-foreground hover:text-foreground'
-            }`}
           >
             <span
-              className={`w-2 h-2 rounded-full ${LEVEL_DOTS[level]} ${on ? '' : 'opacity-40'}`}
+              className={`w-2 h-2 rounded-full ${LEVELS[level].dot} ${on ? '' : 'opacity-40'}`}
             />
-            {LEVEL_BADGES[level].label}
+            {LEVELS[level].label}
             <span className="tabular-nums text-muted-foreground">
               {counts ? counts[level].toLocaleString() : ''}
             </span>
-          </button>
+          </Button>
         );
       })}
     </div>
@@ -674,7 +682,7 @@ function LevelFilters({ hidden, counts, onToggle, disabled }) {
 // One entry: timestamp, level badge (error logs only), then the message with
 // its continuation lines — a stack trace stays under its error.
 function LogEntry({ entry }) {
-  const badge = entry.level ? LEVEL_BADGES[entry.level] : null;
+  const badge = entry.level ? LEVELS[entry.level] : null;
   return (
     <li className="flex items-start gap-3 px-4 py-1.5">
       <span className="flex-shrink-0 w-48 text-muted-foreground whitespace-nowrap truncate">
@@ -682,7 +690,7 @@ function LogEntry({ entry }) {
       </span>
       {badge && (
         <span
-          className={`flex-shrink-0 w-[4.75rem] text-center rounded-sm px-1.5 text-[11px] font-sans font-medium ${badge.className}`}
+          className={`flex-shrink-0 w-[4.75rem] text-center rounded-sm px-1.5 text-[11px] font-sans font-medium ${badge.badge}`}
         >
           {badge.label}
         </span>
