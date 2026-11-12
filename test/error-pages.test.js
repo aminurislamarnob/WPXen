@@ -86,6 +86,15 @@ describe('snippet', () => {
     expect(count(snippet, 'proxy_pass ')).toBe(2);
   });
 
+  it('answers the repair and status routes only to this machine, never the LAN', () => {
+    for (const route of ['repair', 'status']) {
+      const block = snippet.match(new RegExp(`location = /__wpxen/${route} \\{[^}]*\\}`))[0];
+      expect(block).toMatch(/allow 127\.0\.0\.1;\s*allow ::1;\s*deny all;/);
+      // The access check comes before the proxy, so a denied request never reaches the app.
+      expect(block.indexOf('deny all;')).toBeLessThan(block.indexOf('proxy_pass'));
+    }
+  });
+
   it('reserves the rest of /__wpxen/ so it never reaches WordPress', () => {
     expect(snippet).toMatch(/location \^~ \/__wpxen\/ \{\s*return 404;\s*\}/);
   });

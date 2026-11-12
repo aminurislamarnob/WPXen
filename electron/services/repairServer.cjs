@@ -13,9 +13,14 @@ const fs = require('fs');
 const http = require('http');
 const path = require('path');
 
+// Names that carry the app's name outside its bundle (see CLAUDE.md, "Legacy
+// names"): the URL prefix the shared nginx snippet reserves on every Site.
+// repair.cjs re-exports it; it lives here so this module needs nothing back.
+const RESERVED_PREFIX = '/__wpxen/';
+
 const ROUTES = {
-  '/__wpxen/repair': 'POST',
-  '/__wpxen/status': 'GET',
+  [`${RESERVED_PREFIX}repair`]: 'POST',
+  [`${RESERVED_PREFIX}status`]: 'GET',
 };
 
 function send(res, status, body, headers = {}) {
@@ -81,4 +86,4 @@ function listen({ socketPath, repairer }) {
   });
 }
 
-module.exports = { listen, ROUTES };
+module.exports = { listen, ROUTES, RESERVED_PREFIX };

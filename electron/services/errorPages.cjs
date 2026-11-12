@@ -49,13 +49,19 @@ function snippetPath(confDir) {
 
 // The shared snippet, included inside each Site's server {} block. Pure.
 // The two app routes are exact locations proxied to the socket with the
-// request's host (the app identifies the Site by it); the rest of the
-// reserved prefix is a 404 so it never falls through to WordPress.
+// request's host (the app identifies the Site by it), answered only to this
+// machine: vhosts listen on every interface, so without the allow list a LAN
+// host sending `Host: shop.test` could restart a Site's PHP. The pages stay
+// open (internal-only already) so a LAN visitor still sees the 502. The rest
+// of the reserved prefix is a 404 so it never falls through to WordPress.
 function buildErrorSnippet({ socketPath, pagesDir }) {
   assertNginxPath(socketPath, 'repair socket path');
   assertNginxPath(pagesDir, 'error page folder');
   const upstream = `http://unix:${socketPath}:`;
   const route = (name) => `location = ${RESERVED}${name} {
+    allow 127.0.0.1;
+    allow ::1;
+    deny all;
     proxy_pass ${upstream};
     proxy_set_header Host $host;
     proxy_pass_request_body off;
@@ -363,7 +369,7 @@ function build504Page({ logPath }) {
 
 // Writes the snippet and the pages, rewriting only what changed. Must run
 // before any vhost that includes the snippet is written or nginx is tested —
-// an include of a missing file fails `nginx -t`. Returns the snippet path.
+// an include of a missing file fails `nginx -t`. Returns { snippetPath }.
 function ensureErrorPages({ confDir, prefix }) {
   const dir = errorPagesDir(confDir);
   if (!dir || !prefix) throw new Error('nginx config folder not found');

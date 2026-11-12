@@ -16,8 +16,9 @@ const repairServer = require('./repairServer.cjs');
 // Names that carry the app's name outside its bundle (see CLAUDE.md, "Legacy
 // names") — a future rename has to find and migrate these.
 const REPAIR_SOCKET_NAME = 'wpxen-repair.sock';
-// The URL prefix the shared nginx snippet reserves on every Site.
-const RESERVED_PREFIX = '/__wpxen/';
+// The URL prefix the shared nginx snippet reserves on every Site. Defined
+// beside the routes it prefixes (repairServer.cjs requires nothing of ours).
+const RESERVED_PREFIX = repairServer.RESERVED_PREFIX;
 
 // macOS sun_path is 104 bytes including the terminating NUL.
 const MAX_SOCKET_PATH_BYTES = 103;
