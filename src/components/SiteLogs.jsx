@@ -11,7 +11,23 @@ import {
   X,
 } from 'lucide-react';
 import { Button, Tooltip } from './ui';
-import { prependOlder, formatLogSize, matchSummary } from '../lib/logView';
+import {
+  prependOlder,
+  formatLogSize,
+  matchSummary,
+  FILTER_LEVELS,
+  hasLevelFilters,
+  visibleLevels,
+  toggleHiddenLevel,
+  readHiddenLevels,
+  saveHiddenLevels,
+  searchLevels,
+} from '../lib/logView';
+
+// A filtered page that comes back empty only means the level is rare in
+// that stretch of the file, so a load keeps reading back this many pages
+// (16 MB each) before showing "none yet" with Load older.
+const FILTERED_PAGE_TRIES = 8;
 
 const LOG_TABS = [
   { id: 'debug', label: 'Debug Log' },
@@ -30,6 +46,15 @@ const LEVEL_BADGES = {
   other: { label: 'Other', className: 'bg-muted text-muted-foreground' },
 };
 
+// The colored dot on each level filter, matching its badge.
+const LEVEL_DOTS = {
+  fatal: 'bg-destructive',
+  warning: 'bg-status-warning',
+  notice: 'bg-highlight',
+  deprecated: 'bg-muted-foreground',
+  other: 'bg-muted-foreground/50',
+};
+
 export default function SiteLogs({ site }) {
   const [tab, setTab] = useState('debug');
   const [view, setView] = useState(null); // logReader page, grown by Load older
@@ -44,6 +69,53 @@ export default function SiteLogs({ site }) {
   // What the next layout should do with the scroll position: 'end' after a
   // fresh load, or the distance from the bottom to keep after Load older.
   const scrollRef = useRef(null);
+  // Levels hidden by the filter (the error logs only), remembered per viewer.
+  const [hidden, setHidden] = useState(readHiddenLevels);
+  const [counts, setCounts] = useState(null); // logReader countLevels result
+  const countsRequestRef = useRef(0);
+
+  // A page ending at `end` (the newest when omitted), at the filter's levels.
+  // A filtered page with nothing in it reads on further back, a few times.
+  const fetchPage = useCallback(
+    async (kind, end) => {
+      if (!hasLevelFilters(kind)) {
+        return window.electronAPI.getSiteLogPage(site.id, kind, { end });
+      }
+      const levels = visibleLevels(hidden);
+      let result;
+      for (let tries = 0; tries < FILTERED_PAGE_TRIES; tries++) {
+        result = await window.electronAPI.getSiteLogPage(site.id, kind, { end, levels });
+        if (!result.success || result.page.entries.length || result.page.atStart) break;
+        end = result.page.pageStart;
+      }
+      return result;
+    },
+    [site.id, hidden]
+  );
+
+  const loadCounts = useCallback(
+    async (kind) => {
+      const request = ++countsRequestRef.current;
+      setCounts(null);
+      if (!hasLevelFilters(kind)) return;
+      const result = await window.electronAPI.getSiteLogCounts(site.id, kind);
+      if (request === countsRequestRef.current && result.success)
+        setCounts(result.counts);
+    },
+    [site.id]
+  );
+
+  // Counts cover the whole file, independent of the filter: fetched per tab,
+  // and again whenever the file is reloaded (Refresh, Clear).
+  useEffect(() => {
+    loadCounts(tab);
+  }, [tab, loadCounts]);
+
+  function toggleLevel(level) {
+    const next = toggleHiddenLevel(hidden, level);
+    setHidden(next);
+    saveHiddenLevels(next);
+  }
 
   // Whole-file search. Results are a separate view laid over the paged one,
   // which stays mounted underneath, so clearing the search lands the reader
@@ -61,7 +133,7 @@ export default function SiteLogs({ site }) {
     async (kind) => {
       const request = ++requestRef.current;
       setLoading(true);
-      const result = await window.electronAPI.getSiteLogPage(site.id, kind);
+      const result = await fetchPage(kind);
       if (request !== requestRef.current) return;
       if (result.success) {
         scrollRef.current = 'end';
@@ -72,7 +144,7 @@ export default function SiteLogs({ site }) {
       }
       setLoading(false);
     },
-    [site.id]
+    [fetchPage]
   );
 
   // Load on mount and whenever the active tab changes.
@@ -85,9 +157,7 @@ export default function SiteLogs({ site }) {
     if (!view || view.atStart || loadingOlder) return;
     const request = requestRef.current;
     setLoadingOlder(true);
-    const result = await window.electronAPI.getSiteLogPage(site.id, tab, {
-      end: view.pageStart,
-    });
+    const result = await fetchPage(tab, view.pageStart);
     setLoadingOlder(false);
     if (request !== requestRef.current) return;
     if (result.success) {
@@ -119,22 +189,26 @@ export default function SiteLogs({ site }) {
         return;
       }
       setSearching(true);
-      const result = await window.electronAPI.searchSiteLog(site.id, kind, text);
+      // A filtered view searches only the levels it shows.
+      const levels = searchLevels(kind, hidden);
+      const result = await window.electronAPI.searchSiteLog(site.id, kind, text, {
+        levels,
+      });
       if (request !== searchRequestRef.current) return;
       if (result.success) {
         resultsScrollRef.current = 'end';
-        setSearch({ ...result.result, kind });
+        setSearch({ ...result.result, kind, levels });
       } else {
         setSearch(null);
         setMessage({ type: 'error', text: result.error });
       }
       setSearching(false);
     },
-    [site.id]
+    [site.id, hidden]
   );
 
-  // Search as the term settles, and again on another tab. Clearing it is
-  // immediate.
+  // Search as the term settles, and again on another tab or a level toggle.
+  // Clearing it is immediate.
   useEffect(() => {
     const timer = setTimeout(() => runSearch(tab, term), term ? 250 : 0);
     return () => clearTimeout(timer);
@@ -144,10 +218,12 @@ export default function SiteLogs({ site }) {
     if (!search || search.atStart || loadingMore) return;
     const request = searchRequestRef.current;
     setLoadingMore(true);
-    // The batch's own term, not the box's: the cursor belongs to it.
-    const { kind, query: batchQuery, pageStart } = search;
+    // The batch's own term and levels, not the box's or the filter's: the
+    // cursor belongs to them.
+    const { kind, query: batchQuery, levels, pageStart } = search;
     const result = await window.electronAPI.searchSiteLog(site.id, kind, batchQuery, {
       end: pageStart,
+      levels,
     });
     setLoadingMore(false);
     if (request !== searchRequestRef.current) return;
@@ -177,6 +253,7 @@ export default function SiteLogs({ site }) {
     const result = await window.electronAPI.clearSiteLog(site.id, tab);
     if (result.success) {
       setMessage({ type: 'success', text: 'Log cleared.' });
+      loadCounts(tab);
       await load(tab);
       if (term) await runSearch(tab, term);
     } else {
@@ -200,7 +277,13 @@ export default function SiteLogs({ site }) {
   const isBusy = !!busy;
   // A batch from another tab is stale until that tab's search lands.
   const searchResult = search && search.kind === tab ? search : null;
-  const hasContent = !!view?.exists && view.entries.some((e) => e.text.trim().length > 0);
+  const filtered = hasLevelFilters(tab) && hidden.length > 0;
+  // A filtered page can be empty while the file isn't: what's on screen
+  // only proves emptiness for an unfiltered page that reaches the start.
+  const hasContent =
+    !!view?.exists &&
+    view.size > 0 &&
+    (filtered || !view.atStart || view.entries.some((e) => e.text.trim().length > 0));
 
   const placeholder = !view
     ? ''
@@ -256,6 +339,7 @@ export default function SiteLogs({ site }) {
               onClick={() => {
                 setMessage(null);
                 load(tab);
+                loadCounts(tab);
                 if (term) runSearch(tab, term);
               }}
               disabled={isBusy || loading}
@@ -336,6 +420,15 @@ export default function SiteLogs({ site }) {
         )}
       </div>
 
+      {hasLevelFilters(tab) && (
+        <LevelFilters
+          hidden={hidden}
+          counts={counts?.counts}
+          onToggle={toggleLevel}
+          disabled={!view?.exists}
+        />
+      )}
+
       {/* Viewer */}
       <div className="relative">
         {term && searching && (
@@ -408,6 +501,13 @@ export default function SiteLogs({ site }) {
                   </Button>
                 </div>
               )}
+              {view.entries.length === 0 && (
+                <p className="px-4 py-3 text-muted-foreground">
+                  {view.atStart
+                    ? '-- No entries at the selected levels.'
+                    : '-- No entries at the selected levels yet. Load older reads further back.'}
+                </p>
+              )}
               <ol className="divide-y divide-border">
                 {view.entries.map((entry) => (
                   <LogEntry key={entry.offset} entry={entry} />
@@ -433,6 +533,44 @@ export default function SiteLogs({ site }) {
           </p>
         </div>
       )}
+    </div>
+  );
+}
+
+// One toggle per level, with how many entries of it the whole file holds.
+// Counts are blank until the whole-file count lands.
+function LevelFilters({ hidden, counts, onToggle, disabled }) {
+  return (
+    <div
+      className="flex flex-wrap items-center gap-1.5 mb-3"
+      role="group"
+      aria-label="Levels"
+    >
+      {FILTER_LEVELS.map((level) => {
+        const on = !hidden.includes(level);
+        return (
+          <button
+            key={level}
+            type="button"
+            aria-pressed={on}
+            disabled={disabled}
+            onClick={() => onToggle(level)}
+            className={`inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md border text-xs transition-colors disabled:opacity-50 ${
+              on
+                ? 'border-border bg-card text-foreground'
+                : 'border-dashed border-border text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <span
+              className={`w-2 h-2 rounded-full ${LEVEL_DOTS[level]} ${on ? '' : 'opacity-40'}`}
+            />
+            {LEVEL_BADGES[level].label}
+            <span className="tabular-nums text-muted-foreground">
+              {counts ? counts[level].toLocaleString() : ''}
+            </span>
+          </button>
+        );
+      })}
     </div>
   );
 }

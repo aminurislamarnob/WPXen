@@ -4,9 +4,11 @@ import os from 'os';
 import path from 'path';
 import {
   readPage,
+  countLevels,
   PAGE_MAX_ENTRIES,
   PAGE_MAX_BYTES,
   ENTRY_MAX_BYTES,
+  PAGE_SCAN_BYTES,
 } from '../electron/services/logReader.cjs';
 
 // Fixtures copy the line shapes PHP, PHP-FPM and nginx really write; every
@@ -220,10 +222,10 @@ function bigDebugLog(name, count, { frames = 3 } = {}) {
 }
 
 // Pages from the newest back to the first entry; returns every page.
-function pageToStart(p, kind) {
-  const pages = [readPage(p, kind)];
+function pageToStart(p, kind, opts = {}) {
+  const pages = [readPage(p, kind, opts)];
   while (!pages[pages.length - 1].atStart) {
-    pages.push(readPage(p, kind, { end: pages[pages.length - 1].pageStart }));
+    pages.push(readPage(p, kind, { ...opts, end: pages[pages.length - 1].pageStart }));
     if (pages.length > 10_000) throw new Error('paging never reached the start');
   }
   return pages;
@@ -309,6 +311,80 @@ describe('readPage: paging', () => {
   });
 });
 
+describe('readPage: level filter', () => {
+  it('returns only entries of the levels asked for', () => {
+    const p = fixture('debug.log', KNOWN_MIX);
+    const page = readPage(p, 'debug', { levels: ['fatal', 'warning'] });
+    expect(page.entries.map((e) => e.level)).toEqual([
+      'warning',
+      'fatal',
+      'warning',
+      'fatal',
+      'warning',
+    ]);
+    expect(page.atStart).toBe(true);
+  });
+
+  it('keeps each fatal whole, with its full stack trace', () => {
+    const p = fixture('debug.log', KNOWN_MIX);
+    const [fatal] = readPage(p, 'debug', { levels: ['fatal'] }).entries;
+    expect(fatal).toMatchObject({ time: '12-Nov-2026 10:00:02 UTC', level: 'fatal' });
+    expect(fatal.text).toBe(FATAL_WITH_TRACE.replace('[12-Nov-2026 10:00:02 UTC] ', ''));
+  });
+
+  it('pages back to the start while filtered, never returning a hidden level', () => {
+    const { path: p, expected } = bigDebugLog('debug.log', 5000);
+    const pages = pageToStart(p, 'debug', { levels: ['fatal'] });
+    expect(pages.length).toBeGreaterThan(1);
+
+    const all = pages.reverse().flatMap((page) => page.entries);
+    expect(all.every((e) => e.level === 'fatal')).toBe(true);
+    // Exactly the file's fatals, in order, each once and with its trace.
+    expect(all.map(({ offset, time, text }) => ({ offset, time, text }))).toEqual(
+      expected.filter((e) => e.text.startsWith('PHP Fatal error:'))
+    );
+  });
+
+  it('hides deprecations while showing everything else', () => {
+    const p = fixture('debug.log', KNOWN_MIX);
+    const page = readPage(p, 'debug', {
+      levels: ['fatal', 'warning', 'notice', 'other'],
+    });
+    expect(page.entries).toHaveLength(8);
+    expect(page.entries.some((e) => e.level === 'deprecated')).toBe(false);
+  });
+
+  it('bounds how far one filtered page scans, so a rare level never reads the whole file', () => {
+    // Only deprecations: a fatal-only page finds nothing and must stop early.
+    const p = path.join(dir, 'debug.log');
+    const line = `[12-Nov-2026 10:00:00 UTC] PHP Deprecated:  Function legacy() is deprecated in /srv/demo/y.php on line 1\n`;
+    const block = Buffer.from(line.repeat(Math.ceil((1024 * 1024) / line.length)));
+    const fd = fs.openSync(p, 'w');
+    for (let written = 0; written < PAGE_SCAN_BYTES * 3; written += block.length) {
+      fs.writeSync(fd, block);
+    }
+    fs.closeSync(fd);
+
+    const page = readPage(p, 'debug', { levels: ['fatal'] });
+    expect(page.entries).toEqual([]);
+    expect(page.atStart).toBe(false);
+    expect(page.end - page.pageStart).toBeGreaterThanOrEqual(PAGE_SCAN_BYTES);
+    expect(page.end - page.pageStart).toBeLessThan(PAGE_SCAN_BYTES + ENTRY_MAX_BYTES);
+    // …and the next page carries on from there, still on an entry start.
+    const next = readPage(p, 'debug', { levels: ['fatal'], end: page.pageStart });
+    expect(next.end).toBe(page.pageStart);
+    expect(next.pageStart % line.length).toBe(0);
+  });
+
+  it('ignores a level filter on the access log, which has no levels', () => {
+    const p = fixture(
+      'demo.test.access.log',
+      '127.0.0.1 - - [12/Nov/2026:10:00:00 +0000] "GET / HTTP/1.1" 200 5120 "-" "Mozilla/5.0"\n'
+    );
+    expect(readPage(p, 'nginx-access', { levels: ['fatal'] }).entries).toHaveLength(1);
+  });
+});
+
 describe('readPage: large files', () => {
   it('opens the newest page of a 200 MB debug log in under a second', () => {
     const p = path.join(dir, 'debug.log');
@@ -342,5 +418,93 @@ describe('readPage: large files', () => {
     expect(performance.now() - started).toBeLessThan(1000);
     expect(page.entries.length).toBeGreaterThan(0);
     expect(page.atStart).toBe(false);
+  });
+});
+
+// A debug log with a known mix: 2 fatals (one with a stack trace), 3
+// warnings, 1 notice, 4 deprecations and 2 plain WordPress lines.
+const KNOWN_MIX = [
+  '[12-Nov-2026 10:00:01 UTC] PHP Deprecated:  Function a() is deprecated in /srv/demo/a.php on line 1',
+  '[12-Nov-2026 10:00:02 UTC] PHP Warning:  Undefined variable $x in /srv/demo/c.php on line 3',
+  FATAL_WITH_TRACE,
+  '[12-Nov-2026 10:00:03 UTC] PHP Deprecated:  Function b() is deprecated in /srv/demo/a.php on line 2',
+  '[12-Nov-2026 10:00:04 UTC] WordPress database error Table demo.wp_acme does not exist',
+  '[12-Nov-2026 10:00:05 UTC] PHP Notice:  Function f was called incorrectly. in /srv/demo/d.php on line 4',
+  '[12-Nov-2026 10:00:06 UTC] PHP Warning:  Undefined array key "slug" in /srv/demo/f.php on line 8',
+  '[12-Nov-2026 10:00:07 UTC] PHP Deprecated:  Function c() is deprecated in /srv/demo/a.php on line 3',
+  '[12-Nov-2026 10:00:08 UTC] PHP Parse error:  syntax error, unexpected token "}" in /srv/demo/b.php on line 2',
+  '[12-Nov-2026 10:00:09 UTC] acme: cache warmed',
+  '[12-Nov-2026 10:00:10 UTC] PHP Warning:  Division by zero in /srv/demo/g.php on line 9',
+  '[12-Nov-2026 10:00:11 UTC] PHP Deprecated:  Function d() is deprecated in /srv/demo/a.php on line 4',
+  '',
+].join('\n');
+
+describe('countLevels', () => {
+  it('counts the entries of each level in a file with a known mix', () => {
+    const p = fixture('debug.log', KNOWN_MIX);
+    expect(countLevels(p, 'debug')).toEqual({
+      path: p,
+      exists: true,
+      size: Buffer.byteLength(KNOWN_MIX),
+      counts: { fatal: 2, warning: 3, notice: 1, deprecated: 4, other: 2 },
+    });
+  });
+
+  it('counts the whole file, not just its newest page', () => {
+    // 5000 entries, every 7th a fatal with a trace: 715 fatals, 4285 deprecations.
+    const { path: p } = bigDebugLog('debug.log', 5000);
+    expect(countLevels(p, 'debug').counts).toEqual({
+      fatal: 715,
+      warning: 0,
+      notice: 0,
+      deprecated: 4285,
+      other: 0,
+    });
+  });
+
+  it('counts the nginx error log by its normalised levels', () => {
+    const p = fixture(
+      'demo.test.error.log',
+      [
+        '2026/06/26 02:17:16 [crit] 19713#0: *1 connect() to unix:/opt/demo/php8.5-fpm.sock failed (2: No such file or directory)',
+        '2026/06/26 02:17:18 [error] 19713#0: *3 FastCGI sent in stderr: "PHP message: PHP Deprecated:  Return type should be compatible"',
+        '2026/06/26 02:17:19 [warn] 19713#0: *4 an upstream response is buffered to a temporary file',
+        '',
+      ].join('\n')
+    );
+    expect(countLevels(p, 'nginx-error').counts).toEqual({
+      fatal: 1,
+      warning: 1,
+      notice: 0,
+      deprecated: 1,
+      other: 0,
+    });
+  });
+
+  it('has no counts for the access log, which has no levels', () => {
+    const p = fixture(
+      'demo.test.access.log',
+      '127.0.0.1 - - [12/Nov/2026:10:00:00 +0000] "GET / HTTP/1.1" 200 5120 "-" "Mozilla/5.0"\n'
+    );
+    expect(countLevels(p, 'nginx-access')).toMatchObject({ exists: true, counts: null });
+  });
+
+  it('counts each level exactly as many rows as filtered paging shows', () => {
+    const { path: p } = bigDebugLog('debug.log', 3000);
+    const { counts } = countLevels(p, 'debug');
+    for (const level of ['fatal', 'deprecated']) {
+      const shown = pageToStart(p, 'debug', { levels: [level] }).flatMap(
+        (pg) => pg.entries
+      );
+      expect(shown.length).toBe(counts[level]);
+    }
+  });
+
+  it('reports a missing file as not existing, with zero counts', () => {
+    expect(countLevels(path.join(dir, 'nope.log'), 'debug')).toMatchObject({
+      exists: false,
+      size: 0,
+      counts: { fatal: 0, warning: 0, notice: 0, deprecated: 0, other: 0 },
+    });
   });
 });

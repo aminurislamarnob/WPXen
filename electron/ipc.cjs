@@ -2278,12 +2278,27 @@ function registerHandlers(win, storeInstance) {
   // ─── Site logs ─────────────────────────────────────────────────────────
 
   // A page of parsed entries; `opts.end` (a previous page's `pageStart`)
-  // asks for the page before it, omitted for the newest.
+  // asks for the page before it, omitted for the newest. `opts.levels`
+  // limits it to those levels (logReader drops anything it doesn't know).
   ipcMain.handle('get-site-log-page', async (_, id, kind, opts) => {
     try {
       const site = findSite(id);
       if (!site) return { success: false, error: 'Site not found' };
-      return { success: true, page: logs.readLogPage(site, kind, { end: opts?.end }) };
+      return {
+        success: true,
+        page: logs.readLogPage(site, kind, { end: opts?.end, levels: opts?.levels }),
+      };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  // Entries per level across the whole file, for the level filters.
+  ipcMain.handle('get-site-log-counts', async (_, id, kind) => {
+    try {
+      const site = findSite(id);
+      if (!site) return { success: false, error: 'Site not found' };
+      return { success: true, counts: logs.countLogLevels(site, kind) };
     } catch (err) {
       return { success: false, error: humanize(err) };
     }

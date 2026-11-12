@@ -1,5 +1,73 @@
 import { describe, it, expect } from 'vitest';
-import { prependOlder, formatLogSize } from '../src/lib/logView.js';
+import {
+  prependOlder,
+  formatLogSize,
+  FILTER_LEVELS,
+  DEFAULT_HIDDEN_LEVELS,
+  hasLevelFilters,
+  parseHiddenLevels,
+  searchLevels,
+  toggleHiddenLevel,
+  visibleLevels,
+} from '../src/lib/logView.js';
+
+describe('level filters', () => {
+  it('apply to the three error logs, not the access log', () => {
+    expect(hasLevelFilters('debug')).toBe(true);
+    expect(hasLevelFilters('php-error')).toBe(true);
+    expect(hasLevelFilters('nginx-error')).toBe(true);
+    expect(hasLevelFilters('nginx-access')).toBe(false);
+  });
+
+  it('hide deprecations by default, and only those', () => {
+    expect(DEFAULT_HIDDEN_LEVELS).toEqual(['deprecated']);
+    expect(visibleLevels(DEFAULT_HIDDEN_LEVELS)).toEqual([
+      'fatal',
+      'warning',
+      'notice',
+      'other',
+    ]);
+  });
+
+  it('turn a level back on, and off again', () => {
+    const shown = toggleHiddenLevel(['deprecated'], 'deprecated');
+    expect(shown).toEqual([]);
+    expect(visibleLevels(shown)).toEqual(FILTER_LEVELS);
+    expect(toggleHiddenLevel(shown, 'notice')).toEqual(['notice']);
+  });
+
+  it('narrow to fatal by hiding every other level', () => {
+    const hidden = ['warning', 'notice', 'deprecated', 'other'];
+    expect(visibleLevels(hidden)).toEqual(['fatal']);
+  });
+
+  it('scope a whole-log search to the visible levels, except on the access log', () => {
+    expect(searchLevels('debug', ['deprecated'])).toEqual([
+      'fatal',
+      'warning',
+      'notice',
+      'other',
+    ]);
+    expect(searchLevels('php-error', [])).toEqual(FILTER_LEVELS);
+    expect(
+      searchLevels('nginx-error', ['warning', 'notice', 'deprecated', 'other'])
+    ).toEqual(['fatal']);
+    expect(searchLevels('nginx-access', ['deprecated'])).toBeUndefined();
+  });
+
+  it('read a remembered choice back, falling back to the default when unusable', () => {
+    expect(parseHiddenLevels(JSON.stringify(['notice', 'deprecated']))).toEqual([
+      'notice',
+      'deprecated',
+    ]);
+    expect(parseHiddenLevels(JSON.stringify([]))).toEqual([]);
+    // Unknown names are dropped, not trusted.
+    expect(parseHiddenLevels(JSON.stringify(['warning', 'bogus']))).toEqual(['warning']);
+    expect(parseHiddenLevels(null)).toEqual(['deprecated']);
+    expect(parseHiddenLevels('not json')).toEqual(['deprecated']);
+    expect(parseHiddenLevels('{"a":1}')).toEqual(['deprecated']);
+  });
+});
 
 const entry = (offset, text = `entry at ${offset}`) => ({
   offset,

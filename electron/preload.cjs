@@ -112,6 +112,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('get-site-log-page', id, kind, opts),
   searchSiteLog: (id, kind, query, opts) =>
     ipcRenderer.invoke('search-site-log', id, kind, query, opts),
+  getSiteLogCounts: (id, kind) => ipcRenderer.invoke('get-site-log-counts', id, kind),
   clearSiteLog: (id, kind) => ipcRenderer.invoke('clear-site-log', id, kind),
   saveSiteLog: (id, kind) => ipcRenderer.invoke('save-site-log', id, kind),
 
