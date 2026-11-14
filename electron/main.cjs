@@ -331,48 +331,44 @@ app.on('before-quit', (e) => {
   if (quitCleanupDone) return;
 
   // Q11: quitting is the one destructive moment for a Session — an Agent may be
-  // mid-edit. Confirm only when a Session is actually live, then tear it down
-  // gracefully as part of cleanup below.
+  // mid-edit, so a live Session is always confirmed. Otherwise ask only when
+  // WPXen's own services would stop (quitPrompt.cjs).
   const agents = require('./services/agents.cjs');
+  let agentSiteNames = [];
   if (agents.hasActiveSessions()) {
     const sitesById = new Map((store?.get('sites', []) || []).map((s) => [s.id, s.name]));
-    const names = agents
-      .activeSiteIds()
-      .map((id) => sitesById.get(id) || id)
-      .join(', ');
-    const choice = dialog.showMessageBoxSync(mainWindow, {
-      type: 'warning',
-      buttons: ['Quit Anyway', 'Cancel'],
-      defaultId: 1,
-      cancelId: 1,
-      message: 'An agent is still running.',
-      detail: `Agents are running in: ${names}. Quitting will stop them.`,
-    });
+    agentSiteNames = agents.activeSiteIds().map((id) => sitesById.get(id) || id);
+  }
+  const confirmation = require('./services/quitPrompt.cjs').quitConfirmation({
+    confirmOnQuit: getSetting('app.confirmOnQuit'),
+    agentSiteNames,
+    procStatus: require('./services/procman.cjs').statusAll(),
+  });
+  if (confirmation) {
+    const names = confirmation.names.join(', ');
+    const choice = dialog.showMessageBoxSync(
+      mainWindow,
+      confirmation.kind === 'agents'
+        ? {
+            type: 'warning',
+            buttons: ['Quit Anyway', 'Cancel'],
+            defaultId: 1,
+            cancelId: 1,
+            message: 'An agent is still running.',
+            detail: `Agents are running in: ${names}. Quitting will stop them.`,
+          }
+        : {
+            type: 'question',
+            buttons: ['Quit', 'Cancel'],
+            defaultId: 1,
+            cancelId: 1,
+            message: 'Quit WPXen?',
+            detail: `This stops ${names}, taking your local sites offline. You can turn this confirmation off in Settings → General.`,
+          }
+    );
     if (choice === 1) {
       e.preventDefault();
       return;
-    }
-  } else if (getSetting('app.confirmOnQuit') !== false) {
-    // Quitting stops every service, which takes all of the user's local sites
-    // offline at once. Only worth asking when something is actually running —
-    // an "are you sure?" over an idle app is pure noise.
-    const status = getServiceStatus();
-    const running = Object.values(status)
-      .filter((s) => s?.running)
-      .map((s) => s.name);
-    if (running.length > 0) {
-      const choice = dialog.showMessageBoxSync(mainWindow, {
-        type: 'question',
-        buttons: ['Quit', 'Cancel'],
-        defaultId: 1,
-        cancelId: 1,
-        message: 'Quit WPXen?',
-        detail: `This stops ${running.join(', ')}, taking your local sites offline. You can turn this confirmation off in Settings → General.`,
-      });
-      if (choice === 1) {
-        e.preventDefault();
-        return;
-      }
     }
   }
 
