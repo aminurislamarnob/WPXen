@@ -79,7 +79,7 @@ function buildContextMenu(
   keepAwake,
   folders = []
 ) {
-  const { nginx, php, mysql } = serviceStatus || {};
+  const { nginx, php, mysql, dnsmasq } = serviceStatus || {};
 
   const statusIcon = (running) => (running ? '●' : '○');
 
@@ -133,6 +133,10 @@ function buildContextMenu(
     },
     {
       label: `${statusIcon(mysql?.running)} MySQL`,
+      enabled: false,
+    },
+    {
+      label: `${statusIcon(dnsmasq?.running)} dnsmasq`,
       enabled: false,
     },
     { type: 'separator' },

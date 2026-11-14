@@ -76,17 +76,23 @@ function hasVhost() {
   return nginx.siteConfigExists(DOMAIN);
 }
 
-// Writes/refreshes the nginx vhost for phpmyadmin.test and reloads nginx.
-function ensureVhost() {
+// Writes/refreshes the nginx vhost for phpmyadmin.test, without reloading —
+// for callers that rewrite several vhosts and reload once (the upgrade pass).
+function writeVhost() {
   const dir = getInstallDir();
   if (!dir) throw new Error('Could not resolve the phpMyAdmin directory.');
 
-  nginx.createSiteConfig({
+  return nginx.createSiteConfig({
     name: 'phpMyAdmin',
     domain: DOMAIN,
     path: dir,
     phpVersion: brew.getActivePhpVersion(),
   });
+}
+
+// Writes/refreshes the nginx vhost for phpmyadmin.test and reloads nginx.
+function ensureVhost() {
+  writeVhost();
   try {
     nginx.reload();
   } catch {}
@@ -124,6 +130,7 @@ module.exports = {
   isInstalled,
   ensureInstalled,
   writeConfig,
+  writeVhost,
   ensureVhost,
   hasVhost,
   ensureReady,

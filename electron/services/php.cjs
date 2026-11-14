@@ -6,6 +6,7 @@ const net = require('net');
 const brew = require('./brew.cjs');
 const execAsync = require('./asyncExec.cjs');
 const procman = require('./procman.cjs');
+const trustBundle = require('./trustBundle.cjs');
 
 // PHP versions WPXen can install. Newer versions ship as Homebrew core
 // formulae (php@<version>); older EOL versions were dropped from core and come
@@ -304,6 +305,26 @@ async function ensurePhpFpm(version) {
 
 function stopPhpFpm(version) {
   return deps.procman.stop(fpmSlot(version));
+}
+
+// Stop-then-start of one version's FPM — what a 502 repair does (repair.cjs).
+// Works from any state, including `failed` after a crash loop or `starting`
+// on a crash-restart backoff, and never touches another version.
+async function restartPhpFpm(version) {
+  await stopPhpFpm(version);
+  return startPhpFpm(version);
+}
+
+// Does `version`'s socket accept connections right now — what nginx needs.
+function fpmAccepts(version) {
+  const socket = fpmSocketPath(version);
+  return socket ? socketAccepts(socket) : Promise.resolve(false);
+}
+
+// The supervisor's capture of `version`'s PHP-FPM stdout/stderr — where a
+// config it can't load is reported (repair.cjs reads it for the 502 page).
+function fpmLogPath(version) {
+  return procman.getLogPath(fpmSlot(version));
 }
 
 async function stopAllPhpFpm() {
@@ -777,14 +798,10 @@ function validateSettingValue(setting, value) {
   return num;
 }
 
-// Reads the WPXen-managed values for a version, falling back to defaults for
-// any setting that hasn't been customised yet. Values are round-tripped via a
-// `; wpxen:<key>=<number>` comment so the plain number survives directive
-// formatting (e.g. "128M").
-function readManagedValues(version) {
-  const values = {};
-  for (const s of PHP_INI_SETTINGS) values[s.key] = s.default;
-
+// Reads the values recorded in the WPXen-managed file — only the keys someone
+// actually customised. Values are round-tripped via a `; wpxen:<key>=<number>`
+// comment so the plain number survives directive formatting (e.g. "128M").
+function readRecordedValues(version) {
   // Prefer our own file; fall back through the pre-rename ones so a customised
   // value survives the first read after upgrading, whichever name wrote it.
   const candidates = [
@@ -795,33 +812,130 @@ function readManagedValues(version) {
     try {
       if (!p || !fs.existsSync(p)) continue;
       const content = fs.readFileSync(p, 'utf8');
+      const values = {};
       for (const s of PHP_INI_SETTINGS) {
         const m = content.match(new RegExp(`^; ${marker}:${s.key}=(-?\\d+)`, 'm'));
         if (m) values[s.key] = parseInt(m[1], 10);
       }
-      break;
+      return values;
     } catch {}
   }
-  return values;
+  return {};
 }
 
-function writeManagedIni(version, values) {
-  const p = getManagedIniPath(version);
-  if (!p) throw new Error('Could not resolve the PHP config directory.');
-  const dir = p.slice(0, p.lastIndexOf('/'));
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+// The managed values for a version, with defaults for any setting that hasn't
+// been customised yet.
+function readManagedValues(version) {
+  const values = {};
+  for (const s of PHP_INI_SETTINGS) values[s.key] = s.default;
+  return { ...values, ...readRecordedValues(version) };
+}
 
+// The trust bundle, if it's there to point at. A cafile that doesn't exist
+// would fail every TLS handshake PHP makes, public sites included, so the
+// directives are only written while the file exists.
+function existingTrustBundle() {
+  const p = trustBundle.getBundlePath();
+  return p && fs.existsSync(p) ? p : null;
+}
+
+// The text of zz-wpxen.ini: one block per setting present in `values`, then
+// the certificate directives when there's a bundle. openssl.cafile covers
+// streams (file_get_contents, Guzzle's stream handler, Composer); curl.cainfo
+// covers ext/curl. Both are quoted — the path is under the Homebrew prefix
+// today, but a quoted value survives a space if that ever changes.
+function buildManagedIni(values = {}, { caBundle = null } = {}) {
   const lines = ['; Managed by WPXen — edit these from the app.', ''];
   for (const s of PHP_INI_SETTINGS) {
     const v = values[s.key];
+    if (v == null) continue;
     lines.push(`; wpxen:${s.key}=${v}`);
     for (const [directive, val] of Object.entries(s.toDirectives(v))) {
       lines.push(`${directive} = ${val}`);
     }
     lines.push('');
   }
-  fs.writeFileSync(p, lines.join('\n'), 'utf8');
+  if (caBundle) {
+    lines.push('; HTTPS: verify against the public authorities plus the local one.');
+    lines.push(`openssl.cafile = "${caBundle}"`);
+    lines.push(`curl.cainfo = "${caBundle}"`);
+    lines.push('');
+  }
+  return lines.join('\n');
+}
+
+function writeManagedIniText(version, text) {
+  const p = getManagedIniPath(version);
+  if (!p) throw new Error('Could not resolve the PHP config directory.');
+  const dir = p.slice(0, p.lastIndexOf('/'));
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(p, text, 'utf8');
   removeLegacyManagedIni(version);
+}
+
+function writeManagedIni(version, values) {
+  writeManagedIniText(
+    version,
+    buildManagedIni(values, { caBundle: existingTrustBundle() })
+  );
+}
+
+// Brings one version's zz-wpxen.ini up to date without a settings change:
+// keeps exactly the values already recorded (ours or a legacy file's, which is
+// then deleted, as on any write) and adds or drops the certificate directives
+// to match the bundle. Never imposes defaults on a version nobody customised,
+// and creates no file when there's nothing to say. Returns whether it wrote.
+function syncManagedIni(version) {
+  const p = getManagedIniPath(version);
+  if (!p) return false;
+  const values = readRecordedValues(version);
+  const caBundle = existingTrustBundle();
+  const exists = fs.existsSync(p);
+  const hasLegacy = getLegacyManagedIniPaths(version).some(([l]) => fs.existsSync(l));
+  if (!exists && !hasLegacy && !caBundle && Object.keys(values).length === 0) {
+    return false;
+  }
+  const text = buildManagedIni(values, { caBundle });
+  if (exists && !hasLegacy && fs.readFileSync(p, 'utf8') === text) return false;
+  writeManagedIniText(version, text);
+  return true;
+}
+
+// syncManagedIni for every installed version, reloading the FPM of each one
+// that changed. This is what reaches a PHP version installed later: it runs on
+// app start and after an install. Returns the versions rewritten.
+function syncManagedIniAllVersions() {
+  const changed = [];
+  for (const version of deps.installedVersions()) {
+    try {
+      if (syncManagedIni(version)) changed.push(version);
+    } catch {}
+  }
+  for (const version of changed) reloadPhpFpmIfRunning(version);
+  return changed;
+}
+
+// Whether `version`'s zz-wpxen.ini points both directives at the bundle.
+function isTrustConfigured(version) {
+  const caBundle = trustBundle.getBundlePath();
+  const p = getManagedIniPath(version);
+  if (!caBundle || !p) return false;
+  try {
+    const text = fs.readFileSync(p, 'utf8');
+    return (
+      text.includes(`openssl.cafile = "${caBundle}"`) &&
+      text.includes(`curl.cainfo = "${caBundle}"`)
+    );
+  } catch {
+    return false;
+  }
+}
+
+function getTrustDirectiveStatus() {
+  return deps.installedVersions().map((version) => ({
+    version,
+    configured: isTrustConfigured(version),
+  }));
 }
 
 // Reloads `version`'s FPM only if it's running, so a config change takes
@@ -837,7 +951,7 @@ function reloadPhpFpmIfRunning(version) {
 }
 
 function getPhpIniSettings() {
-  const versions = brew.getInstalledPhpVersions();
+  const versions = deps.installedVersions();
   return {
     settings: PHP_INI_SETTINGS.map(({ key, label, unit, description, default: def }) => ({
       key,
@@ -857,7 +971,7 @@ function setPhpIniSetting(version, key, value) {
   const setting = PHP_INI_SETTINGS.find((s) => s.key === key);
   if (!setting) throw new Error(`Unknown PHP setting: ${key}`);
   if (!/^\d+\.\d+$/.test(String(version))) throw new Error('Invalid PHP version');
-  if (!brew.getInstalledPhpVersions().includes(version)) {
+  if (!deps.installedVersions().includes(version)) {
     throw new Error(`PHP ${version} is not installed`);
   }
 
@@ -869,7 +983,7 @@ function setPhpIniSetting(version, key, value) {
 }
 
 function setPhpIniSettingAllVersions(key, value) {
-  for (const version of brew.getInstalledPhpVersions()) {
+  for (const version of deps.installedVersions()) {
     setPhpIniSetting(version, key, value);
   }
 }
@@ -881,6 +995,9 @@ module.exports = {
   isPhpFpmRunningAsync,
   startPhpFpm,
   stopPhpFpm,
+  restartPhpFpm,
+  fpmAccepts,
+  fpmLogPath,
   stopAllPhpFpm,
   getRunningFpmVersions,
   getFpmStatus,
@@ -889,6 +1006,7 @@ module.exports = {
   neededPhpVersions,
   setSitesProvider,
   fpmSocketPath,
+  FPM_RUN_DIR,
   buildFpmConfig,
   phpKegDir,
   getInstalledPhpVersionsWithDetails,
@@ -903,6 +1021,10 @@ module.exports = {
   reloadPhpFpmIfRunning,
   setPhpIniSetting,
   setPhpIniSettingAllVersions,
+  buildManagedIni,
+  syncManagedIniAllVersions,
+  isTrustConfigured,
+  getTrustDirectiveStatus,
   getSitePhpSettingsSchema,
   getGlobalSitePhpValues,
   validateSitePhpSettings,

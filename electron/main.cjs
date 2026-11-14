@@ -14,6 +14,7 @@ const {
   getServiceStatus,
   getSetting,
   setSetting,
+  setSiteUpgradeReport,
 } = require('./ipc.cjs');
 
 const isDev = process.env.NODE_ENV === 'development';
@@ -200,6 +201,17 @@ app.whenReady().then(() => {
     const phpService = require('./services/php.cjs');
     const mysql = require('./services/mysql.cjs');
     const mailpit = require('./services/mailpit.cjs');
+    const dnsmasq = require('./services/dnsmasq.cjs');
+
+    // The endpoint the 502 page asks for repairs through (repair.cjs). Up
+    // before nginx, so a Site that 502s on launch can already be repaired.
+    try {
+      await require('./services/repair.cjs').startRepairService({
+        sites: () => store.get('sites', []),
+      });
+    } catch (err) {
+      console.error('repair endpoint:', err.message);
+    }
 
     try {
       await migration.migrateToChildProcs(store);
@@ -235,12 +247,46 @@ app.whenReady().then(() => {
       }
     }
 
+    // Rootless dnsmasq comes up whenever DNS is set up, regardless of the
+    // auto-start preference: without it no *.test Site resolves. It needs no
+    // prompt. (A legacy root daemon is launchd's to start.)
+    try {
+      if (dnsmasq.shouldAutoStart()) await dnsmasq.start();
+    } catch (err) {
+      // A port held by another program lands here; dnsmasq records it as an
+      // error with a "Use a different port" fix instead of crash-looping.
+      console.error('auto-start dnsmasq:', err.message);
+    }
+    // DNS health is a real lookup of a .test name, in either mode — "running"
+    // alone can hide a missing or overwritten resolver file. The status
+    // poller re-checks from here on.
+    try {
+      await dnsmasq.checkHealth();
+    } catch {}
+
     // One-time: vhosts from the single-FPM era point PHP at 127.0.0.1:9000,
     // which nothing serves any more — repoint each at its version's socket.
     try {
       await migration.migrateToPerSitePhp(store);
     } catch (err) {
       console.error('per-site PHP migration:', err.message);
+    }
+
+    // One-time, per app update: bring every existing Site's vhost up to the
+    // current template (the shared error-page snippet, wildcard certificates
+    // and server names), with one nginx reload. A Site that fails doesn't stop
+    // the others, and is reported on the Dashboard; a failed `nginx -t` leaves
+    // the pass to retry next launch.
+    try {
+      const upgrade = await migration.runSiteUpgrades(store);
+      if (upgrade.error) console.error('Site upgrade pass:', upgrade.error);
+      for (const { domain, error } of upgrade.failed || []) {
+        console.error(`Site upgrade pass: ${domain}:`, error);
+      }
+      setSiteUpgradeReport(migration.siteUpgradeReport(upgrade));
+    } catch (err) {
+      console.error('Site upgrade pass:', err.message);
+      setSiteUpgradeReport(migration.siteUpgradeReport({ error: err.message }));
     }
   })();
 
@@ -339,6 +385,10 @@ app.on('before-quit', (e) => {
   try {
     require('./services/browser.cjs').unregisterAll();
   } catch {}
+  // Stop any open log view's file watcher.
+  try {
+    require('./services/logFollow.cjs').closeAll();
+  } catch {}
   // Release the sleep assertion now rather than waiting for caffeinate's -w
   // to notice the app is gone.
   try {
@@ -362,9 +412,15 @@ app.on('before-quit', (e) => {
   const gitClone = require('./services/gitClone.cjs');
 
   const procman = require('./services/procman.cjs');
+  // Closing the repair endpoint removes its socket file.
+  const repairService = require('./services/repair.cjs');
   const deadline = new Promise((r) => setTimeout(r, 30_000));
   Promise.race([
-    Promise.all([procman.stopAll({ deadlineMs: 25_000 }), gitClone.stopAll()]),
+    Promise.all([
+      procman.stopAll({ deadlineMs: 25_000 }),
+      gitClone.stopAll(),
+      repairService.stopRepairService().catch(() => {}),
+    ]),
     deadline,
   ]).finally(() => app.exit(0));
 });

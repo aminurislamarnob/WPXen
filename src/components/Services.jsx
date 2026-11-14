@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { Card, IconTile, Row, SectionLabel, Tooltip } from './ui';
 import { StatusBadge } from './StatusBadge';
+import { dnsHealthView, runDnsAction } from '../lib/dnsHealth';
 
 const SERVICE_CONFIG = [
   {
@@ -44,7 +45,9 @@ const SERVICE_CONFIG = [
     description: 'DNS resolver — routes *.test domains to localhost',
     icon: Wifi,
     color: 'blue',
-    system: true,
+    // Only the legacy root daemon is a system service; rootless dnsmasq is a
+    // child of the app like the others (status reports which via `mode`).
+    system: (status) => status?.mode !== 'rootless',
   },
   {
     id: 'mailpit',
@@ -61,6 +64,10 @@ function ServiceRow({ config, status, onAction, loadingAction }) {
   const running = status?.running ?? false;
   const failed = status?.state === 'failed';
   const isLoading = loadingAction === config.id;
+  // dnsmasq can be up and still not resolve: its error comes from a real
+  // lookup (or a taken port), with the fix to offer beside it.
+  const dnsFix =
+    config.id === 'dnsmasq' && status?.error ? dnsHealthView(status).action : null;
 
   return (
     <Row
@@ -81,9 +88,22 @@ function ServiceRow({ config, status, onAction, loadingAction }) {
         </span>
       }
       subtitle={
-        failed && status?.error ? (
+        (failed || dnsFix) && status?.error ? (
           <span className="text-destructive">
             {status.error}{' '}
+            {dnsFix && (
+              <>
+                <span
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => !isLoading && onAction(dnsFix.kind, config.id)}
+                  className="underline cursor-pointer"
+                >
+                  {dnsFix.label}
+                </span>
+                {' · '}
+              </>
+            )}
             <span
               role="button"
               tabIndex={0}
@@ -146,6 +166,8 @@ export default function Services({ serviceStatus, refreshStatus }) {
       if (action === 'start') result = await window.electronAPI.startService(serviceId);
       else if (action === 'stop')
         result = await window.electronAPI.stopService(serviceId);
+      else if (action === 'repair' || action === 'change-port')
+        result = await runDnsAction(action);
       else result = await window.electronAPI.restartService(serviceId);
 
       if (!result.success) {
@@ -184,8 +206,10 @@ export default function Services({ serviceStatus, refreshStatus }) {
     (s) => serviceStatus?.[s.id]?.running
   ).length;
 
-  const appManaged = visibleServices.filter((s) => !s.system);
-  const systemManaged = visibleServices.filter((s) => s.system);
+  const isSystem = (s) =>
+    typeof s.system === 'function' ? s.system(serviceStatus?.[s.id]) : !!s.system;
+  const appManaged = visibleServices.filter((s) => !isSystem(s));
+  const systemManaged = visibleServices.filter(isSystem);
 
   return (
     <div className="px-6 pb-6 max-w-[735px] mx-auto animate-fade-in">
@@ -255,28 +279,44 @@ export default function Services({ serviceStatus, refreshStatus }) {
       </Card>
 
       {/* System services */}
-      <SectionLabel>System Services</SectionLabel>
-      <Card className="mb-4">
-        {systemManaged.map((config) => (
-          <ServiceRow
-            key={config.id}
-            config={config}
-            status={serviceStatus?.[config.id]}
-            onAction={handleAction}
-            loadingAction={loadingAction}
-          />
-        ))}
-      </Card>
+      {systemManaged.length > 0 && (
+        <>
+          <SectionLabel>System Services</SectionLabel>
+          <Card className="mb-4">
+            {systemManaged.map((config) => (
+              <ServiceRow
+                key={config.id}
+                config={config}
+                status={serviceStatus?.[config.id]}
+                onAction={handleAction}
+                loadingAction={loadingAction}
+              />
+            ))}
+          </Card>
+        </>
+      )}
 
       {/* Info */}
       <Card className="!bg-highlight/10">
         <div className="flex items-start gap-3 px-4 py-3 text-[13px] text-highlight">
           <Info size={14} className="flex-shrink-0 mt-0.5" />
           <p className="text-xs">
-            nginx, PHP-FPM, MySQL, and Mailpit run as part of WPXen — they stop when the
-            app quits and don&apos;t appear as background items in macOS. dnsmasq runs as
-            a system service so <span className="font-mono">*.test</span> DNS keeps
-            working when the app is closed. Install missing services with{' '}
+            {systemManaged.length > 0 ? (
+              <>
+                nginx, PHP-FPM, MySQL, and Mailpit run as part of WPXen — they stop when
+                the app quits and don&apos;t appear as background items in macOS. dnsmasq
+                runs as a system service so <span className="font-mono">*.test</span> DNS
+                keeps working when the app is closed.
+              </>
+            ) : (
+              <>
+                nginx, PHP-FPM, MySQL, dnsmasq, and Mailpit run as part of WPXen — they
+                stop when the app quits and don&apos;t appear as background items in
+                macOS. <span className="font-mono">*.test</span> names resolve while WPXen
+                is running.
+              </>
+            )}{' '}
+            Install missing services with{' '}
             <span className="font-mono bg-highlight/10 px-1 rounded">
               brew install nginx php mysql dnsmasq
             </span>

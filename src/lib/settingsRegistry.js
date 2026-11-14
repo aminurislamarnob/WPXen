@@ -632,22 +632,6 @@ export const SETTINGS_ITEMS = [
 
   // ── DNS & HTTPS ──────────────────────────────────────────────────────────
   {
-    id: 'dns.sudoers',
-    section: 'dns',
-    title: 'Passwordless DNS Control',
-    description: 'Let WPXen manage the dnsmasq resolver without a password prompt',
-    keywords: [
-      'sudo',
-      'sudoers',
-      'password',
-      'permission',
-      'admin',
-      'dnsmasq',
-      'privileges',
-      'prompt',
-    ],
-  },
-  {
     id: 'dns.resolver',
     section: 'dns',
     title: '*.test DNS Resolution',
@@ -661,6 +645,9 @@ export const SETTINGS_ITEMS = [
       'localhost',
       'hosts',
       'tld',
+      'repair',
+      'port',
+      'health',
     ],
   },
   {
@@ -678,6 +665,28 @@ export const SETTINGS_ITEMS = [
       'secure',
       'trust',
       'lock',
+    ],
+  },
+  {
+    id: 'dns.phpTrust',
+    section: 'dns',
+    title: 'PHP trusts the local authority',
+    description: 'PHP and WordPress verify HTTPS calls to local Sites',
+    keywords: [
+      'https',
+      'ssl',
+      'tls',
+      'certificate',
+      'ca',
+      'bundle',
+      'cafile',
+      'curl',
+      'openssl',
+      'php',
+      'wp_remote_get',
+      'loopback',
+      'site health',
+      'trust',
     ],
   },
 

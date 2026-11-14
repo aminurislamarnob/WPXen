@@ -47,7 +47,7 @@ spotting where WPXen is already at parity and where it stands alone.
 - One-click admin "magic login" — _WPXen only_
 - phpMyAdmin, open in browser / Finder / terminal, per-site HTTPS toggle — _Also in: Local, Studio_
 - Per-site logs (view / clear) — _Also in: Local, Herd, Studio_
-- dnsmasq + `/etc/resolver/test` setup, sudoers management, dependency checks, onboarding — _Also in: Local, Herd, Studio_
+- rootless dnsmasq + `/etc/resolver/test` setup (one-click migration off the old root daemon and sudoers grant), dependency checks, onboarding — _Also in: Local, Herd, Studio_
 - Change site URL: rename a domain with WP-CLI `search-replace`, vhost regen, fresh cert — _Also in: Local, Studio_
 - Clone / duplicate a site: copy files + dump/restore DB + rewrite config/URLs + new vhost — _Also in: Local_
 - Export / import site: portable files+SQL zip; imports WPXen, generic, and `.wpress` archives — _Also in: Local, Studio_
