@@ -13,6 +13,8 @@ import {
 } from '../../lib/office/scene/rooms.js';
 import { subscribePreview } from '../../lib/office/preview.js';
 import { PREVIEW_HOURS } from '../../lib/office/scene/daylight.js';
+import { ENVIRONMENTS, environmentById } from '../../lib/office/scene/environments.js';
+import { useSettings } from '../../lib/useSettings';
 
 // Office — the claude-agent-verse 3D office: every live Claude Code or
 // Antigravity session on this machine is a character at a desk, clustered
@@ -97,6 +99,10 @@ export default function OfficePage() {
   const [previewMode, setPreviewMode] = useState('off');
   // Dev Preview only: light the office for a preset hour instead of the clock.
   const [previewTime, setPreviewTime] = useState('clock');
+  // ...and, in the same Preview, try another environment without touching Settings.
+  const [previewEnv, setPreviewEnv] = useState('setting');
+  const { settings } = useSettings();
+  const chosenEnv = environmentById(settings?.['office.environment']).id;
   const [room, setRoom] = useRoom();
   const [focus, setFocus] = useState(null);
   const [listOpen, setListOpen] = useState(true);
@@ -214,11 +220,20 @@ export default function OfficePage() {
           onSelect={setFocus}
           insetRight={insetRight}
           hour={previewOffice ? (PREVIEW_HOURS[previewTime] ?? null) : null}
+          environment={previewOffice && previewEnv !== 'setting' ? previewEnv : chosenEnv}
         />
         {DEV && previewOffice && (
           // Dev Preview only: light the office for a preset hour, so every
           // look can be reviewed without waiting for the clock.
-          <div className="absolute top-3 left-3 z-10">
+          <div className="absolute top-3 left-3 z-10 flex flex-col items-start gap-2">
+            <SegmentedTabs
+              tabs={[
+                { value: 'setting', label: 'Setting' },
+                ...ENVIRONMENTS.map((e) => ({ value: e.id, label: e.name })),
+              ]}
+              value={previewEnv}
+              onChange={setPreviewEnv}
+            />
             <SegmentedTabs
               tabs={[
                 { value: 'clock', label: 'Clock' },

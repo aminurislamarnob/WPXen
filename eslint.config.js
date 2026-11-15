@@ -48,9 +48,10 @@ module.exports = [
     },
   },
 
-  // Renderer — React + JSX, browser globals.
+  // Renderer — React + JSX, browser globals (dev/ holds dev-only renderer
+  // pages, e.g. the Office sandbox).
   {
-    files: ['src/**/*.{js,jsx}'],
+    files: ['src/**/*.{js,jsx}', 'dev/**/*.{js,jsx}'],
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: 'module',

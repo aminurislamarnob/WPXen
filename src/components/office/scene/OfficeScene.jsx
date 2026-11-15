@@ -1,4 +1,12 @@
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Suspense,
+  memo,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import * as THREE from 'three';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import {
@@ -23,8 +31,15 @@ import { FloorPlant } from './Props.jsx';
 import { Workstation } from './Workstation.jsx';
 import { palette, teamColor } from '../../../lib/office/scene/theme.js';
 import { signTexture } from '../../../lib/office/scene/textures.js';
-import { daylightAt, hourOf } from '../../../lib/office/scene/daylight.js';
-import { CAMERA_DISTANCE, World } from './World.jsx';
+import { hourOf } from '../../../lib/office/scene/daylight.js';
+import {
+  CAMERA_DISTANCE,
+  environmentById,
+  environmentLook,
+} from '../../../lib/office/scene/environments.js';
+import { diffAgents, officeMood, pushEvents } from '../../../lib/office/agentEvents.js';
+import { ENVIRONMENT_COMPONENTS } from './environments/index.js';
+import { disposeTree } from './environments/common.jsx';
 import './scene.css';
 
 // ── Office scene ─────────────────────────────────────────────
@@ -384,6 +399,58 @@ const Lights = memo(function Lights({ plan, look }) {
 }, lightsEqual);
 
 /**
+ * The one world on screen. Its module loads on first use (the room draws
+ * meanwhile), and when it goes — another world is chosen, or the Office
+ * closes — everything it put on the GPU goes with it. Keyed on the world by
+ * the caller, so a switch is a clean unmount and mount.
+ */
+function WorldLayer({ id, ...props }) {
+  const World = ENVIRONMENT_COMPONENTS[id];
+  const group = useRef(null);
+  // A layout cleanup runs before React detaches the subtree, while the
+  // world's objects are still in the group to be found.
+  useLayoutEffect(() => {
+    const root = group.current;
+    return () => disposeTree(root);
+  }, []);
+  return (
+    <group ref={group}>
+      <Suspense fallback={null}>
+        <World {...props} />
+      </Suspense>
+    </group>
+  );
+}
+
+/**
+ * Recent agent moments in the room on screen (arrived, left, finished, error,
+ * waiting), diffed from consecutive snapshots and kept for a few seconds so
+ * the environment can play them. A room switch starts afresh: the agents of
+ * the other room didn't just arrive.
+ * @param {{ sessions: Record<number, object> }} office
+ * @param {string} kind The room on screen.
+ */
+function useAgentEvents(office, kind) {
+  const prev = useRef(null);
+  const prevKind = useRef(kind);
+  const nextId = useRef(1);
+  const [events, setEvents] = useState([]);
+  useEffect(() => {
+    if (prevKind.current !== kind) {
+      prevKind.current = kind;
+      prev.current = null;
+      setEvents([]);
+    }
+    const fresh = diffAgents(prev.current, office);
+    prev.current = office;
+    if (!fresh.length) return;
+    setEvents((queue) => pushEvents(queue, fresh, Date.now(), nextId.current));
+    nextId.current += fresh.length;
+  }, [office, kind]);
+  return events;
+}
+
+/**
  * The viewer's local hour, re-read once a minute and whenever the window
  * comes back into view, or `override` (the dev Preview's time presets).
  * @param {number | null} override
@@ -412,6 +479,8 @@ function useLocalHour(override, visible) {
  *   clicked character or intern, or null when the click hit empty floor.
  * @param {number} [props.insetRight] Pixels on the right covered by HUD panels;
  *   the camera frames the remaining area.
+ * @param {string} [props.environment] The world around the room (Settings →
+ *   Office, `office.environment`); see scene/environments/index.js.
  * @param {number | null} [props.hour] Local hour to light the office for;
  *   null follows the real clock (the dev Preview passes its presets).
  */
@@ -422,6 +491,7 @@ export function OfficeScene({
   onSelect = NO_SELECT,
   insetRight = 0,
   hour = null,
+  environment = 'city',
 }) {
   // Each room keeps its own sticky desk slots and break spots, so switching
   // back finds everyone where they were — at their desk or in the lounge.
@@ -447,12 +517,26 @@ export function OfficeScene({
     return () => document.removeEventListener('visibilitychange', onChange);
   }, []);
 
+  const env = environmentById(environment);
   const localHour = useLocalHour(hour, visible);
-  const look = useMemo(() => daylightAt(localHour), [localHour]);
+  const events = useAgentEvents(office, room.kind);
+  // Mood is compared by value so the look (and every light) only changes when
+  // a count the environment cares about does.
+  const moodNow = officeMood(office);
+  const moodKey = `${moodNow.live},${moodNow.busy},${moodNow.waiting},${moodNow.error}`;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const mood = useMemo(() => moodNow, [moodKey]);
+  const look = useMemo(
+    () => environmentLook(env.id, localHour, mood),
+    [env.id, localHour, mood]
+  );
 
   // a rally needs smooth frames
   const rally = [...breaks.values()].some((s) => s.activity === 'pingpong');
-  const fps = frameRate({ visible, busy: isBusy(office), rally });
+  // The scenery keeps moving (waves, rain, fish) at the environment's own rate.
+  const fps = visible
+    ? Math.max(frameRate({ visible, busy: isBusy(office), rally }), env.ambientFps)
+    : 0;
   const [far, setFar] = useState(true);
   const center = roomCenter(plan);
   const poses = poseSignature(plan, breaks);
@@ -502,7 +586,17 @@ export function OfficeScene({
         <ShadowBudget version={poses} />
         <ZoomWatcher onChange={setFar} />
         <Lights plan={plan} look={look} />
-        <World plan={plan} kind={room.kind} look={look} />
+        <WorldLayer
+          key={env.id}
+          id={env.id}
+          plan={plan}
+          kind={room.kind}
+          look={look}
+          office={office}
+          events={events}
+          mood={mood}
+          onSelect={onSelect}
+        />
         <BreakPresence.Provider value={presence}>
           <Room plan={plan} theme={room} />
           {plan.pods.map((pod) => (

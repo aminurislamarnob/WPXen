@@ -1,14 +1,22 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   AlertTriangle,
+  Building2,
   CheckCircle,
+  Fish,
   Loader,
   RefreshCw,
+  Rocket,
+  TreePalm,
+  Trees,
   Webhook,
+  Zap,
   ZapOff,
 } from 'lucide-react';
-import { Button, Card, SectionLabel, SettingsRow } from '../../ui';
+import { Button, Card, IconTile, SectionLabel, SettingsRow } from '../../ui';
+import { useSettings } from '../../../lib/useSettings';
 import { useSettingsContext } from '../SettingsLayout';
+import { ENVIRONMENTS, environmentById } from '../../../lib/office/scene/environments.js';
 
 // Status is file stats on the main side, so polling it is cheap. It keeps the
 // row honest when the hook is changed outside WPXen (a hand edit, another
@@ -25,6 +33,77 @@ const DONE_TEXT = {
     unchanged: 'Nothing to remove.',
   },
 };
+
+/** Each environment's tile in the picker. */
+const ENV_TILES = {
+  city: { icon: Building2, color: 'blue' },
+  space: { icon: Rocket, color: 'indigo' },
+  island: { icon: TreePalm, color: 'orange' },
+  underwater: { icon: Fish, color: 'teal' },
+  cyberpunk: { icon: Zap, color: 'pink' },
+  green: { icon: Trees, color: 'green' },
+};
+
+// The world around the Office room (`office.environment`). A card per
+// environment rather than a dropdown: the name alone doesn't say what the
+// world does, and the "reacts" line is the point of choosing one.
+function EnvironmentPicker() {
+  const { settings, setSetting } = useSettings();
+  const { visible } = useSettingsContext();
+  if (visible && !visible.includes('office.environment')) return null;
+  const current = environmentById(settings['office.environment']).id;
+  return (
+    <div>
+      <SectionLabel>Environment</SectionLabel>
+      <div
+        role="radiogroup"
+        aria-label="Office environment"
+        className="grid grid-cols-2 gap-2"
+      >
+        {ENVIRONMENTS.map((env) => {
+          const selected = env.id === current;
+          const tile = ENV_TILES[env.id];
+          return (
+            <button
+              key={env.id}
+              type="button"
+              role="radio"
+              aria-checked={selected}
+              onClick={() => setSetting('office.environment', env.id)}
+              className={`text-left bg-card border rounded-xl shadow-sm p-3 flex gap-3 transition-colors ${
+                selected
+                  ? 'border-highlight ring-1 ring-highlight'
+                  : 'border-border hover:bg-accent'
+              }`}
+            >
+              <IconTile
+                icon={tile.icon}
+                color={tile.color}
+                size={28}
+                className="flex-shrink-0"
+              />
+              <span className="min-w-0">
+                <span className="block text-[13px] font-medium text-foreground">
+                  {env.name}
+                </span>
+                <span className="block text-xs text-muted-foreground mt-0.5">
+                  {env.blurb}
+                </span>
+                <span className="block text-[11px] text-muted-foreground/80 mt-1">
+                  {env.reacts}
+                </span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      <p className="text-[11px] text-muted-foreground mt-1.5 px-1">
+        Click a shuttle, boat, fish school or bird out there to focus its agent, the same
+        as clicking the agent itself.
+      </p>
+    </div>
+  );
+}
 
 function subtitleFor(status) {
   if (!status?.installed)
@@ -106,8 +185,38 @@ export default function OfficeSection() {
   const needsReinstall = status?.installed && status.problem;
 
   return (
+    <div className="space-y-6">
+      <EnvironmentPicker />
+      <HookSettings
+        visible={visible}
+        status={status}
+        loading={loading}
+        pending={pending}
+        setPending={setPending}
+        message={message}
+        needsReinstall={needsReinstall}
+        run={run}
+        apply={apply}
+      />
+    </div>
+  );
+}
+
+function HookSettings({
+  visible,
+  status,
+  loading,
+  pending,
+  setPending,
+  message,
+  needsReinstall,
+  run,
+  apply,
+}) {
+  if (visible && !visible.includes('office.hook')) return null;
+  return (
     <div>
-      <SectionLabel>Office</SectionLabel>
+      <SectionLabel>Claude Code Hook</SectionLabel>
       <Card>
         <SettingsRow
           id="office.hook"

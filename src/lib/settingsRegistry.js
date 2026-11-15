@@ -518,6 +518,34 @@ export const SETTINGS_ITEMS = [
   },
 
   // ── Office ───────────────────────────────────────────────────────────────
+  {
+    id: 'office.environment',
+    section: 'office',
+    title: 'Environment',
+    description:
+      'The world around the Office — a city tower, space, an island, the sea floor',
+    keywords: [
+      'office',
+      'environment',
+      'world',
+      'scene',
+      'view',
+      'background',
+      'city',
+      'high-rise',
+      'space',
+      'station',
+      'island',
+      'beach',
+      'underwater',
+      'ocean',
+      'cyberpunk',
+      'neon',
+      'green',
+      'garden',
+      'nature',
+    ],
+  },
   // An action row (install/uninstall + live status), not a stored value — the
   // dns.sudoers precedent.
   {

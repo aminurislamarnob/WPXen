@@ -329,30 +329,57 @@ under `services/office/` is electron-free and tested through `CLAUDE_HOME` /
 - **Snapshot sink.** `start({ onSnapshot })` binds production's sink once; `ipc.cjs`
   resolves the windows when each snapshot is sent. `__setDeps({ onSnapshot })`
   stays the test override.
-- **The world around the room.** The room is the top floor of a tower in a
-  city, lit by the viewer's local clock. `lib/office/scene/daylight.js` maps an
-  hour to a look: sun or moon direction, sky, fog and light colours, and how
-  many city windows glow. Sunrise and sunset are fixed at 6:00 and 19:00, since
-  no location is known. `lib/office/scene/city.js` plans the city, seeded per
-  room kind, and `scene/World.jsx` draws it. OfficeScene re-reads the hour once
-  a minute, and the dev Preview's Clock / Dawn / Day / Golden / Night presets
-  override it.
-  - ⚠️ **Nothing may rise between the camera and the room.** The camera only
-    looks from the +x/+z quadrant, downwards, so `mayRise` allows a roof above
-    the office floor only on lots entirely behind or left of the tower's block.
-    Every other roof stays `LOW_ROOF_GAP` below the floor, and the near ring
-    stays well below it. `office-scene-city.test.js` pins this. If you widen
-    the OrbitControls azimuth range, revisit `mayRise`.
-  - **Perf budget.** All buildings are one `InstancedMesh`, with windows drawn
-    in an injected shader (`exteriorMaterial`) rather than textured or modelled.
-    Streets, trees and rooftop plant are one instanced mesh each. Nothing
-    outdoors casts or receives shadows, so the shadow map stays the room's. A
-    time-of-day change only moves shared uniforms, and the city is only
-    re-planned when the room's bounds change.
-  - `CAMERA_DISTANCE` (World.jsx) sets both the camera's distance and the fog
-    range. Fog is view-depth based, so changing one without the other either
-    fogs the room or un-hazes the skyline. The camera sits 220 units out so the
-    whole city stays in front of the near plane.
+- **Environments.** The world around the room is a setting,
+  `office.environment` (Settings → Office): `city`, `space`, `island`,
+  `underwater`, `cyberpunk` or `green`. The schema enum in `settings.cjs` must
+  list `ENVIRONMENT_IDS` in order (`office-scene-environments.test.js` checks).
+  `lib/office/scene/environments.js` holds the catalogue and
+  `environmentLook(id, hour, mood)`, which lights every world from one Look
+  shape. That shape comes from `daylight.js` (local hour → sun or moon, sky, fog,
+  light colours; sunrise and sunset fixed at 6:00 and 19:00, since no location
+  is known). `scene/environments/<Name>.jsx` draws each world, registered in
+  `scene/environments/index.js`. That file spells out the contract every world
+  keeps (props, rules); `common.jsx` is the shared kit (exterior shader with
+  height haze and window grid, instancing, sky and fog, `Clickable`).
+  OfficeScene re-reads the hour once a minute and renders at least the world's
+  `ambientFps`. The dev Preview can override both world and hour.
+  - **Worlds react to agents.** `lib/office/agentEvents.js` diffs consecutive
+    snapshots of the room into moments (`arrived`, `left`, `finished`, `error`,
+    `waiting`) and a standing mood. A room switch starts afresh.
+    `stickySlots` keeps each agent's world object (shuttle, boat, school,
+    bird) in the same place. Objects standing in for an agent are wrapped in
+    `Clickable`, so clicking one focuses that agent.
+  - ⚠️ **Nothing may rise between the camera and the room.** The azimuth range
+    keeps the camera in the +x/+z quadrant, so every sight line from the room
+    heads toward +x and +z. Above the floor (y > 0), scenery must lie entirely
+    behind the back wall (any x) or entirely beyond the left wall (any z);
+    everywhere else it stays below y = 0. The city's `mayRise` (stricter) and
+    each world's plan test pin this. If you widen the OrbitControls azimuth
+    range, revisit every world.
+  - **Perf budget.** Repeats are instanced (all of the city's buildings are one
+    `InstancedMesh`, windows drawn in the shader). Nothing outdoors casts or
+    receives shadows, so the shadow map stays the room's. Ambient motion runs
+    in shaders or allocation-free `useFrame`, and a time-of-day change only
+    moves shared uniforms. A world adds **no lights**: even one at intensity 0
+    recompiles every room material and is evaluated per pixel every frame
+    (the Cyberpunk lightning flashes `scene.environmentIntensity` instead).
+  - ⚠️ **Only the chosen world runs.** `environments/index.js` loads each world
+    by dynamic import, so the other five are never fetched, parsed or built,
+    and OfficeScene's `WorldLayer` runs `disposeTree` on a world as it leaves,
+    which also frees the geometry its module keeps at module scope. A static
+    import of a world or its helper module undoes the split
+    (`office-env-loading.test.js` fails). The sandbox's
+    `window.__officeSandboxSetEnv(id)` switches worlds in place to check that
+    GPU counts come back.
+  - `CAMERA_DISTANCE` (`environments.js`) sets both the camera's distance and
+    every fog range. Fog is view-depth based, so changing one without the other
+    either fogs the room or un-hazes the scenery. The camera sits 220 units out
+    so the whole world stays in front of the near plane.
+  - **Reviewing a world** without Electron: `npm run vite`, then open
+    `/dev/office-sandbox.html?env=island&hour=golden&mode=demo` in any browser.
+    `mode=demo` plays an arrival, a finish, an error, a wait and a departure,
+    1.5 s apart, and `zoom=<wheel steps>` gives the wide shot. Vite never
+    builds this page into the app.
 - **Credentials guardrails.** `scanner.cjs` reads only `*.json` in
   `~/.claude/sessions/` and skips names containing `.key`, because the key files
   beside them are credentials. `antigravity.cjs` lists only `<root>/brain/` folder

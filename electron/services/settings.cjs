@@ -243,6 +243,16 @@ const SETTINGS = {
   // procman truncates a service log once it passes this size (it rotates by
   // size, not by age — there is no dated-file retention to configure).
   'services.logMaxSizeMb': { type: 'int', default: 5, min: 1, max: 200 },
+
+  // ── Office ───────────────────────────────────────────────────────────────
+  // The world around the Office room. Must list the renderer's ENVIRONMENT_IDS
+  // (src/lib/office/scene/environments.js) in the same order —
+  // office-scene-environments.test.js holds the two together.
+  'office.environment': {
+    type: 'enum',
+    values: ['city', 'space', 'island', 'underwater', 'cyberpunk', 'green'],
+    default: 'city',
+  },
 };
 
 // Legacy flat keys → new namespaced keys. Migrated once on init; the old keys
