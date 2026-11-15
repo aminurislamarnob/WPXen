@@ -85,6 +85,13 @@ function ensureCA() {
   if (!isCaTrusted()) {
     throw new Error('The local certificate authority was not trusted by macOS.');
   }
+
+  // A new (or re-created) root means PHP's trust bundle is stale: rebuild it
+  // and point every PHP version at it. Lazily required — trustBundle.cjs reaches
+  // back here for getCaRoot(). Never fails the HTTPS switch that got us here.
+  try {
+    require('./trustBundle.cjs').syncLocalTrust();
+  } catch {}
 }
 
 // `security` arguments that trust the CA root for the current user.
@@ -99,11 +106,19 @@ function userTrustArgs(caRoot, home) {
   ];
 }
 
+// Whether mkcert's local authority exists on disk (trusted or not). mkcert
+// silently creates a fresh root when it's missing, so a caller that must not
+// change trust (the silent re-issue in migration.cjs) checks this first.
+function hasCa() {
+  const caRoot = getCaRoot();
+  return !!caRoot && fs.existsSync(`${caRoot}/rootCA.pem`);
+}
+
 // Whether macOS actually trusts mkcert's root — not merely whether the file
 // exists, which it does even after a failed keychain step.
 function isCaTrusted() {
+  if (!hasCa()) return false;
   const caRoot = getCaRoot();
-  if (!caRoot || !fs.existsSync(`${caRoot}/rootCA.pem`)) return false;
   try {
     execFileSync('security', ['verify-cert', '-c', `${caRoot}/rootCA.pem`], {
       stdio: 'ignore',
@@ -114,13 +129,25 @@ function isCaTrusted() {
   }
 }
 
-// Generates (or overwrites) a trusted cert + key for `domain`. Returns their
-// absolute paths. `domain` is validated to a safe charset so it's never able to
-// smuggle extra mkcert arguments even though we already avoid a shell.
-function generateCert(domain) {
-  if (!/^[a-z0-9.-]+$/.test(domain)) {
+// `mkcert` arguments for one Site certificate: the domain and its wildcard, so
+// `sub.shop.test` is covered too (subdomain multisite; the vhost answers to
+// `*.domain` as well, nginx.cjs). A wildcard covers one label, which is all a
+// subdomain network needs. `domain` is validated to a safe charset that can't
+// start with `-`, so it's never able to smuggle an extra mkcert argument even
+// though we already avoid a shell.
+function certArgs(domain, certPath, keyPath) {
+  if (!/^[a-z0-9][a-z0-9.-]*$/.test(domain)) {
     throw new Error(`Unsafe domain for certificate: ${domain}`);
   }
+  return ['-cert-file', certPath, '-key-file', keyPath, domain, `*.${domain}`];
+}
+
+// Generates (or overwrites) a trusted cert + key for `domain` and its
+// wildcard. Returns their absolute paths, keyed on the bare domain — the same
+// two files whatever names the cert covers, so re-issuing leaves no orphans.
+// Prompt-free: only ensureCA() touches a trust store.
+function generateCert(domain) {
+  certArgs(domain); // validate before touching the filesystem
   const mkcert = getMkcertPath();
   if (!mkcert) throw new Error('mkcert is not installed.');
   const dir = getCertDir();
@@ -128,9 +155,7 @@ function generateCert(domain) {
 
   const certPath = `${dir}/${domain}.pem`;
   const keyPath = `${dir}/${domain}-key.pem`;
-  execFileSync(mkcert, ['-cert-file', certPath, '-key-file', keyPath, domain], {
-    stdio: 'pipe',
-  });
+  execFileSync(mkcert, certArgs(domain, certPath, keyPath), { stdio: 'pipe' });
   return { certPath, keyPath };
 }
 
@@ -172,8 +197,10 @@ module.exports = {
   ensureInstalled,
   getCertDir,
   ensureCA,
+  hasCa,
   isCaTrusted,
   userTrustArgs,
+  certArgs,
   generateCert,
   removeCert,
   getCaRoot,

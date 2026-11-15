@@ -546,6 +546,7 @@ module.exports = {
   onStateChange,
   reconcileOrphans,
   getLogPath,
+  getBaseDir,
   setBaseDir,
   pidAlive,
 };

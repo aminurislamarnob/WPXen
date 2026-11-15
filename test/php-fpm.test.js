@@ -122,6 +122,24 @@ describe('switchPhpVersion', () => {
   });
 });
 
+describe('restartPhpFpm', () => {
+  it('restarts that one version and touches no other', async () => {
+    slots = {
+      [slotOf('8.5')]: { state: 'running' },
+      [slotOf('8.4')]: { state: 'running' },
+    };
+    await php.restartPhpFpm('8.4');
+    expect(calls).toEqual(['stop php@8.4', 'start 8.4']);
+    expect(running()).toEqual(['8.4', '8.5']);
+  });
+
+  it('starts a version that had died', async () => {
+    slots = { [slotOf('8.4')]: { state: 'failed', error: 'crashed' } };
+    await php.restartPhpFpm('8.4');
+    expect(running()).toEqual(['8.4']);
+  });
+});
+
 describe('getFpmStatus', () => {
   it('lists the versions up and is running when any is', () => {
     slots[slotOf('8.5')] = { state: 'running' };
