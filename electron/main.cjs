@@ -64,7 +64,7 @@ function createWindow() {
     minHeight: 400,
     center: true,
     titleBarStyle: 'hiddenInset',
-    trafficLightPosition: { x: 16, y: 18 },
+    trafficLightPosition: require('./services/windowControls.cjs').TRAFFIC_LIGHTS.default,
     backgroundColor: windowBackground(),
     show: false,
     webPreferences: {

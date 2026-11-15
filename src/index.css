@@ -164,6 +164,13 @@ body {
   -webkit-app-region: no-drag;
 }
 
+/* A panel toggle (the Agents explorer) slides the way the left sidebar does:
+   react-resizable-panels sizes panels by flex-grow, so transition that, only
+   while the toggle runs (never while dragging a divider). */
+.panels-animating [data-panel] {
+  transition: flex-grow 200ms ease-out;
+}
+
 /* Status dot animations */
 @keyframes blink {
   0%,

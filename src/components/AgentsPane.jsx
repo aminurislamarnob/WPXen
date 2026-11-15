@@ -24,7 +24,7 @@ import * as webviewCache from '../lib/browser/webviewCache';
 import { useSettings } from '../lib/useSettings';
 import { LAST_AGENTS_SITE_KEY, resolveLastSite } from '../lib/activityBar';
 import { useAgentSessions, setSelectedSession } from '../lib/useAgentSessions';
-import TabStrip from './agents/TabStrip';
+import TabStrip, { ExplorerToggle } from './agents/TabStrip';
 import { cleanupOrphanedDrafts } from '../lib/chatDraft';
 import TabContextMenu from './agents/TabContextMenu';
 import {
@@ -262,11 +262,23 @@ export default function AgentsPane() {
       // storage unavailable — the width lasts this session only
     }
   }, []);
+  // Opening and closing the explorer slides like the left sidebar does (200ms
+  // ease-out width). The panels only transition while a toggle runs, so
+  // dragging the divider still tracks the pointer.
+  const [explorerAnimating, setExplorerAnimating] = useState(false);
+  const animTimer = useRef(null);
+  useEffect(() => () => clearTimeout(animTimer.current), []);
   const toggleExplorer = useCallback(() => {
     const panel = explorerRef.current;
     if (!panel) return;
-    if (panel.isCollapsed()) panel.expand();
-    else panel.collapse();
+    setExplorerAnimating(true);
+    clearTimeout(animTimer.current);
+    animTimer.current = setTimeout(() => setExplorerAnimating(false), 240);
+    // Let the transition class land before the sizes change.
+    requestAnimationFrame(() => {
+      if (panel.isCollapsed()) panel.expand();
+      else panel.collapse();
+    });
   }, []);
   useEffect(() => {
     const onKey = (e) => {
@@ -922,15 +934,19 @@ export default function AgentsPane() {
       return null;
     }
     return (
-      <div className="h-full flex flex-col items-center justify-center text-center px-6">
-        <div className="icon-tile w-12 h-12 bg-[#af52de] mb-4">
-          <TerminalIcon size={24} strokeWidth={2} />
+      <div className="h-full flex flex-col">
+        {/* The top bar's segment over this column, so the band stays whole. */}
+        <div className="drag-region h-10 flex-shrink-0 bg-tertiary border-b border-border" />
+        <div className="flex-1 flex flex-col items-center justify-center text-center px-6">
+          <div className="icon-tile w-12 h-12 bg-[#af52de] mb-4">
+            <TerminalIcon size={24} strokeWidth={2} />
+          </div>
+          <p className="text-[15px] font-semibold text-foreground">Agents</p>
+          <p className="mt-1 max-w-sm text-[13px] text-muted-foreground">
+            Add a site or any folder as a project in the sidebar, then start an AI agent
+            session in it.
+          </p>
         </div>
-        <p className="text-[15px] font-semibold text-foreground">Agents</p>
-        <p className="mt-1 max-w-sm text-[13px] text-muted-foreground">
-          Add a site or any folder as a project in the sidebar, then start an AI agent
-          session in it.
-        </p>
       </div>
     );
   }
@@ -945,7 +961,10 @@ export default function AgentsPane() {
 
   return (
     <>
-      <div ref={measureGroup} className="h-full">
+      <div
+        ref={measureGroup}
+        className={`h-full ${explorerAnimating ? 'panels-animating' : ''}`}
+      >
         {groupWidth > 0 && (
           <PanelGroup
             direction="horizontal"
@@ -976,7 +995,6 @@ export default function AgentsPane() {
                   dirtyKeys={dirtyKeys}
                   openAddMenu={openAddMenu}
                   detectedCount={detected.length}
-                  setSettingsOpen={setSettingsOpen}
                   setBrowserMenu={setBrowserMenu}
                   toggleExplorer={toggleExplorer}
                   sitePath={sitePath}
@@ -1143,8 +1161,11 @@ export default function AgentsPane() {
                   onExpand={() => setExplorerCollapsed(false)}
                   onResize={onExplorerResize}
                 >
-                  <div className="h-full border-l border-border">
+                  <div className="h-full bg-sidebar text-sidebar-foreground border-l border-sidebar-border">
                     <FileExplorer
+                      headerEnd={
+                        <ExplorerToggle collapsed={false} onToggle={toggleExplorer} />
+                      }
                       rootPath={sitePath}
                       rootName={meta.siteName}
                       onOpenFile={openFile}
