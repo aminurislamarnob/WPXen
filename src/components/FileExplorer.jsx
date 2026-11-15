@@ -69,6 +69,7 @@ export default function FileExplorer({
   onOpenFile,
   onOpenDiff,
   activeFilePath,
+  headerEnd = null,
 }) {
   const [childrenByPath, setChildrenByPath] = useState({});
   const [expanded, setExpanded] = useState(() => new Set());
@@ -653,8 +654,10 @@ export default function FileExplorer({
 
   return (
     <div className="h-full flex flex-col">
-      {/* Files / Changes tabs */}
-      <div className="drag-strip flex items-center gap-0.5 px-2 pt-2 pb-1.5 border-b border-border">
+      {/* Files / Changes: this panel's segment of the Agents top bar (see
+          agents/TabStrip.jsx) — icon tabs, then whatever the pane puts at the
+          end (the panel toggle). */}
+      <div className="drag-strip h-10 flex-shrink-0 flex items-stretch pl-1 pr-2 bg-tertiary border-b border-border">
         <TabButton
           icon={FileText}
           label="Files"
@@ -668,6 +671,8 @@ export default function FileExplorer({
           active={tab === 'changes'}
           onClick={() => setTab('changes')}
         />
+        <div className="drag-region flex-1" />
+        {headerEnd && <div className="flex items-center">{headerEnd}</div>}
       </div>
 
       {tab === 'files' ? (
@@ -933,24 +938,29 @@ function MenuItem({ icon: Icon, label, onClick, danger, disabled }) {
 }
 
 // One explorer tab (Files / Changes), with an optional count badge.
+// An icon tab in the panel's top-bar segment: the active one is underlined.
 function TabButton({ icon: Icon, label, active, badge, onClick }) {
   return (
-    <button
-      onClick={onClick}
-      className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[12.5px] ${
-        active
-          ? 'bg-muted text-foreground font-medium'
-          : 'text-muted-foreground hover:bg-accent'
-      }`}
-    >
-      <Icon size={13} strokeWidth={2} className="flex-shrink-0" />
-      {label}
-      {badge > 0 && (
-        <span className="min-w-[16px] px-1 text-center rounded-full bg-foreground/10 text-[10.5px] font-semibold">
-          {badge}
-        </span>
-      )}
-    </button>
+    <Tooltip label={badge > 0 ? `${label} (${badge})` : label}>
+      <button
+        onClick={onClick}
+        aria-label={label}
+        aria-pressed={active}
+        className={`relative flex items-center justify-center w-9 ${
+          active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
+        }`}
+      >
+        <Icon size={16} strokeWidth={1.8} className="flex-shrink-0" />
+        {badge > 0 && (
+          <span className="absolute top-1.5 right-0.5 min-w-[14px] h-[14px] px-1 flex items-center justify-center rounded-full bg-highlight text-highlight-foreground text-[9px] font-semibold leading-none tabular-nums">
+            {badge > 99 ? '99+' : badge}
+          </span>
+        )}
+        {active && (
+          <span className="absolute bottom-0 inset-x-2 h-[2px] rounded-t bg-highlight" />
+        )}
+      </button>
+    </Tooltip>
   );
 }
 

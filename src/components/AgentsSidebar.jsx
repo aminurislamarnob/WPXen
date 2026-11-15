@@ -401,7 +401,7 @@ export default function AgentsSidebar() {
 
   return (
     <div className="flex-1 flex flex-col min-h-0 no-drag">
-      <div className="flex items-center gap-0.5 pl-4 pr-3 pb-1">
+      <div className="flex items-center gap-0.5 pl-4 pr-3 pt-2.5 pb-1">
         <span className="flex-1 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
           {activityView ? 'Activity' : 'Projects'}
         </span>

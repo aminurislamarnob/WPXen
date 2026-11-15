@@ -69,11 +69,14 @@ export default function ActivityBar({ serviceStatus, onToggleTree, agentsUnread 
     <nav
       aria-label="Main screens"
       style={{ width: ACTIVITY_BAR_WIDTH }}
-      className="flex flex-col flex-shrink-0 bg-sidebar border-r border-sidebar-border"
+      className="flex flex-col flex-shrink-0 bg-sidebar"
     >
-      {/* Clears the traffic lights and keeps the window draggable above the icons. */}
-      <div className="drag-region h-12 flex-shrink-0" />
-      <div className="flex-1 flex flex-col no-drag">
+      {/* Its share of the Agents top bar: clears the traffic lights and keeps
+          the window draggable above the icons. No divider up here, so the
+          lights and window controls sit in one unbroken segment with the
+          sidebar's; the column's border starts below the bar. */}
+      <div className="drag-region h-10 flex-shrink-0 bg-tertiary border-b border-border" />
+      <div className="flex-1 flex flex-col no-drag border-r border-sidebar-border">
         {body.map((group, gi) => (
           <div key={gi} className="flex flex-col">
             {gi > 0 && <div className="mx-3 my-1 border-t border-sidebar-border" />}

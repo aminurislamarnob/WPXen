@@ -902,6 +902,15 @@ function registerHandlers(win, storeInstance) {
   // Unread bookkeeping needs to know what's actually on screen: the Session
   // the Agents pane shows (renderer-reported) and whether the window is
   // focused (observed here).
+  // The Agents screen's 40px top bar puts the traffic lights on its centre line.
+  ipcMain.on('window-controls-layout', (e, layout) => {
+    const win = BrowserWindow.fromWebContents(e.sender);
+    if (!win || win.isDestroyed() || typeof win.setWindowButtonPosition !== 'function')
+      return;
+    const { trafficLightsFor } = require('./services/windowControls.cjs');
+    win.setWindowButtonPosition(trafficLightsFor(layout));
+  });
+
   ipcMain.on('agent-view', (_e, sessionId) =>
     agents.setView({ selected: sessionId || null })
   );

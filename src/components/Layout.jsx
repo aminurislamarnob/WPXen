@@ -52,6 +52,12 @@ export default function Layout({ serviceStatus }) {
     ? WINDOW_CONTROLS_END - (agentsMode ? ACTIVITY_BAR_WIDTH : 0)
     : 0;
 
+  // Agents runs a 40px top bar; the traffic lights move onto its centre line
+  // there (electron/services/windowControls.cjs) and back everywhere else.
+  useEffect(() => {
+    window.electronAPI.setWindowControlsLayout?.(agentsMode ? 'agents' : 'default');
+  }, [agentsMode]);
+
   // Shortcuts for the window controls, matching the keycaps in their tooltips.
   // ⌘[ / ⌘] are the macOS system bindings for history; ⌘B is the usual
   // sidebar toggle. Keep these in sync with the `keys` props below.
@@ -124,8 +130,13 @@ export default function Layout({ serviceStatus }) {
         } ${sidebarCollapsed ? 'w-0 border-r-0' : agentsMode ? '' : 'w-56'}`}
         style={agentsMode && !sidebarCollapsed ? { width: agentsWidth } : undefined}
       >
-        {/* Title bar drag region (hosts the traffic lights) */}
-        <div className="drag-region h-12 flex-shrink-0" />
+        {/* Title bar drag region (hosts the traffic lights). On Agents it is
+            the sidebar's segment of the bordered top bar. */}
+        <div
+          className={`drag-region flex-shrink-0 ${
+            agentsMode ? 'h-10 bg-tertiary border-b border-border' : 'h-12'
+          }`}
+        />
 
         {agentsMode ? (
           // Agents mode: the sidebar becomes the Projects list (Sites → agent
@@ -242,7 +253,13 @@ export default function Layout({ serviceStatus }) {
           the same line (10 + 16 = 26). Fixed square hit targets (32px toggle,
           28px arrows) rather than padding keep every glyph optically centered,
           so resizing an icon never shifts the row off the lights. */}
-      <div className="no-drag absolute top-2.5 left-20 z-30 flex items-center gap-1.5">
+      <div
+        // On Agents, top-1 puts the row's centre at 20: the 40px top bar's
+        // (and the traffic lights') centre line.
+        className={`no-drag absolute left-20 z-30 flex items-center gap-1.5 ${
+          agentsMode ? 'top-1' : 'top-2.5'
+        }`}
+      >
         <Tooltip label="Toggle sidebar" keys={['⌘', 'B']}>
           <button
             onClick={() => setSidebarCollapsed((v) => !v)}
