@@ -329,6 +329,30 @@ under `services/office/` is electron-free and tested through `CLAUDE_HOME` /
 - **Snapshot sink.** `start({ onSnapshot })` binds production's sink once; `ipc.cjs`
   resolves the windows when each snapshot is sent. `__setDeps({ onSnapshot })`
   stays the test override.
+- **The world around the room.** The room is the top floor of a tower in a
+  city, lit by the viewer's local clock. `lib/office/scene/daylight.js` maps an
+  hour to a look: sun or moon direction, sky, fog and light colours, and how
+  many city windows glow. Sunrise and sunset are fixed at 6:00 and 19:00, since
+  no location is known. `lib/office/scene/city.js` plans the city, seeded per
+  room kind, and `scene/World.jsx` draws it. OfficeScene re-reads the hour once
+  a minute, and the dev Preview's Clock / Dawn / Day / Golden / Night presets
+  override it.
+  - ⚠️ **Nothing may rise between the camera and the room.** The camera only
+    looks from the +x/+z quadrant, downwards, so `mayRise` allows a roof above
+    the office floor only on lots entirely behind or left of the tower's block.
+    Every other roof stays `LOW_ROOF_GAP` below the floor, and the near ring
+    stays well below it. `office-scene-city.test.js` pins this. If you widen
+    the OrbitControls azimuth range, revisit `mayRise`.
+  - **Perf budget.** All buildings are one `InstancedMesh`, with windows drawn
+    in an injected shader (`exteriorMaterial`) rather than textured or modelled.
+    Streets, trees and rooftop plant are one instanced mesh each. Nothing
+    outdoors casts or receives shadows, so the shadow map stays the room's. A
+    time-of-day change only moves shared uniforms, and the city is only
+    re-planned when the room's bounds change.
+  - `CAMERA_DISTANCE` (World.jsx) sets both the camera's distance and the fog
+    range. Fog is view-depth based, so changing one without the other either
+    fogs the room or un-hazes the skyline. The camera sits 220 units out so the
+    whole city stays in front of the near plane.
 - **Credentials guardrails.** `scanner.cjs` reads only `*.json` in
   `~/.claude/sessions/` and skips names containing `.key`, because the key files
   beside them are credentials. `antigravity.cjs` lists only `<root>/brain/` folder

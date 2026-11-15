@@ -12,6 +12,7 @@ import {
   roomTheme,
 } from '../../lib/office/scene/rooms.js';
 import { subscribePreview } from '../../lib/office/preview.js';
+import { PREVIEW_HOURS } from '../../lib/office/scene/daylight.js';
 
 // Office — the claude-agent-verse 3D office: every live Claude Code or
 // Antigravity session on this machine is a character at a desk, clustered
@@ -94,6 +95,8 @@ function useWidth(ref) {
 export default function OfficePage() {
   const [office, setOffice] = useState(EMPTY_OFFICE);
   const [previewMode, setPreviewMode] = useState('off');
+  // Dev Preview only: light the office for a preset hour instead of the clock.
+  const [previewTime, setPreviewTime] = useState('clock');
   const [room, setRoom] = useRoom();
   const [focus, setFocus] = useState(null);
   const [listOpen, setListOpen] = useState(true);
@@ -210,7 +213,25 @@ export default function OfficePage() {
           focus={liveFocus}
           onSelect={setFocus}
           insetRight={insetRight}
+          hour={previewOffice ? (PREVIEW_HOURS[previewTime] ?? null) : null}
         />
+        {DEV && previewOffice && (
+          // Dev Preview only: light the office for a preset hour, so every
+          // look can be reviewed without waiting for the clock.
+          <div className="absolute top-3 left-3 z-10">
+            <SegmentedTabs
+              tabs={[
+                { value: 'clock', label: 'Clock' },
+                { value: 'dawn', label: 'Dawn' },
+                { value: 'day', label: 'Day' },
+                { value: 'golden', label: 'Golden' },
+                { value: 'night', label: 'Night' },
+              ]}
+              value={previewTime}
+              onChange={setPreviewTime}
+            />
+          </div>
+        )}
         {roomEmpty && (
           <div className="absolute left-1/2 bottom-10 -translate-x-1/2 z-10">
             <Card className="px-5 py-3.5 text-center shadow-md">

@@ -406,34 +406,32 @@ export function whiteboardTexture() {
   });
 }
 
-/** Dusk city skyline seen through the office windows. */
-export function skylineTexture() {
-  return make('skyline', 1024, 512, (ctx, w, h) => {
+/**
+ * The sky behind the city, drawn for one moment of the day: zenith at the top,
+ * the horizon glow below it, and the fog colour at the very bottom so the
+ * fogged far edge of the city meets it without a seam. Stars fade in with
+ * `stars` (0..1). Not cached — the sky changes through the day, so the caller
+ * owns the texture and disposes it when the next one replaces it.
+ * @param {{ skyTop: string, skyHorizon: string, fog: string, stars: number }} look
+ */
+export function skyTexture({ skyTop, skyHorizon, fog, stars }) {
+  return paint(512, 512, (ctx, w, h) => {
     const g = ctx.createLinearGradient(0, 0, 0, h);
-    g.addColorStop(0, '#9fb7d9');
-    g.addColorStop(0.55, '#e8c9b5');
-    g.addColorStop(1, '#f3d9c4');
+    g.addColorStop(0, skyTop);
+    g.addColorStop(0.62, skyHorizon);
+    g.addColorStop(1, fog);
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, w, h);
-    const r = rand(42);
-    for (const [layer, color, base] of [
-      [0, '#b7b9c9', 0.55],
-      [1, '#8e92a8', 0.68],
-    ]) {
-      let x = 0;
-      while (x < w) {
-        const bw = 40 + r() * 90;
-        const bh = h * (0.18 + r() * (layer ? 0.32 : 0.42));
-        ctx.fillStyle = color;
-        ctx.fillRect(x, h * base - bh + h * 0.32, bw, bh + h);
-        if (layer) {
-          ctx.fillStyle = 'rgba(255, 228, 170, 0.75)';
-          for (let wy = h * base - bh + h * 0.32 + 10; wy < h; wy += 16)
-            for (let wx = x + 8; wx < x + bw - 10; wx += 14)
-              if (r() < 0.3) ctx.fillRect(wx, wy, 6, 8);
-        }
-        x += bw + 4;
-      }
+    if (stars <= 0.01) return;
+    const r = rand(7);
+    for (let i = 0; i < 260; i++) {
+      const x = r() * w;
+      const y = r() * h * 0.7;
+      // Fainter toward the horizon, where the city's glow washes them out.
+      const a = stars * (0.35 + r() * 0.65) * (1 - y / (h * 0.75));
+      ctx.fillStyle = `rgba(255, 255, 255, ${a.toFixed(3)})`;
+      const size = r() < 0.08 ? 1.6 : 1;
+      ctx.fillRect(x, y, size, size);
     }
   });
 }

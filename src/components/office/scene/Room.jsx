@@ -8,7 +8,6 @@ import {
   nameplateTexture,
   posterTexture,
   screenTexture,
-  skylineTexture,
   whiteboardTexture,
   woodTexture,
 } from '../../../lib/office/scene/textures.js';
@@ -16,6 +15,7 @@ import { COFFEE_TABLE, LOUNGE } from '../../../lib/office/scene/layout.js';
 import { HighTable, PlayZone } from './PlayZone.jsx';
 import { StaticBatch } from './StaticBatch.jsx';
 import { roomLayoutKey } from '../../../lib/office/scene/memo.js';
+import { SLAB_DEPTH } from '../../../lib/office/scene/city.js';
 
 // ── Room shell ───────────────────────────────────────────────
 // Floor, walls, nameplate and the culture pieces: the social corner — sofa,
@@ -25,8 +25,16 @@ import { roomLayoutKey } from '../../../lib/office/scene/memo.js';
 
 const WALL_H = 3.1;
 const WALL_T = 0.14;
-const SLAB = 0.35;
+/** Window openings in the glazed left wall: sill and head heights. */
+const SILL = 0.5;
+const HEAD = 2.78;
 
+/**
+ * The office floor: oak boards on a concrete slab. The slab spans the walls
+ * too, and the tower's facade (World.jsx) continues straight down from its
+ * underside, so the cut-away edges read as a floor of a building rather than
+ * a model on a plinth.
+ */
 function Floor({ plan }) {
   const w = plan.maxX - plan.minX + 1;
   const d = plan.maxZ - plan.minZ + 1;
@@ -37,93 +45,139 @@ function Floor({ plan }) {
   }, [w, d]);
   const cx = (plan.minX + plan.maxX + 1) / 2;
   const cz = (plan.minZ + plan.maxZ + 1) / 2;
+  const x0 = plan.minX - WALL_T;
+  const z0 = plan.minZ - WALL_T;
+  const x1 = plan.maxX + 1;
+  const z1 = plan.maxZ + 1;
   return (
-    <group position={[cx, 0, cz]}>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+    <group>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[cx, 0, cz]} receiveShadow>
         <planeGeometry args={[w, d]} />
         <meshStandardMaterial map={tex} roughness={0.72} />
       </mesh>
-      {/* diorama slab */}
-      <RoundedBox
-        args={[w + 0.02, SLAB, d + 0.02]}
-        radius={0.05}
-        position={[0, -SLAB / 2 - 0.004, 0]}
+      {/* structural slab: its top sits a hair under the boards */}
+      <mesh
+        position={[(x0 + x1) / 2, -SLAB_DEPTH / 2 - 0.004, (z0 + z1) / 2]}
         receiveShadow
       >
-        <meshStandardMaterial color="#e7e1d6" roughness={0.9} />
-      </RoundedBox>
-      <mesh position={[0, -SLAB - 0.03, 0]}>
-        <boxGeometry args={[w - 0.2, 0.06, d - 0.2]} />
-        <meshStandardMaterial color="#c9c1b3" roughness={1} />
+        <boxGeometry args={[x1 - x0 + 0.04, SLAB_DEPTH - 0.008, z1 - z0 + 0.04]} />
+        <meshStandardMaterial color={palette.concrete} roughness={0.92} />
       </mesh>
     </group>
+  );
+}
+
+/** Steel window frame member. */
+function Frame({ args, position }) {
+  return (
+    <mesh position={position}>
+      <boxGeometry args={args} />
+      <meshStandardMaterial color={palette.ink} roughness={0.4} metalness={0.4} />
+    </mesh>
   );
 }
 
 function Walls({ plan, color }) {
   const w = plan.maxX - plan.minX + 1;
   const d = plan.maxZ - plan.minZ + 1;
-  const sky = useMemo(() => skylineTexture(), []);
   const winCount = Math.max(2, Math.floor((d - 1.2) / 2.2));
   const winSpan = (d - 1.2) / winCount;
+  const ww = winSpan - 0.24;
+  const openH = HEAD - SILL;
+  const windows = Array.from({ length: winCount }, (_, i) => 0.6 + winSpan * (i + 0.5));
+  // Solid piers between the openings, from the corner to the far end.
+  const piers = [];
+  let from = 0;
+  for (const z of windows) {
+    piers.push([from, z - ww / 2]);
+    from = z + ww / 2;
+  }
+  piers.push([from, d]);
+  const backX = (plan.minX + plan.maxX + 1) / 2;
   return (
     <group>
-      {/* back wall */}
+      {/* back wall: the building core */}
       <mesh
-        position={[(plan.minX + plan.maxX + 1) / 2, WALL_H / 2, plan.minZ - WALL_T / 2]}
+        position={[backX, WALL_H / 2, plan.minZ - WALL_T / 2]}
         receiveShadow
         castShadow
       >
         <boxGeometry args={[w + WALL_T * 2, WALL_H, WALL_T]} />
         <meshStandardMaterial color={color} roughness={0.92} />
       </mesh>
-      <mesh position={[(plan.minX + plan.maxX + 1) / 2, 0.06, plan.minZ + 0.01]}>
+      <mesh position={[backX, 0.06, plan.minZ + 0.01]}>
         <boxGeometry args={[w, 0.12, 0.02]} />
         <meshStandardMaterial color={palette.wallTrim} roughness={0.8} />
       </mesh>
-      {/* left wall: floor-to-ceiling glazing with the skyline behind */}
+      {/* concrete coping where the section cuts the wall */}
+      <mesh position={[backX, WALL_H + 0.04, plan.minZ - WALL_T / 2]}>
+        <boxGeometry args={[w + WALL_T * 2 + 0.04, 0.08, WALL_T + 0.04]} />
+        <meshStandardMaterial color={palette.concrete} roughness={0.9} />
+      </mesh>
+
+      {/* left wall: real openings, so the city shows through and the evening
+          sun falls across the floor */}
       <group position={[plan.minX - WALL_T / 2, 0, plan.minZ]}>
-        <mesh position={[0, WALL_H / 2, d / 2]} castShadow receiveShadow>
-          <boxGeometry args={[WALL_T, WALL_H, d]} />
+        <mesh position={[0, SILL / 2, d / 2]} castShadow receiveShadow>
+          <boxGeometry args={[WALL_T, SILL, d]} />
           <meshStandardMaterial color={color} roughness={0.92} />
         </mesh>
-        {Array.from({ length: winCount }).map((_, i) => {
-          const z = 0.6 + winSpan * (i + 0.5);
-          const ww = winSpan - 0.24;
-          return (
-            <group
-              key={i}
-              position={[WALL_T / 2 + 0.002, 1.6, z]}
-              rotation={[0, Math.PI / 2, 0]}
-            >
-              <mesh>
-                <planeGeometry args={[ww, 2.3]} />
-                <meshBasicMaterial map={sky} toneMapped={false} />
-              </mesh>
-              {/* mullions */}
-              {[-ww / 2, 0, ww / 2].map((x, k) => (
-                <mesh key={k} position={[x, 0, 0.02]}>
-                  <boxGeometry args={[0.05, 2.36, 0.04]} />
-                  <meshStandardMaterial
-                    color={palette.ink}
-                    roughness={0.4}
-                    metalness={0.4}
-                  />
-                </mesh>
-              ))}
-              {[-1.15, 1.15].map((y, k) => (
-                <mesh key={k} position={[0, y, 0.02]}>
-                  <boxGeometry args={[ww + 0.05, 0.05, 0.04]} />
-                  <meshStandardMaterial
-                    color={palette.ink}
-                    roughness={0.4}
-                    metalness={0.4}
-                  />
-                </mesh>
-              ))}
-            </group>
-          );
-        })}
+        <mesh position={[0, (HEAD + WALL_H) / 2, d / 2]} castShadow receiveShadow>
+          <boxGeometry args={[WALL_T, WALL_H - HEAD, d]} />
+          <meshStandardMaterial color={color} roughness={0.92} />
+        </mesh>
+        {piers.map(([z0, z1], i) => (
+          <mesh
+            key={i}
+            position={[0, (SILL + HEAD) / 2, (z0 + z1) / 2]}
+            castShadow
+            receiveShadow
+          >
+            <boxGeometry args={[WALL_T, openH, z1 - z0]} />
+            <meshStandardMaterial color={color} roughness={0.92} />
+          </mesh>
+        ))}
+        <mesh position={[0, WALL_H + 0.04, d / 2]}>
+          <boxGeometry args={[WALL_T + 0.04, 0.08, d + 0.04]} />
+          <meshStandardMaterial color={palette.concrete} roughness={0.9} />
+        </mesh>
+        {windows.map((z, i) => (
+          <group key={i} position={[0, (SILL + HEAD) / 2, z]}>
+            {/* glazing: lets light through, so it never enters the shadow map */}
+            <mesh rotation={[0, Math.PI / 2, 0]}>
+              <planeGeometry args={[ww, openH]} />
+              <meshStandardMaterial
+                color="#dcebf5"
+                transparent
+                opacity={0.16}
+                roughness={0.05}
+                metalness={0.1}
+                depthWrite={false}
+                side={THREE.DoubleSide}
+              />
+            </mesh>
+            {/* mullions and transoms on the room side */}
+            {[-ww / 2, 0, ww / 2].map((dz, k) => (
+              <Frame
+                key={k}
+                args={[0.04, openH, 0.05]}
+                position={[WALL_T / 2 + 0.01, 0, dz]}
+              />
+            ))}
+            {[-openH / 2, openH / 2, openH / 2 - 0.62].map((dy, k) => (
+              <Frame
+                key={k}
+                args={[0.04, 0.05, ww + 0.05]}
+                position={[WALL_T / 2 + 0.01, dy, 0]}
+              />
+            ))}
+            {/* sill board */}
+            <mesh position={[WALL_T / 2 + 0.06, -openH / 2 - 0.015, 0]}>
+              <boxGeometry args={[0.16, 0.03, ww + 0.1]} />
+              <meshStandardMaterial color={palette.wallTrim} roughness={0.7} />
+            </mesh>
+          </group>
+        ))}
       </group>
     </group>
   );

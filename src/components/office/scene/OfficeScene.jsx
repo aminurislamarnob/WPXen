@@ -23,6 +23,8 @@ import { FloorPlant } from './Props.jsx';
 import { Workstation } from './Workstation.jsx';
 import { palette, teamColor } from '../../../lib/office/scene/theme.js';
 import { signTexture } from '../../../lib/office/scene/textures.js';
+import { daylightAt, hourOf } from '../../../lib/office/scene/daylight.js';
+import { CAMERA_DISTANCE, World } from './World.jsx';
 import './scene.css';
 
 // ── Office scene ─────────────────────────────────────────────
@@ -303,21 +305,31 @@ function FrameDriver({ fps }) {
   return null;
 }
 
-/** Lights only follow the room's bounds; plan itself is new every snapshot. */
-const boundsEqual = (a, b) =>
+/** Lights only follow the room's bounds and the time of day; plan itself is new every snapshot. */
+const lightsEqual = (a, b) =>
+  a.look === b.look &&
   a.plan.minX === b.plan.minX &&
   a.plan.maxX === b.plan.maxX &&
   a.plan.minZ === b.plan.minZ &&
   a.plan.maxZ === b.plan.maxZ;
 
+/** How far the key light sits from the room centre, along its direction. */
+const KEY_DISTANCE = 40;
+
 /**
- * Memoised on the bounds: drei's Environment re-captures its cube map whenever
+ * The room's light at this moment of the local day (lib/office/scene/
+ * daylight.js): the sun — or the moon — as the shadow-casting key light, a
+ * hemisphere for sky and floor bounce (warm office lighting at night), and the
+ * studio Lightformers for reflections, dimmed after dark. Memoised on the
+ * bounds and the look: drei's Environment re-captures its cube map whenever
  * its children change identity, which used to happen on every snapshot.
  */
-const Lights = memo(function Lights({ plan }) {
+const Lights = memo(function Lights({ plan, look }) {
   const c = roomCenter(plan);
   const span = Math.max(plan.maxX - plan.minX, plan.maxZ - plan.minZ) * 0.75 + 4;
   const light = useRef(null);
+  const gl = useThree((s) => s.gl);
+  const [kx, ky, kz] = look.keyDir;
   useEffect(() => {
     const l = light.current;
     if (!l) return;
@@ -326,17 +338,25 @@ const Lights = memo(function Lights({ plan }) {
     const cam = l.shadow.camera;
     cam.left = cam.bottom = -span;
     cam.right = cam.top = span;
+    cam.near = 1;
+    cam.far = KEY_DISTANCE * 2.5;
     cam.updateProjectionMatrix();
+    // The sun moved: the frozen shadow map needs one fresh pass.
+    gl.shadowMap.needsUpdate = true;
   });
   return (
     <>
-      <hemisphereLight args={['#ffffff', '#d6c4a8', 1.15]} />
-      <ambientLight intensity={0.25} />
+      <hemisphereLight args={[look.hemiSky, look.hemiGround, look.hemiIntensity]} />
+      <ambientLight intensity={look.ambient} />
       <directionalLight
         ref={light}
-        position={[c.x - 9, 16, c.z + 7]}
-        intensity={2.1}
-        color="#fff6ea"
+        position={[
+          c.x + kx * KEY_DISTANCE,
+          c.y + ky * KEY_DISTANCE,
+          c.z + kz * KEY_DISTANCE,
+        ]}
+        intensity={look.sunIntensity}
+        color={look.sun}
         castShadow
         shadow-mapSize={[2048, 2048]}
         shadow-bias={-0.0004}
@@ -344,10 +364,10 @@ const Lights = memo(function Lights({ plan }) {
       />
       <directionalLight
         position={[c.x + 10, 8, c.z + 12]}
-        intensity={0.45}
+        intensity={look.fill}
         color="#dfe8ff"
       />
-      <Environment resolution={128} frames={1}>
+      <Environment resolution={128} frames={1} environmentIntensity={look.env}>
         <Lightformer form="rect" intensity={2} position={[0, 5, -6]} scale={[10, 3, 1]} />
         <Lightformer
           form="rect"
@@ -361,7 +381,24 @@ const Lights = memo(function Lights({ plan }) {
       </Environment>
     </>
   );
-}, boundsEqual);
+}, lightsEqual);
+
+/**
+ * The viewer's local hour, re-read once a minute and whenever the window
+ * comes back into view, or `override` (the dev Preview's time presets).
+ * @param {number | null} override
+ * @param {boolean} visible
+ */
+function useLocalHour(override, visible) {
+  const [hour, setHour] = useState(() => hourOf(new Date()));
+  useEffect(() => {
+    if (override != null || !visible) return;
+    setHour(hourOf(new Date()));
+    const id = setInterval(() => setHour(hourOf(new Date())), 60_000);
+    return () => clearInterval(id);
+  }, [override, visible]);
+  return override ?? hour;
+}
 
 // ── Scene ────────────────────────────────────────────────────
 
@@ -375,6 +412,8 @@ const Lights = memo(function Lights({ plan }) {
  *   clicked character or intern, or null when the click hit empty floor.
  * @param {number} [props.insetRight] Pixels on the right covered by HUD panels;
  *   the camera frames the remaining area.
+ * @param {number | null} [props.hour] Local hour to light the office for;
+ *   null follows the real clock (the dev Preview passes its presets).
  */
 export function OfficeScene({
   office,
@@ -382,6 +421,7 @@ export function OfficeScene({
   focus = null,
   onSelect = NO_SELECT,
   insetRight = 0,
+  hour = null,
 }) {
   // Each room keeps its own sticky desk slots and break spots, so switching
   // back finds everyone where they were — at their desk or in the lounge.
@@ -407,6 +447,9 @@ export function OfficeScene({
     return () => document.removeEventListener('visibilitychange', onChange);
   }, []);
 
+  const localHour = useLocalHour(hour, visible);
+  const look = useMemo(() => daylightAt(localHour), [localHour]);
+
   // a rally needs smooth frames
   const rally = [...breaks.values()].some((s) => s.activity === 'pingpong');
   const fps = frameRate({ visible, busy: isBusy(office), rally });
@@ -423,15 +466,18 @@ export function OfficeScene({
         frameloop={visible ? 'demand' : 'never'}
         shadows="percentage"
         dpr={[1, 1.5]}
-        gl={{ antialias: true, alpha: true }}
+        gl={{ antialias: true }}
         onPointerMissed={() => onSelect(null)}
       >
         <OrthographicCamera
           makeDefault
-          position={center.clone().add(VIEW_DIR.clone().multiplyScalar(60)).toArray()}
+          position={center
+            .clone()
+            .add(VIEW_DIR.clone().multiplyScalar(CAMERA_DISTANCE))
+            .toArray()}
           zoom={40}
-          near={0.1}
-          far={400}
+          near={1}
+          far={CAMERA_DISTANCE * 4}
         />
         <OrbitControls
           makeDefault
@@ -455,7 +501,8 @@ export function OfficeScene({
         <FrameDriver fps={fps} />
         <ShadowBudget version={poses} />
         <ZoomWatcher onChange={setFar} />
-        <Lights plan={plan} />
+        <Lights plan={plan} look={look} />
+        <World plan={plan} kind={room.kind} look={look} />
         <BreakPresence.Provider value={presence}>
           <Room plan={plan} theme={room} />
           {plan.pods.map((pod) => (
