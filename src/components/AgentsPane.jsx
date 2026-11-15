@@ -8,6 +8,13 @@ import {
   Database,
   Mail,
   Loader2,
+  ArrowRightLeft,
+  MessageSquare,
+  SquareTerminal,
+  PanelRightClose,
+  PanelBottomClose,
+  Pencil,
+  X,
 } from 'lucide-react';
 import { ProviderIcon } from './providerIcons';
 import { Panel, PanelGroup } from 'react-resizable-panels';
@@ -26,7 +33,8 @@ import { LAST_AGENTS_SITE_KEY, resolveLastSite } from '../lib/activityBar';
 import { useAgentSessions, setSelectedSession } from '../lib/useAgentSessions';
 import TabStrip, { ExplorerToggle } from './agents/TabStrip';
 import { cleanupOrphanedDrafts } from '../lib/chatDraft';
-import TabContextMenu from './agents/TabContextMenu';
+import ContextMenu from './ContextMenu';
+import { TAB_COLORS } from '../lib/tabColors';
 import {
   getViewMode,
   opensInChatByDefault,
@@ -422,6 +430,8 @@ export default function AgentsPane() {
       // Honour a pending spawn or focus request from the sidebar.
       const spawnAgent = location.state?.spawn;
       let preferActive = location.state?.focus || null;
+      // The sidebar row menu's Hand Off: the dialog lives here, with the tabs.
+      if (location.state?.handoff) setHandoffSession(location.state.handoff);
       if (spawnAgent) {
         const res = await window.electronAPI.launchAgent(
           siteId,
@@ -604,6 +614,13 @@ export default function AgentsPane() {
   };
 
   const [tabMenu, setTabMenu] = useState(null);
+  // The session tab being renamed inline (tab menu → Rename), or null.
+  const [renamingTab, setRenamingTab] = useState(null);
+  const commitRename = async (sessionId, title) => {
+    setRenamingTab(null);
+    const res = await window.electronAPI.renameSession(sessionId, title);
+    if (res?.error) setError(res.error);
+  };
   const [bulkCloseConfirm, setBulkCloseConfirm] = useState(null);
 
   const handleBulkClose = (action, targetKey) => {
@@ -662,49 +679,65 @@ export default function AgentsPane() {
     const canCloseRight = tabsToClose(orderedKeys, key, 'right').length > 0;
     const canCloseLeft = tabsToClose(orderedKeys, key, 'left').length > 0;
 
+    // Icons and order after Orca's tab menu (SortableTabContextMenu.tsx);
+    // items without an icon keep the icon column so the labels line up.
     const items = [];
     if (kind === 'session') {
       const isAgent = tabs.find((t) => t.sessionId === key)?.isAgent;
       if (isAgent) {
         items.push({
           label: 'Hand Off to Another Agent…',
+          icon: ArrowRightLeft,
           onClick: () => setHandoffSession(key),
         });
 
         const session = sessionsById[key];
         if (session && session.chat) {
-          const currentMode = getViewMode(key);
-          const isChat = currentMode === 'chat';
+          const isChat = getViewMode(key) === 'chat';
           items.push({
             label: isChat ? 'Switch to Terminal View' : 'Switch to Chat View',
+            icon: isChat ? SquareTerminal : MessageSquare,
             onClick: () => toggleViewMode(key),
           });
         }
         items.push('separator');
       }
 
+      const split = async (dir) => {
+        const res = await window.electronAPI.splitPane(key, dir);
+        if (res?.error) return setError(res.error);
+        selectSession(key);
+      };
       items.push({
-        label: 'Split right',
-        onClick: () => window.electronAPI.splitPane(key, 'right'),
+        label: 'Split Right',
+        icon: PanelRightClose,
+        onClick: () => split('right'),
       });
       items.push({
-        label: 'Split down',
-        onClick: () => window.electronAPI.splitPane(key, 'down'),
+        label: 'Split Down',
+        icon: PanelBottomClose,
+        onClick: () => split('down'),
+      });
+      items.push('separator');
+      items.push({
+        label: 'Rename…',
+        icon: Pencil,
+        onClick: () => setRenamingTab(key),
       });
       items.push('separator');
     }
-
-    items.push({
-      label: 'Close',
-      disabled: !canClose,
-      onClick: () => handleBulkClose('close', key),
-    });
 
     setTabMenu({
       x: e.clientX,
       y: e.clientY,
       items: [
         ...items,
+        {
+          label: 'Close',
+          icon: X,
+          disabled: !canClose,
+          onClick: () => handleBulkClose('close', key),
+        },
         {
           label: 'Close Others',
           disabled: !canCloseOthers,
@@ -720,6 +753,18 @@ export default function AgentsPane() {
           disabled: !canCloseLeft,
           onClick: () => handleBulkClose('left', key),
         },
+        // Last, as in Orca's tab menu.
+        ...(kind === 'session'
+          ? [
+              'separator',
+              {
+                label: 'Tab Color',
+                swatches: TAB_COLORS,
+                value: sessionsById[key]?.color ?? null,
+                onPick: (color) => window.electronAPI.colorSession(key, color),
+              },
+            ]
+          : []),
       ],
     });
   };
@@ -1001,10 +1046,13 @@ export default function AgentsPane() {
                   explorerCollapsed={explorerCollapsed}
                   controlsInset={controlsInset}
                   onTabContextMenu={onTabContextMenu}
+                  renamingTab={renamingTab}
+                  onRenameCommit={commitRename}
+                  onRenameCancel={() => setRenamingTab(null)}
                 />
 
                 {tabMenu && (
-                  <TabContextMenu
+                  <ContextMenu
                     x={tabMenu.x}
                     y={tabMenu.y}
                     items={tabMenu.items}
@@ -1097,7 +1145,9 @@ export default function AgentsPane() {
                   />
                 </div>
 
-                <div className={showingFile ? 'hidden' : 'flex-1 min-h-0 px-4 pb-4'}>
+                {/* No gutter here: the chat view runs edge to edge, and each
+              terminal pane pads itself (SplitLayout). */}
+                <div className={showingFile ? 'hidden' : 'flex-1 min-h-0'}>
                   {showingFile ? null : activeTab ? (
                     <SplitLayout
                       key={activeTab}

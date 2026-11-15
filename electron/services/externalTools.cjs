@@ -12,7 +12,22 @@
 // so tests can swap it — these .cjs modules load through Node's CJS loader,
 // out of reach of vi.mock on a builtin.
 const proc = require('child_process');
-const deps = { execFile: proc.execFile, execFileSync: proc.execFileSync };
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const deps = {
+  execFile: proc.execFile,
+  execFileSync: proc.execFileSync,
+  isDirectory: (p) => {
+    try {
+      return fs.statSync(p).isDirectory();
+    } catch {
+      return false;
+    }
+  },
+  // The app macOS opens code files with, or null. See defaultCodeEditor.
+  defaultCodeEditor: () => defaultCodeEditor(),
+};
 
 // `open -a` needs the bundle name; the CLI shim is what we probe for, because
 // a user who never ran "Install 'code' command in PATH" should fall through to
@@ -102,33 +117,60 @@ function spawnDetached(cmd, args) {
 }
 
 /**
- * Opens a path in the configured editor.
+ * Opens a path in an editor. The order is:
+ *
+ *   1. WPXen's own setting (Settings → External Tools): a named editor or a
+ *      custom command, when it's installed.
+ *   2. Otherwise a file goes to its macOS default app, as it always has.
+ *      A folder goes to the macOS default *code* editor instead (the app
+ *      that opens .php/.js/…): a folder's own default is Finder, which is
+ *      never what "Open in Editor" means.
+ *   3. A folder with no default code editor opens nothing and returns
+ *      { ok: false, needsChoice: true }, so the caller can ask the user.
+ *
  * @param {string} target        absolute path
  * @param {object} settings      { editor, customCommand }
  * @param {function} fallback    shell.openPath, injected so this module stays
  *                               free of electron imports
  */
 function openInEditor(target, { editor = 'system', customCommand = '' } = {}, fallback) {
+  const configured = openWithSetting(target, editor, customCommand);
+  if (configured) return configured;
+  const reason =
+    editor === 'custom'
+      ? 'custom command not found'
+      : EDITORS[editor]
+        ? `${EDITORS[editor].label} not found`
+        : undefined;
+
+  if (deps.isDirectory(target)) {
+    const app = deps.defaultCodeEditor();
+    if (!app) return { ok: false, needsChoice: true, reason };
+    spawnDetached('/usr/bin/open', ['-b', app.bundleId, target]);
+    return { ok: true, via: app.name, reason };
+  }
+  return fallbackOpen(target, fallback, reason);
+}
+
+// Step 1 of openInEditor: the editor WPXen's settings name, or null when the
+// setting is 'system' or names something that isn't installed.
+function openWithSetting(target, editor, customCommand) {
   if (editor === 'custom') {
-    const cmd = customCommand.trim();
+    const cmd = String(customCommand || '').trim();
     // A custom command is user-authored and runs with their privileges — the
     // same trust level as anything they'd type into the app's terminal. It is
     // still passed as argv (never concatenated into a shell string) so a path
     // with spaces or quotes can't split into extra arguments.
-    if (cmd) {
-      const [bin, ...rest] = cmd.split(/\s+/);
-      const resolved = resolveBin(bin);
-      if (resolved) {
-        spawnDetached(resolved, [...rest, target]);
-        return { ok: true, via: 'custom' };
-      }
-    }
-    return fallbackOpen(target, fallback, 'custom command not found');
+    if (!cmd) return null;
+    const [bin, ...rest] = cmd.split(/\s+/);
+    const resolved = resolveBin(bin);
+    if (!resolved) return null;
+    spawnDetached(resolved, [...rest, target]);
+    return { ok: true, via: 'custom' };
   }
 
   const entry = EDITORS[editor];
-  if (!entry) return fallbackOpen(target, fallback);
-
+  if (!entry) return null;
   const bin = resolveBin(entry.bin);
   if (bin) {
     spawnDetached(bin, [target]);
@@ -138,7 +180,93 @@ function openInEditor(target, { editor = 'system', customCommand = '' } = {}, fa
     spawnDetached('/usr/bin/open', ['-a', entry.app, target]);
     return { ok: true, via: entry.app };
   }
-  return fallbackOpen(target, fallback, `${entry.label} not found`);
+  return null;
+}
+
+// File types whose default app says which code editor the user prefers. Not
+// .txt (TextEdit) or .sh (often a terminal): those answer a different
+// question.
+const CODE_PROBE_EXTENSIONS = ['php', 'js', 'ts', 'json', 'css', 'py', 'md'];
+
+// Apps that open code files but are no editor for a folder. A default from
+// this list counts as "no default code editor".
+const NOT_CODE_EDITORS = new Set([
+  'com.apple.TextEdit',
+  'com.apple.finder',
+  'com.apple.Preview',
+  'com.apple.Safari',
+  'com.google.Chrome',
+  'com.google.chrome',
+  'org.mozilla.firefox',
+  'com.microsoft.edgemac',
+  'com.brave.Browser',
+  'company.thebrowser.Browser',
+  'com.apple.Terminal',
+  'com.googlecode.iterm2',
+  'dev.warp.Warp-Stable',
+  'com.mitchellh.ghostty',
+]);
+
+// Asks Launch Services which app opens each probe file (empty files in a
+// temp folder, named only by extension) and reads its bundle id and name.
+// JXA rather than a UTType lookup: the UniformTypeIdentifiers framework
+// can't be imported there, and a file URL needs only AppKit.
+const DEFAULT_APP_SCRIPT = `
+ObjC.import('AppKit');
+function run(argv) {
+  const ws = $.NSWorkspace.sharedWorkspace;
+  return argv.map((file) => {
+    const url = ws.URLForApplicationToOpenURL($.NSURL.fileURLWithPath(file));
+    if (url.isNil()) return '';
+    const bundle = $.NSBundle.bundleWithURL(url);
+    const name = ObjC.unwrap(url.path).split('/').pop().replace(/\\.app$/, '');
+    return (bundle.isNil() ? '' : ObjC.unwrap(bundle.bundleIdentifier)) + '\\t' + name;
+  }).join('\\n');
+}`;
+
+/**
+ * The code editor macOS opens source files with, or null when there's none
+ * worth opening a folder in. The most common default across the probe types
+ * wins, so one odd association (say .md → a Markdown app) doesn't decide it.
+ * @returns {{ bundleId: string, name: string } | null}
+ */
+function defaultCodeEditor() {
+  let out = '';
+  try {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wpxen-editor-probe-'));
+    try {
+      const files = CODE_PROBE_EXTENSIONS.map((ext) => {
+        const file = path.join(dir, `probe.${ext}`);
+        fs.writeFileSync(file, '');
+        return file;
+      });
+      out = deps.execFileSync(
+        '/usr/bin/osascript',
+        ['-l', 'JavaScript', '-e', DEFAULT_APP_SCRIPT, ...files],
+        { encoding: 'utf8', timeout: 5000 }
+      );
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  } catch {
+    return null;
+  }
+  return pickCodeEditor(out);
+}
+
+// `bundleId\tname` lines → the most common real editor, or null.
+function pickCodeEditor(output) {
+  const counts = new Map();
+  for (const line of String(output || '').split('\n')) {
+    const [bundleId, name] = line.trim().split('\t');
+    if (!bundleId || NOT_CODE_EDITORS.has(bundleId)) continue;
+    const entry = counts.get(bundleId) || { bundleId, name: name || bundleId, n: 0 };
+    entry.n += 1;
+    counts.set(bundleId, entry);
+  }
+  let best = null;
+  for (const entry of counts.values()) if (!best || entry.n > best.n) best = entry;
+  return best ? { bundleId: best.bundleId, name: best.name } : null;
 }
 
 // Builds the AppleScript that opens a new session already cd'd into `dir`.
@@ -215,6 +343,8 @@ module.exports = {
   listTools,
   openInEditor,
   openInTerminal,
+  defaultCodeEditor,
+  pickCodeEditor,
   resolveBin,
   clearCache,
   __setDeps,

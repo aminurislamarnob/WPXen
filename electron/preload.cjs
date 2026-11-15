@@ -246,6 +246,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('agent-launch', siteId, agentId, targetId),
   resumeChatSession: (sessionId) => ipcRenderer.invoke('agent-resume-session', sessionId),
   splitPane: (sessionId, dir) => ipcRenderer.invoke('agent-split-pane', sessionId, dir),
+  renameSession: (sessionId, title) =>
+    ipcRenderer.invoke('agent-rename-session', sessionId, title),
+  colorSession: (sessionId, color) =>
+    ipcRenderer.invoke('agent-color-session', sessionId, color),
+  pinSession: (sessionId, pinned) =>
+    ipcRenderer.invoke('agent-pin-session', sessionId, pinned),
   setPaneRatio: (rootId, path, ratio) =>
     ipcRenderer.invoke('agent-set-pane-ratio', rootId, path, ratio),
   prepareHandoff: (sessionId) => ipcRenderer.invoke('agent-handoff-prepare', sessionId),
@@ -371,7 +377,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('list-directory', rootPath, dirPath),
   terminalStatPath: (rootPath, candidate) =>
     ipcRenderer.invoke('terminal-stat-path', rootPath, candidate),
-  openFilePath: (filePath) => ipcRenderer.invoke('open-file-path', filePath),
+  openFilePath: (filePath, editorId) =>
+    ipcRenderer.invoke('open-file-path', filePath, editorId),
   readFile: (rootPath, filePath) => ipcRenderer.invoke('read-file', rootPath, filePath),
   writeFile: (rootPath, filePath, content) =>
     ipcRenderer.invoke('write-file', rootPath, filePath, content),

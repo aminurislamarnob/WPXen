@@ -16,6 +16,7 @@ import {
   Bell,
   BellOff,
   TerminalSquare,
+  Pin,
 } from 'lucide-react';
 import { ProviderIcon } from './providerIcons';
 import { Tooltip, ConfirmDialog } from './ui';
@@ -26,6 +27,11 @@ import ProjectMenu from './ProjectMenu';
 import CloneRepoModal from './CloneRepoModal';
 import { useOpenLink } from '../lib/useOpenLink';
 import AgentStatusGlyph from './AgentStatusGlyph';
+import ContextMenu from './ContextMenu';
+import RenameInput from './agents/RenameInput';
+import { sessionMenuItems } from './agents/sessionMenu';
+import { useOpenInEditor } from './EditorChooser';
+import { getViewMode, toggleViewMode } from '../lib/chatView';
 import {
   buildProjects,
   buildActivity,
@@ -178,12 +184,17 @@ export function SessionRow({
   siteName,
   compact,
   isChild,
+  onContextMenu,
+  renaming = false,
+  onRenameCommit,
+  onRenameCancel,
 }) {
   const ended = s.state === 'exited' || s.state === 'error';
   return (
     <div
       onClick={onOpen}
-      title={siteName ? `${siteName} · ${s.displayTitle}` : s.displayTitle}
+      onContextMenu={onContextMenu}
+      title={siteName ? `${siteName} · ${s.displayTooltip}` : s.displayTooltip}
       className={`group/row w-full min-w-0 flex items-center gap-1.5 pl-1.5 pr-1 ${
         compact ? 'py-[2px] text-[12.5px]' : 'py-[5px] text-[13px]'
       } rounded-md cursor-pointer ${
@@ -206,20 +217,43 @@ export function SessionRow({
           #{s.issue.number}
         </span>
       )}
-      <span
-        className={`truncate flex-1 ${
-          s.unread
-            ? 'font-semibold text-sidebar-foreground'
-            : ended
-              ? 'text-muted-foreground'
-              : ''
-        }`}
-      >
-        {s.displayTitle}
-        {siteName && (
-          <span className="font-normal text-muted-foreground"> · {siteName}</span>
-        )}
-      </span>
+      {renaming ? (
+        <RenameInput
+          initial={s.displayTitle}
+          className="flex-1 min-w-0"
+          onCommit={(title) => onRenameCommit?.(title)}
+          onCancel={() => onRenameCancel?.()}
+        />
+      ) : (
+        <span
+          className={`truncate flex-1 ${
+            s.unread
+              ? 'font-semibold text-sidebar-foreground'
+              : ended
+                ? 'text-muted-foreground'
+                : ''
+          }`}
+        >
+          {s.displayTitle}
+          {siteName && (
+            <span className="font-normal text-muted-foreground"> · {siteName}</span>
+          )}
+        </span>
+      )}
+      {s.color && !renaming && (
+        <span
+          aria-hidden
+          className="size-2 flex-shrink-0 rounded-full"
+          style={{ backgroundColor: s.color }}
+        />
+      )}
+      {s.pinned && !renaming && (
+        <Pin
+          size={11}
+          aria-label="Pinned"
+          className="flex-shrink-0 text-muted-foreground"
+        />
+      )}
       {!compact && (
         <span className="text-[11px] text-muted-foreground tabular-nums flex-shrink-0 group-hover/row:hidden">
           {formatAge(now - s.changedAt)}
@@ -286,6 +320,9 @@ export default function AgentsSidebar() {
   // New workspace menu; `siteId: null` shows the project list first.
   const [newMenu, setNewMenu] = useState(null); // { x, y, siteId }
   const [removing, setRemoving] = useState(null); // { site, live } pending confirm
+  const [rowMenu, setRowMenu] = useState(null); // { x, y, items }
+  const [renaming, setRenaming] = useState(null); // sessionId being renamed
+  const editor = useOpenInEditor();
 
   // Re-read sites when the working set changes — a newly added project may be
   // a site created since this mounted.
@@ -335,6 +372,46 @@ export default function AgentsSidebar() {
     navigate(`/agents/${encodeURIComponent(siteId)}`, {
       state: { focus: sessionId, nonce: Date.now() },
     });
+
+  // Right-click on a Session row (sessionMenu.js holds the items).
+  const openRowMenu = (e, s, siteId) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const api = window.electronAPI;
+    const id = s.sessionId;
+    const items = sessionMenuItems(s, {
+      isChatView: getViewMode(id) === 'chat',
+      toggleUnread: () => api.markSessionRead(id, s.unread),
+      togglePin: () => api.pinSession(id, !s.pinned),
+      setColor: (color) => api.colorSession(id, color),
+      rename: () => setRenaming(id),
+      handoff: () =>
+        navigate(`/agents/${encodeURIComponent(siteId)}`, {
+          state: { focus: id, handoff: id, nonce: Date.now() },
+        }),
+      toggleView: () => {
+        toggleViewMode(id);
+        openSession(siteId, id);
+      },
+      openInFinder: () => api.openSiteInFinder(s.cwd),
+      openInEditor: () => editor.open(s.cwd),
+      openInTerminal: () => api.openSiteInTerminal(s.cwd),
+      copy: (text) => navigator.clipboard?.writeText(text),
+      dismiss: () => api.dismissSession(id),
+      end: () => api.terminalStop(id),
+    });
+    setRowMenu({ x: e.clientX, y: e.clientY, items });
+  };
+
+  const rowMenuProps = (s, siteId) => ({
+    onContextMenu: (e) => openRowMenu(e, s, siteId),
+    renaming: renaming === s.sessionId,
+    onRenameCommit: (title) => {
+      setRenaming(null);
+      window.electronAPI.renameSession(s.sessionId, title);
+    },
+    onRenameCancel: () => setRenaming(null),
+  });
 
   const launch = (siteId, agentId, targetId) => {
     setLaunchMenu(null);
@@ -490,6 +567,7 @@ export default function AgentsSidebar() {
               now={now}
               selected={s.sessionId === selected}
               onOpen={() => openSession(s.siteId, s.sessionId)}
+              {...rowMenuProps(s, s.siteId)}
             />
           ))}
           {activity.length === 0 && (
@@ -616,6 +694,7 @@ export default function AgentsSidebar() {
                         now={now}
                         selected={s.sessionId === selected}
                         onOpen={() => openSession(site.id, s.sessionId)}
+                        {...rowMenuProps(s, site.id)}
                       />
                       {s.children?.length > 0 && (
                         <div className="ml-4 mt-0.5 space-y-0.5 border-l border-sidebar-border/50 pl-2">
@@ -627,6 +706,7 @@ export default function AgentsSidebar() {
                               now={now}
                               selected={c.sessionId === selected}
                               onOpen={() => openSession(site.id, c.sessionId)}
+                              {...rowMenuProps(c, site.id)}
                               isChild
                             />
                           ))}
@@ -656,6 +736,17 @@ export default function AgentsSidebar() {
           </p>
         )}
       </nav>
+
+      {editor.dialog}
+
+      {rowMenu && (
+        <ContextMenu
+          x={rowMenu.x}
+          y={rowMenu.y}
+          items={rowMenu.items}
+          onClose={() => setRowMenu(null)}
+        />
+      )}
 
       {projectMenu && (
         <ProjectMenu

@@ -3,7 +3,8 @@ import { ProviderIcon } from '../providerIcons';
 import { Tooltip } from '../ui';
 import { FileGlyph } from '../../lib/fileIcons';
 import { Favicon } from '../browser/BrowserToolbar';
-import { sessionTitle } from '../../lib/agentsList';
+import { sessionTitle, sessionTooltipTitle } from '../../lib/agentsList';
+import RenameInput from './RenameInput';
 
 function countLeaves(tree) {
   if (!tree) return 1;
@@ -28,7 +29,9 @@ function resumeTooltip(tab, tabs) {
 }
 
 function tabTooltip(tab, tabs) {
-  return handoffTooltip(tab, tabs) || resumeTooltip(tab, tabs);
+  const name = sessionTooltipTitle(tab, tabs);
+  const origin = handoffTooltip(tab, tabs) || resumeTooltip(tab, tabs);
+  return origin ? `${name}\n${origin}` : name;
 }
 
 // The Agents screen's top bar, Orca-style: one 40px band split into bordered
@@ -86,6 +89,9 @@ export default function TabStrip({
   explorerCollapsed,
   controlsInset,
   onTabContextMenu,
+  renamingTab = null,
+  onRenameCommit,
+  onRenameCancel,
 }) {
   return (
     <div className="relative h-10 flex-shrink-0 flex bg-tertiary">
@@ -115,7 +121,22 @@ export default function TabStrip({
                 size={13}
                 className="flex-shrink-0"
               />
-              <span className="truncate max-w-[220px]">{sessionTitle(tab, tabs)}</span>
+              {renamingTab === tab.sessionId ? (
+                <RenameInput
+                  initial={sessionTitle(tab, tabs)}
+                  onCommit={(title) => onRenameCommit?.(tab.sessionId, title)}
+                  onCancel={() => onRenameCancel?.()}
+                />
+              ) : (
+                <span className="truncate max-w-[220px]">{sessionTitle(tab, tabs)}</span>
+              )}
+              {tab.color && renamingTab !== tab.sessionId && (
+                <span
+                  aria-hidden
+                  className="size-2 flex-shrink-0 rounded-full"
+                  style={{ backgroundColor: tab.color }}
+                />
+              )}
               {panes > 1 && (
                 <span className="rounded-[4px] bg-border/50 px-1 py-0.5 text-[10px] font-medium tabular-nums leading-none text-muted-foreground">
                   {panes}

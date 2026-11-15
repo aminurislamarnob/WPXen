@@ -43,6 +43,7 @@ import {
 } from '../../lib/chatComplete';
 import { imagePastePath, isImageDropPath } from '../../lib/terminal/keys';
 import { useOpenLink } from '../../lib/useOpenLink';
+import { mergeChatTitles, resolveChatTitle } from '../../lib/chatTitle';
 
 export function ChatView({ sessionId, onRestart, onResume, headerActions }) {
   const viewerId = useId();
@@ -56,7 +57,7 @@ export function ChatView({ sessionId, onRestart, onResume, headerActions }) {
   const setAttachments = (images) => setDraft({ ...draft, images });
   const [atStart, setAtStart] = useState(false);
   const [staleNotice, setStaleNotice] = useState(false);
-  const [headerTitle, setHeaderTitle] = useState('');
+  const [titles, setTitles] = useState({});
   const [chatState, setChatState] = useState({});
   const sessions = useAgentSessions();
   const selectedSessionId = useSelectedSession();
@@ -251,12 +252,15 @@ export function ChatView({ sessionId, onRestart, onResume, headerActions }) {
     [sessionId]
   );
 
+  // A pane switched to another Session must not keep the old one's name.
+  useEffect(() => setTitles({}), [sessionId]);
+
   useEffect(() => {
     const api = window.electronAPI;
     const unsub = api.on('agent-chat-rows', (push) => {
       if (push.sessionId !== sessionId) return;
       const { rows, header, state } = push;
-      if (header?.title) setHeaderTitle(header.title);
+      if (header) setTitles((prev) => mergeChatTitles(prev, header));
       if (state) setChatState(state);
       if (typeof push.atStart === 'boolean') setAtStart(push.atStart);
 
@@ -522,6 +526,7 @@ export function ChatView({ sessionId, onRestart, onResume, headerActions }) {
   );
 
   const meter = contextMeter(chatState?.usage);
+  const headerTitle = resolveChatTitle({ titles, messages, session: currentSession });
 
   return (
     <div
@@ -530,7 +535,9 @@ export function ChatView({ sessionId, onRestart, onResume, headerActions }) {
     >
       {(headerTitle || headerActions || meter) && (
         <div className="px-4 py-1 border-b border-border bg-tertiary text-[13px] font-medium flex-none flex items-center gap-3">
-          <span className="flex-1 truncate">{headerTitle}</span>
+          <span className="flex-1 min-w-0 truncate" title={headerTitle}>
+            {headerTitle}
+          </span>
           {meter && (
             <span className="text-muted-foreground font-normal">{meter.label}</span>
           )}

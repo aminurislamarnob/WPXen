@@ -12,7 +12,12 @@ const execFile = vi.fn();
 beforeEach(() => {
   execFileSync.mockReset();
   execFile.mockReset();
-  tools.__setDeps({ execFileSync, execFile });
+  tools.__setDeps({
+    execFileSync,
+    execFile,
+    isDirectory: (p) => p.endsWith('/'),
+    defaultCodeEditor: () => null,
+  });
   tools.clearCache();
 });
 
@@ -65,6 +70,85 @@ describe('openInEditor', () => {
     );
     expect(fallback).toHaveBeenCalledWith('/a.php');
     expect(execFile).not.toHaveBeenCalled();
+  });
+
+  describe('a folder', () => {
+    const antigravity = {
+      bundleId: 'com.google.antigravity-ide',
+      name: 'Antigravity IDE',
+    };
+
+    it("uses WPXen's own editor setting first", () => {
+      withBins('cursor');
+      const defaultCodeEditor = vi.fn(() => antigravity);
+      tools.__setDeps({ defaultCodeEditor });
+      const result = tools.openInEditor('/site/', { editor: 'cursor' }, vi.fn());
+      expect(result).toMatchObject({ ok: true, via: 'cursor' });
+      expect(defaultCodeEditor).not.toHaveBeenCalled();
+    });
+
+    it('then the macOS default code editor, never Finder', () => {
+      withBins();
+      tools.__setDeps({ defaultCodeEditor: () => antigravity });
+      const fallback = vi.fn();
+      const result = tools.openInEditor('/site/', { editor: 'system' }, fallback);
+      expect(result).toMatchObject({ ok: true, via: 'Antigravity IDE' });
+      expect(execFile).toHaveBeenCalledWith(
+        '/usr/bin/open',
+        ['-b', 'com.google.antigravity-ide', '/site/'],
+        expect.anything(),
+        expect.any(Function)
+      );
+      expect(fallback).not.toHaveBeenCalled();
+    });
+
+    it('also when the configured editor is not installed', () => {
+      withBins();
+      tools.__setDeps({ defaultCodeEditor: () => antigravity });
+      const result = tools.openInEditor('/site/', { editor: 'phpstorm' }, vi.fn());
+      expect(result).toMatchObject({ ok: true, via: 'Antigravity IDE' });
+      expect(result.reason).toMatch(/PhpStorm/);
+    });
+
+    it('asks for a choice when there is no default code editor', () => {
+      withBins();
+      tools.__setDeps({ defaultCodeEditor: () => null });
+      const fallback = vi.fn();
+      expect(tools.openInEditor('/site/', { editor: 'system' }, fallback)).toEqual({
+        ok: false,
+        needsChoice: true,
+        reason: undefined,
+      });
+      expect(fallback).not.toHaveBeenCalled();
+      expect(execFile).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('pickCodeEditor', () => {
+    it('takes the most common default, skipping apps that are no code editor', () => {
+      const out = [
+        'com.google.antigravity-ide\tAntigravity IDE',
+        'com.google.antigravity-ide\tAntigravity IDE',
+        'com.microsoft.VSCode\tVisual Studio Code',
+        'com.apple.TextEdit\tTextEdit',
+        'com.apple.TextEdit\tTextEdit',
+        'com.apple.TextEdit\tTextEdit',
+        '',
+      ].join('\n');
+      expect(tools.pickCodeEditor(out)).toEqual({
+        bundleId: 'com.google.antigravity-ide',
+        name: 'Antigravity IDE',
+      });
+    });
+
+    it('is null when only TextEdit, browsers or terminals answer', () => {
+      expect(
+        tools.pickCodeEditor(
+          'com.apple.TextEdit\tTextEdit\ncom.googlecode.iterm2\tiTerm\n'
+        )
+      ).toBeNull();
+      expect(tools.pickCodeEditor('')).toBeNull();
+    });
   });
 
   it('runs a custom command with the path as the final argument', () => {

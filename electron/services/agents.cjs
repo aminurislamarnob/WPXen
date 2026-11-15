@@ -267,6 +267,34 @@ function resolveShellEnv() {
   return cachedEnv;
 }
 
+// The variables a running Claude Code session exports to its own children.
+// WPXen inherits them whenever it is launched from inside one (`npm run dev`
+// typed in a Claude terminal, or run by an agent), and every Session's pty
+// would then pass them on. A Claude Code that sees CLAUDE_CODE_CHILD_SESSION
+// believes it is a sub-process of that other session and turns transcript
+// saving off ("Transcript saving is off — inherited CLAUDE_CODE_CHILD_SESSION
+// marker"), so no transcript is ever written and the chat view stays empty.
+// The rest point it at the parent's messaging socket and session id. Only
+// these session-identity markers are dropped; user configuration such as
+// CLAUDE_CODE_USE_BEDROCK or CLAUDE_CONFIG_DIR passes through untouched.
+const PARENT_AGENT_ENV_KEYS = [
+  'CLAUDECODE',
+  'CLAUDE_CODE_CHILD_SESSION',
+  'CLAUDE_CODE_ENTRYPOINT',
+  'CLAUDE_CODE_EXECPATH',
+  'CLAUDE_CODE_MESSAGING_SOCKET',
+  'CLAUDE_CODE_MESSAGING_TOKEN',
+  'CLAUDE_CODE_SESSION_ATTENDED',
+  'CLAUDE_CODE_SESSION_ID',
+  'CLAUDE_PID',
+];
+
+function stripParentAgentEnv(env) {
+  const out = { ...env };
+  for (const key of PARENT_AGENT_ENV_KEYS) delete out[key];
+  return out;
+}
+
 // Some tools put a launcher of their own on PATH under the *agent's* name — a
 // small shell script that finds the real binary elsewhere on PATH and execs it,
 // and prints an error if there isn't one. Superset does this for a dozen agent
@@ -832,6 +860,11 @@ function sessionRow(s) {
     agentName: s.agentName,
     targetId: s.targetId,
     label: s.label,
+    customTitle: s.customTitle || null,
+    pinned: !!s.pinned,
+    color: s.color || null,
+    // The folder the Session runs in: what its tab and sidebar row are named.
+    cwd: s.cwd || null,
     paneOf: s.paneOf || null,
     layout: !s.paneOf ? layouts.get(s.sessionId) || { leaf: s.sessionId } : null,
     handoffFrom: s.handoffFrom || null,
@@ -1025,7 +1058,7 @@ function startSession({ cwd, command, meta, failLabel, phpBinDir = null }) {
   }
 
   const sessionId = randomUUID();
-  const env = deps.shellEnv();
+  const env = stripParentAgentEnv(deps.shellEnv());
   let phpEnv = {};
   try {
     phpEnv = shellIntegration.sitePhpEnv({ env, shell: deps.userShell(), phpBinDir });
@@ -1249,6 +1282,62 @@ function splitPane(sessionId, dir, site, globalArgs = '') {
   layouts.set(rootId, insert(tree));
   emitChange({ immediate: true });
   return { ok: true, sessionId: res.sessionId };
+}
+
+// The name the user gave a Session (tab menu → Rename), or '' to go back to
+// the automatic one. Ranked first by the renderer's sessionTitle. Lives with
+// the Session in memory, like its layout: it ends when the Session does.
+const MAX_CUSTOM_TITLE = 120;
+function renameSession(sessionId, title) {
+  const session = sessions.get(sessionId);
+  if (!session) return { error: 'session not found' };
+  const clean =
+    typeof title === 'string'
+      ? title.replace(/\s+/g, ' ').trim().slice(0, MAX_CUSTOM_TITLE)
+      : '';
+  if ((session.customTitle || '') === clean) return { ok: true };
+  session.customTitle = clean || null;
+  emitChange({ immediate: true });
+  return { ok: true };
+}
+
+// Pin a Session to the top of its project in the Agents sidebar (row menu →
+// Pin, after Orca's Pin). In memory, like the name: it ends with the Session.
+function setSessionPinned(sessionId, pinned) {
+  const session = sessions.get(sessionId);
+  if (!session) return { error: 'session not found' };
+  if (!!session.pinned === !!pinned) return { ok: true };
+  session.pinned = !!pinned;
+  emitChange({ immediate: true });
+  return { ok: true };
+}
+
+// The tab colors a Session can carry (tab menu → Tab Color). Mirrors
+// TAB_COLORS in src/lib/tabColors.js; anything else is refused.
+const TAB_COLOR_VALUES = [
+  '#3b82f6',
+  '#a855f7',
+  '#ec4899',
+  '#ef4444',
+  '#f97316',
+  '#eab308',
+  '#22c55e',
+  '#14b8a6',
+  '#9ca3af',
+];
+
+// Mark a Session's tab (and sidebar row) with a color, or null for none. In
+// memory, like the name and the pin.
+function setSessionColor(sessionId, color) {
+  const session = sessions.get(sessionId);
+  if (!session) return { error: 'session not found' };
+  const next = color == null ? null : String(color).toLowerCase();
+  if (next !== null && !TAB_COLOR_VALUES.includes(next))
+    return { error: 'unknown tab color' };
+  if ((session.color || null) === next) return { ok: true };
+  session.color = next;
+  emitChange({ immediate: true });
+  return { ok: true };
 }
 
 function setPaneRatio(rootId, path, ratio) {
@@ -1506,11 +1595,13 @@ function openChat(sessionId, viewerId) {
         (s) => s.sessionId !== sessionId && !s.exited && s.transcriptId === uuid
       ),
     onRows: (rows, state, page) => {
+      // Every name the batch carries, by kind ({ custom, ai, agent }); the
+      // last of each kind wins, as Claude re-appends them when they change.
       let header = undefined;
       const filteredRows = [];
       for (const row of rows) {
         if (row.isHeader) {
-          header = row;
+          header = { ...header, [row.kind || 'ai']: row.title };
         } else {
           filteredRows.push(row);
         }
@@ -1684,6 +1775,8 @@ module.exports = {
   resolveBin,
   shellQuote,
   resolveShellEnv,
+  stripParentAgentEnv,
+  PARENT_AGENT_ENV_KEYS,
   isWrapperShim,
   installAgent,
   brewInstallArgs,
@@ -1722,6 +1815,10 @@ module.exports = {
   resize,
   splitPane,
   setPaneRatio,
+  renameSession,
+  setSessionPinned,
+  setSessionColor,
+  TAB_COLOR_VALUES,
   stop,
   stopTab,
   respawnPane,
