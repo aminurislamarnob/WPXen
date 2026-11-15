@@ -37,6 +37,7 @@ const VALID_EVENT_CHANNELS = [
   'browser-shortcut',
   'settings-updated',
   'keep-awake-status-update',
+  'office-update',
   'site-log-follow-update',
   'site-upgrade-report',
 ];
@@ -181,6 +182,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openHomebrewInstaller: () => ipcRenderer.invoke('open-homebrew-installer'),
   getOnboardingState: () => ipcRenderer.invoke('get-onboarding-state'),
   setOnboardingComplete: () => ipcRenderer.invoke('set-onboarding-complete'),
+
+  // Office (live agent sessions). Lazy-starts the engine on first call and
+  // returns the current Office; later snapshots arrive on 'office-update'.
+  officeStart: () => ipcRenderer.invoke('office-start'),
+  // The Office page's unmount: stop pushing it snapshots (the engine stays warm).
+  officeUnwatch: () => ipcRenderer.invoke('office-unwatch'),
+  // Claude Code hook (exact real-time state): Settings → Office. command is
+  // 'install' | 'uninstall'; preview writes nothing, apply takes its token.
+  officeHooksStatus: () => ipcRenderer.invoke('office-hooks-status'),
+  officeHooksPreview: (command) => ipcRenderer.invoke('office-hooks-preview', command),
+  officeHooksApply: (command, token) =>
+    ipcRenderer.invoke('office-hooks-apply', command, token),
 
   // Settings
   // Schema-backed settings. `setSettings` takes a patch of dotted keys and

@@ -19,6 +19,7 @@ export const SECTIONS = [
     items: [
       { id: 'general', label: 'General', icon: 'sliders' },
       { id: 'agents', label: 'Agents', icon: 'cpu' },
+      { id: 'office', label: 'Agents Verse', icon: 'armchair' },
       { id: 'tools', label: 'External Tools', icon: 'wrench' },
     ],
   },
@@ -513,6 +514,62 @@ export const SETTINGS_ITEMS = [
       'where',
       'mode',
       'git',
+    ],
+  },
+
+  // ── Office ───────────────────────────────────────────────────────────────
+  {
+    id: 'office.environment',
+    section: 'office',
+    title: 'Environment',
+    description:
+      'The world around the Agents Verse office — a city tower, space, an island, the sea floor',
+    keywords: [
+      'agents verse',
+      'verse',
+      'office',
+      'environment',
+      'world',
+      'scene',
+      'view',
+      'background',
+      'city',
+      'high-rise',
+      'space',
+      'station',
+      'island',
+      'beach',
+      'underwater',
+      'ocean',
+      'cyberpunk',
+      'neon',
+      'green',
+      'garden',
+      'nature',
+    ],
+  },
+  // An action row (install/uninstall + live status), not a stored value — the
+  // dns.sudoers precedent.
+  {
+    id: 'office.hook',
+    section: 'office',
+    title: 'Claude Code hook',
+    description:
+      'Exact real-time session state in Agents Verse — no inference lag on permission prompts',
+    keywords: [
+      'agents verse',
+      'verse',
+      'office',
+      'hook',
+      'hooks',
+      'claude',
+      'claude code',
+      'waiting',
+      'permission',
+      'real-time',
+      'install',
+      'forwarder',
+      'socket',
     ],
   },
 

@@ -548,4 +548,5 @@ module.exports = {
   getLogPath,
   getBaseDir,
   setBaseDir,
+  pidAlive,
 };

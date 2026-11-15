@@ -5,6 +5,7 @@ import Dashboard from './components/Dashboard';
 import Sites from './components/Sites';
 import SiteDetail from './components/SiteDetail';
 import AgentsPane from './components/AgentsPane';
+import OfficePage from './components/office/OfficePage';
 import Tasks from './components/tasks/Tasks';
 import Services from './components/Services';
 import PHPVersions from './components/PHPVersions';
@@ -15,6 +16,7 @@ import GeneralSection from './components/settings/sections/GeneralSection';
 import SitesSection from './components/settings/sections/SitesSection';
 import DatabaseSection from './components/settings/sections/DatabaseSection';
 import AgentsSection from './components/settings/sections/AgentsSection';
+import OfficeSection from './components/settings/sections/OfficeSection';
 import ToolsSection from './components/settings/sections/ToolsSection';
 import MailSection from './components/settings/sections/MailSection';
 import ServicesSection from './components/settings/sections/ServicesSection';
@@ -139,6 +141,7 @@ export default function App() {
             <Route path="sites/:id" element={<SiteDetail {...sharedProps} />} />
             <Route path="agents" element={<AgentsPane />} />
             <Route path="agents/:siteId" element={<AgentsPane />} />
+            <Route path="office" element={<OfficePage />} />
             <Route path="tasks/*" element={<Tasks />} />
             <Route path="services" element={<Services {...sharedProps} />} />
             <Route path="php" element={<PHPVersions {...sharedProps} />} />
@@ -150,6 +153,7 @@ export default function App() {
               <Route path="appearance" element={<AppearanceSection />} />
               <Route path="general" element={<GeneralSection />} />
               <Route path="agents" element={<AgentsSection />} />
+              <Route path="office" element={<OfficeSection />} />
               <Route path="tools" element={<ToolsSection />} />
               <Route path="sites" element={<SitesSection />} />
               <Route path="database" element={<DatabaseSection />} />

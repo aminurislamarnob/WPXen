@@ -54,6 +54,8 @@ const externalTools = require('./services/externalTools.cjs');
 const keepAwake = require('./services/keepAwake.cjs');
 const handoff = require('./services/handoff.cjs');
 const transcripts = require('./services/transcripts.cjs');
+const officeEngine = require('./services/office/engine.cjs');
+const officeHooks = require('./services/office/hooksInstaller.cjs');
 const { humanize } = require('./services/errors.cjs');
 
 let store;
@@ -3053,6 +3055,77 @@ function registerHandlers(win, storeInstance) {
   ipcMain.handle('dns-use-different-port', () =>
     dnsResult(() => dnsmasq.useDifferentPort())
   );
+
+  // ─── Office (see services/office/engine.cjs) ─────────────────────────
+
+  // Lazy single-start: the first Office visit starts the engine (nothing is
+  // scanned before then); it then stays warm until app quit — switching away
+  // never stops it. Idempotent, so every later mount just gets the current
+  // Office back. Snapshots are pushed on 'office-update', already
+  // reference-deduped and coalesced by the engine. The sink is bound once, so
+  // it looks the windows up at send time rather than capturing one: a window
+  // recreated after the first visit (macOS activate) still gets updates.
+  //
+  // The engine stays warm, but snapshots only go to renderers whose Office
+  // page is mounted: office-start subscribes the caller, office-unwatch (the
+  // page's unmount) drops it. Without that every snapshot was still
+  // serialized and delivered to a window showing some other page.
+  const officeWatchers = new Set();
+  // Senders already carrying a 'destroyed' cleanup — one per webContents,
+  // however often its page is visited.
+  const officeCleanupBound = new WeakSet();
+  ipcMain.handle('office-start', (e) => {
+    const sender = e.sender;
+    officeWatchers.add(sender);
+    if (!officeCleanupBound.has(sender)) {
+      officeCleanupBound.add(sender);
+      sender.once('destroyed', () => officeWatchers.delete(sender));
+    }
+    return officeEngine.start({
+      onSnapshot: (office) => {
+        for (const wc of officeWatchers) {
+          if (wc.isDestroyed()) officeWatchers.delete(wc);
+          else wc.send('office-update', office);
+        }
+      },
+      // While the engine runs, the hook socket listens here (userData, beside
+      // the installed forwarder) — the engine itself stays electron-free.
+      hookSocketDir: app.getPath('userData'),
+    });
+  });
+  ipcMain.handle('office-unwatch', (e) => {
+    officeWatchers.delete(e.sender);
+  });
+
+  // Claude Code hook install/uninstall — the one-click action behind
+  // Settings → Office (the dnsmasq/sudoers precedent: an action, not a stored
+  // value). Two steps so the diff is shown before anything is written:
+  // preview computes it, apply writes it once the user confirms (refusing if
+  // the files moved in between). Status is scanned from the user's Claude
+  // settings file, cheap enough for the page to poll.
+  ipcMain.handle('office-hooks-status', () => {
+    try {
+      return officeHooks.status();
+    } catch (err) {
+      return { installed: false, healthy: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('office-hooks-preview', (_e, command) => {
+    try {
+      return { success: true, ...officeHooks.preview(command) };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('office-hooks-apply', (_e, command, token) => {
+    try {
+      return { success: true, ...officeHooks.apply(command, { token }) };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
 
   // ─── Settings ────────────────────────────────────────────────────────
 

@@ -48,9 +48,10 @@ module.exports = [
     },
   },
 
-  // Renderer — React + JSX, browser globals.
+  // Renderer — React + JSX, browser globals (dev/ holds dev-only renderer
+  // pages, e.g. the Office sandbox).
   {
-    files: ['src/**/*.{js,jsx}'],
+    files: ['src/**/*.{js,jsx}', 'dev/**/*.{js,jsx}'],
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: 'module',
@@ -66,6 +67,14 @@ module.exports = [
       'react/prop-types': 'off',
       'no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
     },
+  },
+
+  // The 3D office scene — React Three Fiber renders three.js objects, not DOM
+  // elements, so React's DOM property whitelist doesn't apply to its JSX
+  // (`position`, `args`, `castShadow`, material props, …).
+  {
+    files: ['src/components/office/scene/**/*.jsx'],
+    rules: { 'react/no-unknown-property': 'off' },
   },
 
   // Tests — Node + Vitest globals.
