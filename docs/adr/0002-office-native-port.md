@@ -1,5 +1,9 @@
 # The Office is a one-time native port of claude-agent-verse, not an embedded server
 
+> **Renamed (2026-11-15).** The section is now called **Agents Verse** in everything a
+> user reads. This record keeps the name it was written under, and so does the code
+> (`office/`, `office-*` channels, `office.*` settings keys).
+
 ## Context
 
 claude-agent-verse was a finished standalone project: a pnpm/TypeScript monorepo

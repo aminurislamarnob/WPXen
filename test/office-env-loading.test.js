@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -61,5 +61,17 @@ describe('office environment loading', () => {
   it('loads each world through a dynamic import in the registry', () => {
     const registry = readFileSync(join(ROOT, ENV_DIR, 'index.js'), 'utf8');
     for (const w of WORLDS) expect(registry).toContain(`import('./${w}.jsx')`);
+  });
+
+  it('shows every environment in the Settings picker with a still of it', () => {
+    const picker = readFileSync(
+      join(ROOT, 'src/components/settings/sections/OfficeSection.jsx'),
+      'utf8'
+    );
+    for (const id of ENVIRONMENT_IDS) {
+      const shot = `src/assets/office-environments/${id}.webp`;
+      expect(existsSync(join(ROOT, shot)), shot).toBe(true);
+      expect(picker, id).toContain(`office-environments/${id}.webp'`);
+    }
   });
 });

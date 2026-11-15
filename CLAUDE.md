@@ -151,7 +151,7 @@ Node directly. When adding a feature that crosses the boundary you must touch th
     `externalTools.cjs` (which app opens a file/folder/terminal — maps each
     editor to its `$PATH` CLI shim, falling back to `shell.openPath`),
     `files.cjs`, `git.cjs`, `validation.cjs`, `errors.cjs`, `asyncExec.cjs`.
-  - **Office** — `office/` (see below): `engine.cjs` (poll loop) drives
+  - **Agents Verse** — `office/` (see below): `engine.cjs` (poll loop) drives
     `scanner.cjs` / `antigravity.cjs` / `tailer.cjs` / `projectKey.cjs` into the
     pure `reducer.cjs` (typedefs in `types.cjs`); `hooksInstaller.cjs`,
     `forwarder.cjs` and `hookSocket.cjs` are the optional Claude Code hook.
@@ -274,20 +274,26 @@ DevTools, native context menus, key interception.
   anything but http/https. `src/lib/useOpenLink.js` is the renderer-side
   decision point for Settings → General → _Open links in_ (`system` vs `app`).
 
-### Office
+### Agents Verse
 
-The **Office** section is a one-time port of the standalone claude-agent-verse
+The **Agents Verse** section is a one-time port of the standalone claude-agent-verse
 project (`docs/adr/0002-office-native-port.md`): every live Claude Code session on
 the machine (not only WPXen's own Sessions) and every recently written Antigravity
 conversation is a character at a desk in a 3D room. It only observes. The engine
 under `services/office/` is electron-free and tested through `CLAUDE_HOME` /
 `ANTIGRAVITY_HOME` temp dirs plus `__setDeps`.
 
-- **Lifecycle.** Nothing is scanned before the first Office visit. The page calls
+It was called the Office until it was renamed, and the code keeps that name:
+the `office/` folders, `Office*` components, the `office-*` IPC channels, the
+`office.*` settings keys and `wpxen.office.room`. Renaming those would reset
+stored choices for nothing. Text a user reads (navigation, page title,
+Settings, search, messages) says **Agents Verse**, never "Office".
+
+- **Lifecycle.** Nothing is scanned before the first Agents Verse visit. The page calls
   `officeStart` (`office-start`), which starts the engine once and returns the
-  current Office. From then on it stays warm until `before-quit` calls
+  current `office` snapshot. From then on it stays warm until `before-quit` calls
   `engine.stop()`, and switching sections never stops it. Snapshots arrive on
-  `office-update`, but only for renderers whose Office page is mounted:
+  `office-update`, but only for renderers whose Agents Verse page is mounted:
   `office-start` subscribes the caller and the page's unmount sends
   `office-unwatch` (`officeUnwatch`). Each 1 s poll (a setTimeout chain) runs the Claude registry scan,
   then the Antigravity scan, then subagent discovery, then a `tick`. `agSnapshot` is
@@ -295,10 +301,10 @@ under `services/office/` is electron-free and tested through `CLAUDE_HOME` /
   path from it.
 - ⚠️ **Same-reference contract.** `reduce(office, event)` returns the _same object_
   when nothing changed, and `dispatch` pushes a snapshot only when
-  `office !== before` (then coalesces 100 ms). A branch that rebuilds the Office
+  `office !== before` (then coalesces 100 ms). A branch that rebuilds the `office`
   unconditionally, on `tick` above all, still passes every `toEqual` test. It also
   pushes a full snapshot every second, re-plans the floor, and keeps the shadow map
-  re-rendering, because `ShadowBudget` is keyed on the Office's identity. Put new
+  re-rendering, because `ShadowBudget` is keyed on the `office` object's identity. Put new
   derivations in `computeOfficeState`, which commits a session only when a field
   flips. The tick test asserts `toBe`, so keep it. Transcript lines obey it too:
   `processTranscriptLine` and its subagent / Antigravity siblings go through
@@ -309,7 +315,7 @@ under `services/office/` is electron-free and tested through `CLAUDE_HOME` /
   main process. A cold start therefore replays only the last `REPLAY_BYTES` (4 MiB),
   dropping the line the cut lands in, and every read goes in `CHUNK_BYTES` slices
   with an event-loop turn between them. Reading whole files froze the app for
-  ~300 ms and spiked RSS to ~900 MB with seven live sessions. Everything the Office
+  ~300 ms and spiked RSS to ~900 MB with seven live sessions. Everything Agents Verse
   derives can be recovered from the end, because Claude Code re-appends `ai-title`
   and `last-prompt` all through a transcript. Don't add a derivation that needs the
   file's start.
@@ -330,7 +336,7 @@ under `services/office/` is electron-free and tested through `CLAUDE_HOME` /
   resolves the windows when each snapshot is sent. `__setDeps({ onSnapshot })`
   stays the test override.
 - **Environments.** The world around the room is a setting,
-  `office.environment` (Settings → Office): `city`, `space`, `island`,
+  `office.environment` (Settings → Agents Verse): `city`, `space`, `island`,
   `underwater`, `cyberpunk` or `green`. The schema enum in `settings.cjs` must
   list `ENVIRONMENT_IDS` in order (`office-scene-environments.test.js` checks).
   `lib/office/scene/environments.js` holds the catalogue and
@@ -387,7 +393,7 @@ under `services/office/` is electron-free and tested through `CLAUDE_HOME` /
   `~/.gemini` holds OAuth credentials. Widening either filter is a credential
   read, not a refactor.
 - **The hook** makes _waiting on you_ exact. It is optional: without it, a tool
-  running ≥ 15 s is read as waiting (always, for Antigravity). Settings → Office
+  running ≥ 15 s is read as waiting (always, for Antigravity). Settings → Agents Verse
   drives `office-hooks-install` / `-uninstall` / `-status`. Like `dns.sudoers`, it
   is an action row with a `settingsRegistry.js` entry and no schema key,
   deliberately deviating from #187's "schema and registry": there is no stored
@@ -428,7 +434,7 @@ under `services/office/` is electron-free and tested through `CLAUDE_HOME` /
     socket file is absent, and a 1 s `process.exit(0)` ceiling caps everything
     else. A forwarder that hangs or exits non-zero stalls or breaks Claude Code.
   - `hookSocket.cjs` listens on `<userData>/wpxen-hook.sock` only while the engine
-    runs, so events from before the first Office visit are dropped. The socket is
+    runs, so events from before the first Agents Verse visit are dropped. The socket is
     created under a `0o177` umask, and its 0600 mode is the only authentication.
     `forwarder.cjs` repeats the name as a literal because it can't require
     anything, and a test asserts the two match.
@@ -486,8 +492,8 @@ file per section under `sections/`), `browser/` (`BrowserPane`,
 the R3F scene under `scene/`). `src/lib/` holds the non-React logic:
 `theme.js` / `editorTheme.js` / `typography.js` for appearance,
 `settingsRegistry.js` + `settingsSearch.js` for the settings index,
-`browser/` and `terminal/` for the two imperative surfaces, and `office/` for the
-Office's pure derivations.
+`browser/` and `terminal/` for the two imperative surfaces, and `office/` for
+Agents Verse's pure derivations.
 
 ### Renderer UI conventions
 

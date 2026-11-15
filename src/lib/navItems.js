@@ -18,7 +18,7 @@ export const NAV_GROUPS = [
     { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard', color: 'blue' },
     { to: '/sites', icon: Globe, label: 'Sites', color: 'teal' },
     { to: '/agents', icon: Terminal, label: 'Agents', color: 'purple' },
-    { to: '/office', icon: Building2, label: 'Office', color: 'pink' },
+    { to: '/office', icon: Building2, label: 'Agents Verse', color: 'pink' },
     { to: '/tasks', icon: ListTodo, label: 'Tasks', color: 'orange' },
   ],
   [

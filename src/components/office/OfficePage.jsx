@@ -158,7 +158,7 @@ export default function OfficePage() {
     <div className="h-full flex flex-col animate-fade-in">
       <div className="px-6 flex-shrink-0">
         <PageHeader
-          title="Office"
+          title="Agents Verse"
           subtitle={
             previewOffice
               ? 'Preview — synthetic sessions, engine untouched'

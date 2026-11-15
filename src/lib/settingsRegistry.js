@@ -19,7 +19,7 @@ export const SECTIONS = [
     items: [
       { id: 'general', label: 'General', icon: 'sliders' },
       { id: 'agents', label: 'Agents', icon: 'cpu' },
-      { id: 'office', label: 'Office', icon: 'armchair' },
+      { id: 'office', label: 'Agents Verse', icon: 'armchair' },
       { id: 'tools', label: 'External Tools', icon: 'wrench' },
     ],
   },
@@ -523,8 +523,10 @@ export const SETTINGS_ITEMS = [
     section: 'office',
     title: 'Environment',
     description:
-      'The world around the Office — a city tower, space, an island, the sea floor',
+      'The world around the Agents Verse office — a city tower, space, an island, the sea floor',
     keywords: [
+      'agents verse',
+      'verse',
       'office',
       'environment',
       'world',
@@ -553,8 +555,10 @@ export const SETTINGS_ITEMS = [
     section: 'office',
     title: 'Claude Code hook',
     description:
-      'Exact real-time session state in the Office — no inference lag on permission prompts',
+      'Exact real-time session state in Agents Verse — no inference lag on permission prompts',
     keywords: [
+      'agents verse',
+      'verse',
       'office',
       'hook',
       'hooks',

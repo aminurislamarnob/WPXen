@@ -20,6 +20,10 @@ import '../src/index.css';
 // departure at 7.5 s — so reactions can be caught on screenshots taken at
 // those times. Every selection (a click on an agent or on the world object
 // standing in for one) is logged as `[sandbox] select {...}`.
+// `thumb=1` is the Settings picker's preview shot: no floating labels, and no
+// agent in error, so every world shows its fair-weather self (the shots live
+// in src/assets/office-environments/, captured at 1280×720, zoom=3, scaled
+// to 320×180 WebP).
 // `window.__officeSandboxSetEnv('space')` switches the world in place, the way
 // the Settings picker does (the old world unmounts, the new one loads). Never
 // part of the app bundle: vite builds index.html only.
@@ -31,6 +35,24 @@ const hour =
 const room = roomTheme(q.get('room') ?? 'claude');
 const mode = q.get('mode') ?? 'still';
 const zoomSteps = Number(q.get('zoom') ?? 0);
+const thumb = q.get('thumb') === '1';
+
+if (thumb) {
+  const style = document.createElement('style');
+  style.textContent = '.label-layer { display: none !important; }';
+  document.head.append(style);
+}
+
+/** For a thumbnail: the same room, with every agent in error back at work. */
+function calm(office) {
+  const sessions = Object.fromEntries(
+    Object.entries(office.sessions).map(([pid, s]) => [
+      pid,
+      s.state === 'error' ? { ...s, state: 'working' } : s,
+    ])
+  );
+  return { ...office, sessions };
+}
 
 /** The scripted moments of `mode=demo`, applied to the still preview. */
 function demoStep(office, step) {
@@ -117,7 +139,7 @@ function Sandbox() {
   const office = useMemo(() => {
     if (!base) return null;
     const shown = mode === 'demo' ? demoStep(base, step) : base;
-    return officeInRoom(shown, room.kind);
+    return officeInRoom(thumb ? calm(shown) : shown, room.kind);
   }, [base, step]);
   if (!office) return null;
   return (
