@@ -426,7 +426,22 @@ describe('decodeClaudeLine', () => {
     const headers = lines
       .flatMap((l) => [decodeClaudeLine(l, state) ?? []].flat())
       .filter((r) => r.isHeader);
-    expect(headers).toEqual([{ isHeader: true, title: 'Health check endpoint' }]);
+    expect(headers).toEqual([
+      { isHeader: true, kind: 'ai', title: 'Health check endpoint' },
+    ]);
+  });
+
+  it('reports a /rename and the agent name as their own header kinds', () => {
+    const decode = (record) => decodeClaudeLine(JSON.stringify(record), {});
+    expect(
+      decode({ type: 'custom-title', customTitle: '  Fix  checkout ', sessionId: 's' })
+    ).toEqual({ isHeader: true, kind: 'custom', title: 'Fix checkout' });
+    expect(decode({ type: 'agent-name', agentName: 'reviewer', sessionId: 's' })).toEqual(
+      { isHeader: true, kind: 'agent', title: 'reviewer' }
+    );
+    expect(
+      decode({ type: 'custom-title', customTitle: '   ', sessionId: 's' })
+    ).toBeNull();
   });
 
   it('renders Edit, Write and MultiEdit calls as inline diffs', () => {

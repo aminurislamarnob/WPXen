@@ -8,6 +8,18 @@ function claudeTranscriptPath({ home, cwd, uuid }) {
   return path.join(home, '.claude', 'projects', encodedCwd, `${uuid}.jsonl`);
 }
 
+// Transcript records that name the conversation: record type → the field
+// holding the name and the kind it is reported as.
+const HEADER_RECORDS = {
+  'custom-title': { key: 'customTitle', kind: 'custom' },
+  'ai-title': { key: 'aiTitle', kind: 'ai' },
+  'agent-name': { key: 'agentName', kind: 'agent' },
+};
+
+function normalizeTitle(value) {
+  return typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : '';
+}
+
 // User records that are the harness talking to itself, not the user: the
 // tags and prose openings Claude Code injects as user turns (after Orca's
 // harness-injected-user-turns.ts). Matched case-insensitively on the start.
@@ -356,11 +368,15 @@ function decodeRecord(record, state) {
   state.calls = state.calls || {};
   state.results = state.results || {};
 
-  // Claude names the conversation in its own record, and renames it later.
-  if (record.type === 'ai-title') {
-    return typeof record.aiTitle === 'string' && record.aiTitle.trim()
-      ? { isHeader: true, title: record.aiTitle.trim() }
-      : null;
+  // The conversation's name, from three records (after Orca's
+  // session-scanner-primary-parsers.ts): `custom-title` is the user's own
+  // /rename, `ai-title` the name Claude generates and later revises, and
+  // `agent-name` metadata. Each is tagged with its kind; the renderer ranks
+  // them (src/lib/chatTitle.js), so a later ai-title never hides a rename.
+  const titleRecord = HEADER_RECORDS[record.type];
+  if (titleRecord) {
+    const title = normalizeTitle(record[titleRecord.key]);
+    return title ? { isHeader: true, kind: titleRecord.kind, title } : null;
   }
 
   if (record.type === 'user') {

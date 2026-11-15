@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest';
 import {
   buildProjects,
   sessionTitle,
+  sessionTooltipTitle,
+  dirName,
   formatAge,
   mostUrgent,
   buildActivity,
@@ -71,26 +73,53 @@ describe('buildProjects', () => {
 });
 
 describe('sessionTitle', () => {
-  it('prefers the terminal title', () => {
-    const s = session('a', 'claude', { title: 'Fix checkout tax', label: 'Plugin' });
-    expect(sessionTitle(s, [s])).toBe('Fix checkout tax');
+  const cwd = '/Users/me/theme-wp/wp-content/plugins/storesuite';
+
+  it('names the Session after the folder it runs in, not its terminal title', () => {
+    const s = session('a', 'claude', {
+      cwd,
+      title: 'Storesuite overview',
+      label: 'Plugin',
+    });
+    expect(sessionTitle(s, [s])).toBe('storesuite');
+    expect(sessionTitle({ ...s, cwd: `${cwd}/` }, [s])).toBe('storesuite');
   });
 
-  it('falls back to the launch target label', () => {
-    const s = session('a', 'claude', { label: 'Plugin' });
-    expect(sessionTitle(s, [s])).toBe('Plugin');
+  it('falls back to the launch target label, then the provider name', () => {
+    const labelled = session('a', 'claude', { label: 'Plugin' });
+    expect(sessionTitle(labelled, [labelled])).toBe('Plugin');
+    const bare = session('a', 'claude');
+    expect(sessionTitle(bare, [bare, session('a', 'codex')])).toBe('Claude');
   });
 
-  it('uses the bare provider name when it is the only one', () => {
-    const s = session('a', 'claude');
-    expect(sessionTitle(s, [s, session('a', 'codex')])).toBe('Claude');
+  it('numbers siblings that share a name, whatever their provider', () => {
+    const one = session('a', 'claude', { cwd });
+    const two = session('a', 'codex', { cwd });
+    const other = session('a', 'claude', { cwd: '/Users/me/site' });
+    const all = [one, two, other];
+    expect(sessionTitle(one, all)).toBe('storesuite #1');
+    expect(sessionTitle(two, all)).toBe('storesuite #2');
+    expect(sessionTitle(other, all)).toBe('site');
   });
 
-  it('numbers repeated providers in launch order', () => {
-    const one = session('a', 'claude');
-    const two = session('a', 'claude');
-    expect(sessionTitle(one, [one, two])).toBe('Claude #1');
-    expect(sessionTitle(two, [one, two])).toBe('Claude #2');
+  it('keeps the terminal title for the tooltip', () => {
+    const s = session('a', 'claude', { cwd, title: 'Storesuite overview' });
+    expect(sessionTooltipTitle(s, [s])).toBe('storesuite · Storesuite overview');
+    const quiet = session('a', 'claude', { cwd });
+    expect(sessionTooltipTitle(quiet, [quiet])).toBe('storesuite');
+  });
+
+  it("puts the user's own name first, and leaves it out of the numbering", () => {
+    const one = session('a', 'claude', { cwd, customTitle: 'Checkout bug' });
+    const two = session('a', 'claude', { cwd });
+    expect(sessionTitle(one, [one, two])).toBe('Checkout bug');
+    expect(sessionTitle(two, [one, two])).toBe('storesuite');
+  });
+
+  it('reads the last segment of a folder path', () => {
+    expect(dirName('/a/b/c')).toBe('c');
+    expect(dirName('/')).toBe('/');
+    expect(dirName(null)).toBe('');
   });
 });
 

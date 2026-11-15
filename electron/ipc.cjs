@@ -1015,6 +1015,15 @@ function registerHandlers(win, storeInstance) {
 
   ipcMain.handle('terminal-stop-tab', (_e, sessionId) => agents.stopTab(sessionId));
 
+  ipcMain.handle('agent-rename-session', (_e, sessionId, title) =>
+    agents.renameSession(sessionId, title)
+  );
+  ipcMain.handle('agent-color-session', (_e, sessionId, color) =>
+    agents.setSessionColor(sessionId, color)
+  );
+  ipcMain.handle('agent-pin-session', (_e, sessionId, pinned) =>
+    agents.setSessionPinned(sessionId, pinned)
+  );
   ipcMain.handle('agent-set-pane-ratio', (_e, rootId, path, ratio) => {
     agents.setPaneRatio(rootId, path, ratio);
   });
@@ -1271,12 +1280,16 @@ function registerHandlers(win, storeInstance) {
   );
 
   // Open a file in the user's configured editor, falling back to the OS
-  // default when none is set or the chosen one isn't installed.
-  ipcMain.handle('open-file-path', (_e, filePath) => {
+  // default when none is set or the chosen one isn't installed. A folder with
+  // no default code editor returns { needsChoice } and the renderer asks; its
+  // answer comes back as `editorId`, one of the known editors only.
+  ipcMain.handle('open-file-path', (_e, filePath, editorId) => {
+    const chosen =
+      typeof editorId === 'string' && externalTools.EDITORS[editorId] ? editorId : null;
     return externalTools.openInEditor(
       filePath,
       {
-        editor: settings.get('tools.editor'),
+        editor: chosen || settings.get('tools.editor'),
         customCommand: settings.get('tools.editorCustomCommand'),
       },
       (p) => shell.openPath(p)

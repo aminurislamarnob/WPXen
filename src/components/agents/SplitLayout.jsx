@@ -101,7 +101,7 @@ export default function SplitLayout({
         }`}
         onClickCapture={() => onFocusPane?.(tree.leaf)}
       >
-        <div className={viewMode === 'chat' ? 'hidden' : 'h-full w-full'}>
+        <div className={viewMode === 'chat' ? 'hidden' : 'h-full w-full px-4 pb-4'}>
           <Terminal
             sessionId={tree.leaf}
             rootPath={rootPath}

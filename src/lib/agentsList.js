@@ -10,17 +10,35 @@ export const FOLDER_ID_PREFIX = 'folder-';
 export const isFolderProject = (id) =>
   typeof id === 'string' && id.startsWith(FOLDER_ID_PREFIX);
 
-// What a Session row (and its terminal tab) is called: the agent's own
-// terminal title when it has set one, else the saved Launch Target's label,
-// else the provider name — numbered when the same provider runs more than once
-// in the Site ("Claude #2").
+// The last segment of a folder path, or '' for none.
+export function dirName(cwd) {
+  if (typeof cwd !== 'string') return '';
+  const parts = cwd.split('/').filter(Boolean);
+  return parts[parts.length - 1] || (cwd.startsWith('/') ? '/' : '');
+}
+
+// What a Session row (and its terminal tab) is called: the name the user gave
+// it (tab menu → Rename), else the name of the folder it runs in
+// ("storesuite"), else the saved Launch Target's label, else the provider
+// name. Numbered when several siblings share the name, in launch order
+// ("storesuite #2"). The conversation's own name stays in the chat header and
+// the tooltip (sessionTooltipTitle), not here.
 export function sessionTitle(session, siblings) {
-  if (session.title) return session.title;
-  if (session.label) return session.label;
-  const same = siblings.filter((s) => s.agentId === session.agentId);
-  if (same.length < 2) return session.agentName;
+  if (session.customTitle) return session.customTitle;
+  const name = (s) => dirName(s.cwd) || s.label || s.agentName;
+  const own = name(session);
+  // Renamed siblings no longer share the folder's name, so they don't count.
+  const same = siblings.filter((s) => !s.customTitle && name(s) === own);
+  if (same.length < 2) return own;
   const n = same.findIndex((s) => s.sessionId === session.sessionId) + 1;
-  return `${session.agentName} #${n}`;
+  return n > 0 ? `${own} #${n}` : own;
+}
+
+// The full name for a tooltip: the row's folder name plus, when the agent
+// has set one, its terminal title ("storesuite · Storesuite overview").
+export function sessionTooltipTitle(session, siblings) {
+  const base = sessionTitle(session, siblings);
+  return session.title && session.title !== base ? `${base} · ${session.title}` : base;
 }
 
 // Working-set ids + all Sites + all Sessions → ordered project rows:
@@ -45,6 +63,7 @@ export function buildProjects({ projectIds, sites, sessions }) {
     const enrichedList = list.map((s) => ({
       ...s,
       displayTitle: sessionTitle(s, list),
+      displayTooltip: sessionTooltipTitle(s, list),
       children: [],
     }));
     const rootMap = new Map();
@@ -186,6 +205,9 @@ export function applyListOptions(projects, options = DEFAULT_LIST_OPTIONS) {
 
       list = [...list].sort((a, b) => rank(a) - rank(b) || recent(b) - recent(a));
     }
+    // Pinned Sessions (row menu → Pin) lead their project, whatever the sort;
+    // each group keeps the order the sort gave it.
+    list = [...list.filter((s) => s.pinned), ...list.filter((s) => !s.pinned)];
     return { site, sessions: list };
   });
 
