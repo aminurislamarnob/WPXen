@@ -186,6 +186,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Office (live agent sessions). Lazy-starts the engine on first call and
   // returns the current Office; later snapshots arrive on 'office-update'.
   officeStart: () => ipcRenderer.invoke('office-start'),
+  // The Office page's unmount: stop pushing it snapshots (the engine stays warm).
+  officeUnwatch: () => ipcRenderer.invoke('office-unwatch'),
   // Claude Code hook (exact real-time state): Settings → Office. command is
   // 'install' | 'uninstall'; preview writes nothing, apply takes its token.
   officeHooksStatus: () => ipcRenderer.invoke('office-hooks-status'),

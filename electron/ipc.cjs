@@ -3065,19 +3065,37 @@ function registerHandlers(win, storeInstance) {
   // reference-deduped and coalesced by the engine. The sink is bound once, so
   // it looks the windows up at send time rather than capturing one: a window
   // recreated after the first visit (macOS activate) still gets updates.
-  ipcMain.handle('office-start', () =>
-    officeEngine.start({
+  //
+  // The engine stays warm, but snapshots only go to renderers whose Office
+  // page is mounted: office-start subscribes the caller, office-unwatch (the
+  // page's unmount) drops it. Without that every snapshot was still
+  // serialized and delivered to a window showing some other page.
+  const officeWatchers = new Set();
+  // Senders already carrying a 'destroyed' cleanup — one per webContents,
+  // however often its page is visited.
+  const officeCleanupBound = new WeakSet();
+  ipcMain.handle('office-start', (e) => {
+    const sender = e.sender;
+    officeWatchers.add(sender);
+    if (!officeCleanupBound.has(sender)) {
+      officeCleanupBound.add(sender);
+      sender.once('destroyed', () => officeWatchers.delete(sender));
+    }
+    return officeEngine.start({
       onSnapshot: (office) => {
-        for (const w of BrowserWindow.getAllWindows()) {
-          if (!w.isDestroyed() && w.webContents)
-            w.webContents.send('office-update', office);
+        for (const wc of officeWatchers) {
+          if (wc.isDestroyed()) officeWatchers.delete(wc);
+          else wc.send('office-update', office);
         }
       },
       // While the engine runs, the hook socket listens here (userData, beside
       // the installed forwarder) — the engine itself stays electron-free.
       hookSocketDir: app.getPath('userData'),
-    })
-  );
+    });
+  });
+  ipcMain.handle('office-unwatch', (e) => {
+    officeWatchers.delete(e.sender);
+  });
 
   // Claude Code hook install/uninstall — the one-click action behind
   // Settings → Office (the dnsmasq/sudoers precedent: an action, not a stored

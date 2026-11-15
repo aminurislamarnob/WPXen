@@ -80,6 +80,10 @@ async function scan(prev) {
 
   // Only read .json files, skip .key files (credentials — guardrail).
   const jsonFiles = files.filter((f) => f.endsWith('.json') && !f.includes('.key'));
+  // Project keys resolve through git; look them up for all new sessions at
+  // once rather than one after another (7 sessions took 2.4 s serially).
+  /** @type {Promise<void>[]} */
+  const keyLookups = [];
 
   for (const file of jsonFiles) {
     try {
@@ -110,17 +114,22 @@ async function scan(prev) {
       const prevSession = prev.sessions.get(entry.pid);
 
       if (!prevSession) {
-        // New session appeared.
-        const projectKey = await getProjectKey(entry.cwd);
-        events.push({
+        // New session appeared; its project key is filled in below.
+        const appeared = {
           type: 'session_appeared',
           pid: entry.pid,
           sessionId: entry.sessionId,
           cwd: entry.cwd,
           name,
-          projectKey,
+          projectKey: '',
           startedAt,
-        });
+        };
+        events.push(appeared);
+        keyLookups.push(
+          getProjectKey(entry.cwd).then((key) => {
+            appeared.projectKey = key;
+          })
+        );
       }
 
       if (
@@ -143,6 +152,8 @@ async function scan(prev) {
       continue;
     }
   }
+
+  await Promise.all(keyLookups);
 
   // Detect ended sessions — previously known PIDs no longer in the new snapshot.
   for (const pid of prev.sessions.keys()) {

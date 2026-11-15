@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import {
@@ -14,6 +14,7 @@ import {
   routeToBreak,
 } from '../../../lib/office/scene/layout.js';
 import { frameRate, isBusy, isFarZoom } from '../../../lib/office/scene/pacing.js';
+import { poseSignature } from '../../../lib/office/scene/memo.js';
 import { focusKey, focusTarget } from '../../../lib/office/focus.js';
 import { BreakAllocator, BreakPresence } from '../../../lib/office/scene/breaks.js';
 import { BeanBag, Room } from './Room.jsx';
@@ -32,6 +33,8 @@ import './scene.css';
 // floor (onPointerMissed) releases focus and re-frames the room.
 
 const VIEW_DIR = new THREE.Vector3(1, 0.92, 1.12).normalize();
+const NO_SELECT = () => {};
+const _dir = new THREE.Vector3();
 
 // ── Pods ─────────────────────────────────────────────────────
 
@@ -82,7 +85,7 @@ function PodZone({ pod, plan, breaks, focus, onSelect, far }) {
 }
 
 /** Break-out corner filling an unused desk slot. */
-function Nook({ x, z, seed }) {
+const Nook = memo(function Nook({ x, z, seed }) {
   return (
     <group position={[x, 0, z]}>
       {seed % 2 ? (
@@ -98,10 +101,20 @@ function Nook({ x, z, seed }) {
       )}
     </group>
   );
-}
+});
+
+/** The sign draws only the pod's name and corner; the pod object is new every snapshot. */
+const podSignEqual = (a, b) =>
+  a.accent === b.accent &&
+  a.live === b.live &&
+  a.waiting === b.waiting &&
+  a.far === b.far &&
+  a.pod.projectKey === b.pod.projectKey &&
+  a.pod.x === b.pod.x &&
+  a.pod.z === b.pod.z;
 
 /** Floor-standing team sign at the left end of the pod. */
-function PodSign({ pod, accent, live, waiting, far }) {
+const PodSign = memo(function PodSign({ pod, accent, live, waiting, far }) {
   const detail = `${live} agent${live === 1 ? '' : 's'}${waiting ? ` · ${waiting} waiting` : ''}`;
   const tex = useMemo(
     () => signTexture(pod.projectKey, detail, accent, waiting > 0),
@@ -149,7 +162,7 @@ function PodSign({ pod, accent, live, waiting, far }) {
       )}
     </group>
   );
-}
+}, podSignEqual);
 
 // ── Camera ───────────────────────────────────────────────────
 
@@ -197,9 +210,14 @@ function frameRoom(plan, width, height, inset) {
 function CameraRig({ room, plan, breaks, focus, insetRight }) {
   const { camera, size, controls, invalidate } = useThree();
   const goal = useRef(null);
-  const frame = frameRoom(plan, size.width, size.height, { right: insetRight, top: 72 });
   // Switching rooms re-frames even when both rooms happen to be the same size.
   const boundsKey = `${room},${plan.minX},${plan.maxX},${plan.minZ},${plan.maxZ},${size.width},${size.height},${insetRight}`;
+  // plan is new every snapshot; the framing only depends on what boundsKey names.
+  const frame = useMemo(
+    () => frameRoom(plan, size.width, size.height, { right: insetRight, top: 72 }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [boundsKey]
+  );
   const aimKey = focusKey(focus, breaks);
 
   useEffect(() => {
@@ -227,8 +245,8 @@ function CameraRig({ room, plan, breaks, focus, insetRight }) {
     controls.target.lerp(g.target, k);
     camera.zoom += (g.zoom - camera.zoom) * k;
     const dist = camera.position.distanceTo(controls.target);
-    const dir = camera.position.clone().sub(controls.target).normalize();
-    camera.position.copy(controls.target).add(dir.multiplyScalar(dist));
+    _dir.copy(camera.position).sub(controls.target).normalize();
+    camera.position.copy(controls.target).add(_dir.multiplyScalar(dist));
     camera.updateProjectionMatrix();
     controls.update();
     if (
@@ -244,7 +262,9 @@ function CameraRig({ room, plan, breaks, focus, insetRight }) {
 
 /**
  * Shadows only change when agents change pose, so the shadow map re-renders for
- * a moment after each office update instead of on every frame.
+ * a moment after a pose change instead of on every frame. `version` is the
+ * pose signature, not the office: snapshots arrive faster than the window, and
+ * keying on them kept the timer from ever expiring.
  */
 function ShadowBudget({ version }) {
   const gl = useThree((s) => s.gl);
@@ -283,7 +303,18 @@ function FrameDriver({ fps }) {
   return null;
 }
 
-function Lights({ plan }) {
+/** Lights only follow the room's bounds; plan itself is new every snapshot. */
+const boundsEqual = (a, b) =>
+  a.plan.minX === b.plan.minX &&
+  a.plan.maxX === b.plan.maxX &&
+  a.plan.minZ === b.plan.minZ &&
+  a.plan.maxZ === b.plan.maxZ;
+
+/**
+ * Memoised on the bounds: drei's Environment re-captures its cube map whenever
+ * its children change identity, which used to happen on every snapshot.
+ */
+const Lights = memo(function Lights({ plan }) {
   const c = roomCenter(plan);
   const span = Math.max(plan.maxX - plan.minX, plan.maxZ - plan.minZ) * 0.75 + 4;
   const light = useRef(null);
@@ -330,7 +361,7 @@ function Lights({ plan }) {
       </Environment>
     </>
   );
-}
+}, boundsEqual);
 
 // ── Scene ────────────────────────────────────────────────────
 
@@ -349,7 +380,7 @@ export function OfficeScene({
   office,
   room,
   focus = null,
-  onSelect = () => {},
+  onSelect = NO_SELECT,
   insetRight = 0,
 }) {
   // Each room keeps its own sticky desk slots and break spots, so switching
@@ -381,6 +412,7 @@ export function OfficeScene({
   const fps = frameRate({ visible, busy: isBusy(office), rally });
   const [far, setFar] = useState(true);
   const center = roomCenter(plan);
+  const poses = poseSignature(plan, breaks);
 
   const labelLayer = useRef(null);
 
@@ -389,8 +421,8 @@ export function OfficeScene({
       <div ref={labelLayer} className="label-layer" />
       <Canvas
         frameloop={visible ? 'demand' : 'never'}
-        shadows="soft"
-        dpr={[1, 2]}
+        shadows="percentage"
+        dpr={[1, 1.5]}
         gl={{ antialias: true, alpha: true }}
         onPointerMissed={() => onSelect(null)}
       >
@@ -421,7 +453,7 @@ export function OfficeScene({
           insetRight={insetRight}
         />
         <FrameDriver fps={fps} />
-        <ShadowBudget version={office} />
+        <ShadowBudget version={poses} />
         <ZoomWatcher onChange={setFar} />
         <Lights plan={plan} />
         <BreakPresence.Provider value={presence}>

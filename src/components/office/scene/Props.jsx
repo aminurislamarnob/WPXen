@@ -1,4 +1,4 @@
-import { useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
 import { RoundedBox } from '@react-three/drei';
@@ -6,6 +6,8 @@ import { palette } from '../../../lib/office/scene/theme.js';
 import { screenTexture } from '../../../lib/office/scene/textures.js';
 
 // ── Screens ──────────────────────────────────────────────────
+
+const LIVE = { live: true };
 
 /** A screen surface. When `scroll` is set the content scrolls like live output. */
 export function Screen({ kind, variant, width, height, scroll = false, tint }) {
@@ -18,14 +20,20 @@ export function Screen({ kind, variant, width, height, scroll = false, tint }) {
     t.needsUpdate = true;
     return t;
   }, [kind, variant, width, height]);
+  // The clone is ours (the cached original is shared); release it when the
+  // screen changes kind or unmounts. three keeps the shared GL upload alive
+  // while other clones still use it.
+  useEffect(() => () => tex.dispose(), [tex]);
   const color = useMemo(() => new THREE.Color(tint ?? '#ffffff'), [tint]);
 
   useFrame((_, dt) => {
     if (scroll) tex.offset.y -= dt * 0.06;
   });
 
+  // Live: its content follows the agent's state and tool, so StaticBatch must
+  // never merge it (that would freeze it until the next desk re-merge).
   return (
-    <mesh>
+    <mesh userData={LIVE}>
       <planeGeometry args={[width, height]} />
       <meshBasicMaterial map={tex} color={color} toneMapped={false} />
     </mesh>

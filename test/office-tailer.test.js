@@ -106,4 +106,35 @@ describe('FileTailer', () => {
     await new Promise((r) => setTimeout(r, 120));
     expect(lines).toEqual([]);
   });
+
+  it('replays only the tail of a large file, dropping the line it cuts into', async () => {
+    const rows = Array.from({ length: 50 }, (_, n) => JSON.stringify({ n }) + '\n');
+    fs.writeFileSync(file, rows.join(''));
+    // The last 30 bytes cut into a line: only the whole lines after the cut replay.
+    await tail(file, { replayBytes: 30 });
+    const tailRows = rows.join('').slice(-30);
+    const whole = tailRows
+      .slice(tailRows.indexOf('\n') + 1)
+      .split('\n')
+      .filter(Boolean);
+    expect(lines).toEqual(whole.map((l) => JSON.parse(l)));
+    expect(lines.at(-1)).toEqual({ n: 49 });
+
+    await settle();
+    fs.appendFileSync(file, '{"n":50}\n');
+    await until(() => lines.at(-1)?.n === 50);
+  });
+
+  it('keeps the first tail line whole when the cut lands on a line boundary', async () => {
+    fs.writeFileSync(file, '{"n":1}\n{"n":2}\n{"n":3}\n');
+    // Exactly the last two lines.
+    await tail(file, { replayBytes: 16 });
+    expect(lines).toEqual([{ n: 2 }, { n: 3 }]);
+  });
+
+  it('decodes a multi-byte character split across read chunks', async () => {
+    fs.writeFileSync(file, JSON.stringify({ t: 'café — ✓ 日本' }) + '\n');
+    await tail(file, { chunkBytes: 3 });
+    expect(lines).toEqual([{ t: 'café — ✓ 日本' }]);
+  });
 });

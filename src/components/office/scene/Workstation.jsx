@@ -1,4 +1,4 @@
-import { useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { RoundedBox } from '@react-three/drei';
 import { useFrame, useThree } from '@react-three/fiber';
@@ -8,6 +8,7 @@ import { BreakPresence } from '../../../lib/office/scene/breaks.js';
 import { internBench } from '../../../lib/office/scene/layout.js';
 import { stateBadge } from '../../../lib/office/hud.js';
 import { StaticBatch } from './StaticBatch.jsx';
+import { workstationPropsEqual } from '../../../lib/office/scene/memo.js';
 import {
   DeskLamp,
   DeskPlant,
@@ -178,7 +179,20 @@ function AgentTag({ name, state, tool, emphasis = false, onBreak }) {
 // side table, and leaves when its work ends. Seat positions come from the
 // pure internBench plan (lib/office/focus.js aims the camera at the same seat).
 
-function Intern({ sub, seat, accent, focused, onSelect }) {
+const internPropsEqual = (a, b) =>
+  a.pid === b.pid &&
+  a.accent === b.accent &&
+  a.focused === b.focused &&
+  a.onSelect === b.onSelect &&
+  a.seat.x === b.seat.x &&
+  a.seat.z === b.seat.z &&
+  a.seat.yaw === b.seat.yaw &&
+  a.sub.subagentId === b.sub.subagentId &&
+  a.sub.state === b.sub.state &&
+  a.sub.currentTool === b.sub.currentTool &&
+  a.sub.agentType === b.sub.agentType;
+
+const Intern = memo(function Intern({ pid, sub, seat, accent, focused, onSelect }) {
   const look = useMemo(() => lookFor(sub.subagentId, { intern: true }), [sub.subagentId]);
   const [hover, setHover] = useState(false);
   useHoverCursor(hover);
@@ -188,7 +202,7 @@ function Intern({ sub, seat, accent, focused, onSelect }) {
       rotation={[0, seat.yaw, 0]}
       onClick={(e) => {
         e.stopPropagation();
-        onSelect();
+        onSelect({ pid, subagentId: sub.subagentId });
       }}
       onPointerOver={(e) => {
         e.stopPropagation();
@@ -238,7 +252,7 @@ function Intern({ sub, seat, accent, focused, onSelect }) {
       )}
     </group>
   );
-}
+}, internPropsEqual);
 
 // ── Commuting ────────────────────────────────────────────────
 // Progress is a distance along the desk → break-spot route, so a character
@@ -266,6 +280,7 @@ function dampAngle(from, to, lambda, dt) {
 function Commuter({ origin, route, spot, onSeated, children, ...props }) {
   const presence = useContext(BreakPresence);
   const invalidate = useThree((s) => s.invalidate);
+  const gl = useThree((s) => s.gl);
   const group = useRef(null);
   const stride = useRef(0);
   // Keep the last route so a character can still find its way back once the break ends.
@@ -363,7 +378,12 @@ function Commuter({ origin, route, spot, onSeated, children, ...props }) {
     if (atSpot !== arrived) setArrived(atSpot);
     const settling =
       Math.abs(g.position.y - y) > 0.002 || Math.abs(Math.sin(g.rotation.y - yaw)) > 0.01;
-    if (s !== before || settling || (next === 'standing' && !atSpot)) invalidate();
+    if (s !== before || settling || (next === 'standing' && !atSpot)) {
+      invalidate();
+      // Shadows are otherwise frozen between pose changes (ShadowBudget); a
+      // walk outlasts that window, so a moving commuter refreshes them itself.
+      gl.shadowMap.needsUpdate = true;
+    }
   });
 
   const activity =
@@ -382,7 +402,11 @@ function Commuter({ origin, route, spot, onSeated, children, ...props }) {
   );
 }
 
-export function Workstation({
+/**
+ * Memoised on the fields it draws (workstationPropsEqual): every snapshot hands
+ * down fresh session, desk and route objects, and most change nothing here.
+ */
+export const Workstation = memo(function Workstation({
   session,
   accent,
   deskKey,
@@ -411,7 +435,10 @@ export function Workstation({
 
   return (
     <group>
-      <StaticBatch version={`${deskKey}|${kind}|${state}|${seated && !!session}`}>
+      {/* Only what changes merged furniture belongs in the version. Screens
+          (state- and tool-dependent) are live and never merged, so a state or
+          tool change no longer re-merges the whole desk. */}
+      <StaticBatch version={`${deskKey}|${accent}|${lit}|${seated && !!session}`}>
         <Desk accent={accent} occupied={lit} />
 
         {/* main display, angled so the camera can read it */}
@@ -508,8 +535,9 @@ export function Workstation({
           sub={seat.sub}
           seat={seat}
           accent={accent}
+          pid={session.pid}
           focused={focus?.pid === session.pid && focus.subagentId === seat.sub.subagentId}
-          onSelect={() => onSelect({ pid: session.pid, subagentId: seat.sub.subagentId })}
+          onSelect={onSelect}
         />
       ))}
       {bench && bench.overflow > 0 && (
@@ -519,4 +547,4 @@ export function Workstation({
       )}
     </group>
   );
-}
+}, workstationPropsEqual);

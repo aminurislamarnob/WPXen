@@ -11,9 +11,15 @@ import { hash } from './theme.js';
 
 const cache = new Map();
 
-function make(key, w, h, draw) {
-  const hit = cache.get(key);
-  if (hit) return hit;
+/**
+ * Team signs are keyed by their count line ("3 agents · 1 waiting"), so every
+ * count a pod ever shows would otherwise stay cached — canvas and GPU texture
+ * alike — for the life of the app. They live in their own small LRU instead.
+ */
+export const SIGN_CACHE_MAX = 24;
+const signCache = new Map();
+
+function paint(w, h, draw) {
   const canvas = document.createElement('canvas');
   canvas.width = w;
   canvas.height = h;
@@ -22,7 +28,34 @@ function make(key, w, h, draw) {
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 8;
+  return tex;
+}
+
+function make(key, w, h, draw) {
+  const hit = cache.get(key);
+  if (hit) return hit;
+  const tex = paint(w, h, draw);
   cache.set(key, tex);
+  return tex;
+}
+
+/** Least-recently-used: a hit moves to the back, the oldest falls off the front. */
+function makeSign(key, w, h, draw) {
+  const hit = signCache.get(key);
+  if (hit) {
+    signCache.delete(key);
+    signCache.set(key, hit);
+    return hit;
+  }
+  const tex = paint(w, h, draw);
+  signCache.set(key, tex);
+  for (const [oldKey, old] of signCache) {
+    if (signCache.size <= SIGN_CACHE_MAX) break;
+    signCache.delete(oldKey);
+    // Frees the GPU copy. Should a pod still show it (a sign is only touched
+    // when its text changes), three just re-uploads it from the canvas.
+    old.dispose();
+  }
   return tex;
 }
 
@@ -508,7 +541,7 @@ export function woodTexture() {
 
 /** Team sign: colour swatch, project name and a live count line. */
 export function signTexture(name, detail, color, alert) {
-  return make(`sign:${name}:${detail}:${color}:${alert}`, 800, 220, (ctx, w, h) => {
+  return makeSign(`sign:${name}:${detail}:${color}:${alert}`, 800, 220, (ctx, w, h) => {
     ctx.fillStyle = '#fbfaf7';
     ctx.fillRect(0, 0, w, h);
     ctx.fillStyle = color;

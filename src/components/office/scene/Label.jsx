@@ -8,14 +8,10 @@ import { Html } from '@react-three/drei';
  */
 export const LabelLayer = createContext(null);
 
+/** Hoisted: a fresh style object each render made drei restyle the label. */
+const LABEL_STYLE = { pointerEvents: 'none' };
+
 export function Label(props) {
   const layer = useContext(LabelLayer);
-  return (
-    <Html
-      center
-      style={{ pointerEvents: 'none' }}
-      {...props}
-      portal={layer ?? undefined}
-    />
-  );
+  return <Html center style={LABEL_STYLE} {...props} portal={layer ?? undefined} />;
 }

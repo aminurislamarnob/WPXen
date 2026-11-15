@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { reduce, emptyOffice } from '../electron/services/office/reducer.cjs';
+import {
+  reduce,
+  emptyOffice,
+  assistantTurn,
+} from '../electron/services/office/reducer.cjs';
 import {
   WAITING_THRESHOLD_MS,
   BREAK_THRESHOLD_MS,
@@ -1046,5 +1050,104 @@ describe('reducer', () => {
       const after = reduce(office, { type: 'some_future_event' });
       expect(after).toEqual(office);
     });
+  });
+});
+
+// ── Snapshot economy and split messages ──────────────────────
+
+describe('reducer: lines that change nothing', () => {
+  const line = (extra) => ({ type: 'transcript_line', pid: 1001, line: extra });
+
+  it('keeps the Office reference for records the Office does not read', () => {
+    const office = officeWith(appeared());
+    for (const l of [
+      { type: 'attachment', attachment: {} },
+      { type: 'api-request', uuid: 'r1' },
+      { type: 'permission-mode', permissionMode: 'default' },
+    ]) {
+      expect(reduce(office, line(l))).toBe(office);
+    }
+  });
+
+  it('keeps it for a re-appended identical title, and changes for a new one', () => {
+    const office = officeWith(
+      appeared(),
+      line({ type: 'ai-title', aiTitle: 'Fix login' })
+    );
+    expect(reduce(office, line({ type: 'ai-title', aiTitle: 'Fix login' }))).toBe(office);
+    const renamed = reduce(office, line({ type: 'ai-title', aiTitle: 'Fix signup' }));
+    expect(renamed).not.toBe(office);
+    expect(renamed.sessions[1001].title).toBe('Fix signup');
+  });
+
+  it('keeps it for a subagent line that changes nothing', () => {
+    const office = officeWith(appeared(), {
+      type: 'subagent_appeared',
+      pid: 1001,
+      subagentId: 's1',
+      agentType: 'Explore',
+      description: '',
+    });
+    expect(
+      reduce(office, {
+        type: 'subagent_transcript_line',
+        pid: 1001,
+        subagentId: 's1',
+        line: { type: 'attachment' },
+      })
+    ).toBe(office);
+  });
+});
+
+describe('reducer: a message split across lines', () => {
+  const assistant = (content, stop_reason) => ({
+    type: 'transcript_line',
+    pid: 1001,
+    line: {
+      type: 'assistant',
+      uuid: `a-${Math.random()}`,
+      timestamp: '2026-01-01T00:00:00.000Z',
+      message: { content, stop_reason },
+    },
+  });
+
+  it('stays thinking on a thinking or text line whose message ends in a tool call', () => {
+    const office = officeWith(
+      appeared(),
+      assistant([{ type: 'thinking', thinking: '…' }], 'tool_use')
+    );
+    expect(office.sessions[1001].state).toBe('thinking');
+    const texted = reduce(
+      office,
+      assistant([{ type: 'text', text: 'Let me look' }], 'tool_use')
+    );
+    expect(texted.sessions[1001].state).toBe('thinking');
+  });
+
+  it('goes idle on the line that ends the turn', () => {
+    const office = officeWith(
+      appeared(),
+      assistant([{ type: 'text', text: 'Done' }], 'end_turn')
+    );
+    expect(office.sessions[1001].state).toBe('idle');
+  });
+
+  it('classifies turn boundaries', () => {
+    expect(
+      assistantTurn({ content: [{ type: 'tool_use' }], stop_reason: 'tool_use' })
+    ).toBe('continues');
+    expect(assistantTurn({ content: [{ type: 'text' }], stop_reason: null })).toBe(
+      'continues'
+    );
+    expect(
+      assistantTurn({ content: [{ type: 'thinking' }], stop_reason: 'end_turn' })
+    ).toBe('continues');
+    expect(assistantTurn({ content: [{ type: 'text' }], stop_reason: 'end_turn' })).toBe(
+      'ended'
+    );
+    expect(
+      assistantTurn({ content: [{ type: 'text' }], stop_reason: 'max_tokens' })
+    ).toBe('ended');
+    expect(assistantTurn({ content: [{ type: 'text' }] })).toBe('unknown');
   });
 });

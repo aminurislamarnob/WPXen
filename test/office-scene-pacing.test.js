@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  ACTIVE_STATES,
+  BRISK_STATES,
   FAR_ZOOM,
   frameRate,
   isBusy,
@@ -16,13 +16,8 @@ function office(sessions) {
 }
 
 describe('render pacing', () => {
-  it('treats working/thinking/waiting/error as active, idle/ended as calm', () => {
-    expect([...ACTIVE_STATES].sort()).toEqual([
-      'error',
-      'thinking',
-      'waiting_on_user',
-      'working',
-    ]);
+  it('treats working/thinking/error as brisk; waiting, idle and ended are calm', () => {
+    expect([...BRISK_STATES].sort()).toEqual(['error', 'thinking', 'working']);
   });
 
   it('isBusy looks at sessions and their subagents', () => {
@@ -30,6 +25,13 @@ describe('render pacing', () => {
     expect(isBusy(office({ 1: { state: 'idle' } }))).toBe(false);
     expect(isBusy(office({ 1: { state: 'ended' } }))).toBe(false);
     expect(isBusy(office({ 1: { state: 'working' } }))).toBe(true);
+    // An agent can wait on you for hours; that must not hold 30 fps.
+    expect(isBusy(office({ 1: { state: 'waiting_on_user' } }))).toBe(false);
+    expect(
+      isBusy(
+        office({ 1: { state: 'idle', subagents: { a: { state: 'waiting_on_user' } } } })
+      )
+    ).toBe(false);
     expect(
       isBusy(office({ 1: { state: 'idle', subagents: { a: { state: 'thinking' } } } }))
     ).toBe(true);

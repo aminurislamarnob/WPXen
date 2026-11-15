@@ -1,9 +1,10 @@
-import { useMemo, useRef } from 'react';
+import { memo, useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
 import { RoundedBox } from '@react-three/drei';
 import { stateColor } from '../../../lib/office/scene/theme.js';
 import { rallyHit } from '../../../lib/office/scene/breaks.js';
+import { characterPropsEqual } from '../../../lib/office/scene/memo.js';
 
 // ── Chibi developer ──────────────────────────────────────────
 // Pose and face are pure functions of Agent State, stance and break activity.
@@ -78,6 +79,34 @@ const STANDING = {
   },
 };
 
+// ── Shared geometry ──────────────────────────────────────────
+// Every character used to build its own ~45 geometries (and upload their
+// buffers). They're a handful of distinct shapes, so one cache serves them all;
+// `primitive` attachments are never disposed by r3f, which is what keeps a
+// shared geometry alive when one character leaves.
+const GEOMETRIES = {
+  box: THREE.BoxGeometry,
+  capsule: THREE.CapsuleGeometry,
+  circle: THREE.CircleGeometry,
+  cylinder: THREE.CylinderGeometry,
+  plane: THREE.PlaneGeometry,
+  ring: THREE.RingGeometry,
+  sphere: THREE.SphereGeometry,
+  torus: THREE.TorusGeometry,
+};
+const geometryCache = new Map();
+
+function sharedGeometry(kind, args) {
+  const key = `${kind}:${args.join(',')}`;
+  let g = geometryCache.get(key);
+  if (!g) geometryCache.set(key, (g = new GEOMETRIES[kind](...args)));
+  return g;
+}
+
+function Geo({ kind, args }) {
+  return <primitive object={sharedGeometry(kind, args)} attach="geometry" />;
+}
+
 const damp = THREE.MathUtils.damp;
 const _q = new THREE.Quaternion();
 const FACE_UP = new THREE.Quaternion().setFromAxisAngle(
@@ -86,7 +115,7 @@ const FACE_UP = new THREE.Quaternion().setFromAxisAngle(
 );
 
 function useMaterials(look) {
-  return useMemo(
+  const mats = useMemo(
     () => ({
       skin: new THREE.MeshStandardMaterial({ color: look.skin, roughness: 0.62 }),
       hair: new THREE.MeshStandardMaterial({ color: look.hair, roughness: 0.75 }),
@@ -136,12 +165,15 @@ function useMaterials(look) {
     }),
     [look]
   );
+  // Passed by `material=`, so r3f never owns (or disposes) them: we do.
+  useEffect(() => () => Object.values(mats).forEach((m) => m.dispose()), [mats]);
+  return mats;
 }
 
 function Hair({ look, mat }) {
   const cap = (thetaLen, r = 0.243) => (
     <mesh material={mat} castShadow>
-      <sphereGeometry args={[r, 32, 20, 0, Math.PI * 2, 0, thetaLen]} />
+      <Geo kind="sphere" args={[r, 24, 16, 0, Math.PI * 2, 0, thetaLen]} />
     </mesh>
   );
   switch (look.hairStyle) {
@@ -151,8 +183,8 @@ function Hair({ look, mat }) {
       return (
         <group rotation={[-0.3, 0, 0]}>
           {cap(Math.PI * 0.48)}
-          <mesh material={mat} position={[0, 0.25, -0.06]} castShadow>
-            <sphereGeometry args={[0.085, 20, 16]} />
+          <mesh material={mat} position={[0, 0.25, -0.06]}>
+            <Geo kind="sphere" args={[0.085, 20, 16]} />
           </mesh>
         </group>
       );
@@ -172,9 +204,8 @@ function Hair({ look, mat }) {
                   0.17 + (i % 2) * 0.04,
                   Math.sin(a) * ring - 0.02,
                 ]}
-                castShadow
               >
-                <sphereGeometry args={[0.07, 14, 12]} />
+                <Geo kind="sphere" args={[0.07, 10, 8]} />
               </mesh>
             );
           })}
@@ -192,7 +223,7 @@ function Hair({ look, mat }) {
               scale={[0.07, 0.17, 0.15]}
               castShadow
             >
-              <sphereGeometry args={[1, 16, 12]} />
+              <Geo kind="sphere" args={[1, 16, 12]} />
             </mesh>
           ))}
           <mesh
@@ -201,7 +232,7 @@ function Hair({ look, mat }) {
             scale={[0.2, 0.18, 0.12]}
             castShadow
           >
-            <sphereGeometry args={[1, 18, 14]} />
+            <Geo kind="sphere" args={[1, 18, 14]} />
           </mesh>
         </group>
       );
@@ -216,7 +247,7 @@ function Hair({ look, mat }) {
             scale={[0.16, 0.07, 0.11]}
             castShadow
           >
-            <sphereGeometry args={[1, 18, 12]} />
+            <Geo kind="sphere" args={[1, 18, 12]} />
           </mesh>
         </group>
       );
@@ -231,9 +262,8 @@ function Hair({ look, mat }) {
               position={[x, 0.15, 0.17]}
               rotation={[0.9, 0, (i - 1) * 0.3]}
               scale={[0.06, 0.035, 0.05]}
-              castShadow
             >
-              <sphereGeometry args={[1, 12, 10]} />
+              <Geo kind="sphere" args={[1, 12, 10]} />
             </mesh>
           ))}
         </group>
@@ -252,11 +282,11 @@ function PrayerCap({ color }) {
   return (
     <group rotation={[-0.22, 0, 0]}>
       <mesh castShadow>
-        <sphereGeometry args={[r, 32, 14, 0, Math.PI * 2, 0, edge]} />
+        <Geo kind="sphere" args={[r, 24, 12, 0, Math.PI * 2, 0, edge]} />
         <meshStandardMaterial color={color} roughness={0.92} />
       </mesh>
       <mesh position={[0, r * Math.cos(edge), 0]} rotation={[Math.PI / 2, 0, 0]}>
-        <torusGeometry args={[r * Math.sin(edge), 0.011, 8, 40]} />
+        <Geo kind="torus" args={[r * Math.sin(edge), 0.011, 6, 28]} />
         <meshStandardMaterial color={color} roughness={0.92} />
       </mesh>
       {[0.24, 0.17].map((t) => (
@@ -265,7 +295,7 @@ function PrayerCap({ color }) {
           position={[0, (r + 0.001) * Math.cos(Math.PI * t), 0]}
           rotation={[Math.PI / 2, 0, 0]}
         >
-          <torusGeometry args={[(r + 0.001) * Math.sin(Math.PI * t), 0.0035, 6, 40]} />
+          <Geo kind="torus" args={[(r + 0.001) * Math.sin(Math.PI * t), 0.0035, 4, 28]} />
           <meshStandardMaterial color={thread} roughness={0.8} />
         </mesh>
       ))}
@@ -332,15 +362,15 @@ function Beanie({ color }) {
   return (
     <group rotation={[-0.3, 0, 0]}>
       <mesh castShadow>
-        <sphereGeometry args={[0.252, 28, 18, 0, Math.PI * 2, 0, Math.PI * 0.45]} />
+        <Geo kind="sphere" args={[0.252, 24, 14, 0, Math.PI * 2, 0, Math.PI * 0.45]} />
         <meshStandardMaterial color={color} roughness={0.95} />
       </mesh>
       <mesh position={[0, 0.038, 0]} rotation={[Math.PI / 2, 0, 0]}>
-        <torusGeometry args={[0.243, 0.03, 10, 32]} />
+        <Geo kind="torus" args={[0.243, 0.03, 10, 32]} />
         <meshStandardMaterial color={color} roughness={0.95} />
       </mesh>
-      <mesh position={[0, 0.26, 0]} castShadow>
-        <sphereGeometry args={[0.05, 14, 12]} />
+      <mesh position={[0, 0.26, 0]}>
+        <Geo kind="sphere" args={[0.05, 14, 12]} />
         <meshStandardMaterial color="#f4f2ee" roughness={1} />
       </mesh>
     </group>
@@ -352,17 +382,17 @@ function Arm({ side, refs, mats, children }) {
   return (
     <group ref={refs.shoulder} position={[side * 0.18, 0.31, 0]}>
       <mesh material={mats.top} position={[0, -0.08, 0]} castShadow>
-        <capsuleGeometry args={[0.052, 0.1, 6, 12]} />
+        <Geo kind="capsule" args={[0.052, 0.1, 6, 12]} />
       </mesh>
       <group ref={refs.elbow} position={[0, -0.17, 0]}>
         <mesh material={mats.top} position={[0, -0.06, 0]} castShadow>
-          <capsuleGeometry args={[0.046, 0.07, 6, 12]} />
+          <Geo kind="capsule" args={[0.046, 0.07, 6, 12]} />
         </mesh>
         <mesh material={mats.topShade} position={[0, -0.115, 0]}>
-          <cylinderGeometry args={[0.044, 0.044, 0.025, 14]} />
+          <Geo kind="cylinder" args={[0.044, 0.044, 0.025, 14]} />
         </mesh>
-        <mesh material={mats.skin} position={[0, -0.155, 0]} castShadow>
-          <sphereGeometry args={[0.046, 16, 12]} />
+        <mesh material={mats.skin} position={[0, -0.155, 0]}>
+          <Geo kind="sphere" args={[0.046, 16, 12]} />
         </mesh>
         {children}
       </group>
@@ -370,7 +400,8 @@ function Arm({ side, refs, mats, children }) {
   );
 }
 
-export function Character({
+/** Memoised: Commuter re-renders on every stance change and hands a fresh `activity`. */
+export const Character = memo(function Character({
   look,
   state,
   accent,
@@ -573,11 +604,10 @@ export function Character({
       const pulse =
         state === 'waiting_on_user' || state === 'error' ? 1 + ((t * 1.2) % 1) * 0.6 : 1;
       ring.current.scale.setScalar(pulse);
-      const m = ring.current.material;
-      m.opacity =
-        state === 'waiting_on_user' || state === 'error'
-          ? (0.55 * (1.6 - pulse)) / 0.6
-          : 0.0;
+      // At opacity 0 it still cost a transparent draw call; hide it instead.
+      const active = state === 'waiting_on_user' || state === 'error';
+      ring.current.visible = active;
+      ring.current.material.opacity = active ? (0.55 * (1.6 - pulse)) / 0.6 : 0.0;
       ring.current.position.y = (seated ? floor : -STAND_HEIGHT) + 0.01;
     }
   });
@@ -603,8 +633,13 @@ export function Character({
   return (
     <group {...props}>
       {/* state ring on the floor */}
-      <mesh ref={ring} rotation={[-Math.PI / 2, 0, 0]} position={[0, floor + 0.01, 0.05]}>
-        <ringGeometry args={[0.36, 0.42, 48]} />
+      <mesh
+        ref={ring}
+        rotation={[-Math.PI / 2, 0, 0]}
+        position={[0, floor + 0.01, 0.05]}
+        visible={false}
+      >
+        <Geo kind="ring" args={[0.36, 0.42, 32]} />
         <meshBasicMaterial
           color={stateColor[state]}
           transparent
@@ -624,7 +659,7 @@ export function Character({
             rotation={[-Math.PI / 2, 0, 0]}
           >
             <mesh material={mats.pants} position={[0, -0.12, 0]} castShadow>
-              <capsuleGeometry args={[0.065, 0.2, 6, 12]} />
+              <Geo kind="capsule" args={[0.065, 0.2, 6, 12]} />
             </mesh>
             <group
               ref={(g) => void (knees.current[i] = g)}
@@ -632,17 +667,16 @@ export function Character({
               rotation={[Math.PI / 2, 0, 0]}
             >
               <mesh material={mats.pants} position={[0, -0.17, 0]} castShadow>
-                <capsuleGeometry args={[0.058, 0.2, 6, 12]} />
+                <Geo kind="capsule" args={[0.058, 0.2, 6, 12]} />
               </mesh>
               <RoundedBox
                 args={[0.1, 0.07, 0.17]}
                 radius={0.032}
                 position={[0, -0.36, 0.04]}
                 material={mats.shoe}
-                castShadow
               />
               <mesh material={mats.sole} position={[0, -0.39, 0.04]}>
-                <boxGeometry args={[0.1, 0.016, 0.165]} />
+                <Geo kind="box" args={[0.1, 0.016, 0.165]} />
               </mesh>
             </group>
           </group>
@@ -652,14 +686,14 @@ export function Character({
         {look.attire === 'thobe' && stance !== 'seated' && (
           <group position={[0, -0.12, -0.01]}>
             <mesh material={mats.robe} castShadow>
-              <cylinderGeometry args={[0.165, 0.205, 0.42, 28, 1, true]} />
+              <Geo kind="cylinder" args={[0.165, 0.205, 0.42, 20, 1, true]} />
             </mesh>
             <mesh
               material={mats.topShade}
               position={[0, -0.205, 0]}
               rotation={[Math.PI / 2, 0, 0]}
             >
-              <torusGeometry args={[0.205, 0.008, 6, 36]} />
+              <Geo kind="torus" args={[0.205, 0.008, 6, 36]} />
             </mesh>
           </group>
         )}
@@ -667,7 +701,7 @@ export function Character({
         <group ref={torso} position={[0, 0.06, -0.02]}>
           {/* body */}
           <mesh material={mats.top} position={[0, 0.17, 0]} castShadow>
-            <capsuleGeometry args={[0.165, 0.16, 8, 20]} />
+            <Geo kind="capsule" args={[0.165, 0.16, 8, 20]} />
           </mesh>
           {look.attire === 'thobe' ? (
             <>
@@ -677,7 +711,7 @@ export function Character({
                 position={[0, 0.335, 0]}
                 rotation={[Math.PI / 2, 0, 0]}
               >
-                <torusGeometry args={[0.072, 0.016, 8, 24]} />
+                <Geo kind="torus" args={[0.072, 0.016, 8, 24]} />
               </mesh>
               <RoundedBox
                 args={[0.034, 0.13, 0.012]}
@@ -688,7 +722,7 @@ export function Character({
               />
               {[0.29, 0.25, 0.21].map((y) => (
                 <mesh key={y} position={[0, y, 0.166]}>
-                  <sphereGeometry args={[0.0075, 8, 6]} />
+                  <Geo kind="sphere" args={[0.0075, 8, 6]} />
                   <meshStandardMaterial color="#c9c3b6" roughness={0.4} />
                 </mesh>
               ))}
@@ -706,9 +740,8 @@ export function Character({
                 material={mats.topShade}
                 position={[0, 0.3, -0.12]}
                 rotation={[0.5, 0, 0]}
-                castShadow
               >
-                <torusGeometry args={[0.1, 0.045, 10, 20]} />
+                <Geo kind="torus" args={[0.1, 0.045, 10, 20]} />
               </mesh>
               <RoundedBox
                 args={[0.2, 0.08, 0.04]}
@@ -718,30 +751,30 @@ export function Character({
               />
               {[-1, 1].map((s) => (
                 <mesh key={s} material={mats.white} position={[s * 0.035, 0.24, 0.158]}>
-                  <cylinderGeometry args={[0.005, 0.005, 0.08, 6]} />
+                  <Geo kind="cylinder" args={[0.005, 0.005, 0.08, 6]} />
                 </mesh>
               ))}
             </>
           )}
           {/* lanyard badge in team colour */}
           <mesh position={[0.07, 0.19, 0.165]} rotation={[0.1, 0, 0.08]}>
-            <boxGeometry args={[0.045, 0.06, 0.006]} />
+            <Geo kind="box" args={[0.045, 0.06, 0.006]} />
             <meshStandardMaterial color={accent} roughness={0.4} />
           </mesh>
 
           <Arm side={-1} refs={{ shoulder: lS, elbow: lE }} mats={mats}>
             {/* coffee on break */}
             <group ref={mug} position={[0.0, -0.17, 0.05]} visible={false}>
-              <mesh castShadow>
-                <cylinderGeometry args={[0.04, 0.035, 0.085, 18]} />
+              <mesh>
+                <Geo kind="cylinder" args={[0.04, 0.035, 0.085, 18]} />
                 <meshStandardMaterial color="#f4f2ee" roughness={0.35} />
               </mesh>
               <mesh position={[0, 0.043, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-                <circleGeometry args={[0.036, 18]} />
+                <Geo kind="circle" args={[0.036, 18]} />
                 <meshStandardMaterial color="#5b3a26" roughness={0.3} />
               </mesh>
               <mesh position={[0.045, 0.005, 0]} rotation={[0, 0, Math.PI / 2]}>
-                <torusGeometry args={[0.02, 0.006, 6, 12, Math.PI]} />
+                <Geo kind="torus" args={[0.02, 0.006, 6, 12, Math.PI]} />
                 <meshStandardMaterial color="#f4f2ee" roughness={0.35} />
               </mesh>
             </group>
@@ -750,16 +783,16 @@ export function Character({
             {/* ping-pong bat: handle in the fist, blade facing forward */}
             <group ref={bat} visible={false}>
               <mesh position={[0, -0.2, 0.01]}>
-                <cylinderGeometry args={[0.012, 0.014, 0.08, 8]} />
+                <Geo kind="cylinder" args={[0.012, 0.014, 0.08, 8]} />
                 <meshStandardMaterial color="#c9a27e" roughness={0.6} />
               </mesh>
               <group position={[0, -0.3, 0.01]} rotation={[Math.PI / 2, 0, 0]}>
-                <mesh castShadow>
-                  <cylinderGeometry args={[0.075, 0.075, 0.012, 28]} />
+                <mesh>
+                  <Geo kind="cylinder" args={[0.075, 0.075, 0.012, 28]} />
                   <meshStandardMaterial color="#d6453d" roughness={0.6} />
                 </mesh>
                 <mesh position={[0, -0.0065, 0]}>
-                  <cylinderGeometry args={[0.075, 0.075, 0.002, 28]} />
+                  <Geo kind="cylinder" args={[0.075, 0.075, 0.002, 28]} />
                   <meshStandardMaterial color="#1d1f24" roughness={0.6} />
                 </mesh>
               </group>
@@ -767,13 +800,13 @@ export function Character({
             {/* "!" paddle held up while waiting on you; extends past the hand along the arm */}
             <group ref={paddle} visible={false}>
               <mesh position={[0, -0.27, 0]}>
-                <cylinderGeometry args={[0.009, 0.009, 0.22, 8]} />
+                <Geo kind="cylinder" args={[0.009, 0.009, 0.22, 8]} />
                 <meshStandardMaterial color="#c9a27e" roughness={0.6} />
               </mesh>
               {/* billboarded so the "!" always faces the viewer */}
               <group ref={paddleFace} position={[0, -0.45, 0]}>
-                <mesh castShadow>
-                  <cylinderGeometry args={[0.125, 0.125, 0.02, 36]} />
+                <mesh>
+                  <Geo kind="cylinder" args={[0.125, 0.125, 0.02, 24]} />
                   <meshStandardMaterial
                     color={stateColor.waiting_on_user}
                     emissive={stateColor.waiting_on_user}
@@ -783,11 +816,11 @@ export function Character({
                 </mesh>
                 <group rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.0105, 0]}>
                   <mesh position={[0, 0.022, 0]}>
-                    <planeGeometry args={[0.03, 0.085]} />
+                    <Geo kind="plane" args={[0.03, 0.085]} />
                     <meshBasicMaterial color="#ffffff" />
                   </mesh>
                   <mesh position={[0, -0.05, 0]}>
-                    <circleGeometry args={[0.018, 16]} />
+                    <Geo kind="circle" args={[0.018, 16]} />
                     <meshBasicMaterial color="#ffffff" />
                   </mesh>
                 </group>
@@ -798,7 +831,7 @@ export function Character({
           {/* head */}
           <group ref={head} position={[0, 0.56, 0.01]}>
             <mesh material={mats.skin} scale={[1, 0.94, 0.96]} castShadow>
-              <sphereGeometry args={[0.235, 36, 28]} />
+              <Geo kind="sphere" args={[0.235, 28, 20]} />
             </mesh>
             {[-1, 1].map((s) => (
               <mesh
@@ -807,7 +840,7 @@ export function Character({
                 position={[s * 0.228, -0.01, 0]}
                 scale={[0.5, 0.8, 0.6]}
               >
-                <sphereGeometry args={[0.06, 14, 12]} />
+                <Geo kind="sphere" args={[0.06, 14, 12]} />
               </mesh>
             ))}
 
@@ -817,9 +850,7 @@ export function Character({
               <Hair look={look} mat={mats.hair} />
             )}
             {look.prayerCap && <PrayerCap color="#f7f5f0" />}
-            {look.beard && (
-              <mesh geometry={beardGeometry()} material={mats.beard} castShadow />
-            )}
+            {look.beard && <mesh geometry={beardGeometry()} material={mats.beard} />}
 
             {/* face */}
             <group position={[0, -0.02, 0]}>
@@ -828,10 +859,10 @@ export function Character({
                   [-1, 1].map((s) => (
                     <group key={s} position={[s * 0.082, 0, 0.205]}>
                       <mesh material={mats.eye} scale={[0.035, 0.048, 0.018]}>
-                        <sphereGeometry args={[1, 18, 14]} />
+                        <Geo kind="sphere" args={[1, 18, 14]} />
                       </mesh>
                       <mesh material={mats.white} position={[0.01, 0.016, 0.014]}>
-                        <sphereGeometry args={[0.0095, 10, 8]} />
+                        <Geo kind="sphere" args={[0.0095, 10, 8]} />
                       </mesh>
                     </group>
                   ))}
@@ -844,7 +875,7 @@ export function Character({
                     position={[s * 0.082, -0.005, 0.212]}
                     rotation={[0, 0, 0]}
                   >
-                    <torusGeometry args={[0.028, 0.0075, 8, 16, Math.PI]} />
+                    <Geo kind="torus" args={[0.028, 0.0075, 8, 16, Math.PI]} />
                   </mesh>
                 ))}
               {/* brows */}
@@ -855,7 +886,7 @@ export function Character({
                   position={[s * 0.085, 0.075 + browLift, 0.2]}
                   rotation={[0, 0, Math.PI / 2 - s * browTilt]}
                 >
-                  <capsuleGeometry args={[0.009, 0.04, 4, 8]} />
+                  <Geo kind="capsule" args={[0.009, 0.04, 4, 8]} />
                 </mesh>
               ))}
               {/* cheeks */}
@@ -866,7 +897,7 @@ export function Character({
                   position={[s * 0.135, -0.055, 0.19]}
                   rotation={[0, s * 0.55, 0]}
                 >
-                  <circleGeometry args={[0.032, 20]} />
+                  <Geo kind="circle" args={[0.032, 20]} />
                 </mesh>
               ))}
               {/* mouth */}
@@ -877,7 +908,7 @@ export function Character({
               <group position={[0, -0.02, 0.222]}>
                 {[-1, 1].map((s) => (
                   <mesh key={s} material={mats.frame} position={[s * 0.082, 0, 0]}>
-                    <torusGeometry args={[0.05, 0.0065, 8, 28]} />
+                    <Geo kind="torus" args={[0.05, 0.0065, 8, 28]} />
                   </mesh>
                 ))}
                 <mesh
@@ -885,7 +916,7 @@ export function Character({
                   position={[0, 0.005, 0]}
                   rotation={[0, 0, Math.PI / 2]}
                 >
-                  <cylinderGeometry args={[0.005, 0.005, 0.064, 6]} />
+                  <Geo kind="cylinder" args={[0.005, 0.005, 0.064, 6]} />
                 </mesh>
               </group>
             )}
@@ -897,7 +928,7 @@ export function Character({
                   rotation={[0, 0, 0]}
                   position={[0, 0.02, -0.01]}
                 >
-                  <torusGeometry args={[0.255, 0.016, 10, 36, Math.PI]} />
+                  <Geo kind="torus" args={[0.255, 0.016, 10, 36, Math.PI]} />
                 </mesh>
                 {[-1, 1].map((s) => (
                   <RoundedBox
@@ -918,7 +949,7 @@ export function Character({
               scale={[0.028, 0.04, 0.028]}
               visible={false}
             >
-              <sphereGeometry args={[1, 12, 10]} />
+              <Geo kind="sphere" args={[1, 12, 10]} />
               <meshStandardMaterial
                 color="#8ec5ff"
                 roughness={0.1}
@@ -933,11 +964,11 @@ export function Character({
       {/* thought bubble (thinking) */}
       <group ref={bubble} position={[0.3, 1.0, 0.05]} visible={false}>
         <mesh position={[-0.13, -0.17, 0]}>
-          <sphereGeometry args={[0.025, 12, 10]} />
+          <Geo kind="sphere" args={[0.025, 12, 10]} />
           <meshStandardMaterial color="#ffffff" roughness={0.3} />
         </mesh>
         <mesh position={[-0.07, -0.09, 0]}>
-          <sphereGeometry args={[0.04, 14, 12]} />
+          <Geo kind="sphere" args={[0.04, 14, 12]} />
           <meshStandardMaterial color="#ffffff" roughness={0.3} />
         </mesh>
         <RoundedBox args={[0.3, 0.16, 0.08]} radius={0.075} position={[0.08, 0.05, 0]}>
@@ -946,7 +977,7 @@ export function Character({
         {[0, 1, 2].map((i) => (
           <group key={i} position={[0.01 + i * 0.07, 0.05, 0.045]}>
             <mesh>
-              <sphereGeometry args={[0.018, 12, 10]} />
+              <Geo kind="sphere" args={[0.018, 12, 10]} />
               <meshBasicMaterial color={stateColor.thinking} toneMapped={false} />
             </mesh>
           </group>
@@ -956,7 +987,7 @@ export function Character({
       {/* red alert badge beside the head on error */}
       <group ref={alert} position={[-0.27, 0.98, 0.05]} visible={false}>
         <mesh>
-          <sphereGeometry args={[0.085, 24, 18]} />
+          <Geo kind="sphere" args={[0.085, 16, 12]} />
           <meshStandardMaterial
             color={stateColor.error}
             emissive={stateColor.error}
@@ -965,17 +996,17 @@ export function Character({
           />
         </mesh>
         <mesh position={[0, 0.018, 0.072]}>
-          <capsuleGeometry args={[0.012, 0.038, 4, 8]} />
+          <Geo kind="capsule" args={[0.012, 0.038, 4, 8]} />
           <meshBasicMaterial color="#ffffff" />
         </mesh>
         <mesh position={[0, -0.042, 0.074]}>
-          <sphereGeometry args={[0.013, 10, 8]} />
+          <Geo kind="sphere" args={[0.013, 10, 8]} />
           <meshBasicMaterial color="#ffffff" />
         </mesh>
       </group>
     </group>
   );
-}
+}, characterPropsEqual);
 
 function Mouth({ expr, mats }) {
   const y = -0.085;
@@ -988,7 +1019,7 @@ function Mouth({ expr, mats }) {
           position={[0, y + 0.012, z]}
           rotation={[0, 0, Math.PI]}
         >
-          <torusGeometry args={[0.03, 0.008, 8, 18, Math.PI]} />
+          <Geo kind="torus" args={[0.03, 0.008, 8, 18, Math.PI]} />
         </mesh>
       );
     case 'alert':
@@ -998,13 +1029,13 @@ function Mouth({ expr, mats }) {
           position={[0, y - 0.005, z]}
           scale={[0.024, 0.03, 0.01]}
         >
-          <sphereGeometry args={[1, 14, 12]} />
+          <Geo kind="sphere" args={[1, 14, 12]} />
         </mesh>
       );
     case 'worried':
       return (
         <mesh material={mats.mouth} position={[0, y - 0.018, z]}>
-          <torusGeometry args={[0.026, 0.007, 8, 18, Math.PI]} />
+          <Geo kind="torus" args={[0.026, 0.007, 8, 18, Math.PI]} />
         </mesh>
       );
     case 'curious':
@@ -1014,13 +1045,13 @@ function Mouth({ expr, mats }) {
           position={[0.02, y, z]}
           rotation={[0, 0, Math.PI / 2 + 0.25]}
         >
-          <capsuleGeometry args={[0.007, 0.022, 4, 8]} />
+          <Geo kind="capsule" args={[0.007, 0.022, 4, 8]} />
         </mesh>
       );
     case 'focused':
       return (
         <mesh material={mats.mouth} position={[0, y, z]} rotation={[0, 0, Math.PI / 2]}>
-          <capsuleGeometry args={[0.0065, 0.026, 4, 8]} />
+          <Geo kind="capsule" args={[0.0065, 0.026, 4, 8]} />
         </mesh>
       );
     default:
@@ -1030,7 +1061,7 @@ function Mouth({ expr, mats }) {
           position={[0, y + 0.006, z]}
           rotation={[0, 0, Math.PI]}
         >
-          <torusGeometry args={[0.022, 0.007, 8, 18, Math.PI]} />
+          <Geo kind="torus" args={[0.022, 0.007, 8, 18, Math.PI]} />
         </mesh>
       );
   }

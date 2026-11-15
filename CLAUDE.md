@@ -287,7 +287,9 @@ under `services/office/` is electron-free and tested through `CLAUDE_HOME` /
   `officeStart` (`office-start`), which starts the engine once and returns the
   current Office. From then on it stays warm until `before-quit` calls
   `engine.stop()`, and switching sections never stops it. Snapshots arrive on
-  `office-update`. Each 1 s poll (a setTimeout chain) runs the Claude registry scan,
+  `office-update`, but only for renderers whose Office page is mounted:
+  `office-start` subscribes the caller and the page's unmount sends
+  `office-unwatch` (`officeUnwatch`). Each 1 s poll (a setTimeout chain) runs the Claude registry scan,
   then the Antigravity scan, then subagent discovery, then a `tick`. `agSnapshot` is
   assigned before its events dispatch because `tailAntigravity` reads the transcript
   path from it.
@@ -298,7 +300,26 @@ under `services/office/` is electron-free and tested through `CLAUDE_HOME` /
   pushes a full snapshot every second, re-plans the floor, and keeps the shadow map
   re-rendering, because `ShadowBudget` is keyed on the Office's identity. Put new
   derivations in `computeOfficeState`, which commits a session only when a field
-  flips. The tick test asserts `toBe`, so keep it.
+  flips. The tick test asserts `toBe`, so keep it. Transcript lines obey it too:
+  `processTranscriptLine` and its subagent / Antigravity siblings go through
+  `unlessUnchanged`, because most lines (attachments, API-request records, mode
+  lines, a re-appended identical `ai-title`) change nothing. Without it every one
+  of them pushed a snapshot.
+- ⚠️ **Tail-only replay.** Real transcripts reach 200 MB and the tailer runs in the
+  main process. A cold start therefore replays only the last `REPLAY_BYTES` (4 MiB),
+  dropping the line the cut lands in, and every read goes in `CHUNK_BYTES` slices
+  with an event-loop turn between them. Reading whole files froze the app for
+  ~300 ms and spiked RSS to ~900 MB with seven live sessions. Everything the Office
+  derives can be recovered from the end, because Claude Code re-appends `ai-title`
+  and `last-prompt` all through a transcript. Don't add a derivation that needs the
+  file's start.
+- **Split messages.** Claude Code writes one assistant message as one line per
+  content block (thinking, text, tool_use). A line without a tool call is therefore
+  not the end of a turn; `assistantTurn` in `reducer.cjs` decides that from
+  `stop_reason`. Main transcripts stamp every line with the message's final value,
+  while subagent transcripts leave it `null` until the last line. Both the
+  idle/thinking state and the engine's "subagent finished" check use it. Reading
+  "no tool_use" as finished ended live interns mid-task.
 - **`ended` linger.** `session_ended` keeps the session as `ended` (tool and interns
   cleared, tailers stopped at once). The first tick stamps `endedAt`, and the first
   tick `ENDED_LINGER_MS` later removes it. Ended sessions are skipped by the waiting

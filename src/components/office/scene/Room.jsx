@@ -1,4 +1,4 @@
-import { useMemo, useRef } from 'react';
+import { memo, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
 import { RoundedBox } from '@react-three/drei';
@@ -15,6 +15,7 @@ import {
 import { COFFEE_TABLE, LOUNGE } from '../../../lib/office/scene/layout.js';
 import { HighTable, PlayZone } from './PlayZone.jsx';
 import { StaticBatch } from './StaticBatch.jsx';
+import { roomLayoutKey } from '../../../lib/office/scene/memo.js';
 
 // ── Room shell ───────────────────────────────────────────────
 // Floor, walls, nameplate and the culture pieces: the social corner — sofa,
@@ -565,21 +566,32 @@ function Arcade(props) {
   );
 }
 
+const LED_COUNT = 24;
+const LED_OFF = new THREE.Color('#1f2a22');
+const LED_GREEN = new THREE.Color('#22c55e');
+const LED_AMBER = new THREE.Color('#f59e0b');
+
 function ServerRack(props) {
   const leds = useRef(null);
-  const COUNT = 24;
+  const COUNT = LED_COUNT;
+  // Last on/off per LED, so the colour buffer is only re-uploaded when one flips.
+  const lit = useRef(new Array(COUNT).fill(null));
   useFrame(({ clock }) => {
     const m = leds.current;
     if (!m) return;
-    const c = new THREE.Color();
+    let changed = false;
     for (let i = 0; i < COUNT; i++) {
       const on = Math.sin(clock.elapsedTime * (2 + (i % 5)) + i * 1.7) > 0.2;
-      m.setColorAt(i, c.set(on ? (i % 7 === 0 ? '#f59e0b' : '#22c55e') : '#1f2a22'));
+      if (lit.current[i] === on) continue;
+      lit.current[i] = on;
+      m.setColorAt(i, on ? (i % 7 === 0 ? LED_AMBER : LED_GREEN) : LED_OFF);
+      changed = true;
     }
-    if (m.instanceColor) m.instanceColor.needsUpdate = true;
+    if (changed && m.instanceColor) m.instanceColor.needsUpdate = true;
   });
   const setLeds = (m) => {
     leds.current = m;
+    lit.current.fill(null); // a new mesh starts with no colours
     if (!m) return;
     const mat = new THREE.Matrix4();
     for (let i = 0; i < COUNT; i++) {
@@ -719,7 +731,12 @@ function Rug({ w, d, ...props }) {
  * Back-wall pieces are laid out left to right and dropped when the room is too
  * narrow.
  */
-export function Room({ plan, theme }) {
+/** The shell only redraws when the room's layout does; plan is new every snapshot. */
+const roomPropsEqual = (a, b) =>
+  a.theme === b.theme &&
+  roomLayoutKey(a.plan, a.theme) === roomLayoutKey(b.plan, b.theme);
+
+export const Room = memo(function Room({ plan, theme }) {
   const bz = plan.minZ; // back wall interior face
   const lx = plan.minX; // left wall interior face
   const right = plan.maxX + 1;
@@ -794,7 +811,7 @@ export function Room({ plan, theme }) {
   });
 
   const sideLen = plan.maxZ + 1 - bz;
-  const layout = `${theme.kind},${lx},${right},${bz},${plan.maxZ},${plan.amenities.zones.map((z) => z.kind).join()}`;
+  const layout = roomLayoutKey(plan, theme);
 
   return (
     <StaticBatch version={layout}>
@@ -829,4 +846,4 @@ export function Room({ plan, theme }) {
       </group>
     </StaticBatch>
   );
-}
+}, roomPropsEqual);

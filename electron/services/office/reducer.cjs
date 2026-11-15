@@ -31,11 +31,64 @@ function truncate(str, len) {
 }
 
 /**
+ * Whether an assistant transcript line ends the model's turn. Claude Code
+ * writes one message as several lines, one per content block (thinking, then
+ * text, then tool_use), so a line without a tool call is not, by itself, the
+ * end. Main transcripts stamp every line with the message's final stop_reason;
+ * subagent transcripts leave it null until the last line. Hence:
+ * - a tool_use block, a null stop_reason or 'tool_use' → 'continues';
+ * - a thinking-only line → 'continues' (the answer text follows);
+ * - any other stop_reason ('end_turn', 'stop_sequence', 'max_tokens') → 'ended';
+ * - no stop_reason key at all (older format) → 'unknown', read as ended the
+ *   way the source did.
+ * @param {*} message
+ * @returns {'continues' | 'ended' | 'unknown'}
+ */
+function assistantTurn(message) {
+  const content = Array.isArray(message?.content) ? message.content : [];
+  if (content.some((c) => c?.type === 'tool_use')) return 'continues';
+  const stop = message?.stop_reason;
+  if (stop === undefined) return 'unknown';
+  if (stop === null || stop === 'tool_use') return 'continues';
+  if (content.length > 0 && content.every((c) => c?.type === 'thinking'))
+    return 'continues';
+  return 'ended';
+}
+
+/**
+ * `next` when it differs from `prev` in any own field, else `prev` itself, so
+ * a transcript line that changes nothing (most of them: attachments, API
+ * request records, mode lines, a re-appended identical title) keeps the
+ * Office reference and costs no snapshot push or scene re-render.
+ * @template T
+ * @param {T} prev
+ * @param {T} next
+ * @returns {T}
+ */
+function unlessUnchanged(prev, next) {
+  const a = /** @type {Record<string, unknown>} */ (prev);
+  const b = /** @type {Record<string, unknown>} */ (next);
+  const keys = Object.keys(b);
+  if (keys.length !== Object.keys(a).length) return next;
+  for (const k of keys) if (a[k] !== b[k]) return next;
+  return prev;
+}
+
+/**
  * @param {Session} session
  * @param {*} line
  * @returns {Session}
  */
 function processTranscriptLine(session, line) {
+  return unlessUnchanged(session, applyTranscriptLine(session, line));
+}
+
+/**
+ * @param {Session} session
+ * @param {*} line
+ * @returns {Session}
+ */
+function applyTranscriptLine(session, line) {
   const next = { ...session };
 
   if (line.gitBranch) {
@@ -80,7 +133,8 @@ function processTranscriptLine(session, line) {
         };
       } else {
         if (!next.hookWaiting) {
-          next.state = 'idle';
+          // A thinking or text block mid-message: the model is still going.
+          next.state = assistantTurn(line.message) === 'continues' ? 'thinking' : 'idle';
         }
         next.currentTool = undefined;
         next.toolStartedAt = undefined;
@@ -161,6 +215,15 @@ function processTranscriptLine(session, line) {
  * @returns {Subagent}
  */
 function processSubagentTranscriptLine(subagent, line) {
+  return unlessUnchanged(subagent, applySubagentTranscriptLine(subagent, line));
+}
+
+/**
+ * @param {Subagent} subagent
+ * @param {*} line
+ * @returns {Subagent}
+ */
+function applySubagentTranscriptLine(subagent, line) {
   const next = { ...subagent };
   const content = line.message?.content;
   const timestamp = line.timestamp ? new Date(line.timestamp).getTime() : Date.now();
@@ -173,7 +236,7 @@ function processSubagentTranscriptLine(subagent, line) {
         next.currentTool = toolUse.name;
         next.toolStartedAt = timestamp;
       } else {
-        next.state = 'idle';
+        next.state = assistantTurn(line.message) === 'continues' ? 'thinking' : 'idle';
         next.currentTool = undefined;
         next.toolStartedAt = undefined;
       }
@@ -239,6 +302,15 @@ function userRequest(text) {
  * @returns {Session}
  */
 function processAntigravityStep(session, step) {
+  return unlessUnchanged(session, applyAntigravityStep(session, step));
+}
+
+/**
+ * @param {Session} session
+ * @param {*} step
+ * @returns {Session}
+ */
+function applyAntigravityStep(session, step) {
   if (!step || typeof step !== 'object') return session;
   const parsed = Date.parse(step.created_at);
   const timestamp = Number.isNaN(parsed) ? Date.now() : parsed;
@@ -544,16 +616,13 @@ function reduce(office, event) {
     case 'transcript_line': {
       const session = office.sessions[event.pid];
       if (session) {
-        next = {
-          ...office,
-          sessions: {
-            ...office.sessions,
-            [event.pid]:
-              session.agent === 'antigravity'
-                ? processAntigravityStep(session, event.line)
-                : processTranscriptLine(session, event.line),
-          },
-        };
+        const updated =
+          session.agent === 'antigravity'
+            ? processAntigravityStep(session, event.line)
+            : processTranscriptLine(session, event.line);
+        // Most lines change nothing; keep the Office so no snapshot is pushed.
+        if (updated === session) return office;
+        next = { ...office, sessions: { ...office.sessions, [event.pid]: updated } };
       }
       break;
     }
@@ -609,7 +678,9 @@ function reduce(office, event) {
       const session = office.sessions[event.pid];
       if (session) {
         const subagent = session.subagents[event.subagentId];
-        if (subagent) {
+        const updated = subagent && processSubagentTranscriptLine(subagent, event.line);
+        if (updated === subagent) return office;
+        if (updated) {
           next = {
             ...office,
             sessions: {
@@ -618,7 +689,7 @@ function reduce(office, event) {
                 ...session,
                 subagents: {
                   ...session.subagents,
-                  [event.subagentId]: processSubagentTranscriptLine(subagent, event.line),
+                  [event.subagentId]: updated,
                 },
               },
             },
@@ -700,4 +771,4 @@ function emptyOffice() {
   };
 }
 
-module.exports = { reduce, emptyOffice, computeOfficeState };
+module.exports = { reduce, emptyOffice, computeOfficeState, assistantTurn };

@@ -3,15 +3,21 @@
 // demand frameloop and only invalidates when something can move). Extracted
 // from the source scene so they are testable without a DOM/WebGL environment.
 
-/** Agent States whose characters animate continuously. */
-export const ACTIVE_STATES = new Set(['working', 'thinking', 'waiting_on_user', 'error']);
+/**
+ * Agent States whose characters move fast enough to need brisk frames: typing,
+ * the thought bubble, the error head-shake. Waiting on you is deliberately not
+ * one of them — its wave and ring pulse read fine at the calm rate, and an
+ * agent can sit waiting for hours, which would otherwise hold the canvas at
+ * 30 fps the whole time.
+ */
+export const BRISK_STATES = new Set(['working', 'thinking', 'error']);
 
-/** Whether any session (or any of its subagents) is in an active state. */
+/** Whether any session (or any of its subagents) is in a brisk state. */
 export function isBusy(office) {
   return Object.values(office.sessions).some(
     (s) =>
-      ACTIVE_STATES.has(s.state) ||
-      Object.values(s.subagents ?? {}).some((a) => ACTIVE_STATES.has(a.state))
+      BRISK_STATES.has(s.state) ||
+      Object.values(s.subagents ?? {}).some((a) => BRISK_STATES.has(a.state))
   );
 }
 

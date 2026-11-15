@@ -29,7 +29,7 @@
 
 const { join } = require('node:path');
 const { readdir, readFile, stat } = require('node:fs/promises');
-const { reduce, emptyOffice } = require('./reducer.cjs');
+const { reduce, emptyOffice, assistantTurn } = require('./reducer.cjs');
 const scanner = require('./scanner.cjs');
 const antigravity = require('./antigravity.cjs');
 const { getProjectKey } = require('./projectKey.cjs');
@@ -301,9 +301,11 @@ async function discoverSubagents(session) {
           line,
         });
 
+        // Only the line that really ends the turn: a message is written as one
+        // line per content block, so a thinking or text line on its way to a
+        // tool call is not the end (see assistantTurn).
         if (line.type === 'assistant' && Array.isArray(line.message?.content)) {
-          const hasToolUse = line.message.content.some((c) => c.type === 'tool_use');
-          if (!hasToolUse) {
+          if (assistantTurn(line.message) !== 'continues') {
             dispatch({ type: 'subagent_ended', pid: session.pid, subagentId });
             tailer.stop();
             subagentTailers.delete(key);

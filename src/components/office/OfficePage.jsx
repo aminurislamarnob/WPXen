@@ -109,6 +109,8 @@ export default function OfficePage() {
     return () => {
       mounted = false;
       off();
+      // Stop the main process sending this renderer snapshots nobody reads.
+      window.electronAPI.officeUnwatch?.();
     };
   }, []);
 

@@ -172,3 +172,14 @@ describe('getProjectKey', () => {
     expect(await getProjectKey(repo)).toBe('storefront');
   });
 });
+
+describe('getProjectKey caching', () => {
+  it('shares one lookup per cwd', () => {
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'wpxen-key-'));
+    try {
+      expect(getProjectKey(cwd)).toBe(getProjectKey(cwd));
+    } finally {
+      fs.rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+});

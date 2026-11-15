@@ -301,6 +301,43 @@ describe('engine subagent discovery', () => {
     expect(subagents()['xyz']).toBeUndefined();
   });
 
+  it('keeps a subagent through the thinking and text lines a message is split into', async () => {
+    engine.__setDeps({ pollIntervalMs: 25, coalesceMs: 5 });
+    liveSession();
+    // Claude Code writes one message per content block; subagent transcripts
+    // leave stop_reason null until the message's last line.
+    const block = (content, stop_reason) => ({
+      type: 'assistant',
+      uuid: `a-${Math.random()}`,
+      timestamp: new Date().toISOString(),
+      message: { content, stop_reason },
+    });
+    writeSubagent('xyz', [
+      block([{ type: 'thinking', thinking: 'plan' }], null),
+      block([{ type: 'text', text: 'Looking around' }], null),
+      block([{ type: 'tool_use', name: 'Grep' }], 'tool_use'),
+    ]);
+
+    engine.start();
+    await until(() => subagents()['xyz']?.state === 'working');
+    expect(subagents()['xyz'].currentTool).toBe('Grep');
+
+    // A thinking-only line even when it carries end_turn: the answer follows.
+    fs.appendFileSync(
+      path.join(subagentsDir, 'agent-xyz.jsonl'),
+      JSON.stringify(block([{ type: 'thinking', thinking: 'wrap up' }], 'end_turn')) +
+        '\n'
+    );
+    await sleep(100);
+    expect(subagents()['xyz']).toBeDefined();
+
+    fs.appendFileSync(
+      path.join(subagentsDir, 'agent-xyz.jsonl'),
+      JSON.stringify(block([{ type: 'text', text: 'Done' }], 'end_turn')) + '\n'
+    );
+    await until(() => !subagents()['xyz']);
+  });
+
   it('does not rediscover the interns of a session lingering as ended', async () => {
     const tailed = [];
     engine.__setDeps({
