@@ -334,41 +334,58 @@ app.on('before-quit', (e) => {
   // mid-edit, so a live Session is always confirmed. Otherwise ask only when
   // WPXen's own services would stop (quitPrompt.cjs).
   const agents = require('./services/agents.cjs');
+  const quitPrompt = require('./services/quitPrompt.cjs');
   let agentSiteNames = [];
   const keepAgentsRunning =
     getSetting('agents.keepRunningOnQuit') && !agents.getHostStatus().fallback;
-  if (!keepAgentsRunning && agents.hasActiveSessions()) {
+  const liveAgentCount = agents.activeAgentCount();
+  if (!keepAgentsRunning && liveAgentCount > 0) {
     const sitesById = new Map((store?.get('sites', []) || []).map((s) => [s.id, s.name]));
     agentSiteNames = agents.activeSiteIds().map((id) => sitesById.get(id) || id);
   }
-  const confirmation = require('./services/quitPrompt.cjs').quitConfirmation({
+  const confirmation = quitPrompt.quitConfirmation({
     confirmOnQuit: getSetting('app.confirmOnQuit'),
+    keepRunningOnQuit: keepAgentsRunning,
+    liveAgentCount,
     agentSiteNames,
     procStatus: require('./services/procman.cjs').statusAll(),
   });
+  let action = 'keep-and-quit';
   if (confirmation) {
-    const names = confirmation.names.join(', ');
-    const choice = dialog.showMessageBoxSync(
-      mainWindow,
-      confirmation.kind === 'agents'
-        ? {
-            type: 'warning',
-            buttons: ['Quit Anyway', 'Cancel'],
-            defaultId: 1,
-            cancelId: 1,
-            message: 'An agent is still running.',
-            detail: `Agents are running in: ${names}. Quitting will stop them.`,
-          }
-        : {
-            type: 'question',
-            buttons: ['Quit', 'Cancel'],
-            defaultId: 1,
-            cancelId: 1,
-            message: 'Quit WPXen?',
-            detail: `This stops ${names}, taking your local sites offline. You can turn this confirmation off in Settings → General.`,
-          }
-    );
-    if (choice === 1) {
+    let dialogOpts;
+    if (confirmation.kind === 'agents-keep-running') {
+      dialogOpts = {
+        type: 'question',
+        buttons: confirmation.buttons,
+        defaultId: confirmation.defaultId,
+        cancelId: confirmation.cancelId,
+        message: confirmation.message,
+        detail: confirmation.detail,
+      };
+    } else if (confirmation.kind === 'agents') {
+      const names = confirmation.names.join(', ');
+      dialogOpts = {
+        type: 'warning',
+        buttons: ['Quit Anyway', 'Cancel'],
+        defaultId: 1,
+        cancelId: 1,
+        message: 'An agent is still running.',
+        detail: `Agents are running in: ${names}. Quitting will stop them.`,
+      };
+    } else {
+      const names = confirmation.names.join(', ');
+      dialogOpts = {
+        type: 'question',
+        buttons: ['Quit', 'Cancel'],
+        defaultId: 1,
+        cancelId: 1,
+        message: 'Quit WPXen?',
+        detail: `This stops ${names}, taking your local sites offline. You can turn this confirmation off in Settings → General.`,
+      };
+    }
+    const choice = dialog.showMessageBoxSync(mainWindow, dialogOpts);
+    action = quitPrompt.quitAction(choice, confirmation);
+    if (action === 'cancel') {
       e.preventDefault();
       return;
     }
@@ -378,7 +395,7 @@ app.on('before-quit', (e) => {
   quitCleanupDone = true;
 
   try {
-    agents.shutdownAll();
+    agents.shutdownAll({ forceStop: action === 'stop-and-quit' });
   } catch {}
   try {
     require('./services/browser.cjs').unregisterAll();

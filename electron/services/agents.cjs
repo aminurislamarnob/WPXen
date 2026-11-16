@@ -2198,6 +2198,15 @@ function hasActiveSessions() {
   return false;
 }
 
+// Count of live Site Sessions (excluding Floating Workspace terminals).
+function activeAgentCount() {
+  let count = 0;
+  for (const s of sessions.values()) {
+    if (!s.exited && s.scope !== 'floating') count++;
+  }
+  return count;
+}
+
 // Distinct Site ids that have a live Session — for the quit-confirmation dialog.
 function activeSiteIds() {
   const ids = new Set();
@@ -2531,6 +2540,7 @@ module.exports = {
   getBuffer,
   chatSnapshot,
   hasActiveSessions,
+  activeAgentCount,
   activeSiteIds,
   stopAll,
   __setDeps,

@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   PROTOCOL_VERSION,
+  MAX_IDLE_MS,
   createSessionHost,
   parseClientMessage,
   parseHostMessage,
@@ -339,6 +340,63 @@ describe('Session Host server and client (#230)', () => {
       });
     } finally {
       await client2.close();
+    }
+  });
+
+  it('stops all Sessions and exits after 24 hours with no client connected, and a client connecting resets the clock (#234)', async () => {
+    expect(MAX_IDLE_MS).toBe(24 * 60 * 60 * 1000);
+
+    const idleSock = path.join(tmp, 'wpxen-idle-24h.sock');
+    const idlePtys = [];
+    let idleClock = 1_700_000_000_000;
+    let idleExited = 0;
+    let scheduledTimer = null;
+
+    const idleHost = createSessionHost({
+      socketPath: idleSock,
+      appVersion: '0.6.3',
+      spawnPty: fakePtyFactory(idlePtys),
+      now: () => idleClock,
+      setTimeoutFn: (fn, ms) => {
+        scheduledTimer = { fn, ms, cleared: false };
+        return scheduledTimer;
+      },
+      clearTimeoutFn: (t) => {
+        if (t) t.cleared = true;
+      },
+      onExit: () => {
+        idleExited++;
+      },
+    });
+    await idleHost.start();
+
+    try {
+      const c1 = createSessionHostClient({ socketPath: idleSock });
+      await c1.start({ sessionId: 's-24h', file: '/bin/zsh', cwd: tmp });
+      await c1.close();
+
+      await until(() => scheduledTimer && !scheduledTimer.cleared);
+      expect(scheduledTimer.ms).toBe(MAX_IDLE_MS);
+
+      // Advance 20 hours, then a second client connects and disconnects -> resets the 24h clock.
+      idleClock += 20 * 60 * 60 * 1000;
+      const c2 = createSessionHostClient({ socketPath: idleSock });
+      await c2.hello();
+      expect(scheduledTimer.cleared).toBe(true);
+      await c2.close();
+
+      await until(() => scheduledTimer && !scheduledTimer.cleared);
+      expect(idlePtys[0].kill).not.toHaveBeenCalled();
+      expect(idleExited).toBe(0);
+
+      // Advance 24 hours with no client connected -> stops all Sessions and exits.
+      idleClock += MAX_IDLE_MS;
+      scheduledTimer.fn();
+
+      await until(() => idleExited === 1);
+      expect(idlePtys[0].kill).toHaveBeenCalledWith('SIGTERM');
+    } finally {
+      await idleHost.close();
     }
   });
 });
