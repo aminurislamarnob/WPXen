@@ -67,6 +67,12 @@ const SETTINGS = {
 
   // ── PHP ──────────────────────────────────────────────────────────────────
   'php.defaultVersion': { type: 'string', default: '' },
+  // Daily `brew update` + `brew outdated` for installed PHP versions
+  // (services/phpUpdates.cjs). It only finds updates; installing one is
+  // still a click on the PHP page.
+  'php.checkForUpdates': { type: 'bool', default: true },
+  // A native notification once per new PHP release the check finds.
+  'php.updateNotifications': { type: 'bool', default: true },
 
   // ── App ──────────────────────────────────────────────────────────────────
   'app.startAtLogin': { type: 'bool', default: false },

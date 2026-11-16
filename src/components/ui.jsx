@@ -62,6 +62,20 @@ export function SectionLabel({ children, right }) {
   );
 }
 
+// A loading placeholder bar. Size it with classes; it pulses unless the
+// system asks for reduced motion. Compose skeletons from the real Card / Row
+// with Bones as their content, so padding and dividers match what replaces
+// them and nothing jumps when the data lands.
+export function Bone({ className = '', style }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={`block rounded-md bg-muted motion-safe:animate-pulse ${className}`}
+      style={style}
+    />
+  );
+}
+
 // One row: [icon tile] label/sublabel ......... controls [chevron]
 // Rows after the first draw a hairline divider (via CSS sibling rule).
 export function Row({

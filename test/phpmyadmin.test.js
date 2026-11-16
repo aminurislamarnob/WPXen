@@ -28,7 +28,13 @@ describe('getUrl', () => {
 
 describe('DB_NAME_RE (the gate in front of getUrl)', () => {
   it('accepts the names WPXen generates', () => {
-    for (const name of ['wp_site', 'wpxen_blog1', 'A_b_9', 'x'.repeat(64)]) {
+    for (const name of [
+      'wp_site',
+      'wpxen_blog1',
+      'A_b_9',
+      'x'.repeat(64),
+      'seco-system',
+    ]) {
       expect(DB_NAME_RE.test(name)).toBe(true);
     }
   });
@@ -44,6 +50,8 @@ describe('DB_NAME_RE (the gate in front of getUrl)', () => {
       'foo`',
       '',
       'x'.repeat(65),
+      '-x', // read as an option when passed to mysqldump
+      '--all-databases',
     ]) {
       expect(DB_NAME_RE.test(name)).toBe(false);
     }

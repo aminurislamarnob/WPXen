@@ -46,7 +46,10 @@ const REGISTRY = [
     cmd: 'claude --dangerously-skip-permissions',
     install: 'npm install -g @anthropic-ai/claude-code',
     installer: { kind: 'brew', name: 'claude-code', cask: true },
-    sessionIdFlag: '--session-id',
+    // A fresh Session opens exactly as typing `claude` would — no
+    // `--session-id` — and its conversation id is read afterwards from
+    // Claude's own ~/.claude/sessions/<pid>.json (claudeRegistry.cjs).
+    sessionRegistry: true,
     resumeFlag: '--resume',
     chat: 'claude',
     ask: { kind: 'claude-digits' },
@@ -376,7 +379,7 @@ function listAgents({ all = false, shell = true } = {}) {
         // Install button off this and branches on `kind` for its wording.
         installer: a.installer ? { ...a.installer } : null,
         promptFlag: a.promptFlag || null,
-        sessionIdFlag: a.sessionIdFlag || null,
+        sessionRegistry: !!a.sessionRegistry,
         resumeFlag: a.resumeFlag || null,
         models: a.models ? a.models.map((m) => ({ ...m })) : null,
         chat: a.chat || null,
@@ -432,6 +435,10 @@ const deps = {
   shellEnv: () => resolveShellEnv(),
   userShell: () => getUserShell(),
   homedir: () => os.homedir(),
+  // Claude Code's per-process registry (see claudeRegistry.cjs): the process
+  // table, and the sessionId one pid registered.
+  listProcesses: () => require('./claudeRegistry.cjs').listProcesses(),
+  readClaudeSessionId: (pid) => require('./claudeRegistry.cjs').readSessionId(pid),
   // The bin dir of a Site's PHP version, or null. php.cjs required lazily
   // like brew.cjs above.
   sitePhpBin: (site) => {
@@ -914,7 +921,7 @@ function launch({
   handoffFrom = null,
   handoffFile = null,
   // Resume a pinned transcript in a new Session: the Agent keeps appending
-  // to the same transcript file, so no fresh --session-id is typed.
+  // to the same transcript file.
   resume = null,
   resumeFrom = null,
 }) {
@@ -940,13 +947,10 @@ function launch({
     .replace(/\s*[\r\n]+\s*/g, ' ')
     .trim();
 
-  const transcriptId = resume || (agent.sessionIdFlag ? randomUUID() : undefined);
+  // A fresh launch types no session id; the pin arrives from the registry.
+  const transcriptId = resume || undefined;
   let typed = resolved.command;
-  if (resume) {
-    typed += ` ${agent.resumeFlag} ${resume}`;
-  } else if (transcriptId) {
-    typed += ` ${agent.sessionIdFlag} ${transcriptId}`;
-  }
+  if (resume) typed += ` ${agent.resumeFlag} ${resume}`;
   if (line) {
     typed += ` ${agent.promptFlag ? agent.promptFlag + ' ' : ''}${shellQuote(line)}`;
   }
@@ -977,6 +981,7 @@ function launch({
       handoffFile,
       resumeFrom,
       transcriptId,
+      pinFromRegistry: !!agent.sessionRegistry,
       chat: agent.chat || null,
       ask: agent.ask || null,
     },
@@ -1167,8 +1172,11 @@ function startSession({ cwd, command, meta, failLabel, phpBinDir = null }) {
     }
   });
 
+  if (meta.pinFromRegistry) startRegistryPin(session);
+
   term.onExit(({ exitCode }) => {
     session.exited = true;
+    stopRegistryPin(session);
     session.exitCode = exitCode;
     session.tracker.exit(exitCode);
     deliverAlerts(session);
@@ -1182,6 +1190,57 @@ function startSession({ cwd, command, meta, failLabel, phpBinDir = null }) {
 
   emitChange({ immediate: true });
   return { ok: true, sessionId };
+}
+
+// Learn which Claude conversation the Session is running from Claude's own
+// registry: find the Claude process under this pty, then keep re-reading its
+// entry so a /clear moves the pin with it. Until the first id arrives the
+// Session is `transcriptPending`, and the chat view waits rather than guessing
+// a sibling's transcript by recency. Once found, a tick is one small file
+// read; the process table is only walked again when that pid's entry goes
+// (Claude exited, maybe to be started again in the same shell). The last id
+// is kept after Claude exits, so Resume still has it.
+const REGISTRY_PIN_MS = 1500;
+
+function startRegistryPin(session) {
+  if (session.transcriptId == null) session.transcriptPending = true;
+  let busy = false;
+  const tick = async () => {
+    if (busy || session.exited || !sessions.has(session.sessionId)) return;
+    busy = true;
+    try {
+      let id = session.claudePid ? deps.readClaudeSessionId(session.claudePid) : null;
+      if (!id) {
+        session.claudePid = null;
+        const rootPid = session.pty?.pid;
+        if (!rootPid) return;
+        const table = await deps.listProcesses();
+        const { descendantPids } = require('./claudeRegistry.cjs');
+        for (const pid of descendantPids(rootPid, table)) {
+          id = deps.readClaudeSessionId(pid);
+          if (id) {
+            session.claudePid = pid;
+            break;
+          }
+        }
+      }
+      if (id && id !== session.transcriptId) {
+        session.transcriptId = id;
+        session.transcriptPending = false;
+        emitChange({ immediate: true });
+      }
+    } catch {
+      // try again next tick
+    } finally {
+      busy = false;
+    }
+  };
+  session.pinTimer = setInterval(tick, REGISTRY_PIN_MS);
+}
+
+function stopRegistryPin(session) {
+  if (session.pinTimer) clearInterval(session.pinTimer);
+  session.pinTimer = null;
 }
 
 // Bind a Terminal Window to its Session and replay the ring buffer (Q9). Setting
@@ -1502,6 +1561,7 @@ function stop(sessionId) {
       }
     }, 3000);
   }
+  stopRegistryPin(session);
   sessions.delete(sessionId);
   notifier.forget(sessionId);
   require('./chatImages.cjs')
@@ -1573,7 +1633,8 @@ function openChat(sessionId, viewerId) {
     // Agents without a session-id flag write their transcript after the
     // first message, and a pinned transcript doesn't exist until the first
     // prompt either — keep locating until one shows up.
-    if (agent.lateBind || session.transcriptId) pendChatLocate(sessionId, viewerId);
+    if (agent.lateBind || session.transcriptId || session.transcriptPending)
+      pendChatLocate(sessionId, viewerId);
     return;
   }
   if (!session.transcriptId) claimedTranscripts.set(transcriptPath, sessionId);
@@ -1626,7 +1687,7 @@ function openChat(sessionId, viewerId) {
   });
   // The file can go between locating and opening it (a moved Site, a
   // cleared conversation): keep locating instead of failing the IPC call.
-  if (!opened && (agent.lateBind || session.transcriptId)) {
+  if (!opened && (agent.lateBind || session.transcriptId || session.transcriptPending)) {
     claimedTranscripts.delete(transcriptPath);
     pendChatLocate(sessionId, viewerId);
   }
@@ -1658,6 +1719,8 @@ function claimHeld(owner, sessionId) {
 }
 
 function locateChatTranscript(sessionId, session) {
+  // Claude hasn't registered its conversation yet: recency would guess.
+  if (session.transcriptPending && !session.transcriptId) return null;
   const exclude = new Set();
   if (!session.transcriptId) {
     for (const [transcriptPath, owner] of claimedTranscripts) {

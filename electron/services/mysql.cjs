@@ -1,5 +1,6 @@
 'use strict';
 
+const { DB_NAME_RE } = require('./validation.cjs');
 const { execFileSync, execFile, spawn } = require('child_process');
 const { promisify } = require('util');
 const { Transform } = require('stream');
@@ -199,11 +200,12 @@ function execQuery(sql, opts = {}) {
     .trim();
 }
 
-// A MySQL identifier we're willing to interpolate into SQL. Names are generated
-// from a validated slug ([a-z0-9_]); reject anything else so a stored/edited
-// value can never smuggle a backtick and break out of the identifier quoting.
+// A MySQL identifier we're willing to interpolate into SQL. The rule is
+// validation.cjs's DB_NAME_RE (see there for why a hyphen is safe); anything
+// else is rejected so a stored/edited value can never smuggle a backtick and
+// break out of the identifier quoting.
 function assertSafeDbName(dbName) {
-  if (typeof dbName !== 'string' || !/^[a-zA-Z0-9_]{1,64}$/.test(dbName)) {
+  if (typeof dbName !== 'string' || !DB_NAME_RE.test(dbName)) {
     throw new Error(`Unsafe database name: ${dbName}`);
   }
   return dbName;

@@ -18,6 +18,8 @@
 //     readyTimeoutMs,       // how long to poll readyProbe (default 10s)
 //     conflictProbe,        // optional async () => bool: something already running?
 //     takeover,             // optional async fn to clear an external instance
+//     describeConflict,     // optional async () => string: the error when the
+//                           //   other instance stays (who it is, what to do)
 //     preSpawn,             // optional async fn run before every (re)spawn
 //                           //   (e.g. sweep orphaned workers holding the port)
 //     onForceKilled,        // optional cleanup after SIGKILL (e.g. orphaned workers)
@@ -363,8 +365,15 @@ async function start(spec) {
     if (conflicted) {
       entry.desiredRunning = false;
       setState(entry, name, 'stopped');
+      let message = null;
+      if (typeof spec.describeConflict === 'function') {
+        try {
+          message = await spec.describeConflict();
+        } catch {}
+      }
       throw new Error(
-        `${name} is already running outside WPXen. Stop the other instance (e.g. \`brew services stop ${name}\`) and try again.`
+        message ||
+          `${name} is already running outside WPXen. Stop the other instance (e.g. \`brew services stop ${name}\`) and try again.`
       );
     }
   }

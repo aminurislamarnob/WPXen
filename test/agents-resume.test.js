@@ -25,6 +25,17 @@ let home;
 let bin;
 let ptys;
 
+// Claude's ~/.claude/sessions/<pid>.json, faked: each pty's shell has one
+// Claude child (pid + 1) registered under `uuid-<shell pid>`.
+let nextPid = 1000;
+const registryDeps = () => ({
+  listProcesses: async () => ptys.map((p) => [p.pid + 1, p.pid]),
+  readClaudeSessionId: (pid) =>
+    ptys.some((p) => p.pid + 1 === pid) ? `uuid-${pid - 1}` : null,
+});
+// Let the registry pin land.
+const pin = () => vi.advanceTimersByTimeAsync(1500);
+
 const site = () => ({ id: 'site-1', path: home });
 
 function launchClaude() {
@@ -52,6 +63,7 @@ beforeEach(() => {
     spawnPty: (file, args, opts) => {
       const p = fakePty();
       p.spawnedWith = { file, args, opts };
+      p.pid = nextPid += 10;
       ptys.push(p);
       return p;
     },
@@ -59,6 +71,7 @@ beforeEach(() => {
     userShell: () => '/bin/zsh',
     homedir: () => home,
     sitePhpBin: () => null,
+    ...registryDeps(),
   });
 });
 
@@ -68,25 +81,27 @@ afterEach(() => {
 });
 
 describe('resume in new session', () => {
-  it('fresh launch pins a transcript with --session-id', () => {
+  it('fresh launch types no session id and pins from the registry', async () => {
     vi.useFakeTimers();
     try {
       const id = launchClaude();
       const typed = settleAndType(0);
-      const match = typed.match(/--session-id (\S+)/);
-      expect(match).not.toBeNull();
+      expect(typed).not.toContain('--session-id');
+      expect(typed).not.toContain('--resume');
+      await pin();
       const row = agents.listAllSessions().find((s) => s.sessionId === id);
-      expect(row.transcriptId).toBe(match[1]);
+      expect(row.transcriptId).toBe(`uuid-${ptys[0].pid}`);
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it('resume types --resume <uuid> with no --session-id', () => {
+  it('resume types --resume <uuid> with no --session-id', async () => {
     vi.useFakeTimers();
     try {
       const oldId = launchClaude();
       settleAndType(0);
+      await pin();
       const oldRow = agents.listAllSessions().find((s) => s.sessionId === oldId);
       // Resume continues a conversation whose Agent has exited.
       ptys[0].emitExit(0);

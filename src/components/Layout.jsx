@@ -10,6 +10,7 @@ import { Tooltip } from './ui';
 import { NAV_GROUPS } from '../lib/navItems';
 import { ACTIVITY_BAR_WIDTH, WINDOW_CONTROLS_END, agentsLabel } from '../lib/activityBar';
 import { useAgentSessions } from '../lib/useAgentSessions';
+import { usePhpUpdates } from '../lib/usePhpUpdates';
 import { setDragPassthrough } from '../lib/browser/webviewCache';
 import {
   AGENTS_SIDEBAR_DEFAULT,
@@ -101,6 +102,17 @@ export default function Layout({ serviceStatus }) {
   // Unread agent Sessions put an amber dot on every Agents entry point, so
   // attention shows from any screen.
   const agentsUnread = useAgentSessions().filter((s) => s.unread).length;
+  // PHP releases waiting to be installed put a blue dot on PHP.
+  const phpUpdateCount = usePhpUpdates()?.updates?.length || 0;
+
+  // A clicked notification that isn't an agent's (a PHP update) names a page.
+  useEffect(
+    () =>
+      window.electronAPI.on('app-navigate', ({ to } = {}) => {
+        if (typeof to === 'string' && to.startsWith('/')) navigate(to);
+      }),
+    [navigate]
+  );
 
   const q = filter.trim().toLowerCase();
   const groups = q
@@ -187,6 +199,13 @@ export default function Layout({ serviceStatus }) {
                             <Icon size={13} strokeWidth={2.2} />
                           </span>
                           {label}
+                          {to === '/php' && phpUpdateCount > 0 && (
+                            <span
+                              className={`ml-auto size-2 rounded-full ${isActive ? 'bg-white' : 'bg-highlight'}`}
+                              title={`${phpUpdateCount} PHP update${phpUpdateCount === 1 ? '' : 's'} available`}
+                              aria-label={`${phpUpdateCount} PHP update${phpUpdateCount === 1 ? '' : 's'} available`}
+                            />
+                          )}
                           {to === '/agents' && agentsUnread > 0 && (
                             <span
                               className="ml-auto size-2 rounded-full bg-status-warning"

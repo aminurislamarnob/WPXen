@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { ChevronDown, ChevronRight, Loader, Check, Sliders } from 'lucide-react';
+import { Bone } from './ui';
 
 // A number input that saves on blur / Enter and shows a spinner + check.
 function SettingInput({ value, onSave, disabled, placeholder }) {
@@ -93,20 +94,85 @@ function SettingGroup({ setting, versions, onSaveOne, onSaveAll }) {
   );
 }
 
-export default function PhpSettings() {
+// How many setting cards the last load showed, so the skeleton matches.
+const COUNT_KEY = 'wpxen.php.iniSettingCount';
+function readCount() {
+  try {
+    const n = Number(localStorage.getItem(COUNT_KEY));
+    if (Number.isInteger(n) && n > 0) return n;
+  } catch {
+    // Storage unavailable: fall back to the default.
+  }
+  return 3;
+}
+
+// The same header and `.settings-card` shells as the loaded section, with
+// bars for the label, the "Set all" field and the description.
+function PhpSettingsSkeleton() {
+  const widths = ['w-28', 'w-36', 'w-24', 'w-32'];
+  const descWidths = ['w-72', 'w-64', 'w-80', 'w-60'];
+  return (
+    <div className="mt-8" role="status" aria-label="Loading PHP configuration">
+      <div className="flex items-center gap-2 mb-3">
+        <Sliders size={16} className="text-muted-foreground" />
+        <h2 className="text-sm font-semibold text-foreground">PHP Configuration</h2>
+      </div>
+      <div className="space-y-3">
+        {Array.from({ length: readCount() }, (_, i) => (
+          <div key={i} className="settings-card">
+            <div className="flex items-center justify-between gap-3 p-4">
+              <span className="flex items-center gap-2 h-5">
+                <ChevronRight size={15} className="text-muted-foreground/40" />
+                <Bone className={`h-3 ${widths[i % widths.length]}`} />
+              </span>
+              <div className="flex items-center gap-2">
+                <Bone className="form-input !w-28 !bg-muted !border-transparent" />
+                <span className="w-4" />
+              </div>
+            </div>
+            <p className="px-4 -mt-2 pb-3 text-xs">
+              <Bone
+                className={`!inline-block align-middle h-2.5 ${descWidths[i % descWidths.length]}`}
+              />
+            </p>
+          </div>
+        ))}
+      </div>
+      {/* The real note has an inline monospace “.ini”, which sets its line
+          height; the invisible strut gives the bar the same line. */}
+      <p className="text-xs mt-3">
+        <Bone className="!inline-block align-middle h-2.5 w-96" />
+        <span className="font-mono invisible">.</span>
+      </p>
+    </div>
+  );
+}
+
+// `refreshKey` changes when the installed versions do; the section reloads
+// in place then, without going back to the skeleton.
+export default function PhpSettings({ refreshKey = '' }) {
   const [data, setData] = useState(null);
+  const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState(null);
 
   useEffect(() => {
     load();
-  }, []);
+  }, [refreshKey]);
 
   async function load() {
     try {
-      setData(await window.electronAPI.getPhpIniSettings());
+      const next = await window.electronAPI.getPhpIniSettings();
+      setData(next);
+      try {
+        if (next?.settings?.length)
+          localStorage.setItem(COUNT_KEY, String(next.settings.length));
+      } catch {
+        // Storage unavailable: the skeleton uses the default count.
+      }
     } catch (err) {
       console.error(err);
     }
+    setLoaded(true);
   }
 
   async function saveOne(version, key, value) {
@@ -131,6 +197,7 @@ export default function PhpSettings() {
     return true;
   }
 
+  if (!loaded) return <PhpSettingsSkeleton />;
   if (!data || data.versions.length === 0) return null;
 
   return (

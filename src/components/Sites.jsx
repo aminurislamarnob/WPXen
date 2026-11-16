@@ -1,9 +1,19 @@
 import { useState, useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Plus, Search, Globe, AlertTriangle, Loader, Upload, Check } from 'lucide-react';
+import {
+  Plus,
+  Search,
+  Globe,
+  AlertTriangle,
+  Loader,
+  Upload,
+  Download,
+  Check,
+} from 'lucide-react';
 import SiteCard from './SiteCard';
 import AddSiteModal from './AddSiteModal';
 import ImportSiteModal from './ImportSiteModal';
+import HerdImportModal from './HerdImportModal';
 import CloneSiteModal from './CloneSiteModal';
 import SaveBlueprintModal from './SaveBlueprintModal';
 
@@ -12,9 +22,18 @@ function DeleteConfirmModal({ site, onConfirm, onClose }) {
   const [removeDb, setRemoveDb] = useState(true);
   const [loading, setLoading] = useState(false);
 
+  // An adopted Site's folder and database still belong to Herd: Remove only
+  // unregisters it (the main process enforces the same).
+  const adopted = !!site.adoptedFrom;
+
   async function handleConfirm() {
     setLoading(true);
-    await onConfirm(site.id, { removeFiles, removeDatabase: removeDb });
+    await onConfirm(
+      site.id,
+      adopted
+        ? { removeFiles: false, removeDatabase: false }
+        : { removeFiles, removeDatabase: removeDb }
+    );
   }
 
   return (
@@ -32,36 +51,44 @@ function DeleteConfirmModal({ site, onConfirm, onClose }) {
               <h3 className="text-[15px] font-bold text-foreground">Remove Site</h3>
               <p className="text-[13px] text-muted-foreground mt-0.5">
                 Remove <span className="font-semibold">{site.name}</span> ({site.domain})?
-                This cannot be undone.
+                {adopted ? '' : ' This cannot be undone.'}
               </p>
             </div>
           </div>
 
-          <div className="sheet-well space-y-2.5 mt-4">
-            <label className="flex items-center gap-2.5 cursor-pointer">
-              <input
-                type="checkbox"
-                className="w-4 h-4 rounded border-border text-status-error"
-                checked={removeDb}
-                onChange={(e) => setRemoveDb(e.target.checked)}
-              />
-              <span className="text-sm text-foreground">
-                Drop database ({site.dbName})
-              </span>
-            </label>
-            <label className="flex items-center gap-2.5 cursor-pointer">
-              <input
-                type="checkbox"
-                className="w-4 h-4 rounded border-border text-status-error"
-                checked={removeFiles}
-                onChange={(e) => setRemoveFiles(e.target.checked)}
-              />
-              <span className="text-sm text-foreground">
-                Delete site files{' '}
-                <span className="text-muted-foreground text-xs">(irreversible)</span>
-              </span>
-            </label>
-          </div>
+          {adopted ? (
+            <div className="sheet-well mt-4 text-[13px] text-muted-foreground">
+              This site was imported from Herd. WPXen removes only its own nginx config
+              and certificate. The folder and the {site.dbName} database stay as they are,
+              for Herd.
+            </div>
+          ) : (
+            <div className="sheet-well space-y-2.5 mt-4">
+              <label className="flex items-center gap-2.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="w-4 h-4 rounded border-border text-status-error"
+                  checked={removeDb}
+                  onChange={(e) => setRemoveDb(e.target.checked)}
+                />
+                <span className="text-sm text-foreground">
+                  Drop database ({site.dbName})
+                </span>
+              </label>
+              <label className="flex items-center gap-2.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="w-4 h-4 rounded border-border text-status-error"
+                  checked={removeFiles}
+                  onChange={(e) => setRemoveFiles(e.target.checked)}
+                />
+                <span className="text-sm text-foreground">
+                  Delete site files{' '}
+                  <span className="text-muted-foreground text-xs">(irreversible)</span>
+                </span>
+              </label>
+            </div>
+          )}
 
           <div className="flex justify-end gap-2 mt-5">
             <button onClick={onClose} className="btn-secondary">
@@ -86,6 +113,9 @@ export default function Sites({ sites, setSites, refreshSites }) {
   const fromAgents = !!location.state?.addForAgents;
   const [showAddModal, setShowAddModal] = useState(fromAgents);
   const [showImportModal, setShowImportModal] = useState(false);
+  // Settings → Guides → "Open the Herd import" lands here with the dialog asked for.
+  const [showHerdModal, setShowHerdModal] = useState(!!location.state?.openHerd);
+  const [herdInstalled, setHerdInstalled] = useState(false);
   const [cloningSite, setCloningSite] = useState(null);
   const [blueprintSite, setBlueprintSite] = useState(null);
   const [blueprints, setBlueprints] = useState([]);
@@ -105,6 +135,13 @@ export default function Sites({ sites, setSites, refreshSites }) {
   const [cfInstalling, setCfInstalling] = useState(false);
   const [cfLog, setCfLog] = useState('');
   const [tunnels, setTunnels] = useState({});
+
+  useEffect(() => {
+    window.electronAPI
+      .herdInstalled()
+      .then(setHerdInstalled)
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     window.electronAPI.getPhpVersions().then(setPhpVersions).catch(console.error);
@@ -285,6 +322,12 @@ export default function Sites({ sites, setSites, refreshSites }) {
           </p>
         )}
         <div className="flex items-center gap-2 flex-shrink-0">
+          {herdInstalled && (
+            <button onClick={() => setShowHerdModal(true)} className="btn-secondary">
+              <Download size={12} strokeWidth={2.5} />
+              From Herd
+            </button>
+          )}
           <button onClick={() => setShowImportModal(true)} className="btn-secondary">
             <Upload size={12} strokeWidth={2.5} />
             Import Site
@@ -392,6 +435,15 @@ export default function Sites({ sites, setSites, refreshSites }) {
         <ImportSiteModal
           phpVersions={phpVersions}
           onClose={() => setShowImportModal(false)}
+          onSiteImported={handleSiteAdded}
+        />
+      )}
+
+      {/* Import from Laravel Herd */}
+      {showHerdModal && (
+        <HerdImportModal
+          phpVersions={phpVersions}
+          onClose={() => setShowHerdModal(false)}
           onSiteImported={handleSiteAdded}
         />
       )}

@@ -250,7 +250,7 @@ const resolverCmd = () =>
   adminOsascript(
     `mkdir -p /etc/resolver && cp '${stagedResolver()}' '/etc/resolver/test' && chmod 644 '/etc/resolver/test'` +
       ' && dscacheutil -flushcache && killall -HUP mDNSResponder',
-    'WPXen wants to configure macOS so that .test sites resolve to your local machine.'
+    'point .test domains at this Mac'
   );
 
 describe('Repair', () => {

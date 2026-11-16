@@ -240,14 +240,10 @@ function buildSpec() {
 // same prompt (migration's stop-and-cleanup). Those steps are best-effort and
 // never fail the prompt: once the copy is in place the new setup is live, and
 // a failing cleanup step must not make the caller record the old one.
-// `reason` is the dialog text.
+// `reason` is the dialog's task (admin.cjs adminPrompt).
 function writeResolverFile(
   content,
-  {
-    after = [],
-    reason = `WPXen wants to configure macOS so that .${TLD} sites resolve to your ` +
-      'local machine.',
-  } = {}
+  { after = [], reason = `point .${TLD} domains at this Mac` } = {}
 ) {
   const tmpFile = path.join(deps.tmpdir(), RESOLVER_STAGING_NAME);
   fs.writeFileSync(tmpFile, content, 'utf8');
@@ -647,10 +643,7 @@ async function migrateToRootless() {
   try {
     writeResolverFile(content, {
       after,
-      reason:
-        `WPXen wants to move .${TLD} DNS off its root service and remove the ` +
-        'passwordless permission it installed. It will not need your password for ' +
-        'DNS again.',
+      reason: `move .${TLD} DNS off its old root service`,
     });
   } catch (err) {
     // The copy never happened: the legacy setup is untouched.

@@ -69,10 +69,15 @@ describe('Chat pin (Session transcript pinning)', () => {
     agents.stopAll();
   });
 
-  it('generates a UUID and types --session-id <uuid> for Claude', () => {
+  it('launches Claude fresh, with no --session-id, and pins from its registry', async () => {
     const cwd = path.join(home, 'code.test');
+    const registry = new Map(); // pid -> sessionId, Claude's sessions/<pid>.json
+    let table = [];
+    agents.__setDeps({
+      listProcesses: async () => table,
+      readClaudeSessionId: (pid) => registry.get(pid) || null,
+    });
 
-    // We launch claude. It should append --session-id <uuid>
     const res = agents.launch({
       site: { id: 's1', path: cwd },
       agentId: 'claude',
@@ -82,33 +87,67 @@ describe('Chat pin (Session transcript pinning)', () => {
 
     expect(res.error).toBeUndefined();
     const sessionId = res.sessionId;
-
-    const row = agents.listAllSessions().find((s) => s.sessionId === sessionId);
-    expect(row).toBeDefined();
-    expect(row.transcriptId).toBeDefined();
+    const row = () => agents.listAllSessions().find((s) => s.sessionId === sessionId);
+    expect(row()).toBeDefined();
+    expect(row().transcriptId).toBeNull();
     // Question cards use this Agent's key map.
-    expect(row.ask).toBe('claude-digits');
+    expect(row().ask).toBe('claude-digits');
 
-    // It should have written to the pty
     const pty = ptys[0];
+    pty.pid = 100;
     pty.emitData('some output'); // Trigger settle timer
     vi.advanceTimersByTime(200);
 
-    const writeCalls = pty.write.mock.calls;
-    expect(writeCalls.length).toBe(1);
-
-    // Typed line should contain --session-id and the uuid
-    const typed = writeCalls[0][0];
-    expect(typed).toContain(`--session-id ${row.transcriptId}`);
+    const typed = pty.write.mock.calls[0][0];
+    expect(typed).not.toContain('--session-id');
+    expect(typed).not.toContain('--resume');
     expect(typed).toContain("'hello world'");
-    // Flag must be before the prompt
-    expect(typed.indexOf('--session-id')).toBeLessThan(typed.indexOf("'hello world'"));
+
+    // Claude starts under the shell (through a wrapper) and registers itself.
+    table = [
+      [100, 1],
+      [200, 100],
+      [300, 200],
+    ];
+    registry.set(300, 'uuid-a');
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(row().transcriptId).toBe('uuid-a');
+
+    // /clear starts a new conversation in the same process: the pin follows.
+    registry.set(300, 'uuid-b');
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(row().transcriptId).toBe('uuid-b');
+
+    // Claude exits back to the shell: the last id stays, for Resume.
+    registry.delete(300);
+    table = [[100, 1]];
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(row().transcriptId).toBe('uuid-b');
+  });
+
+  it('types --resume <id> when resuming', () => {
+    const cwd = path.join(home, 'code.test');
+    const res = agents.launch({
+      site: { id: 's1', path: cwd },
+      agentId: 'claude',
+      resume: 'uuid-old',
+      cwd,
+    });
+    expect(res.error).toBeUndefined();
+    const pty = ptys[0];
+    pty.emitData('x');
+    vi.advanceTimersByTime(200);
+    const typed = pty.write.mock.calls[0][0];
+    expect(typed).toContain('--resume uuid-old');
+    expect(typed).not.toContain('--session-id');
+    const row = agents.listAllSessions().find((s) => s.sessionId === res.sessionId);
+    expect(row.transcriptId).toBe('uuid-old');
   });
 
   it('does not append session-id for non-Claude agents', () => {
     const cwd = path.join(home, 'code.test');
 
-    // antigravity does not have sessionIdFlag
+    // antigravity has no session registry
     const res = agents.launch({
       site: { id: 's1', path: cwd },
       agentId: 'antigravity',

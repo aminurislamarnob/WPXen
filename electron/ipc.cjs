@@ -19,12 +19,14 @@ const os = require('os');
 const { openExternalSafely } = require('./services/safeUrl.cjs');
 
 const fs = require('fs');
+const { execFileSync } = require('child_process');
 const brew = require('./services/brew.cjs');
 const nginx = require('./services/nginx.cjs');
 const phpService = require('./services/php.cjs');
 const mysql = require('./services/mysql.cjs');
 const dnsmasq = require('./services/dnsmasq.cjs');
 const wordpress = require('./services/wordpress.cjs');
+const herd = require('./services/herd.cjs');
 const siteops = require('./services/siteops.cjs');
 const blueprints = require('./services/blueprints.cjs');
 const mkcert = require('./services/mkcert.cjs');
@@ -56,6 +58,7 @@ const handoff = require('./services/handoff.cjs');
 const transcripts = require('./services/transcripts.cjs');
 const officeEngine = require('./services/office/engine.cjs');
 const officeHooks = require('./services/office/hooksInstaller.cjs');
+const phpUpdatesService = require('./services/phpUpdates.cjs');
 const { humanize } = require('./services/errors.cjs');
 
 let store;
@@ -1605,7 +1608,12 @@ function registerHandlers(win, storeInstance) {
         id
       );
 
-      wordpress.removeWordPressSite(site, opts);
+      // An adopted Site's folder and database belong to the app it came from
+      // (Herd still serves them): Remove only unregisters it from WPXen.
+      wordpress.removeWordPressSite(
+        site,
+        site.adoptedFrom ? { removeFiles: false, removeDatabase: false } : opts
+      );
 
       store.set(
         'sites',
@@ -1765,6 +1773,193 @@ function registerHandlers(win, storeInstance) {
     } catch (err) {
       console.error('import-site error:', err);
       return { success: false, error: humanize(err) };
+    }
+  });
+
+  // ─── Import from Laravel Herd ────────────────────────────────────────
+  // A Herd WordPress site is *adopted* in place: WPXen writes its own vhost
+  // for the same folder, domain and database, and changes nothing Herd owns.
+  // The record carries `adoptedFrom: 'herd'`, which makes Remove unregister
+  // only — the folder and database stay, because Herd still serves them.
+
+  // Herd's nginx binds 127.0.0.1:80/443, more specific than WPXen's *:80, so
+  // while it runs it answers every .test request — WPXen's Sites included.
+  const isHerdRunning = () => {
+    try {
+      execFileSync('pgrep', ['-f', 'Herd.app/Contents/Resources/nginx'], {
+        stdio: 'pipe',
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  // Every Herd WordPress site, each with `blocker` (null when adoptable) and
+  // the PHP version WPXen would serve it with.
+  const scanHerd = async () => {
+    if (!herd.isInstalled()) return { installed: false, running: false, sites: [] };
+    const mysqlUp = await mysql.isRunningAsync();
+    const databases = new Set(mysqlUp ? mysql.listDatabases() : []);
+    const installed = await phpService.getInstalledPhpVersionsWithDetailsAsync();
+    const ctx = {
+      sites: store.get('sites', []),
+      dbExists: (name) => databases.has(name),
+      vhostExists: (domain) => nginx.siteConfigExists(domain),
+    };
+    const sites = herd.listWordPressSites().map((s) => {
+      let blocker = herd.adoptionBlocker(s, ctx);
+      // Without MySQL every database looks missing; say what's actually wrong.
+      if (!mysqlUp && blocker?.code === 'db-missing') {
+        blocker = { code: 'mysql-down', message: 'Start MySQL to check this database.' };
+      }
+      return { ...s, blocker, wpxenPhp: herd.pickPhpVersion(s.phpVersion, installed) };
+    });
+    return { installed: true, running: isHerdRunning(), mysqlRunning: mysqlUp, sites };
+  };
+
+  ipcMain.handle('herd-installed', () => herd.isInstalled());
+
+  ipcMain.handle('herd-scan', async () => {
+    try {
+      return { success: true, ...(await scanHerd()) };
+    } catch (err) {
+      return { success: false, error: humanize(err) };
+    }
+  });
+
+  ipcMain.handle('herd-adopt', async (event, payload = {}) => {
+    const progress = (data) => {
+      // Tagged with the site, so a bulk import can show each one's progress.
+      if (!event.sender.isDestroyed())
+        event.sender.send('herd-adopt-progress', { ...data, path: payload.path });
+    };
+    let vhostWritten = false;
+    let domain = null;
+    try {
+      // Only a path the scan itself reports is adoptable — the renderer
+      // names a site, it never supplies one.
+      const scan = await scanHerd();
+      const herdSite = scan.sites.find((s) => s.path === payload.path);
+      if (!herdSite) return { success: false, error: 'That Herd site was not found.' };
+      if (herdSite.blocker) return { success: false, error: herdSite.blocker.message };
+      if (!scan.mysqlRunning) {
+        return {
+          success: false,
+          error: 'MySQL is not running. Start it in the Services panel.',
+        };
+      }
+
+      const installed = await phpService.getInstalledPhpVersionsWithDetailsAsync();
+      const versions = installed.map((v) => v.version);
+      const phpVersion = versions.includes(payload.phpVersion)
+        ? payload.phpVersion
+        : herdSite.wpxenPhp;
+      const target = {
+        name: herdSite.name,
+        domain: herdSite.domain,
+        path: herdSite.path,
+        phpVersion,
+        dbName: herdSite.dbName,
+      };
+      const { valid, errors } = validation.validateSiteInput(target);
+      if (!valid) return { success: false, error: errors.join(' ') };
+      domain = target.domain;
+
+      const unpin = wordpress.pinSitePhp(target.path, phpVersion);
+      try {
+        // WP-CLI connects with wp-config's own credentials — the proof that
+        // the install works against WPXen's MySQL before anything is written.
+        progress({ step: 'check', message: 'Checking the WordPress install…' });
+        let siteUrl;
+        try {
+          siteUrl = (
+            await wordpress.wpAsync(['option', 'get', 'siteurl'], target.path)
+          ).trim();
+        } catch (err) {
+          return {
+            success: false,
+            error: `WordPress couldn't reach its database with the credentials in wp-config.php (${humanize(err)}).`,
+          };
+        }
+        const https =
+          /^https:/i.test(siteUrl) || (!/^http:/i.test(siteUrl) && herdSite.secured);
+
+        progress({ step: 'nginx', message: 'Configuring nginx…' });
+        let site = {
+          id: wordpress.generateId(),
+          ...target,
+          adminUser: 'admin',
+          adminEmail: `admin@${target.domain}`,
+          wpVersion: 'unknown',
+          url: `http://${target.domain}`,
+          createdAt: new Date().toISOString(),
+          adoptedFrom: 'herd',
+        };
+        nginx.createSiteConfig(site);
+        vhostWritten = true;
+        if (https) {
+          progress({ step: 'https', message: 'Issuing a local HTTPS certificate…' });
+          site = applyHttps(site, true);
+        }
+        try {
+          await phpService.ensurePhpFpm(phpVersion);
+        } catch {}
+        try {
+          nginx.reload();
+        } catch {}
+
+        // Lets wp_remote_get reach other local HTTPS Sites. Best-effort.
+        try {
+          wordpress.ensureLocalTrustMuPlugin(target.path);
+        } catch {}
+
+        progress({ step: 'details', message: 'Reading site details…' });
+        try {
+          site.wpVersion =
+            (await wordpress.wpAsync(['core', 'version'], target.path)).match(
+              /^\d+\.\d+(?:\.\d+)*$/m
+            )?.[0] || 'unknown';
+        } catch {}
+        try {
+          const admin = (
+            await wordpress.wpAsync(
+              [
+                'user',
+                'list',
+                '--role=administrator',
+                '--field=user_login',
+                '--number=1',
+              ],
+              target.path
+            )
+          ).trim();
+          if (admin && validation.WP_USER_RE.test(admin)) site.adminUser = admin;
+        } catch {}
+
+        store.set('sites', [...store.get('sites', []), site]);
+        vhostWritten = false; // the Site owns it now
+        progress({ step: 'done', message: 'Site imported from Herd!' });
+        return { success: true, site, herdRunning: scan.running };
+      } finally {
+        unpin();
+      }
+    } catch (err) {
+      console.error('herd-adopt error:', err);
+      return { success: false, error: humanize(err) };
+    } finally {
+      // Roll back only what this adoption wrote: the vhost (and its cert).
+      if (vhostWritten && domain) {
+        for (const undo of [
+          () => nginx.removeSiteConfig(domain),
+          () => mkcert.removeCert(domain), // WPXen's own cert; Herd's is elsewhere
+          () => nginx.reload(),
+        ]) {
+          try {
+            undo();
+          } catch {}
+        }
+      }
     }
   });
 
@@ -2890,6 +3085,50 @@ function registerHandlers(win, storeInstance) {
     return phpService.getInstalledPhpVersionsWithDetailsAsync();
   });
 
+  // Daily PHP update check (services/phpUpdates.cjs). It only finds updates:
+  // the Dashboard notice, the sidebar dot and the notification all lead to the
+  // PHP page, where `update-php-version` does the upgrade on a click.
+  const phpUpdates = phpUpdatesService.createPhpUpdateChecker({
+    refreshIndex: () => brew.updateIndexAsync(),
+    listInstalled: () => phpService.installedPhpFormulae(),
+    listOutdated: () => brew.getOutdatedFormulaeDetails(),
+    enabled: () => settings.get('php.checkForUpdates') !== false,
+    store,
+    onChange: (state) => {
+      for (const w of BrowserWindow.getAllWindows()) {
+        if (!w.isDestroyed()) w.webContents.send('php-updates', state);
+      }
+    },
+    onNew: (fresh) => {
+      if (!settings.get('php.updateNotifications') || !Notification.isSupported()) return;
+      const n = new Notification({
+        title: fresh.length === 1 ? 'PHP update available' : 'PHP updates available',
+        body:
+          fresh.length === 1
+            ? `PHP ${fresh[0].latest} is available` +
+              (fresh[0].installed ? ` (you have ${fresh[0].installed}).` : '.')
+            : `New releases for PHP ${fresh.map((u) => u.version).join(', ')}.`,
+      });
+      liveNotifications.add(n);
+      const drop = () => liveNotifications.delete(n);
+      n.on('close', drop);
+      n.on('click', () => {
+        drop();
+        if (win && !win.isDestroyed()) {
+          win.show();
+          win.focus();
+          win.webContents.send('app-navigate', { to: '/php' });
+        }
+      });
+      n.show();
+    },
+  });
+  phpUpdates.start();
+
+  ipcMain.handle('php-updates-get', () => phpUpdates.getState());
+  ipcMain.handle('php-updates-check', () => phpUpdates.check());
+  ipcMain.handle('php-updates-dismiss', () => phpUpdates.dismiss());
+
   ipcMain.handle('switch-php-version', async (_, version) => {
     try {
       // Links the CLI and swaps a running FPM to the new version — sites would
@@ -2951,6 +3190,7 @@ function registerHandlers(win, storeInstance) {
       try {
         trustBundle.syncLocalTrust();
       } catch {}
+      phpUpdates.check({ refresh: false }).catch(() => {});
       return { success: true };
     } catch (err) {
       return { success: false, error: humanize(err) };
@@ -2965,6 +3205,8 @@ function registerHandlers(win, storeInstance) {
         }
       };
       await phpService.updatePhpVersion(version, progress);
+      // The index is current; only what's installed changed.
+      phpUpdates.check({ refresh: false }).catch(() => {});
       return { success: true };
     } catch (err) {
       return { success: false, error: humanize(err) };

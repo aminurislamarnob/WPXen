@@ -1,3 +1,5 @@
+import { Bone } from '../ui';
+
 // Loading placeholders for Tasks, shaped like what they stand in for — the
 // list's rows, an issue or PR's details, a project board — so the page
 // doesn't jump when the data lands. They pulse unless the system asks for
@@ -8,15 +10,8 @@
 const WIDTHS = ['72%', '54%', '86%', '63%', '45%', '78%', '58%', '68%'];
 const width = (i, offset = 0) => WIDTHS[(i + offset) % WIDTHS.length];
 
-export function Bone({ className = '', style }) {
-  return (
-    <span
-      aria-hidden="true"
-      className={`block rounded-md bg-muted motion-safe:animate-pulse ${className}`}
-      style={style}
-    />
-  );
-}
+// The primitive lives in ui.jsx; re-exported for the Tasks callers.
+export { Bone };
 
 // Rows for the Issues / PRs tables. `grid` is the table's own column
 // template; `cells` is how many trailing columns hold a pill-sized value.
