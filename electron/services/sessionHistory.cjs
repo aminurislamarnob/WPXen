@@ -48,6 +48,28 @@ function trimToTailBytes(buf, maxBytes) {
   return buf.subarray(start);
 }
 
+// Once a file passes the cap it is cut back to TRIM_TO of the cap, not to the
+// cap itself: trimming to exactly the cap would rewrite the whole 5 MB file on
+// every later output chunk. Cut points move forward to a line start where one
+// is near, so replay rarely begins inside an escape sequence.
+const TRIM_TO = 0.8;
+const LINE_SEARCH_BYTES = 64 * 1024;
+
+function trimToLineStart(buf) {
+  const nl = buf.indexOf(0x0a);
+  return nl !== -1 && nl < LINE_SEARCH_BYTES ? buf.subarray(nl + 1) : buf;
+}
+
+// Write via a temp file and rename, so a crash mid-trim never empties history.
+function replaceFile(file, data) {
+  const tmp = `${file}.tmp`;
+  fs.writeFileSync(tmp, data, { mode: 0o600 });
+  try {
+    fs.chmodSync(tmp, 0o600);
+  } catch {}
+  fs.renameSync(tmp, file);
+}
+
 function appendHistory(dir, sessionId, chunk, maxBytes = MAX_HISTORY_BYTES) {
   if (!dir || !sessionId || !chunk) return;
   const incoming = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk), 'utf8');
@@ -55,40 +77,27 @@ function appendHistory(dir, sessionId, chunk, maxBytes = MAX_HISTORY_BYTES) {
 
   ensureHistoryDir(dir);
   const file = historyFilePath(dir, sessionId);
+  const keep = Math.max(1, Math.floor(maxBytes * TRIM_TO));
 
   if (incoming.length >= maxBytes) {
-    const tail = trimToTailBytes(incoming, maxBytes);
-    fs.writeFileSync(file, tail, { mode: 0o600 });
-    try {
-      fs.chmodSync(file, 0o600);
-    } catch {}
+    replaceFile(file, trimToLineStart(trimToTailBytes(incoming, keep)));
     return;
   }
 
   fs.appendFileSync(file, incoming, { mode: 0o600 });
-  try {
-    fs.chmodSync(file, 0o600);
-  } catch {}
 
+  const size = fs.statSync(file).size;
+  if (size <= maxBytes) return;
+  const fd = fs.openSync(file, 'r');
+  let tail;
   try {
-    const stat = fs.statSync(file);
-    if (stat.size > maxBytes) {
-      const fd = fs.openSync(file, 'r');
-      let tail;
-      try {
-        const readLen = Math.min(stat.size, maxBytes);
-        const buf = Buffer.allocUnsafe(readLen);
-        fs.readSync(fd, buf, 0, readLen, stat.size - readLen);
-        tail = trimToTailBytes(buf, maxBytes);
-      } finally {
-        fs.closeSync(fd);
-      }
-      fs.writeFileSync(file, tail, { mode: 0o600 });
-      try {
-        fs.chmodSync(file, 0o600);
-      } catch {}
-    }
-  } catch {}
+    const buf = Buffer.allocUnsafe(keep);
+    fs.readSync(fd, buf, 0, keep, size - keep);
+    tail = trimToLineStart(trimToTailBytes(buf, keep));
+  } finally {
+    fs.closeSync(fd);
+  }
+  replaceFile(file, tail);
 }
 
 function readHistory(dir, sessionId) {

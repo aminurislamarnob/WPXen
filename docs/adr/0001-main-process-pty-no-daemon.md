@@ -1,5 +1,7 @@
 # Agent Sessions run as main-process ptys, with no persistence daemon
 
+**Status:** Superseded by [0003-session-host.md](./0003-session-host.md)
+
 ## Context
 
 WPXen is adding an Agent Launcher: a per-Site terminal that runs an AI-provider

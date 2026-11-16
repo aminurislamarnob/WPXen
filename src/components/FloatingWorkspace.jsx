@@ -149,9 +149,10 @@ export default function FloatingWorkspace() {
 
   // Bring the workspace back at launch.
   //
-  // After an app restart nothing is running (no daemon — ADR 0001), so the
-  // saved layout is relaunched: every terminal tab gets a fresh shell in its
-  // saved cwd, in order. After a renderer-only reload (dev HMR, a crashed
+  // After an app restart with "Keep agents running when WPXen quits" on, a
+  // Session Host may still hold the shells (ADR 0003), and those are adopted.
+  // Otherwise nothing is running, so the saved layout is relaunched: every
+  // terminal tab gets a fresh shell in its saved cwd, in order. After a renderer-only reload (dev HMR, a crashed
   // window) the main process still has the shells, so those are adopted
   // instead — relaunching would leave them running with no tab.
   //

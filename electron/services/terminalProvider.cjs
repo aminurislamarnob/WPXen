@@ -17,15 +17,25 @@
 //   resize(sessionId, cols, rows)
 //     Resizes `sessionId`'s terminal to `cols` × `rows` (both > 0). No-op when
 //     unknown or exited.
-//   stop(sessionId)
+//   stop(sessionId, { keepHistory })
 //     Terminates `sessionId` gracefully (SIGTERM, escalating to SIGKILL after
-//     KILL_GRACE_MS if still alive) and releases its handle.
+//     KILL_GRACE_MS if still alive) and releases its handle, exited or not.
+//     `keepHistory` keeps on-disk history (host only; the in-app provider
+//     has none).
+//   stopAll()
+//     stop() for every Session (in-app provider).
 //   attach(sessionId)
 //     Returns `{ data, exited, exitCode }` (or a Promise of it) with the
 //     buffered output in emission order and whether the terminal has exited, or
 //     `null` if `sessionId` is unknown.
+//   clearBuffer(sessionId)
+//     Empties the replay buffer (and the host's history file).
 //   getPid(sessionId)
 //     Returns the root shell pid for `sessionId`, or `null`.
+//
+// Optional, host client only (agents.cjs checks before calling):
+//   markRead(sessionId, read), onStatus(cb), onDisconnect(cb), and the
+//   proxy's `isHostProvider` / `version`.
 //
 // Events (each returns an unsubscribe `() => void`):
 //   onOutput(cb) — `cb({ sessionId, data })`

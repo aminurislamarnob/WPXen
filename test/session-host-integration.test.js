@@ -57,6 +57,25 @@ function fakeStore(initial = {}) {
   };
 }
 
+// A node-pty package laid out as npm installs it, with the macOS native files.
+// CI runs on Linux, where node-pty ships no spawn-helper, so tests that need a
+// complete package build one rather than use the installed copy.
+function fakeNodePty(root) {
+  const dir = path.join(root, 'node_modules', 'node-pty');
+  fs.mkdirSync(path.join(dir, 'lib'), { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, 'package.json'),
+    JSON.stringify({ name: 'node-pty', main: './lib/index.js' })
+  );
+  fs.writeFileSync(path.join(dir, 'lib', 'index.js'), 'module.exports = {};');
+  fs.mkdirSync(path.join(dir, 'build', 'Release'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'build', 'Release', 'pty.node'), 'native');
+  fs.writeFileSync(path.join(dir, 'build', 'Release', 'spawn-helper'), '#!/bin/sh\n', {
+    mode: 0o644,
+  });
+  return dir;
+}
+
 describe('Session Host runtime staging & detached spawn (#231)', () => {
   let tmp;
 
@@ -83,6 +102,7 @@ describe('Session Host runtime staging & detached spawn (#231)', () => {
     const staged = stageRuntimeFiles({
       userDataDir: tmp,
       version: '0.6.3',
+      nodePtyDir: fakeNodePty(path.join(tmp, 'pkg')),
     });
 
     expect(staged.versionDir).toBe(path.join(tmp, WPXEN_SESSION_HOST_DIR, '0.6.3'));
@@ -120,6 +140,24 @@ describe('Session Host runtime staging & detached spawn (#231)', () => {
     expect(fs.statSync(spawnHelper).mode & 0o111).not.toBe(0);
   });
 
+  // The installed node-pty only has a spawn-helper on macOS, the one platform
+  // WPXen ships for.
+  it.runIf(process.platform === 'darwin')(
+    'stages the installed node-pty package as the host needs it',
+    () => {
+      const staged = stageRuntimeFiles({ userDataDir: tmp, version: '0.6.3' });
+      const release = path.join(
+        staged.versionDir,
+        'node_modules',
+        'node-pty',
+        'build',
+        'Release'
+      );
+      expect(fs.existsSync(path.join(release, 'pty.node'))).toBe(true);
+      expect(fs.statSync(path.join(release, 'spawn-helper')).mode & 0o111).not.toBe(0);
+    }
+  );
+
   it('stages native files from app.asar.unpacked in a packaged build layout', () => {
     const bundleResources = path.join(tmp, 'Resources');
     const asarPty = path.join(bundleResources, 'app.asar', 'node_modules', 'node-pty');
@@ -142,6 +180,13 @@ describe('Session Host runtime staging & detached spawn (#231)', () => {
       path.join(unpackedPty, 'build', 'Release', 'spawn-helper'),
       '#!/bin/sh\n'
     );
+    const prebuildSubdir = path.join('prebuilds', `${process.platform}-${process.arch}`);
+    fs.mkdirSync(path.join(unpackedPty, prebuildSubdir), { recursive: true });
+    fs.writeFileSync(path.join(unpackedPty, prebuildSubdir, 'pty.node'), 'prebuild');
+    fs.writeFileSync(
+      path.join(unpackedPty, prebuildSubdir, 'spawn-helper'),
+      '#!/bin/sh\n'
+    );
 
     const userData = path.join(tmp, 'userData');
     const staged = stageRuntimeFiles({
@@ -158,12 +203,33 @@ describe('Session Host runtime staging & detached spawn (#231)', () => {
       'Release',
       'spawn-helper'
     );
+    const prebuildHelper = path.join(
+      staged.versionDir,
+      'node_modules',
+      'node-pty',
+      prebuildSubdir,
+      'spawn-helper'
+    );
+    const prebuildNode = path.join(
+      staged.versionDir,
+      'node_modules',
+      'node-pty',
+      prebuildSubdir,
+      'pty.node'
+    );
     expect(fs.existsSync(helper)).toBe(true);
     expect(fs.statSync(helper).mode & 0o755).toBe(0o755);
+    expect(fs.existsSync(prebuildHelper)).toBe(true);
+    expect(fs.statSync(prebuildHelper).mode & 0o755).toBe(0o755);
+    expect(fs.existsSync(prebuildNode)).toBe(true);
   });
 
   it('spawns the host detached under ELECTRON_RUN_AS_NODE=1 from the copied data folder, not the app bundle', () => {
-    const staged = stageRuntimeFiles({ userDataDir: tmp, version: '0.6.3' });
+    const staged = stageRuntimeFiles({
+      userDataDir: tmp,
+      version: '0.6.3',
+      nodePtyDir: fakeNodePty(path.join(tmp, 'pkg')),
+    });
     const unref = vi.fn();
     const spawnSpy = vi.fn(() => ({ pid: 9876, unref }));
 
@@ -545,5 +611,61 @@ describe('Run Sessions in the Session Host behind a setting (#231)', () => {
     } finally {
       offAlert();
     }
+  });
+
+  it('does not duplicate output emitted while async Session Host attach is in flight', async () => {
+    host = createSessionHost({
+      socketPath: sockPath,
+      appVersion: '0.6.3',
+      spawnPty: fakePtyFactory(hostPtys),
+      now: () => clock,
+    });
+    await host.start();
+
+    let clientRef = null;
+    agents.__setDeps({
+      connectHost: async () => {
+        const client = createSessionHostClient({ socketPath: sockPath });
+        const origAttach = client.attach;
+        client.attach = async (sid) => {
+          // Simulate host output emitted on the socket while the attach RPC is in flight.
+          hostPtys[0].emitData('in-flight\n');
+          await new Promise((r) => setTimeout(r, 25));
+          return origAttach(sid);
+        };
+        const hello = await client.hello();
+        clientRef = client;
+        return { client, hello, socketPath: sockPath };
+      },
+    });
+
+    await agents.setKeepRunningOnQuit(true);
+    const { sessionId } = agents.launch({ site: site(), agentId: 'claude' });
+    await until(() => hostPtys.length === 1 && clientRef !== null);
+
+    hostPtys[0].emitData('before\n');
+    await new Promise((r) => setTimeout(r, 20));
+
+    const sent = [];
+    const fakeWin = {
+      isDestroyed: () => false,
+      webContents: {
+        send: (channel, payload) => sent.push({ channel, payload }),
+      },
+    };
+
+    agents.attach(sessionId, fakeWin);
+    await until(() => sent.some((e) => e.channel === 'terminal-replay'));
+
+    hostPtys[0].emitData('after\n');
+    await until(() =>
+      sent.some((e) => e.channel === 'terminal-data' && e.payload.data.includes('after'))
+    );
+
+    const replays = sent.filter((e) => e.channel === 'terminal-replay');
+    const datas = sent.filter((e) => e.channel === 'terminal-data');
+    expect(replays).toHaveLength(1);
+    expect(replays[0].payload.data).toBe('before\nin-flight\n');
+    expect(datas.map((d) => d.payload.data).join('')).toBe('after\n');
   });
 });

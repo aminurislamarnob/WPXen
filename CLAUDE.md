@@ -215,10 +215,34 @@ per-session cooldown); `agents.cjs` stays electron-free by handing approved
 alerts to `onAlert`, and `ipc.cjs` / `main.cjs` deliver them as a
 `Notification`, the tray count + "Agents needing attention" menu, and the dock
 badge. Agent hooks can feed the engine later through its normalized
-`apply({ state, source })` entry point. The pty lives in the **main process, with
-no daemon** (see `docs/adr/0001-main-process-pty-no-daemon.md`), so it survives
-the window hiding to the tray and is reaped on quit; reattach after a window
-reopen is served from an in-memory ring buffer. The provider registry is
+`apply({ state, source })` entry point.
+
+- **Terminal provider & Session Host** (`docs/adr/0003-session-host.md`,
+  superseding ADR 0001). `agents.cjs` never imports `node-pty` directly; it
+  talks to one terminal provider interface (`services/terminalProvider.cjs`:
+  `start`, `write`, `resize`, `stop`, `attach`, `clearBuffer`, `getPid`,
+  `onOutput`, `onExit`; the host client adds the optional `markRead`,
+  `onStatus` and `onDisconnect`). With `agents.keepRunningOnQuit`
+  off (default), the in-app provider spawns ptys in the main process and
+  `shutdownAll()` records Sessions as ended (`agentSessions` store key) so they
+  reappear for Resume / Open Again on next launch. With the setting on,
+  `services/sessionHostManager.cjs` copies `sessionHost.cjs`, `agentStatus.cjs`,
+  `sessionHistory.cjs`, and `node-pty` (plus `0755` `spawn-helper`) into
+  `<userData>/wpxen-session-host/<version>/` (never running from the `.app`
+  bundle, which drag-and-replace updates move to the Trash), spawns
+  `services/sessionHost.cjs` detached under `ELECTRON_RUN_AS_NODE=1` on a
+  `0600` versioned Unix socket (`wpxen-host-<version>.sock`), and connects via
+  `services/sessionHostClient.cjs`. The line-delimited JSON protocol
+  (`docs/features/session-host-protocol.md`) is **additive-only forever**:
+  fields/messages may be added, never renamed or removed, and the client gates
+  newer features on `hello.capabilities` when talking to older hosts. Hosts
+  persist 5 MB `0600` per-Session output logs in `wpxen-session-history/` (dir
+  `0700`) and exit automatically once all Sessions end or after 24 hours with
+  no connected client. If a host fails to start or connect, `agents.cjs` falls
+  back to the in-app provider and surfaces a visible notice
+  (`src/lib/sessionHostNotice.js`).
+
+The provider registry is
 data-shaped: `cmd` is the binary detected on `$PATH` and spawned, `install` is
 the hint shown when it isn't found, and the optional `installer` is the
 one-click target, tagged by kind:
@@ -650,8 +674,10 @@ upgraded through every name. These shims are deliberate — don't tidy them away
 
 Names the app now writes outside its bundle, each a constant at the top of its
 module: the nginx folder `wpxen/` with `wpxen-errors.conf`, the reserved
-`/__wpxen/` URL prefix, `wpxen-repair.sock`, `{prefix}/etc/wpxen/ca-bundle.pem`,
-the `wpxen-local-trust.php` mu-plugin, and the `/etc/resolver/test` comment line.
+`/__wpxen/` URL prefix, `wpxen-repair.sock`, `wpxen-session-host/`,
+`wpxen-host-<version>.sock`, `wpxen-session-history/`,
+`{prefix}/etc/wpxen/ca-bundle.pem`, the `wpxen-local-trust.php` mu-plugin, and
+the `/etc/resolver/test` comment line.
 
 Not carried over, deliberately: the browser partition
 (`persist:wpxen-browser`) and the `wpxen.*` localStorage keys start fresh, and

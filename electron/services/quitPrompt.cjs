@@ -44,6 +44,12 @@ function servicesQuitStops(procStatus) {
 //   - { kind: 'agents-keep-running', count, message, detail, buttons, defaultId, cancelId }
 //   - { kind: 'agents' | 'services', names }
 //   - null to quit straight away.
+//
+// `liveAgentCount` is the Sessions a Session Host holds, the only ones that
+// can keep running. `agentSiteNames` names the Sites whose Sessions quitting
+// stops regardless (in-app ones, or every one with the setting off). Those
+// are always confirmed, even with confirm-on-quit off: an Agent may be
+// mid-edit.
 function quitConfirmation({
   confirmOnQuit,
   agentSiteNames,
@@ -51,8 +57,13 @@ function quitConfirmation({
   keepRunningOnQuit = false,
   liveAgentCount = 0,
 }) {
+  const stopping = agentSiteNames || [];
   if (keepRunningOnQuit && liveAgentCount > 0) {
-    if (confirmOnQuit === false) return null;
+    if (confirmOnQuit === false && stopping.length === 0) return null;
+    const stopNote =
+      stopping.length > 0
+        ? ` Agents in ${stopping.join(', ')} started before “Keep agents running when WPXen quits” was on, so they stop.`
+        : '';
     return {
       kind: 'agents-keep-running',
       count: liveAgentCount,
@@ -60,15 +71,14 @@ function quitConfirmation({
         liveAgentCount === 1
           ? '1 agent is still running.'
           : `${liveAgentCount} agents are still running.`,
-      detail:
-        'They keep working after WPXen quits, for up to 24 hours. Your sites will be offline until you open WPXen again.',
+      detail: `They keep working after WPXen quits, for up to 24 hours. Your sites will be offline until you open WPXen again.${stopNote}`,
       buttons: ['Keep running and quit', 'Stop agents and quit', 'Cancel'],
       defaultId: 0,
       cancelId: 2,
     };
   }
-  if (agentSiteNames && agentSiteNames.length > 0) {
-    return { kind: 'agents', names: agentSiteNames };
+  if (stopping.length > 0) {
+    return { kind: 'agents', names: stopping };
   }
   if (confirmOnQuit === false) return null;
   const names = servicesQuitStops(procStatus);
@@ -76,6 +86,12 @@ function quitConfirmation({
 }
 
 // Map the user's dialog button choice (or null confirmation) to a quit action.
+//   'keep-and-quit' — Sessions a host holds keep running; the rest stop.
+//   'stop-and-quit' — every Session stops.
+//   'cancel'
+// Only the keep-running dialog offers stopping host Sessions. "Quit" on the
+// services dialog and "Quit Anyway" on the agents one (which only names
+// Sessions that stop anyway) keep host-held ones, Floating terminals included.
 function quitAction(choice, confirmation) {
   if (!confirmation) return 'keep-and-quit';
   if (confirmation.kind === 'agents-keep-running') {
@@ -83,7 +99,7 @@ function quitAction(choice, confirmation) {
     if (choice === 1) return 'stop-and-quit';
     return 'cancel';
   }
-  return choice === 0 ? 'stop-and-quit' : 'cancel';
+  return choice === 0 ? 'keep-and-quit' : 'cancel';
 }
 
 module.exports = { servicesQuitStops, quitConfirmation, quitAction };

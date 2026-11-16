@@ -1160,7 +1160,7 @@ export default function AgentsPane() {
                 )}
 
                 {fallbackNotice && (
-                  <div className="px-3 py-1.5 text-[12px] text-status-attention bg-status-attention/10 border-b border-border">
+                  <div className="px-3 py-1.5 text-[12px] text-status-warning bg-status-warning/10 border-b border-border">
                     {fallbackNotice}
                   </div>
                 )}

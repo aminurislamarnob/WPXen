@@ -33,7 +33,9 @@ Host replies carry `{ v, id, ok: true, ... }` on success or `{ v, id, ok: false,
 Handshakes with the host and discovers its app and protocol versions.
 
 - **Request:** `{ "v": 1, "id": 1, "type": "hello" }`
-- **Reply:** `{ "v": 1, "id": 1, "ok": true, "appVersion": "0.6.3", "protocolVersion": 1 }`
+- **Reply:** `{ "v": 1, "id": 1, "ok": true, "appVersion": "0.6.3", "protocolVersion": 1, "capabilities": ["status", "mark-read", "history", "stop-keep-history"] }`
+
+`capabilities` lists optional features the host understands. A client checks it before using one (`mark-read`, `stop`'s `keepHistory`) and treats a missing list as "none of them" from a host that announced nothing. New capabilities are only ever appended.
 
 ### `list`
 
@@ -125,6 +127,7 @@ Clears the buffered output for `sessionId` (e.g. on `⌘K`).
 Terminates `sessionId` gracefully (`SIGTERM`, escalating to `SIGKILL` after the grace window) and removes it from the host.
 
 - **Request:** `{ "v": 1, "id": 8, "type": "stop", "sessionId": "s-1" }`
+- **Optional:** `"keepHistory": true` (capability `stop-keep-history`) keeps the Session's history file, for a Session that stays listed as ended ("Stop agents and quit", Stop all). Without it, the history file is deleted, as when a Session is closed. Output the process prints while it is being stopped is not written to a deleted history.
 - **Reply:** `{ "v": 1, "id": 8, "ok": true }`
 
 ### `mark-read`
@@ -173,4 +176,7 @@ Emitted at most once when `sessionId`'s pty process exits.
 ## Host Lifecycle
 
 - When a client disconnects, all live Sessions keep running and buffering output.
-- When the last Session has ended **and** no client is connected, the host closes its socket, unlinks the socket file, and exits automatically.
+- When the last Session has ended **and** no client is connected, the host closes its socket, unlinks the socket file, and exits automatically. A Session being stopped counts as live until its process exits or is killed, so `SIGKILL` escalation always runs.
+- A host that never gets a client exits after 60 seconds if it holds no Session.
+- After 24 hours with no client connected, the host stops every Session and exits. Any client connecting resets the clock.
+- A host never takes over a socket path another host is listening on: at start it probes the path and only unlinks a socket nobody answers on.

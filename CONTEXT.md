@@ -23,14 +23,25 @@ rather than offering a bare shell.
 _Avoid_: Terminal feature, console
 
 **Session**:
-One running Agent bound to one Site — a live pseudo-terminal (pty) hosted in the
-app's main process, identified by a unique sessionId. A Site may host **many**
-concurrent Sessions (any mix of Agents, including several of the same provider);
-each is a terminal tab in the Agents pane. A Session survives the main window
-hiding to the tray and is torn down when its shell exits or WPXen quits.
-Rendered inline in the Agents section's main pane (embedded, Superset-style —
-not a separate window).
+One running Agent bound to one Site — a live pseudo-terminal (pty) identified by
+a unique sessionId. A Site may host **many** concurrent Sessions (any mix of
+Agents, including several of the same provider); each is a terminal tab in the
+Agents pane. By default a Session runs in the main process, survives the main
+window hiding to the tray, and ends when its shell exits or WPXen quits
+(reappearing as an ended record on the next launch). When **Keep agents running
+when WPXen quits** is enabled, Sessions run in a **Session Host** and can
+outlive WPXen across quits, crashes, and app updates (for up to 24 hours without
+a connected client). Rendered inline in the Agents section's main pane
+(embedded, Superset-style — not a separate window).
 _Avoid_: Terminal, process
+
+**Session Host**:
+A detached background Node process (spawned via Electron's
+`ELECTRON_RUN_AS_NODE=1` from a private versioned copy in `userData`) that owns
+ptys, derives status/unread via `agentStatus.cjs`, and writes per-Session
+terminal history on disk over an owner-only (`0600`) versioned Unix socket
+(`docs/adr/0003-session-host.md`).
+_Avoid_: Pty daemon, background agent server
 
 **Launch Preset**:
 An Agent's **global** default flags, applied on every launch in any Site (e.g.

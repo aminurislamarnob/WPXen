@@ -8,11 +8,24 @@
 // Electron-free: loads under plain Node.
 
 const net = require('net');
+const { StringDecoder } = require('string_decoder');
 const { PROTOCOL_VERSION, parseHostMessage } = require('./sessionHost.cjs');
 
-const MAX_LINE_BYTES = 8 * 1024 * 1024;
+// An attach reply carries up to 5 MB of history, and JSON turns each ESC into
+// six characters, so a reply line can reach ~30 MB. Dropping it would leave
+// the attach waiting for ever.
+const MAX_LINE_BYTES = 64 * 1024 * 1024;
+// No request may wait for ever on a host that accepted the connection but
+// stopped answering: the app's launch waits on these.
+const REQUEST_TIMEOUT_MS = 30 * 1000;
+const HELLO_TIMEOUT_MS = 5 * 1000;
+const CLOSE_TIMEOUT_MS = 2 * 1000;
 
-function createSessionHostClient({ socketPath } = {}) {
+function createSessionHostClient({
+  socketPath,
+  requestTimeoutMs = REQUEST_TIMEOUT_MS,
+  helloTimeoutMs = HELLO_TIMEOUT_MS,
+} = {}) {
   if (!socketPath) throw new Error('socketPath is required');
 
   let conn = null;
@@ -47,14 +60,15 @@ function createSessionHostClient({ socketPath } = {}) {
     return () => disconnectListeners.delete(cb);
   }
 
+  // Returns true when an RPC response settled a pending promise.
   function handleLine(line) {
     const parsed = parseHostMessage(line);
-    if (!parsed.ok) return;
+    if (!parsed.ok) return false;
     const msg = parsed.message;
 
     if (parsed.kind === 'event') {
       if (msg.type === 'output') {
-        if (exitedSessions.has(msg.sessionId)) return;
+        if (exitedSessions.has(msg.sessionId)) return false;
         for (const cb of outputListeners) {
           try {
             cb({ sessionId: msg.sessionId, data: msg.data });
@@ -73,7 +87,7 @@ function createSessionHostClient({ socketPath } = {}) {
           } catch {}
         }
       } else if (msg.type === 'exit') {
-        if (exitedSessions.has(msg.sessionId)) return;
+        if (exitedSessions.has(msg.sessionId)) return false;
         exitedSessions.add(msg.sessionId);
         for (const cb of exitListeners) {
           try {
@@ -81,18 +95,21 @@ function createSessionHostClient({ socketPath } = {}) {
           } catch {}
         }
       }
-      return;
+      return false;
     }
 
     const entry = pending.get(msg.id);
-    if (!entry) return;
+    if (!entry) return false;
     pending.delete(msg.id);
+    if (entry.timer) clearTimeout(entry.timer);
     if (msg.ok) entry.resolve(msg);
     else entry.reject(new Error(msg.error || 'Session Host request failed'));
+    return true;
   }
 
   function failAllPending(err) {
-    for (const { reject } of pending.values()) {
+    for (const { reject, timer } of pending.values()) {
+      if (timer) clearTimeout(timer);
       try {
         reject(err);
       } catch {}
@@ -106,8 +123,10 @@ function createSessionHostClient({ socketPath } = {}) {
 
     connecting = new Promise((resolve, reject) => {
       const socket = net.connect(socketPath);
+      const decoder = new StringDecoder('utf8');
       let buf = '';
       let settled = false;
+      let gone = false;
 
       socket.once('connect', () => {
         settled = true;
@@ -116,18 +135,46 @@ function createSessionHostClient({ socketPath } = {}) {
         resolve(socket);
       });
 
+      const lineQueue = [];
+      let draining = false;
+      async function drainLines() {
+        draining = true;
+        try {
+          while (lineQueue.length > 0) {
+            const line = lineQueue.shift();
+            if (handleLine(line)) {
+              // Yield a handful of microtasks so chained promise handlers
+              // (e.g. `attach()` binding `session.window`) settle before
+              // subsequent events packed into the same socket read run.
+              for (let i = 0; i < 4; i++) await Promise.resolve();
+            }
+          }
+        } finally {
+          draining = false;
+        }
+      }
+
       socket.on('data', (chunk) => {
-        buf += chunk.toString('utf8');
+        buf += decoder.write(chunk);
         let idx;
         while ((idx = buf.indexOf('\n')) !== -1) {
           const line = buf.slice(0, idx);
           buf = buf.slice(idx + 1);
-          if (line.trim()) handleLine(line);
+          if (line.trim()) lineQueue.push(line);
         }
-        if (buf.length > MAX_LINE_BYTES) buf = '';
+        if (buf.length > MAX_LINE_BYTES) {
+          // Past the limit the line can't be framed any more; fail whatever
+          // waits on it rather than hang.
+          buf = '';
+          failAllPending(new Error('Session Host reply too large'));
+        }
+        if (lineQueue.length > 0 && !draining) void drainLines();
       });
 
+      // 'error' is followed by 'close'; listeners hear one disconnect.
       const onGone = (err) => {
+        if (gone) return;
+        gone = true;
         if (!settled) {
           settled = true;
           connecting = null;
@@ -150,29 +197,41 @@ function createSessionHostClient({ socketPath } = {}) {
     return connecting;
   }
 
-  function sendOnSocket(socket, type, payload) {
+  function sendOnSocket(socket, type, payload, timeoutMs) {
     const id = nextId++;
     const line = JSON.stringify({ v: PROTOCOL_VERSION, id, type, ...payload }) + '\n';
     return new Promise((resolve, reject) => {
-      pending.set(id, { resolve, reject });
-      socket.write(line, (err) => {
-        if (err) {
+      const entry = { resolve, reject, timer: null };
+      if (timeoutMs > 0) {
+        entry.timer = setTimeout(() => {
+          if (pending.get(id) !== entry) return;
           pending.delete(id);
+          reject(new Error(`Session Host did not answer “${type}” in time`));
+        }, timeoutMs);
+        entry.timer.unref?.();
+      }
+      pending.set(id, entry);
+      socket.write(line, (err) => {
+        if (err && pending.get(id) === entry) {
+          pending.delete(id);
+          if (entry.timer) clearTimeout(entry.timer);
           reject(err);
         }
       });
     });
   }
 
-  function request(type, payload = {}) {
+  function request(type, payload = {}, { timeoutMs = requestTimeoutMs } = {}) {
     if (conn && !conn.destroyed) {
-      return sendOnSocket(conn, type, payload);
+      return sendOnSocket(conn, type, payload, timeoutMs);
     }
-    return ensureConnected().then((socket) => sendOnSocket(socket, type, payload));
+    return ensureConnected().then((socket) =>
+      sendOnSocket(socket, type, payload, timeoutMs)
+    );
   }
 
   async function hello() {
-    const res = await request('hello');
+    const res = await request('hello', {}, { timeoutMs: helloTimeoutMs });
     helloInfo = res;
     return res;
   }
@@ -244,9 +303,16 @@ function createSessionHostClient({ socketPath } = {}) {
     await request('clear-buffer', { sessionId });
   }
 
-  async function stop(sessionId) {
+  // `keepHistory` asks the host to keep the Session's history file for its
+  // ended row. Hosts without 'stop-keep-history' ignore the field.
+  async function stop(sessionId, { keepHistory = false } = {}) {
     pids.delete(sessionId);
-    await request('stop', { sessionId });
+    await request(
+      'stop',
+      keepHistory && supports('stop-keep-history')
+        ? { sessionId, keepHistory: true }
+        : { sessionId }
+    );
   }
 
   function getPid(sessionId) {
@@ -261,7 +327,15 @@ function createSessionHostClient({ socketPath } = {}) {
       }
       const s = conn;
       conn = null;
-      s.once('close', () => resolve());
+      const t = setTimeout(() => {
+        s.destroy();
+        resolve();
+      }, CLOSE_TIMEOUT_MS);
+      t.unref?.();
+      s.once('close', () => {
+        clearTimeout(t);
+        resolve();
+      });
       s.end();
     });
   }
@@ -287,5 +361,7 @@ function createSessionHostClient({ socketPath } = {}) {
 }
 
 module.exports = {
+  MAX_LINE_BYTES,
+  REQUEST_TIMEOUT_MS,
   createSessionHostClient,
 };

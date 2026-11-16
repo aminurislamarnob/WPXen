@@ -92,7 +92,32 @@ describe('terminal history on disk (#233)', () => {
     const file = historyFilePath(histDir, 'sess-cap');
     expect(fs.statSync(file).size).toBeLessThanOrEqual(cap);
     const content = readHistory(histDir, 'sess-cap');
-    expect(content).toBe('A'.repeat(30) + 'B'.repeat(70));
+    // Trimmed to 80% of the cap, so the next chunks append instead of each
+    // rewriting the whole file.
+    expect(content).toBe('A'.repeat(10) + 'B'.repeat(70));
+  });
+
+  it('starts a trimmed history at a line start when one is near the cut', () => {
+    const cap = 100;
+    appendHistory(
+      histDir,
+      'sess-line',
+      'x'.repeat(50) + '\n' + 'y'.repeat(9) + '\n',
+      cap
+    );
+    appendHistory(histDir, 'sess-line', 'z'.repeat(45), cap);
+    expect(readHistory(histDir, 'sess-line')).toBe('y'.repeat(9) + '\n' + 'z'.repeat(45));
+  });
+
+  it('does not rewrite the file on every chunk once it is at the cap', () => {
+    const cap = 1000;
+    appendHistory(histDir, 'sess-amortized', 'a'.repeat(990), cap);
+    appendHistory(histDir, 'sess-amortized', 'b'.repeat(20), cap); // trims to 800
+    const file = historyFilePath(histDir, 'sess-amortized');
+    const inoAfterTrim = fs.statSync(file).ino;
+    appendHistory(histDir, 'sess-amortized', 'c'.repeat(20), cap);
+    expect(fs.statSync(file).ino).toBe(inoAfterTrim); // appended, not replaced
+    expect(fs.statSync(file).size).toBe(820);
   });
 
   it('reattaching to a live Session replays disk history and continues live with no gap or duplicate', async () => {
