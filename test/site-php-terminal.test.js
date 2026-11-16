@@ -61,6 +61,11 @@ describe("a Site's terminal", () => {
     expect(env.PATH.split(':')[0]).toBe(PHP_BIN);
   });
 
+  it('advertises 24-bit color, so CLIs do not quantize to the 256 palette', () => {
+    agents.launch({ site: site(), agentId: 'shell' });
+    expect(ptys[0].spawnedWith.opts.env.COLORTERM).toBe('truecolor');
+  });
+
   it('is left alone when the Site has no PHP version to pin', () => {
     agents.launch({ site: site({ phpVersion: undefined }), agentId: 'shell' });
     const { env } = ptys[0].spawnedWith.opts;
