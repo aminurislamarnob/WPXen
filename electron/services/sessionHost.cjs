@@ -397,11 +397,42 @@ function createSessionHost({
   };
 }
 
+function parseCliArgs(argv = process.argv.slice(2)) {
+  let socketPath = process.env.WPXEN_SESSION_HOST_SOCKET || null;
+  let appVersion = process.env.WPXEN_SESSION_HOST_VERSION || '0.0.0';
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === '--socket' && argv[i + 1]) {
+      socketPath = argv[++i];
+    } else if (argv[i] === '--version' && argv[i + 1]) {
+      appVersion = argv[++i];
+    }
+  }
+  return { socketPath, appVersion };
+}
+
+if (require.main === module) {
+  const { socketPath, appVersion } = parseCliArgs();
+  if (!socketPath) {
+    process.stderr.write('sessionHost: --socket is required\n');
+    process.exit(1);
+  }
+  const host = createSessionHost({
+    socketPath,
+    appVersion,
+    onExit: () => process.exit(0),
+  });
+  host.start().catch((err) => {
+    process.stderr.write(`sessionHost: ${err.message}\n`);
+    process.exit(1);
+  });
+}
+
 module.exports = {
   PROTOCOL_VERSION,
   KNOWN_CLIENT_TYPES,
   KNOWN_HOST_EVENT_TYPES,
   parseClientMessage,
   parseHostMessage,
+  parseCliArgs,
   createSessionHost,
 };

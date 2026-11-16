@@ -38,6 +38,7 @@ const VALID_EVENT_CHANNELS = [
   'browser-shortcut',
   'settings-updated',
   'keep-awake-status-update',
+  'agent-host-status-update',
   'office-update',
   'site-log-follow-update',
   'site-upgrade-report',
@@ -222,6 +223,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Keep computer awake: { mode, active, workingCount }. Changes are pushed on
   // 'keep-awake-status-update'; the mode itself is the agents.keepAwake setting.
   getKeepAwakeStatus: () => ipcRenderer.invoke('keep-awake-status'),
+  // Session Host fallback status (#231): { fallback, message, error }.
+  getAgentHostStatus: () => ipcRenderer.invoke('agent-host-status'),
   // Editors/terminals detected on this machine, for the settings pickers.
   listExternalTools: () => ipcRenderer.invoke('list-external-tools'),
   // Every agent including ones hidden from the launcher (settings only).

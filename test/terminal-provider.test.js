@@ -4,6 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import agents from '../electron/services/agents.cjs';
 import { createInAppTerminalProvider } from '../electron/services/terminalProvider.cjs';
+import { createSessionHost } from '../electron/services/sessionHost.cjs';
+import { createSessionHostClient } from '../electron/services/sessionHostClient.cjs';
 
 function fakePtyFactory(ptys) {
   let nextPid = 2000;
@@ -168,6 +170,53 @@ runTerminalProviderSuite('in-app pty provider', () => {
     cleanup: () => {
       provider.stopAll();
       vi.useRealTimers();
+    },
+  };
+});
+
+runTerminalProviderSuite('Session Host client provider', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wpxen-provider-host-'));
+  const socketPath = path.join(tmp, 'wpxen-host.sock');
+  const ptys = [];
+  const byId = new Map();
+  const spawn = fakePtyFactory(ptys);
+  let lastSessionId = null;
+
+  const host = createSessionHost({
+    socketPath,
+    appVersion: '0.6.3',
+    killGraceMs: 25,
+    spawnPty: (file, args, opts) => {
+      const p = spawn(file, args, opts);
+      if (lastSessionId) byId.set(lastSessionId, p);
+      return p;
+    },
+  });
+  await host.start();
+
+  const client = createSessionHostClient({ socketPath });
+  const origStart = client.start.bind(client);
+  client.start = async (opts) => {
+    lastSessionId = opts.sessionId;
+    return origStart(opts);
+  };
+
+  return {
+    provider: client,
+    emitData: async (id, data) => {
+      byId.get(id)?.emitData(data);
+      await new Promise((r) => setTimeout(r, 15));
+    },
+    emitExit: async (id, code) => {
+      byId.get(id)?.emitExit(code);
+      await new Promise((r) => setTimeout(r, 15));
+    },
+    getSpawned: (id) => byId.get(id),
+    advanceKillGrace: () => new Promise((r) => setTimeout(r, 50)),
+    cleanup: async () => {
+      await client.close();
+      await host.close();
+      fs.rmSync(tmp, { recursive: true, force: true });
     },
   };
 });

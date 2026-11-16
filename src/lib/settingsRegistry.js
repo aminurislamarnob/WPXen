@@ -451,6 +451,25 @@ export const SETTINGS_ITEMS = [
     keywords: ['agents', 'chat', 'transcript', 'view', 'claude', 'default'],
   },
   {
+    id: 'agents.keepRunningOnQuit',
+    section: 'agents',
+    title: 'Keep agents running when WPXen quits',
+    description:
+      'Run agent sessions in a background process so they survive quitting and updating WPXen',
+    keywords: [
+      'agents',
+      'keep',
+      'running',
+      'quit',
+      'background',
+      'host',
+      'daemon',
+      'survive',
+      'update',
+      'persist',
+    ],
+  },
+  {
     id: 'agents.notifications.enabled',
     section: 'agents',
     title: 'Agent notifications',

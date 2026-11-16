@@ -20,6 +20,7 @@ import {
   keepAwakeMode,
   useKeepAwakeStatus,
 } from '../../../lib/useKeepAwake';
+import { hostFallbackNotice, useAgentHostStatus } from '../../../lib/sessionHostNotice';
 
 const TASKS_KEYS = ['tasks.startPrompt', 'tasks.branchTemplate', 'tasks.startMode'];
 const START_MODES = [
@@ -39,6 +40,7 @@ export default function AgentsSection() {
   // replaced.
   const [open, setOpen] = useState(null);
   const keepAwake = useKeepAwakeStatus();
+  const hostStatus = useAgentHostStatus();
 
   const refresh = useCallback(() => {
     window.electronAPI
@@ -209,6 +211,10 @@ export default function AgentsSection() {
     </div>
   );
   const awakeMode = keepAwakeMode(settings['agents.keepAwake']);
+  const fallbackNotice = hostFallbackNotice(
+    hostStatus,
+    settings['agents.keepRunningOnQuit'] === true
+  );
 
   const chatViewRows = (!visible || visible.includes('agents.chatViewDefault')) && (
     <div>
@@ -255,6 +261,29 @@ export default function AgentsSection() {
             Your display can still sleep and lock. With the lid closed on battery, macOS
             sleeps regardless.
           </p>
+        </div>
+      )}
+
+      {(!visible || visible.includes('agents.keepRunningOnQuit')) && (
+        <div>
+          <SectionLabel>Background Sessions</SectionLabel>
+          <Card>
+            <SettingsRow
+              id="agents.keepRunningOnQuit"
+              visible={visible}
+              title="Keep agents running when WPXen quits"
+              subtitle="Run agent sessions in a background process so they survive quitting and updating WPXen"
+            >
+              <Toggle
+                checked={settings['agents.keepRunningOnQuit'] === true}
+                onChange={(v) => setSetting('agents.keepRunningOnQuit', v)}
+                label="Keep agents running when WPXen quits"
+              />
+            </SettingsRow>
+          </Card>
+          {fallbackNotice && (
+            <p className="text-[11px] text-destructive mt-1.5 px-1">{fallbackNotice}</p>
+          )}
         </div>
       )}
 

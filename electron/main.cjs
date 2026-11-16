@@ -335,7 +335,9 @@ app.on('before-quit', (e) => {
   // WPXen's own services would stop (quitPrompt.cjs).
   const agents = require('./services/agents.cjs');
   let agentSiteNames = [];
-  if (agents.hasActiveSessions()) {
+  const keepAgentsRunning =
+    getSetting('agents.keepRunningOnQuit') && !agents.getHostStatus().fallback;
+  if (!keepAgentsRunning && agents.hasActiveSessions()) {
     const sitesById = new Map((store?.get('sites', []) || []).map((s) => [s.id, s.name]));
     agentSiteNames = agents.activeSiteIds().map((id) => sitesById.get(id) || id);
   }

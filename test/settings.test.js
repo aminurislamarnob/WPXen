@@ -421,3 +421,21 @@ describe('agents.chatViewDefault', () => {
     expect(coerce(SETTINGS['agents.chatViewDefault'], 1).ok).toBe(false);
   });
 });
+
+describe('agents.keepRunningOnQuit (#231)', () => {
+  it('defaults to off', () => {
+    expect(SETTINGS['agents.keepRunningOnQuit']).toMatchObject({
+      type: 'bool',
+      default: false,
+    });
+  });
+
+  it('accepts bools and rejects anything else', () => {
+    expect(coerce(SETTINGS['agents.keepRunningOnQuit'], true)).toEqual({
+      ok: true,
+      value: true,
+    });
+    expect(coerce(SETTINGS['agents.keepRunningOnQuit'], 'yes').ok).toBe(false);
+    expect(coerce(SETTINGS['agents.keepRunningOnQuit'], 1).ok).toBe(false);
+  });
+});
