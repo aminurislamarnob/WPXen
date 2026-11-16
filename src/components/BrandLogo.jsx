@@ -10,7 +10,8 @@ const BRAND_BLUE = '#0A60FF';
 // The two strokes stay blue in both themes; the spark is blue on light and
 // white on dark, as the design's horizontal lockups draw it. A logo variant,
 // not a theme color, hence the one `dark:` here rather than a token.
-function MarkPaths() {
+// `fill` paints the whole mark one color instead (white on the icon tile).
+function MarkPaths({ fill = null }) {
   return (
     <>
       <rect
@@ -20,7 +21,7 @@ function MarkPaths() {
         height="15"
         rx="7.5"
         transform="rotate(45 45 55)"
-        fill={BRAND_BLUE}
+        fill={fill || BRAND_BLUE}
       />
       <rect
         x="7.5"
@@ -29,13 +30,27 @@ function MarkPaths() {
         height="15"
         rx="7.5"
         transform="rotate(-45 35.5 64.5)"
-        fill={BRAND_BLUE}
+        fill={fill || BRAND_BLUE}
       />
       <path
         d="M70 14C71.6 25.5 74.5 28.4 86 30C74.5 31.6 71.6 34.5 70 46C68.4 34.5 65.5 31.6 54 30C65.5 28.4 68.4 25.5 70 14Z"
-        className="fill-[#0A60FF] dark:fill-white"
+        {...(fill ? { fill } : { className: 'fill-[#0A60FF] dark:fill-white' })}
       />
     </>
+  );
+}
+
+// The app icon: the white mark on a blue rounded tile, in the proportions of
+// `assets/icon.svg` (tile corner 22% of its side, mark 60% of it, centered).
+// Size it with width/height classes.
+export function BrandIcon({ className = '' }) {
+  return (
+    <svg viewBox="0 0 100 100" className={className} role="img" aria-label="WPXen">
+      <rect width="100" height="100" rx="22.22" fill={BRAND_BLUE} />
+      <g transform="translate(19.78 19.78) scale(0.6044)">
+        <MarkPaths fill="#FFFFFF" />
+      </g>
+    </svg>
   );
 }
 

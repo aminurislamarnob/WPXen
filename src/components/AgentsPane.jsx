@@ -17,6 +17,7 @@ import {
   X,
 } from 'lucide-react';
 import { ProviderIcon } from './providerIcons';
+import { BrandIcon } from './BrandLogo';
 import { Panel, PanelGroup } from 'react-resizable-panels';
 import SplitLayout from './agents/SplitLayout';
 import HandoffDialog from './agents/HandoffDialog';
@@ -1219,6 +1220,7 @@ export default function AgentsPane() {
                     />
                   ) : !sessionsLoaded ? null : (
                     <div className="h-full flex flex-col items-center justify-center text-center">
+                      <BrandIcon className="w-16 h-16 mb-5 rounded-[14px] shadow-lg" />
                       <p className="text-[13px] text-muted-foreground">
                         No sessions yet for {meta.siteName}.
                       </p>
