@@ -90,10 +90,7 @@ const afterCopy = (...steps) =>
   `(${[...steps, 'dscacheutil -flushcache', 'killall -HUP mDNSResponder', 'true'].join('; ')})`;
 const NEW_RESOLVER =
   '# WPXen DNS resolver for .test domains\nnameserver 127.0.0.1\nport 53535\n';
-const MIGRATE_REASON =
-  'WPXen wants to move .test DNS off its root service and remove the ' +
-  'passwordless permission it installed. It will not need your password for ' +
-  'DNS again.';
+const MIGRATE_REASON = 'move .test DNS off its old root service';
 
 describe('the notice', () => {
   it('is needed while DNS is legacy, and not once it is rootless', () => {

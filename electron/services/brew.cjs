@@ -356,13 +356,19 @@ function execBrewServiceAdmin(action, name) {
   const { adminOsascript } = require('./admin.cjs');
   const prefix = getBrewPrefix();
   const shellCmd = `PATH=${prefix}/bin:$PATH ${brewBin} services ${action} ${name}`;
-  const reason = `WPXen wants to ${action} the ${name} service.`;
-  execSync(adminOsascript(shellCmd, reason), {
+  execSync(adminOsascript(shellCmd, `${action} the ${name} service`), {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 }
 
+// Homebrew writes a root service's plist here; without it there is nothing
+// running as root to stop, and the admin prompt would ask for nothing.
+function rootServicePlist(name) {
+  return `/Library/LaunchDaemons/homebrew.mxcl.${name}.plist`;
+}
+
 function stopBrewServiceAdmin(name) {
+  if (!fs.existsSync(rootServicePlist(name))) return;
   execBrewServiceAdmin('stop', name);
 }
 
@@ -491,6 +497,7 @@ module.exports = {
   stopBrewService,
   restartBrewService,
   stopBrewServiceAdmin,
+  rootServicePlist,
   startBrewServiceSudo,
   stopBrewServiceSudo,
   restartBrewServiceSudo,

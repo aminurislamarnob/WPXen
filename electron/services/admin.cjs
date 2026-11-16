@@ -1,25 +1,31 @@
 'use strict';
 
 // Builds an `osascript` command that runs `shellCmd` with administrator
-// privileges. `reason` is shown in the macOS authentication dialog via
-// AppleScript's `with prompt`, replacing the generic
-// "osascript wants to make changes." body text with a plain-language
-// explanation of what WPXen is about to do.
+// privileges, behind the macOS authentication dialog.
 //
-// Note: the bold application name in the dialog ("osascript") is set by macOS
-// from the calling binary and cannot be changed without shipping a signed
-// privileged helper — only the message text is customizable here.
+// `task` finishes one sentence, "WPXen needs administrator access to <task>.",
+// so every prompt reads the same way: a short verb phrase, no explanation
+// (e.g. 'stop the nginx service'). It is passed as AppleScript's `with
+// prompt`. Older macOS shows it as the dialog's message; newer macOS (the
+// "Allow administrator access for a script started by …" dialog) ignores it
+// and shows only Apple's own text. The bold app name comes from the calling
+// binary ("Electron" in dev, "WPXen" when packaged) and can't be changed
+// without shipping a signed privileged helper.
+//
+// Because the dialog may say nothing about why, ask only when there is real
+// work to do as root — never speculatively.
 //
 // Returns a shell command string suitable for execSync.
-function adminOsascript(shellCmd, reason) {
+function adminPrompt(task) {
+  return `WPXen needs administrator access to ${String(task || 'make changes').trim()}.`;
+}
+
+function adminOsascript(shellCmd, task) {
   const cmd = shellCmd.replace(/"/g, '\\"');
   // Escape backslashes and double quotes for the AppleScript string literal.
-  const prompt = String(reason || 'WPXen wants to make changes.').replace(
-    /["\\]/g,
-    '\\$&'
-  );
+  const prompt = adminPrompt(task).replace(/["\\]/g, '\\$&');
   const appleScript = `do shell script "${cmd}" with prompt "${prompt}" with administrator privileges`;
   return `osascript -e '${appleScript.replace(/'/g, "'\\''")}'`;
 }
 
-module.exports = { adminOsascript };
+module.exports = { adminOsascript, adminPrompt };

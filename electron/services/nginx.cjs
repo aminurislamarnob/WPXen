@@ -2,6 +2,7 @@
 
 const { execSync, execFile, execFileSync } = require('child_process');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const brew = require('./brew.cjs');
 const phpService = require('./php.cjs');
@@ -74,6 +75,42 @@ function getNginxBinPath() {
   return null;
 }
 
+// ── Another nginx holding the ports ─────────────────────────────────────────
+// WPXen can only clear an nginx Homebrew started: the root LaunchDaemon from
+// pre-supervisor WPXen (stopping it needs the admin prompt) or a per-user
+// `brew services` agent. Anything else — Laravel Herd, Valet, MAMP, a
+// hand-started nginx — is someone else's to stop, so it gets a message, never
+// a password prompt that can't help.
+const BREW_NGINX_DAEMON = '/Library/LaunchDaemons/homebrew.mxcl.nginx.plist';
+const BREW_NGINX_AGENT = path.join(
+  os.homedir(),
+  'Library',
+  'LaunchAgents',
+  'homebrew.mxcl.nginx.plist'
+);
+const HERD_NGINX_RE = 'Herd\\.app/Contents/Resources/nginx';
+
+// Which Homebrew stops to try, from which service files exist. Pure.
+function takeoverSteps(exists) {
+  const steps = [];
+  if (exists(BREW_NGINX_DAEMON)) steps.push('admin');
+  if (exists(BREW_NGINX_AGENT)) steps.push('user');
+  return steps;
+}
+
+// What to tell the user when the ports stay taken. Pure.
+function conflictMessage({ herd }) {
+  return herd
+    ? 'Laravel Herd is using ports 80 and 443. Quit Herd, then start nginx again.'
+    : 'Another nginx is using ports 80 and 443. Stop it, then start nginx again.';
+}
+
+function isHerdNginxRunning() {
+  return new Promise((resolve) => {
+    execFile('pgrep', ['-f', HERD_NGINX_RE], { timeout: 4000 }, (err) => resolve(!err));
+  });
+}
+
 // nginx runs as a supervised child of WPXen (see procman.cjs). No root
 // needed: since macOS 10.14 unprivileged processes may bind ports below 1024,
 // so 80/443 work from a plain child process (this is how Herd does it too).
@@ -106,17 +143,18 @@ function buildSpec() {
         await execAsync("pkill -f 'nginx: worker process'", { timeout: 4000 });
       } catch {}
     },
-    // A pre-migration launchd instance (root daemon) can't be cleared without
-    // root; the takeover asks through the administrator prompt.
+    // Only Homebrew's own nginx services are ours to stop (takeoverSteps);
+    // the root one is the sole reason this ever shows the admin prompt.
     conflictProbe: isRunningAsync,
     takeover: async () => {
-      try {
-        brew.stopBrewServiceAdmin('nginx');
-      } catch {}
-      try {
-        brew.stopBrewService('nginx');
-      } catch {}
+      for (const step of takeoverSteps(fs.existsSync)) {
+        try {
+          if (step === 'admin') brew.stopBrewServiceAdmin('nginx');
+          else brew.stopBrewService('nginx');
+        } catch {}
+      }
     },
+    describeConflict: async () => conflictMessage({ herd: await isHerdNginxRunning() }),
   };
 }
 
@@ -448,6 +486,10 @@ module.exports = {
   isRunning,
   isRunningAsync,
   isNginxCommand,
+  takeoverSteps,
+  conflictMessage,
+  BREW_NGINX_DAEMON,
+  BREW_NGINX_AGENT,
   start,
   stop,
   restart,
