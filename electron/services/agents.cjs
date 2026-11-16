@@ -11,8 +11,11 @@ const os = require('os');
 const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
-const pty = require('node-pty');
 const { createTracker, createNotifier, isTerminalReply } = require('./agentStatus.cjs');
+const {
+  createInAppTerminalProvider,
+  defaultSpawnPty,
+} = require('./terminalProvider.cjs');
 const shellIntegration = require('./shellIntegration.cjs');
 
 // ── Registry ────────────────────────────────────────────────────────────────
@@ -433,7 +436,9 @@ const deps = {
   runScriptStreaming: (url, onProgress) => runVendorScript(url, onProgress),
   runNpmStreaming: (args, onProgress) => runNpmInstall(args, onProgress),
   // The pty layer, so tests can launch Sessions without a real shell.
-  spawnPty: (file, args, opts) => pty.spawn(file, args, opts),
+  // Default delegates to the in-app terminal provider's node-pty spawn.
+  spawnPty: null,
+  terminalProvider: null,
   shellEnv: () => resolveShellEnv(),
   userShell: () => getUserShell(),
   homedir: () => os.homedir(),
@@ -448,6 +453,26 @@ const deps = {
     return keg ? `${keg}/bin` : null;
   },
 };
+
+// Default in-app terminal provider, delegating to deps.spawnPty when a test
+// swaps it. When deps.terminalProvider is set, the engine uses that provider
+// instead; wireProvider() subscribes the engine's output/exit handlers once per
+// provider instance.
+const inAppProvider = createInAppTerminalProvider({
+  spawnPty: (file, args, opts) =>
+    deps.spawnPty ? deps.spawnPty(file, args, opts) : defaultSpawnPty(file, args, opts),
+});
+const wiredProviders = new WeakSet();
+
+function activeProvider() {
+  const provider = deps.terminalProvider || inAppProvider;
+  if (!wiredProviders.has(provider)) {
+    wiredProviders.add(provider);
+    provider.onOutput(({ sessionId, data }) => handleProviderOutput(sessionId, data));
+    provider.onExit(({ sessionId, exitCode }) => handleProviderExit(sessionId, exitCode));
+  }
+  return provider;
+}
 
 function bindStore(store) {
   deps.store = store;
@@ -1253,9 +1278,12 @@ function startSession({ cwd, command, meta, failLabel, phpBinDir = null }) {
   // a normal shell prompt (like Superset), and the Session only ends when the
   // shell itself exits. `-il` sources the user's rc files.
   const shell = deps.userShell();
-  let term;
+  const provider = activeProvider();
   try {
-    term = deps.spawnPty(shell, ['-il'], {
+    provider.start({
+      sessionId,
+      file: shell,
+      args: ['-il'],
       name: 'xterm-256color',
       cols: 80,
       rows: 24,
@@ -1297,7 +1325,15 @@ function startSession({ cwd, command, meta, failLabel, phpBinDir = null }) {
     sessionId,
     ...meta,
     cwd,
-    pty: term,
+    provider,
+    pty: {
+      get pid() {
+        return provider.getPid?.(sessionId) ?? null;
+      },
+      write: (data) => provider.write(sessionId, data),
+      resize: (cols, rows) => provider.resize(sessionId, cols, rows),
+      kill: () => provider.stop(sessionId),
+    },
     buffer: '',
     window: null,
     exited: false,
@@ -1309,6 +1345,7 @@ function startSession({ cwd, command, meta, failLabel, phpBinDir = null }) {
     // `started` gates the type-the-command step; a shell session has already
     // arrived at what the user wanted, so it starts out done.
     started: startsImmediately,
+    scheduleRun: null,
   };
   sessions.set(sessionId, session);
   session.tracker.view(isOnScreen(sessionId));
@@ -1321,62 +1358,64 @@ function startSession({ cwd, command, meta, failLabel, phpBinDir = null }) {
   const runAgent = () => {
     if (session.started || session.exited) return;
     session.started = true;
-    try {
-      term.write(`${command}\r`);
-    } catch {}
+    provider.write(sessionId, `${command}\r`);
   };
-  const scheduleRun = () => {
+  session.scheduleRun = () => {
     if (session.started || settleTimer) return;
     settleTimer = setTimeout(runAgent, 150);
   };
   if (!startsImmediately) setTimeout(runAgent, 1200); // fallback: no output first
 
-  term.onData((data) => {
-    session.lastOutputAt = deps.now();
-    scheduleRun();
-    const beforeSnap = session.tracker.snapshot();
-    if (session.tracker.output(data)) {
-      // Status and unread flips go out at once; title-only churn (spinner
-      // frames) waits.
-      const after = session.tracker.snapshot();
-      if (after.title !== beforeSnap.title) saveSessionRecord(session);
-      emitChange({
-        immediate: after.state !== beforeSnap.state || after.unread !== beforeSnap.unread,
-      });
-    }
-    deliverAlerts(session);
-    session.buffer += data;
-    if (session.buffer.length > MAX_BUFFER) {
-      session.buffer = session.buffer.slice(session.buffer.length - MAX_BUFFER);
-    }
-    const win = session.window;
-    if (win && !win.isDestroyed()) {
-      win.webContents.send('terminal-data', { sessionId, data });
-    }
-  });
-
   if (meta.pinFromRegistry) startRegistryPin(session);
-
-  term.onExit(({ exitCode }) => {
-    session.exited = true;
-    session.endedAt = deps.now();
-    stopRegistryPin(session);
-    session.exitCode = exitCode;
-    session.tracker.exit(exitCode);
-    deliverAlerts(session);
-    const win = session.window;
-    if (win && !win.isDestroyed()) {
-      win.webContents.send('terminal-exit', { sessionId, code: exitCode });
-    }
-    // stop() already deleted a dismissed session; don't resurrect its row.
-    if (sessions.has(sessionId)) {
-      saveSessionRecord(session);
-      emitChange({ immediate: true });
-    }
-  });
 
   emitChange({ immediate: true });
   return { ok: true, sessionId };
+}
+
+function handleProviderOutput(sessionId, data) {
+  const session = sessions.get(sessionId);
+  if (!session || session.exited) return;
+  session.lastOutputAt = deps.now();
+  session.scheduleRun?.();
+  const beforeSnap = session.tracker.snapshot();
+  if (session.tracker.output(data)) {
+    // Status and unread flips go out at once; title-only churn (spinner
+    // frames) waits.
+    const after = session.tracker.snapshot();
+    if (after.title !== beforeSnap.title) saveSessionRecord(session);
+    emitChange({
+      immediate: after.state !== beforeSnap.state || after.unread !== beforeSnap.unread,
+    });
+  }
+  deliverAlerts(session);
+  session.buffer += data;
+  if (session.buffer.length > MAX_BUFFER) {
+    session.buffer = session.buffer.slice(session.buffer.length - MAX_BUFFER);
+  }
+  const win = session.window;
+  if (win && !win.isDestroyed()) {
+    win.webContents.send('terminal-data', { sessionId, data });
+  }
+}
+
+function handleProviderExit(sessionId, exitCode) {
+  const session = sessions.get(sessionId);
+  if (!session || session.exited) return;
+  session.exited = true;
+  session.endedAt = deps.now();
+  stopRegistryPin(session);
+  session.exitCode = exitCode;
+  session.tracker.exit(exitCode);
+  deliverAlerts(session);
+  const win = session.window;
+  if (win && !win.isDestroyed()) {
+    win.webContents.send('terminal-exit', { sessionId, code: exitCode });
+  }
+  // stop() already deleted a dismissed session; don't resurrect its row.
+  if (sessions.has(sessionId)) {
+    saveSessionRecord(session);
+    emitChange({ immediate: true });
+  }
 }
 
 // Learn which Claude conversation the Session is running from Claude's own
@@ -1438,18 +1477,32 @@ function attach(sessionId, win) {
   const session = sessions.get(sessionId);
   if (!session) return { error: 'no session' };
   session.window = win;
-  win.webContents.send('terminal-replay', {
-    sessionId,
-    data: session.buffer,
-    exited: session.exited,
-  });
+  const attached = session.provider?.attach?.(sessionId);
+  const sendReplay = (data, exited) => {
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('terminal-replay', {
+        sessionId,
+        data,
+        exited,
+      });
+    }
+  };
+  if (attached && typeof attached.then === 'function') {
+    attached
+      .then((snap) =>
+        sendReplay(snap?.data ?? session.buffer, snap?.exited ?? session.exited)
+      )
+      .catch(() => sendReplay(session.buffer, session.exited));
+  } else {
+    sendReplay(attached?.data ?? session.buffer, attached?.exited ?? session.exited);
+  }
   return { ok: true };
 }
 
 function write(sessionId, data) {
   const session = sessions.get(sessionId);
   if (session && !session.exited) {
-    session.pty.write(data);
+    (session.provider || activeProvider()).write(sessionId, data);
     // xterm's own replies (device/cursor reports, focus events) share this
     // path with keystrokes but aren't the user answering anything.
     if (!isTerminalReply(data) && session.tracker.typed()) {
@@ -1489,15 +1542,16 @@ function markRead(sessionId, read = true) {
 // user cleared with Cmd+K. No-op if the session is gone.
 function clearBuffer(sessionId) {
   const session = sessions.get(sessionId);
-  if (session) session.buffer = '';
+  if (session) {
+    session.buffer = '';
+    session.provider?.clearBuffer?.(sessionId);
+  }
 }
 
 function resize(sessionId, cols, rows) {
   const session = sessions.get(sessionId);
   if (session && !session.exited && cols > 0 && rows > 0) {
-    try {
-      session.pty.resize(cols, rows);
-    } catch {}
+    (session.provider || activeProvider()).resize(sessionId, cols, rows);
   }
 }
 
@@ -1743,18 +1797,8 @@ function stop(sessionId) {
 
   closePane(sessionId);
 
-  if (!session.exited && session.pty) {
-    try {
-      session.pty.kill('SIGTERM');
-    } catch {}
-    const term = session.pty;
-    setTimeout(() => {
-      if (!session.exited) {
-        try {
-          term.kill('SIGKILL');
-        } catch {}
-      }
-    }, 3000);
+  if (!session.exited) {
+    (session.provider || activeProvider()).stop(sessionId);
   }
   stopRegistryPin(session);
   sessions.delete(sessionId);
@@ -1774,19 +1818,7 @@ function shutdownAll() {
   for (const session of [...sessions.values()]) {
     stopRegistryPin(session);
     if (!session.exited) {
-      if (session.pty) {
-        try {
-          session.pty.kill('SIGTERM');
-        } catch {}
-        const term = session.pty;
-        setTimeout(() => {
-          if (!session.exited) {
-            try {
-              term.kill('SIGKILL');
-            } catch {}
-          }
-        }, 3000);
-      }
+      (session.provider || activeProvider()).stop(session.sessionId);
       session.exited = true;
       session.endedAt = now;
       session.exitCode = session.exitCode ?? 0;
