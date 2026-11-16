@@ -446,6 +446,7 @@ const deps = {
   spawnPty: null,
   terminalProvider: null,
   connectHost: null,
+  discoverHosts: null,
   userDataDir: () => os.tmpdir(),
   appVersion: () => '0.0.0',
   shellEnv: () => resolveShellEnv(),
@@ -473,17 +474,41 @@ const inAppProvider = createInAppTerminalProvider({
 });
 const wiredProviders = new WeakSet();
 
-// ── Session Host state (#231) ────────────────────────────────────────────────
+// ── Session Host state (#231, #235) ──────────────────────────────────────────
 let keepRunningOnQuit = false;
-let hostClient = null;
-let hostHello = null;
-let hostConnectPromise = null;
+const hostClients = new Map(); // version -> { client, hello, socketPath }
+const hostConnectPromises = new Map(); // version -> Promise<client>
+const hostProxies = new Map(); // version -> provider proxy
 let detachingForQuit = false;
 let hostStatus = { fallback: false, message: null, error: null };
 const hostStatusListeners = new Set();
 
 function getHostStatus() {
   return { ...hostStatus };
+}
+
+function getHostSummary() {
+  const currentVersion = String(deps.appVersion() || '0.0.0');
+  let totalRunning = 0;
+  let olderVersionCount = 0;
+  const olderVersions = new Set();
+  for (const s of sessions.values()) {
+    if (!s.exited && s.isHostSession) {
+      totalRunning++;
+      if (s.hostVersion && s.hostVersion !== currentVersion) {
+        olderVersionCount++;
+        olderVersions.add(s.hostVersion);
+      }
+    }
+  }
+  return {
+    keepRunningOnQuit,
+    connectedHostCount: hostClients.size,
+    totalRunning,
+    olderVersionCount,
+    olderVersions: [...olderVersions].sort(),
+    currentVersion,
+  };
 }
 
 function onHostStatusChanged(cb) {
@@ -564,86 +589,121 @@ function handleProviderStatus({ sessionId, state, title, changedAt, unread } = {
 
 function handleHostDisconnect(disconnectedClient) {
   if (detachingForQuit) return;
-  if (hostClient === disconnectedClient) {
-    hostClient = null;
-    hostHello = null;
-    hostConnectPromise = null;
+  let disconnectedVersion = null;
+  for (const [ver, entry] of hostClients.entries()) {
+    if (entry.client === disconnectedClient) {
+      disconnectedVersion = ver;
+      hostClients.delete(ver);
+      hostConnectPromises.delete(ver);
+      break;
+    }
   }
   for (const s of [...sessions.values()]) {
-    if (!s.exited && s.isHostSession) {
+    if (
+      !s.exited &&
+      s.isHostSession &&
+      (!disconnectedVersion || s.hostVersion === disconnectedVersion)
+    ) {
       handleProviderExit(s.sessionId, 1);
     }
   }
 }
 
-async function ensureHostClient() {
-  if (hostClient) return hostClient;
-  if (hostConnectPromise) return hostConnectPromise;
-  hostConnectPromise = (async () => {
+async function ensureHostClient(version = deps.appVersion()) {
+  const ver = String(version || '0.0.0');
+  const existing = hostClients.get(ver);
+  if (existing) return existing.client;
+  if (hostConnectPromises.has(ver)) return hostConnectPromises.get(ver);
+  const promise = (async () => {
     try {
       const connector =
         deps.connectHost ||
-        (() =>
+        ((v) =>
           require('./sessionHostManager.cjs').connectOrStartHost({
             userDataDir: deps.userDataDir(),
-            version: deps.appVersion(),
+            version: v,
           }));
-      const res = await connector();
+      const res = await connector(ver);
       const client = res?.client || res;
       wireProvider(client);
-      hostClient = client;
-      hostHello = res?.hello || null;
+      hostClients.set(ver, {
+        client,
+        hello: res?.hello || null,
+        socketPath: res?.socketPath || null,
+      });
       setHostStatus({ fallback: false, message: null, error: null });
       return client;
     } catch (err) {
-      hostClient = null;
-      hostHello = null;
+      hostClients.delete(ver);
       activateHostFallback(err);
       throw err;
     } finally {
-      hostConnectPromise = null;
+      hostConnectPromises.delete(ver);
     }
   })();
-  return hostConnectPromise;
+  hostConnectPromises.set(ver, promise);
+  return promise;
 }
 
-const hostProviderProxy = {
-  isHostProvider: true,
-  start: (opts) =>
-    hostClient ? hostClient.start(opts) : ensureHostClient().then((c) => c.start(opts)),
-  write: (sessionId, data) =>
-    hostClient
-      ? hostClient.write(sessionId, data)
-      : ensureHostClient().then((c) => c.write(sessionId, data)),
-  resize: (sessionId, cols, rows) =>
-    hostClient
-      ? hostClient.resize(sessionId, cols, rows)
-      : ensureHostClient().then((c) => c.resize(sessionId, cols, rows)),
-  stop: (sessionId) =>
-    hostClient
-      ? hostClient.stop(sessionId)
-      : ensureHostClient().then((c) => c.stop(sessionId)),
-  attach: (sessionId) =>
-    hostClient
-      ? hostClient.attach(sessionId)
-      : ensureHostClient().then((c) => c.attach(sessionId)),
-  clearBuffer: (sessionId) =>
-    hostClient
-      ? hostClient.clearBuffer(sessionId)
-      : ensureHostClient().then((c) => c.clearBuffer(sessionId)),
-  markRead: (sessionId, read = true) =>
-    hostClient
-      ? hostClient.markRead(sessionId, read)
-      : ensureHostClient().then((c) => c.markRead(sessionId, read)),
-  getPid: (sessionId) => hostClient?.getPid?.(sessionId) ?? null,
-};
+function makeHostProviderProxy(version) {
+  const ver = String(version || '0.0.0');
+  if (hostProxies.has(ver)) return hostProxies.get(ver);
+  const getClient = () => hostClients.get(ver)?.client || null;
+  const proxy = {
+    isHostProvider: true,
+    version: ver,
+    start: (opts) => {
+      const c = getClient();
+      return c ? c.start(opts) : ensureHostClient(ver).then((cl) => cl.start(opts));
+    },
+    write: (sessionId, data) => {
+      const c = getClient();
+      return c
+        ? c.write(sessionId, data)
+        : ensureHostClient(ver).then((cl) => cl.write(sessionId, data));
+    },
+    resize: (sessionId, cols, rows) => {
+      const c = getClient();
+      return c
+        ? c.resize(sessionId, cols, rows)
+        : ensureHostClient(ver).then((cl) => cl.resize(sessionId, cols, rows));
+    },
+    stop: (sessionId) => {
+      const c = getClient();
+      return c
+        ? c.stop(sessionId)
+        : ensureHostClient(ver).then((cl) => cl.stop(sessionId));
+    },
+    attach: (sessionId) => {
+      const c = getClient();
+      return c
+        ? c.attach(sessionId)
+        : ensureHostClient(ver).then((cl) => cl.attach(sessionId));
+    },
+    clearBuffer: (sessionId) => {
+      const c = getClient();
+      return c
+        ? c.clearBuffer(sessionId)
+        : ensureHostClient(ver).then((cl) => cl.clearBuffer(sessionId));
+    },
+    markRead: (sessionId, read = true) => {
+      const c = getClient();
+      return c
+        ? c.markRead(sessionId, read)
+        : ensureHostClient(ver).then((cl) => cl.markRead(sessionId, read));
+    },
+    getPid: (sessionId) => getClient()?.getPid?.(sessionId) ?? null,
+  };
+  hostProxies.set(ver, proxy);
+  return proxy;
+}
 
 function activeProvider(scope = 'site') {
   if (deps.terminalProvider) {
     return wireProvider(deps.terminalProvider);
   }
   if (keepRunningOnQuit && !hostStatus.fallback && scope === 'site') {
-    return hostProviderProxy;
+    return makeHostProviderProxy(deps.appVersion());
   }
   return wireProvider(inAppProvider);
 }
@@ -652,23 +712,20 @@ async function setKeepRunningOnQuit(enabled, { deferConnect = false } = {}) {
   keepRunningOnQuit = Boolean(enabled);
   if (!keepRunningOnQuit) {
     setHostStatus({ fallback: false, message: null, error: null });
-    if (hostClient) {
-      const hasLiveHostSession = [...sessions.values()].some(
-        (s) => !s.exited && s.isHostSession
-      );
-      if (!hasLiveHostSession) {
-        const client = hostClient;
-        hostClient = null;
-        hostHello = null;
-        hostConnectPromise = null;
-        await client.close().catch(() => {});
-      }
+    const hasLiveHostSession = [...sessions.values()].some(
+      (s) => !s.exited && s.isHostSession
+    );
+    if (!hasLiveHostSession) {
+      const clientsToClose = [...hostClients.values()].map((e) => e.client);
+      hostClients.clear();
+      hostConnectPromises.clear();
+      await Promise.all(clientsToClose.map((c) => c.close().catch(() => {})));
     }
     return;
   }
   if (deferConnect) return;
   try {
-    await ensureHostClient();
+    await ensureHostClient(deps.appVersion());
   } catch {
     // Fallback status already recorded by ensureHostClient.
   }
@@ -680,55 +737,90 @@ function getKeepRunningOnQuit() {
 
 async function initSessionHost() {
   if (!keepRunningOnQuit) return listAllSessions();
-  let client;
+
+  let discoveredHosts = [];
   try {
-    client = await ensureHostClient();
+    const discover =
+      deps.discoverHosts ||
+      (() =>
+        require('./sessionHostManager.cjs').discoverHosts({
+          userDataDir: deps.userDataDir(),
+        }));
+    const res = await discover();
+    discoveredHosts = Array.isArray(res?.hosts) ? res.hosts : [];
   } catch {
-    return listAllSessions();
+    discoveredHosts = [];
   }
-  let hostSessions = [];
-  try {
-    hostSessions = (await client.list()) || [];
-  } catch {
-    return listAllSessions();
+
+  const currentVersion = String(deps.appVersion() || '0.0.0');
+  if (discoveredHosts.length === 0) {
+    try {
+      const client = await ensureHostClient(currentVersion);
+      const entry = hostClients.get(currentVersion);
+      discoveredHosts = [
+        {
+          version: entry?.hello?.appVersion || currentVersion,
+          socketPath: entry?.socketPath || null,
+          client,
+          hello: entry?.hello || null,
+        },
+      ];
+    } catch {
+      return listAllSessions();
+    }
   }
 
   let changed = false;
-  for (const hs of hostSessions) {
-    const session = sessions.get(hs.sessionId);
-    if (!session) continue;
-    if (!hs.exited) {
-      session.exited = false;
-      session.endedAt = null;
-      session.exitCode = null;
-      session.provider = hostProviderProxy;
-      session.isHostSession = true;
-      session.hostVersion = hostHello?.appVersion || deps.appVersion();
-      session.pty = makePtyHandle(hostProviderProxy, session.sessionId);
-      session.started = true;
-      session.scheduleRun = null;
-      const prevTitle = session.tracker.snapshot().title;
-      session.tracker = createTracker({
-        now: deps.now,
-        agent: session.agentId !== SHELL_ID,
-        initial: {
-          state: hs.state || 'idle',
-          title: hs.title || prevTitle || '',
-          changedAt: hs.changedAt || session.startedAt,
-          unread: !!hs.unread,
-        },
-      });
-      try {
-        const snap = await client.attach(session.sessionId);
-        if (typeof snap?.data === 'string') session.buffer = snap.data;
-      } catch {}
-      if (session.resumeFlag) startRegistryPin(session);
-      saveSessionRecord(session);
-      changed = true;
-    } else if (hs.exitCode != null && session.exitCode !== hs.exitCode) {
-      session.exitCode = hs.exitCode;
-      saveSessionRecord(session);
-      changed = true;
+  for (const hostEntry of discoveredHosts) {
+    const { client, hello, socketPath } = hostEntry;
+    const version = String(hello?.appVersion || hostEntry.version || currentVersion);
+    wireProvider(client);
+    hostClients.set(version, { client, hello, socketPath });
+    const proxy = makeHostProviderProxy(version);
+
+    let hostSessions = [];
+    try {
+      hostSessions = (await client.list()) || [];
+    } catch {
+      continue;
+    }
+
+    for (const hs of hostSessions) {
+      const session = sessions.get(hs.sessionId);
+      if (!session) continue;
+      if (!hs.exited) {
+        session.exited = false;
+        session.endedAt = null;
+        session.exitCode = null;
+        session.provider = proxy;
+        session.isHostSession = true;
+        session.hostVersion = version;
+        session.pty = makePtyHandle(proxy, session.sessionId);
+        session.started = true;
+        session.scheduleRun = null;
+        const prevTitle = session.tracker.snapshot().title;
+        session.tracker = createTracker({
+          now: deps.now,
+          agent: session.agentId !== SHELL_ID,
+          initial: {
+            state: hs.state || 'idle',
+            title: hs.title || prevTitle || '',
+            changedAt: hs.changedAt || session.startedAt,
+            unread: !!hs.unread,
+          },
+        });
+        try {
+          const snap = await client.attach(session.sessionId);
+          if (typeof snap?.data === 'string') session.buffer = snap.data;
+        } catch {}
+        if (session.resumeFlag) startRegistryPin(session);
+        saveSessionRecord(session);
+        changed = true;
+      } else if (hs.exitCode != null && session.exitCode !== hs.exitCode) {
+        session.exitCode = hs.exitCode;
+        saveSessionRecord(session);
+        changed = true;
+      }
     }
   }
   if (changed) emitChange({ immediate: true });
@@ -1362,6 +1454,7 @@ function sessionRow(s) {
     // Last pty output, for keep-awake's stale cutoff. Not itself a change
     // event: readers that need it fresh call listAllSessions() again.
     lastOutputAt: s.lastOutputAt,
+    hostVersion: s.hostVersion || null,
   };
 }
 
@@ -1627,7 +1720,7 @@ function startSession({ cwd, command, meta, failLabel, phpBinDir = null }) {
     cwd,
     provider,
     isHostSession,
-    hostVersion: isHostSession ? hostHello?.appVersion || deps.appVersion() : null,
+    hostVersion: isHostSession ? String(provider.version || deps.appVersion()) : null,
     pty: makePtyHandle(provider, sessionId),
     buffer: '',
     window: null,
@@ -2177,13 +2270,11 @@ function shutdownAll({ forceStop = false } = {}) {
       sessions.delete(session.sessionId);
       notifier.forget(session.sessionId);
     }
-    if (hostClient) {
-      const client = hostClient;
-      hostClient = null;
-      hostHello = null;
-      hostConnectPromise = null;
-      client.close().catch(() => {});
+    for (const entry of hostClients.values()) {
+      entry.client.close().catch(() => {});
     }
+    hostClients.clear();
+    hostConnectPromises.clear();
     layouts.clear();
     emitChange({ immediate: true });
   } finally {
@@ -2482,6 +2573,7 @@ module.exports = {
   getKeepRunningOnQuit,
   initSessionHost,
   getHostStatus,
+  getHostSummary,
   onHostStatusChanged,
   setConfig,
   effectiveRegistry,

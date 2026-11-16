@@ -18,6 +18,7 @@ function createSessionHostClient({ socketPath } = {}) {
   let conn = null;
   let connecting = null;
   let nextId = 1;
+  let helloInfo = null;
   const pending = new Map(); // id -> { resolve, reject }
   const pids = new Map(); // sessionId -> pid
   const exitedSessions = new Set();
@@ -171,7 +172,16 @@ function createSessionHostClient({ socketPath } = {}) {
   }
 
   async function hello() {
-    return request('hello');
+    const res = await request('hello');
+    helloInfo = res;
+    return res;
+  }
+
+  function supports(capability) {
+    if (!helloInfo) return true;
+    return (
+      Array.isArray(helloInfo.capabilities) && helloInfo.capabilities.includes(capability)
+    );
   }
 
   async function list() {
@@ -226,6 +236,7 @@ function createSessionHostClient({ socketPath } = {}) {
   }
 
   async function markRead(sessionId, read = true) {
+    if (!supports('mark-read')) return;
     await request('mark-read', { sessionId, read: !!read });
   }
 
@@ -257,6 +268,7 @@ function createSessionHostClient({ socketPath } = {}) {
 
   return {
     hello,
+    supports,
     list,
     start,
     write,

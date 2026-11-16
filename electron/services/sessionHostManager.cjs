@@ -200,11 +200,123 @@ async function connectOrStartHost({
   throw lastErr;
 }
 
+function parseHostSocketName(filename) {
+  const name = String(filename || '');
+  if (!name.startsWith(WPXEN_SESSION_HOST_SOCKET_PREFIX) || !name.endsWith('.sock')) {
+    return null;
+  }
+  const version = name.slice(WPXEN_SESSION_HOST_SOCKET_PREFIX.length, -'.sock'.length);
+  return version || null;
+}
+
+// Pure planner over directory listings + reachability probes (#235): decides
+// which live sockets to connect to, which dead sockets to unlink, and which
+// version folders have no live host and can be safely deleted.
+function planHostDiscovery({
+  socketNames = [],
+  versionDirNames = [],
+  probeResults = {},
+} = {}) {
+  const connectSockets = [];
+  const deadSockets = [];
+  const liveVersionSet = new Set();
+
+  for (const name of socketNames) {
+    const parsedVersion = parseHostSocketName(name);
+    if (!parsedVersion) continue;
+    const probe = probeResults[name];
+    if (probe && probe.reachable) {
+      connectSockets.push(name);
+      liveVersionSet.add(String(probe.version || parsedVersion));
+    } else {
+      deadSockets.push(name);
+    }
+  }
+
+  const liveVersions = [...liveVersionSet].sort();
+  const staleVersionDirs = versionDirNames
+    .filter((dir) => dir && !liveVersionSet.has(dir))
+    .sort();
+
+  return {
+    connectSockets,
+    deadSockets,
+    liveVersions,
+    staleVersionDirs,
+  };
+}
+
+async function discoverHosts({
+  userDataDir,
+  createClient = createSessionHostClient,
+} = {}) {
+  if (!userDataDir || !fs.existsSync(userDataDir)) {
+    return { hosts: [], removedSockets: [], removedVersionDirs: [] };
+  }
+
+  let socketNames = [];
+  try {
+    socketNames = fs
+      .readdirSync(userDataDir)
+      .filter((name) => parseHostSocketName(name) !== null);
+  } catch {}
+
+  const hostRootDir = path.join(userDataDir, WPXEN_SESSION_HOST_DIR);
+  let versionDirNames = [];
+  try {
+    if (fs.existsSync(hostRootDir)) {
+      versionDirNames = fs
+        .readdirSync(hostRootDir, { withFileTypes: true })
+        .filter((d) => d.isDirectory())
+        .map((d) => d.name);
+    }
+  } catch {}
+
+  const probeResults = {};
+  const liveClients = new Map();
+
+  for (const name of socketNames) {
+    const socketPath = path.join(userDataDir, name);
+    try {
+      const { client, hello } = await tryConnectClient(socketPath, createClient);
+      const version = String(hello?.appVersion || parseHostSocketName(name));
+      probeResults[name] = { reachable: true, version };
+      liveClients.set(name, { version, socketPath, client, hello });
+    } catch {
+      probeResults[name] = { reachable: false };
+    }
+  }
+
+  const plan = planHostDiscovery({ socketNames, versionDirNames, probeResults });
+
+  const removedSockets = [];
+  for (const dead of plan.deadSockets) {
+    try {
+      fs.unlinkSync(path.join(userDataDir, dead));
+      removedSockets.push(dead);
+    } catch {}
+  }
+
+  const removedVersionDirs = [];
+  for (const dir of plan.staleVersionDirs) {
+    try {
+      fs.rmSync(path.join(hostRootDir, dir), { recursive: true, force: true });
+      removedVersionDirs.push(dir);
+    } catch {}
+  }
+
+  const hosts = plan.connectSockets.map((name) => liveClients.get(name)).filter(Boolean);
+  return { hosts, removedSockets, removedVersionDirs };
+}
+
 module.exports = {
   WPXEN_SESSION_HOST_DIR,
   WPXEN_SESSION_HOST_SOCKET_PREFIX,
   runtimeDirForVersion,
   socketPathForVersion,
+  parseHostSocketName,
+  planHostDiscovery,
+  discoverHosts,
   stageRuntimeFiles,
   spawnDetachedHost,
   connectOrStartHost,
