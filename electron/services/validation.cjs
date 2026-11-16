@@ -14,8 +14,14 @@ const path = require('path');
 const DOMAIN_RE =
   /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$/;
 
-// MySQL identifier: our own generated names are [a-z0-9_]; allow that only.
-const DB_NAME_RE = /^[a-zA-Z0-9_]{1,64}$/;
+// MySQL identifier. WPXen generates [a-z0-9_] names, but a hyphen is legal
+// in a backtick-quoted identifier and common in sites made elsewhere (Herd's
+// `seco-system`). Every use is safe with one: identifiers are backtick-quoted,
+// `SHOW DATABASES LIKE` takes it in a quoted literal, and mysql/mysqldump get
+// it as an argv token with no shell. A *leading* hyphen is refused — as argv,
+// mysqldump would read `-x` as an option. Backticks, quotes, spaces, slashes
+// and dots stay out, so the name can't break out of any of those contexts.
+const DB_NAME_RE = /^[a-zA-Z0-9_][a-zA-Z0-9_-]{0,63}$/;
 
 const PHP_VERSION_RE = /^\d+\.\d+$/;
 
@@ -48,7 +54,7 @@ function validateSiteInput(data = {}) {
     errors.push('Database name is required.');
   } else if (!DB_NAME_RE.test(data.dbName)) {
     errors.push(
-      'Database name may only contain letters, numbers and underscores (max 64).'
+      'Database name may only contain letters, numbers, underscores and hyphens, and must not start with a hyphen (max 64).'
     );
   }
 

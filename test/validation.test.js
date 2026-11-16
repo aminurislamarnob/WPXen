@@ -43,12 +43,17 @@ describe('validateSiteInput', () => {
   });
 
   describe('dbName', () => {
-    it.each(['wp`;DROP', 'wp db', 'wp-db', 'wp;drop', ''])(
+    it.each(['wp`;DROP', 'wp db', '-wp', '--all-databases', 'wp.db', 'wp;drop', ''])(
       'rejects unsafe db name %j',
       (dbName) => {
         expect(validation.validateSiteInput({ ...base, dbName }).valid).toBe(false);
       }
     );
+
+    // Legal backtick-quoted, and how sites made elsewhere (Herd) name them.
+    it.each(['wp-db', 'seco-system', 'a-'])('accepts hyphenated db name %j', (dbName) => {
+      expect(validation.validateSiteInput({ ...base, dbName }).valid).toBe(true);
+    });
 
     it('accepts an underscore identifier', () => {
       expect(validation.validateSiteInput({ ...base, dbName: 'wp_db_1' }).valid).toBe(
