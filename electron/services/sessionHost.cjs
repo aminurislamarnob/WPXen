@@ -14,6 +14,7 @@
 
 const fs = require('fs');
 const net = require('net');
+const { StringDecoder } = require('string_decoder');
 const pty = require('node-pty');
 const { createTracker, isTerminalReply } = require('./agentStatus.cjs');
 const {
@@ -29,6 +30,9 @@ const MAX_LINE_BYTES = 8 * 1024 * 1024;
 const MAX_BUFFER = 1024 * 1024; // ~1 MB in-memory ring buffer per Session
 const KILL_GRACE_MS = 3000;
 const MAX_IDLE_MS = 24 * 60 * 60 * 1000; // 24-hour disconnected limit (#234)
+// A host nobody connects to (the app gave up on a slow start, or quit before
+// starting a Session) exits after this long instead of lingering.
+const STARTUP_GRACE_MS = 60 * 1000;
 
 const KNOWN_CLIENT_TYPES = new Set([
   'hello',
@@ -102,6 +106,7 @@ function createSessionHost({
   maxBuffer = MAX_BUFFER,
   killGraceMs = KILL_GRACE_MS,
   idleTimeoutMs = MAX_IDLE_MS,
+  startupGraceMs = STARTUP_GRACE_MS,
   setTimeoutFn = setTimeout,
   clearTimeoutFn = clearTimeout,
   onExit = null,
@@ -110,10 +115,13 @@ function createSessionHost({
 
   const sessions = new Map(); // sessionId -> { sessionId, term, pid, cwd, startedAt, buffer, exited, exitCode }
   const clients = new Set(); // active net.Socket connections
+  // Stopped Sessions whose process hasn't exited yet. They still count as
+  // live, so the host doesn't exit before its SIGKILL escalation fires.
+  const stopping = new Set();
   let server = null;
   let closed = false;
-  let hadSession = false;
   let idleTimer = null;
+  let startupTimer = null;
   let lastDisconnectedAt = null;
 
   function clearIdleTimer() {
@@ -160,6 +168,7 @@ function createSessionHost({
   }
 
   function hasLiveSessions() {
+    if (stopping.size > 0) return true;
     for (const s of sessions.values()) {
       if (!s.exited) return true;
     }
@@ -168,7 +177,7 @@ function createSessionHost({
 
   // Exit when the last Session has ended and no client is connected.
   function maybeAutoExit() {
-    if (closed || !hadSession) return;
+    if (closed) return;
     if (clients.size > 0) return;
     if (hasLiveSessions()) return;
     close().then(() => {
@@ -204,12 +213,18 @@ function createSessionHost({
     });
   }
 
-  function stopSession(sessionId) {
+  // `keepHistory` (added in protocol v1, capability 'stop-keep-history'):
+  // "Stop agents and quit" and Stop all end a Session that stays listed, so
+  // its history must survive for the ended row. Closing a Session deletes it.
+  function stopSession(sessionId, { keepHistory = false } = {}) {
     const s = sessions.get(sessionId);
-    if (historyDir) deleteHistory(historyDir, sessionId);
+    if (historyDir && !keepHistory) deleteHistory(historyDir, sessionId);
     if (!s) return;
     sessions.delete(sessionId);
+    s.stopped = true;
+    s.keepHistory = !!keepHistory;
     if (!s.exited && s.term) {
+      stopping.add(s);
       try {
         s.term.kill('SIGTERM');
       } catch {}
@@ -220,10 +235,23 @@ function createSessionHost({
             term.kill('SIGKILL');
           } catch {}
         }
+        stopping.delete(s);
+        maybeAutoExit();
       }, killGraceMs);
       t.unref?.();
     }
     maybeAutoExit();
+  }
+
+  function recordHistory(entry, data) {
+    // Output a stopped Session prints during its grace period must not
+    // recreate the history file closing it just deleted.
+    if (entry.stopped && !entry.keepHistory) return;
+    try {
+      appendHistory(historyDir, entry.sessionId, data, maxHistoryBytes);
+    } catch {
+      // A full disk or a removed folder loses history, never the Session.
+    }
   }
 
   function handleRequest(conn, rawLine) {
@@ -242,7 +270,7 @@ function createSessionHost({
           ok: true,
           appVersion,
           protocolVersion: PROTOCOL_VERSION,
-          capabilities: ['status', 'mark-read', 'history'],
+          capabilities: ['status', 'mark-read', 'history', 'stop-keep-history'],
         });
         return;
       }
@@ -286,7 +314,6 @@ function createSessionHost({
           return;
         }
 
-        hadSession = true;
         const tracker = createTracker({
           now,
           agent: msg.agent !== false,
@@ -307,7 +334,7 @@ function createSessionHost({
         term.onData((data) => {
           if (entry.exited) return;
           if (historyDir) {
-            appendHistory(historyDir, sessionId, data, maxHistoryBytes);
+            recordHistory(entry, data);
           } else {
             entry.buffer += data;
             if (entry.buffer.length > maxBuffer) {
@@ -327,6 +354,7 @@ function createSessionHost({
           if (entry.exited) return;
           entry.exited = true;
           entry.exitCode = exitCode ?? 0;
+          stopping.delete(entry);
           if (entry.tracker.exit(entry.exitCode)) {
             entry.tracker.drainEvents();
             broadcastStatus(entry);
@@ -419,25 +447,51 @@ function createSessionHost({
       }
 
       case 'stop': {
-        stopSession(msg.sessionId);
+        stopSession(msg.sessionId, { keepHistory: msg.keepHistory === true });
         sendLine(conn, { id, ok: true });
         return;
       }
     }
   }
 
-  function start() {
-    if (server) return Promise.resolve(socketPath);
-    try {
-      fs.unlinkSync(socketPath);
-    } catch {}
+  // Never take over a live host's socket: only a path nobody answers on is
+  // stale and safe to unlink. One host per version, and no takeover (#235).
+  function probeExisting() {
+    return new Promise((resolve) => {
+      if (!fs.existsSync(socketPath)) return resolve('absent');
+      const probe = net.connect(socketPath);
+      const done = (state) => {
+        probe.removeAllListeners();
+        probe.destroy();
+        resolve(state);
+      };
+      probe.once('connect', () => done('live'));
+      probe.once('error', () => done('stale'));
+    });
+  }
+
+  async function start() {
+    if (server) return socketPath;
+    const existing = await probeExisting();
+    if (existing === 'live') {
+      throw new Error(`A Session Host is already listening on ${socketPath}`);
+    }
+    if (existing === 'stale') {
+      try {
+        fs.unlinkSync(socketPath);
+      } catch {}
+    }
 
     server = net.createServer((conn) => {
       clients.add(conn);
       clearIdleTimer();
+      clearStartupTimer();
+      // A StringDecoder keeps a multibyte character split across two reads
+      // whole; chunk.toString() would turn each half into U+FFFD.
+      const decoder = new StringDecoder('utf8');
       let buf = '';
       conn.on('data', (chunk) => {
-        buf += chunk.toString('utf8');
+        buf += decoder.write(chunk);
         let idx;
         while ((idx = buf.indexOf('\n')) !== -1) {
           const line = buf.slice(0, idx);
@@ -464,6 +518,7 @@ function createSessionHost({
           try {
             fs.chmodSync(socketPath, 0o600);
           } catch {}
+          armStartupTimer();
           resolve(socketPath);
         });
       } finally {
@@ -472,10 +527,28 @@ function createSessionHost({
     });
   }
 
+  function armStartupTimer() {
+    if (startupGraceMs <= 0) return;
+    startupTimer = setTimeoutFn(() => {
+      startupTimer = null;
+      if (clients.size === 0 && !hasLiveSessions()) maybeAutoExit();
+    }, startupGraceMs);
+    startupTimer?.unref?.();
+  }
+
+  function clearStartupTimer() {
+    if (startupTimer) {
+      clearTimeoutFn(startupTimer);
+      startupTimer = null;
+    }
+  }
+
   function close() {
     if (closed) return Promise.resolve();
     closed = true;
     clearIdleTimer();
+    clearStartupTimer();
+    stopping.clear();
     for (const s of sessions.values()) {
       if (!s.exited && s.term) {
         try {
@@ -548,6 +621,7 @@ if (require.main === module) {
 module.exports = {
   PROTOCOL_VERSION,
   MAX_IDLE_MS,
+  STARTUP_GRACE_MS,
   KNOWN_CLIENT_TYPES,
   KNOWN_HOST_EVENT_TYPES,
   parseClientMessage,
