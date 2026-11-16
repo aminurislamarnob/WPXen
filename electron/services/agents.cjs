@@ -513,8 +513,47 @@ function wireProvider(provider) {
   wiredProviders.add(provider);
   provider.onOutput?.(({ sessionId, data }) => handleProviderOutput(sessionId, data));
   provider.onExit?.(({ sessionId, exitCode }) => handleProviderExit(sessionId, exitCode));
+  provider.onStatus?.((ev) => handleProviderStatus(ev));
   provider.onDisconnect?.(() => handleHostDisconnect(provider));
   return provider;
+}
+
+function handleProviderStatus({ sessionId, state, title, changedAt, unread } = {}) {
+  const session = sessions.get(sessionId);
+  if (!session || session.exited) return;
+  const prev = session.tracker.snapshot();
+  const nextState = state || prev.state;
+  const nextTitle = typeof title === 'string' ? title : prev.title;
+  const nextChangedAt = changedAt ?? prev.changedAt;
+  const nextUnread = typeof unread === 'boolean' ? unread : prev.unread;
+  if (
+    prev.state === nextState &&
+    prev.title === nextTitle &&
+    prev.changedAt === nextChangedAt &&
+    prev.unread === nextUnread
+  ) {
+    return;
+  }
+  session.tracker = createTracker({
+    now: deps.now,
+    agent: session.agentId !== SHELL_ID,
+    initial: {
+      state: nextState,
+      title: nextTitle,
+      changedAt: nextChangedAt,
+      unread: nextUnread,
+    },
+  });
+  if (isOnScreen(sessionId)) {
+    session.tracker.view(true);
+    if (nextUnread) {
+      session.provider?.markRead?.(sessionId, true)?.catch?.(() => {});
+    }
+  }
+  if (nextTitle !== prev.title) saveSessionRecord(session);
+  emitChange({
+    immediate: nextState !== prev.state || nextUnread !== prev.unread,
+  });
 }
 
 function handleHostDisconnect(disconnectedClient) {
@@ -586,6 +625,10 @@ const hostProviderProxy = {
     hostClient
       ? hostClient.clearBuffer(sessionId)
       : ensureHostClient().then((c) => c.clearBuffer(sessionId)),
+  markRead: (sessionId, read = true) =>
+    hostClient
+      ? hostClient.markRead(sessionId, read)
+      : ensureHostClient().then((c) => c.markRead(sessionId, read)),
   getPid: (sessionId) => hostClient?.getPid?.(sessionId) ?? null,
 };
 
@@ -1519,6 +1562,7 @@ function startSession({ cwd, command, meta, failLabel, phpBinDir = null }) {
     cols: 80,
     rows: 24,
     cwd,
+    agent: meta.agentId !== SHELL_ID,
     env: {
       ...env,
       ...phpEnv,
@@ -1791,7 +1835,14 @@ function setView(patch) {
   Object.assign(view, patch);
   let changed = false;
   for (const s of sessions.values()) {
-    if (s.tracker.view(isOnScreen(s.sessionId))) changed = true;
+    const onScreen = isOnScreen(s.sessionId);
+    const wasUnread = s.tracker.snapshot().unread;
+    if (s.tracker.view(onScreen)) {
+      changed = true;
+      if (onScreen && wasUnread && s.isHostSession) {
+        s.provider?.markRead?.(s.sessionId, true)?.catch?.(() => {});
+      }
+    }
   }
   if (changed) emitChange({ immediate: true });
 }
@@ -1800,6 +1851,9 @@ function markRead(sessionId, read = true) {
   const session = sessions.get(sessionId);
   if (!session) return;
   const changed = read ? session.tracker.markRead() : session.tracker.markUnread();
+  if (session.isHostSession) {
+    session.provider?.markRead?.(sessionId, !!read)?.catch?.(() => {});
+  }
   if (changed) emitChange({ immediate: true });
 }
 
