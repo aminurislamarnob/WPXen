@@ -4,15 +4,29 @@ import { useEffect, useState, useSyncExternalStore } from 'react';
 // as pushed by the main process. Both the Projects sidebar and the Agents pane
 // read these, so a launch, exit or dismiss in one shows up in the other.
 
+// The last list any mount saw. A screen that mounts again (navigating back to
+// Agents) starts from it instead of from [], so its first frame already has
+// the tabs, layouts and view modes rather than an empty state that the IPC
+// round-trip then replaces. The fetch below still corrects it a moment later.
+let lastSessions = [];
+
+export function getCachedSessions() {
+  return lastSessions;
+}
+
 export function useAgentSessions() {
-  const [sessions, setSessions] = useState([]);
+  const [sessions, setSessionsState] = useState(lastSessions);
   useEffect(() => {
     const api = window.electronAPI;
     let cancelled = false;
+    const setSessions = (list) => {
+      lastSessions = list || [];
+      setSessionsState(lastSessions);
+    };
     api.listAllSessions().then((list) => {
-      if (!cancelled) setSessions(list || []);
+      if (!cancelled) setSessions(list);
     });
-    const off = api.on('agent-sessions-update', (list) => setSessions(list || []));
+    const off = api.on('agent-sessions-update', (list) => setSessions(list));
     return () => {
       cancelled = true;
       off();

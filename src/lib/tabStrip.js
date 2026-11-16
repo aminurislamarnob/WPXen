@@ -154,3 +154,13 @@ export function neighbour(tree, sessionId, direction) {
   }
   return candidates[0].id;
 }
+
+// The tab a Site's Agents screen shows: the one it showed last, while that
+// Session is still a tab of this Site, else the oldest tab, else none.
+export function pickActiveTab(sessions, siteId, preferred) {
+  const roots = (sessions || []).filter((s) => s.siteId === siteId && !s.paneOf);
+  if (preferred && roots.some((s) => s.sessionId === preferred)) return preferred;
+  let first = null;
+  for (const s of roots) if (!first || s.startedAt < first.startedAt) first = s;
+  return first?.sessionId || null;
+}

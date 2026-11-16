@@ -3,6 +3,7 @@ import {
   tabsToClose,
   closeImpact,
   nextActive,
+  pickActiveTab,
   needsBulkConfirm,
   paneIds,
   neighbour,
@@ -181,5 +182,33 @@ describe('tabStrip', () => {
       expect(neighbour(tree, 'bottom-right', 'left')).toBe('left');
       expect(neighbour(tree, 'left', 'down')).toBe(null);
     });
+  });
+});
+
+describe('pickActiveTab', () => {
+  const sessions = [
+    { sessionId: 'b', siteId: 's1', startedAt: 2 },
+    { sessionId: 'a', siteId: 's1', startedAt: 1 },
+    { sessionId: 'pane', siteId: 's1', startedAt: 0, paneOf: 'a' },
+    { sessionId: 'other', siteId: 's2', startedAt: 0 },
+  ];
+
+  it('keeps the tab shown last while it is still a tab of the Site', () => {
+    expect(pickActiveTab(sessions, 's1', 'b')).toBe('b');
+  });
+
+  it('falls back to the oldest tab', () => {
+    expect(pickActiveTab(sessions, 's1', null)).toBe('a');
+    expect(pickActiveTab(sessions, 's1', 'gone')).toBe('a');
+  });
+
+  it("never picks a split pane or another Site's tab", () => {
+    expect(pickActiveTab(sessions, 's1', 'pane')).toBe('a');
+    expect(pickActiveTab(sessions, 's1', 'other')).toBe('a');
+  });
+
+  it('is null for a Site without Sessions', () => {
+    expect(pickActiveTab(sessions, 's3', 'a')).toBeNull();
+    expect(pickActiveTab(undefined, 's1', 'a')).toBeNull();
   });
 });
