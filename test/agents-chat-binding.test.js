@@ -37,6 +37,17 @@ let ptys;
 let pushes;
 let offRows;
 
+// Claude's ~/.claude/sessions/<pid>.json, faked: each pty's shell has one
+// Claude child (pid + 1) registered under `uuid-<shell pid>`.
+let nextPid = 1000;
+const registryDeps = () => ({
+  listProcesses: async () => ptys.map((p) => [p.pid + 1, p.pid]),
+  readClaudeSessionId: (pid) =>
+    ptys.some((p) => p.pid + 1 === pid) ? `uuid-${pid - 1}` : null,
+});
+// Let the registry pin land.
+const pin = () => vi.advanceTimersByTimeAsync(1500);
+
 const site = () => ({ id: 'site-1', path: siteDir });
 
 function transcriptFor(sessionId) {
@@ -67,6 +78,7 @@ beforeEach(() => {
   agents.__setDeps({
     spawnPty: () => {
       const p = fakePty();
+      p.pid = nextPid += 10;
       ptys.push(p);
       return p;
     },
@@ -74,6 +86,7 @@ beforeEach(() => {
     userShell: () => '/bin/zsh',
     homedir: () => home,
     sitePhpBin: () => null,
+    ...registryDeps(),
   });
   transcripts.__setDeps({ homedir: () => home });
   offRows = agents.onChatRows((push) => pushes.push(push));
@@ -88,9 +101,23 @@ afterEach(() => {
 });
 
 describe('pinned transcript binding', () => {
-  it("never falls back to a sibling's transcript before the first prompt", () => {
+  it("never guesses a sibling's transcript before Claude has registered", () => {
+    const sibling = agents.launch({ site: site(), agentId: 'claude' }).sessionId;
+    writeTranscript(
+      claudeTranscriptPath({ home, cwd: siteDir, uuid: `uuid-${ptys[0].pid}` }),
+      userLine('u-sibling', 'sibling prompt')
+    );
+    const fresh = agents.launch({ site: site(), agentId: 'claude' }).sessionId;
+    // No pin yet: recency would pick the sibling's file, so nothing binds.
+    agents.openChat(fresh, 'viewer-1');
+    expect(rowsFor(fresh)).toEqual([]);
+    expect(rowsFor(sibling)).toEqual([]);
+  });
+
+  it("never falls back to a sibling's transcript before the first prompt", async () => {
     const sibling = agents.launch({ site: site(), agentId: 'claude' }).sessionId;
     const fresh = agents.launch({ site: site(), agentId: 'claude' }).sessionId;
+    await pin();
     // The sibling is talking; the fresh Session hasn't been prompted yet.
     writeTranscript(transcriptFor(sibling), userLine('u-sibling', 'sibling prompt'));
 
@@ -103,21 +130,24 @@ describe('pinned transcript binding', () => {
     expect(rowsFor(fresh)).toEqual([]);
   });
 
-  it('binds the chat once the pinned transcript appears', () => {
+  it('binds the chat once the pinned transcript appears', async () => {
     const sessionId = agents.launch({ site: site(), agentId: 'claude' }).sessionId;
+    // Opened before Claude registered: it waits for the pin, then the file.
     agents.openChat(sessionId, 'viewer-1');
     expect(rowsFor(sessionId)).toEqual([]);
+    await pin();
 
     writeTranscript(transcriptFor(sessionId), userLine('u-1', 'first prompt'));
-    vi.advanceTimersByTime(2500);
+    await vi.advanceTimersByTimeAsync(2500);
 
     expect(rowsFor(sessionId).map((r) => r.content)).toEqual(['first prompt']);
   });
 });
 
 describe('resume in a new Session', () => {
-  it('opens the continued conversation while the old Session is still listed', () => {
+  it('opens the continued conversation while the old Session is still listed', async () => {
     const oldId = agents.launch({ site: site(), agentId: 'claude' }).sessionId;
+    await pin();
     const file = transcriptFor(oldId);
     writeTranscript(file, userLine('u-1', 'before the crash'));
     // The old chat is open — that's where the exit bar's Resume lives.
@@ -133,8 +163,9 @@ describe('resume in a new Session', () => {
     ]);
   });
 
-  it('refuses while the old Session is still running', () => {
+  it('refuses while the old Session is still running', async () => {
     const oldId = agents.launch({ site: site(), agentId: 'claude' }).sessionId;
+    await pin();
     expect(agents.resumeChatSession(oldId, { site: site() }).error).toMatch(
       /still running/
     );

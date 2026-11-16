@@ -219,7 +219,7 @@ describe('agents.launch for Start →', () => {
       ptys[0].emitData('% ');
       vi.advanceTimersByTime(200);
       const typed = ptys[0].write.mock.calls[0][0];
-      expect(typed).toMatch(/^sh --claude --session-id [a-f0-9-]+ 'Fix it'\r$/);
+      expect(typed).toBe("sh --claude 'Fix it'\r");
     } finally {
       vi.useRealTimers();
     }
