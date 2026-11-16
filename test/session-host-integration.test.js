@@ -487,4 +487,63 @@ describe('Run Sessions in the Session Host behind a setting (#231)', () => {
       agents.setView({ focused: false, selected: null });
     }
   });
+
+  it('runs Floating Workspace terminals in the Session Host when setting is on, keeps them live across quit, and preserves all exclusions (#237)', async () => {
+    host = createSessionHost({
+      socketPath: sockPath,
+      appVersion: '0.6.3',
+      spawnPty: fakePtyFactory(hostPtys),
+      now: () => clock,
+    });
+    await host.start();
+
+    agents.__setDeps({
+      connectHost: async () => {
+        const client = createSessionHostClient({ socketPath: sockPath });
+        const hello = await client.hello();
+        return { client, hello, socketPath: sockPath };
+      },
+    });
+
+    const alerts = [];
+    const offAlert = agents.onAlert((a) => alerts.push(a));
+
+    try {
+      await agents.setKeepRunningOnQuit(true);
+      const res = agents.launchFloating({ cwd: siteDir });
+      expect(res.ok).toBe(true);
+      await until(() => hostPtys.length === 1);
+      expect(inAppPtys).toHaveLength(0);
+
+      // Exclusions: absent from Projects list, activeAgentCount, hasActiveSessions, and alerts.
+      expect(agents.listAllSessions()).toEqual([]);
+      expect(agents.activeAgentCount()).toBe(0);
+      expect(agents.hasActiveSessions()).toBe(false);
+      hostPtys[0].emitData('float-out\x07');
+      await new Promise((r) => setTimeout(r, 30));
+      expect(alerts).toEqual([]);
+
+      // Quit and reopen: floating terminal is still live with its working folder.
+      agents.shutdownAll();
+      expect(hostPtys[0].kill).not.toHaveBeenCalled();
+
+      agents.restoreSessions({ projectIds: ['site-1'] });
+      await agents.initSessionHost();
+
+      const floating = agents.listFloatingSessions();
+      expect(floating).toHaveLength(1);
+      expect(floating[0]).toMatchObject({
+        sessionId: res.sessionId,
+        cwd: siteDir,
+        exited: false,
+      });
+      expect(agents.listAllSessions()).toEqual([]);
+      expect(agents.activeAgentCount()).toBe(0);
+
+      agents.write(res.sessionId, 'pwd\r');
+      await until(() => hostPtys[0].write.mock.calls.some((c) => c[0] === 'pwd\r'));
+    } finally {
+      offAlert();
+    }
+  });
 });
