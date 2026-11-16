@@ -107,7 +107,7 @@ describe('quitConfirmation', () => {
         confirmOnQuit: true,
         keepRunningOnQuit: true,
         liveAgentCount: 3,
-        agentSiteNames: ['Theme'],
+        agentSiteNames: [],
         procStatus: { nginx: live() },
       });
       expect(res).toEqual({
@@ -130,7 +130,7 @@ describe('quitConfirmation', () => {
         confirmOnQuit: true,
         keepRunningOnQuit: true,
         liveAgentCount: 1,
-        agentSiteNames: ['Theme'],
+        agentSiteNames: [],
         procStatus: {},
       });
       expect(res.message).toBe('1 agent is still running.');
@@ -141,7 +141,7 @@ describe('quitConfirmation', () => {
         confirmOnQuit: false,
         keepRunningOnQuit: true,
         liveAgentCount: 2,
-        agentSiteNames: ['Theme'],
+        agentSiteNames: [],
         procStatus: { nginx: live() },
       });
       expect(res).toBeNull();
@@ -157,6 +157,40 @@ describe('quitConfirmation', () => {
         procStatus: { nginx: live() },
       });
       expect(res).toEqual({ kind: 'services', names: ['nginx'] });
+    });
+    it('names in-app Sessions that stop anyway, and asks even with confirmOnQuit off', () => {
+      const res = quitConfirmation({
+        confirmOnQuit: false,
+        keepRunningOnQuit: true,
+        liveAgentCount: 1,
+        agentSiteNames: ['Shop'],
+        procStatus: {},
+      });
+      expect(res.kind).toBe('agents-keep-running');
+      expect(res.message).toBe('1 agent is still running.');
+      expect(res.detail).toContain('Agents in Shop started before');
+      expect(res.detail).toContain('so they stop.');
+    });
+
+    it('confirms in-app Sessions when no host holds any, even with confirmOnQuit off', () => {
+      const res = quitConfirmation({
+        confirmOnQuit: false,
+        keepRunningOnQuit: true,
+        liveAgentCount: 0,
+        agentSiteNames: ['Shop'],
+        procStatus: {},
+      });
+      expect(res).toEqual({ kind: 'agents', names: ['Shop'] });
+    });
+  });
+
+  describe('quitAction', () => {
+    it('never stops host-held Sessions from the services or agents dialog', () => {
+      // A Floating terminal in the host must survive the ordinary Quit dialog.
+      expect(quitAction(0, { kind: 'services', names: ['nginx'] })).toBe('keep-and-quit');
+      expect(quitAction(1, { kind: 'services', names: ['nginx'] })).toBe('cancel');
+      expect(quitAction(0, { kind: 'agents', names: ['Shop'] })).toBe('keep-and-quit');
+      expect(quitAction(1, { kind: 'agents', names: ['Shop'] })).toBe('cancel');
     });
   });
 });

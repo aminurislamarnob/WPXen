@@ -220,8 +220,9 @@ badge. Agent hooks can feed the engine later through its normalized
 - **Terminal provider & Session Host** (`docs/adr/0003-session-host.md`,
   superseding ADR 0001). `agents.cjs` never imports `node-pty` directly; it
   talks to one terminal provider interface (`services/terminalProvider.cjs`:
-  `start`, `write`, `resize`, `stop`, `attach`, `clearBuffer`, `markRead`,
-  `getPid`, `onOutput`, `onStatus`, `onExit`). With `agents.keepRunningOnQuit`
+  `start`, `write`, `resize`, `stop`, `attach`, `clearBuffer`, `getPid`,
+  `onOutput`, `onExit`; the host client adds the optional `markRead`,
+  `onStatus` and `onDisconnect`). With `agents.keepRunningOnQuit`
   off (default), the in-app provider spawns ptys in the main process and
   `shutdownAll()` records Sessions as ended (`agentSessions` store key) so they
   reappear for Resume / Open Again on next launch. With the setting on,

@@ -581,7 +581,7 @@ function handleProviderStatus({ sessionId, state, title, changedAt, unread } = {
       session.provider?.markRead?.(sessionId, true)?.catch?.(() => {});
     }
   }
-  if (nextTitle !== prev.title) saveSessionRecord(session);
+  if (nextTitle !== prev.title) scheduleRecordSave(session);
   emitChange({
     immediate: nextState !== prev.state || nextUnread !== prev.unread,
   });
@@ -598,12 +598,11 @@ function handleHostDisconnect(disconnectedClient) {
       break;
     }
   }
+  // A client no longer in the map was closed on purpose (idle, quit) or has
+  // already been handled; it says nothing about any other host's Sessions.
+  if (!disconnectedVersion) return;
   for (const s of [...sessions.values()]) {
-    if (
-      !s.exited &&
-      s.isHostSession &&
-      (!disconnectedVersion || s.hostVersion === disconnectedVersion)
-    ) {
+    if (!s.exited && s.isHostSession && s.hostVersion === disconnectedVersion) {
       handleProviderExit(s.sessionId, 1);
     }
   }
@@ -668,11 +667,11 @@ function makeHostProviderProxy(version) {
         ? c.resize(sessionId, cols, rows)
         : ensureHostClient(ver).then((cl) => cl.resize(sessionId, cols, rows));
     },
-    stop: (sessionId) => {
+    stop: (sessionId, opts) => {
       const c = getClient();
       return c
-        ? c.stop(sessionId)
-        : ensureHostClient(ver).then((cl) => cl.stop(sessionId));
+        ? c.stop(sessionId, opts)
+        : ensureHostClient(ver).then((cl) => cl.stop(sessionId, opts));
     },
     attach: (sessionId) => {
       const c = getClient();
@@ -786,9 +785,7 @@ async function initSessionHost() {
     }
   }
 
-  const floatingRecords = deps.store
-    ? deps.store.get(FLOATING_SESSIONS_STORE_KEY, []) || []
-    : [];
+  const floatingRecords = storedList(FLOATING_SESSIONS_STORE_KEY);
   const floatingMap = new Map(
     floatingRecords
       .filter((r) => r && typeof r.sessionId === 'string')
@@ -1222,11 +1219,15 @@ function toSessionRecord(s) {
     exitCode: s.exitCode ?? null,
     exitState: s.exited ? exitState : null,
     hostVersion: s.hostVersion || null,
+    // Last write: after a crash, the closest thing to when the Session ended.
+    savedAt: deps.now(),
   };
 }
 
 // Keep all live Sessions plus at most MAX_ENDED_SESSIONS_PER_PROJECT ended
-// records per Project (oldest dropped first, by startedAt).
+// records per Project, dropping the ones that ended longest ago. By end time,
+// not start time: a long-running Session that just finished is the newest
+// ended one, and must not vanish the moment it exits.
 function capEndedRecords(records, isLive = () => false) {
   const byProject = new Map();
   for (const r of records) {
@@ -1238,17 +1239,46 @@ function capEndedRecords(records, isLive = () => false) {
   const dropped = new Set();
   for (const list of byProject.values()) {
     if (list.length <= MAX_ENDED_SESSIONS_PER_PROJECT) continue;
-    const sorted = [...list].sort((a, b) => (a.startedAt || 0) - (b.startedAt || 0));
+    const endedAt = (r) => r.endedAt || r.savedAt || r.startedAt || 0;
+    const sorted = [...list].sort((a, b) => endedAt(a) - endedAt(b));
     const excess = sorted.length - MAX_ENDED_SESSIONS_PER_PROJECT;
     for (let i = 0; i < excess; i++) dropped.add(sorted[i].sessionId);
   }
   return dropped.size ? records.filter((r) => !dropped.has(r.sessionId)) : records;
 }
 
+// A title can change many times a second (a CLI showing a timer), and each
+// store write is a synchronous rewrite of the whole data file. Title-only
+// changes are therefore saved at most once per RECORD_SAVE_DELAY_MS; launch,
+// exit and every other change still save at once (and flush a pending one).
+const RECORD_SAVE_DELAY_MS = 1000;
+
+function scheduleRecordSave(session) {
+  if (session.recordSaveTimer) return;
+  session.recordSaveTimer = setTimeout(() => {
+    session.recordSaveTimer = null;
+    if (sessions.get(session.sessionId) === session) saveSessionRecord(session);
+  }, RECORD_SAVE_DELAY_MS);
+  session.recordSaveTimer.unref?.();
+}
+
+function clearPendingRecordSave(session) {
+  if (session.recordSaveTimer) clearTimeout(session.recordSaveTimer);
+  session.recordSaveTimer = null;
+}
+
+// Store lists read defensively: a hand-edited or damaged store must not break
+// launching or restoring Sessions.
+function storedList(key) {
+  const v = deps.store ? deps.store.get(key, []) : [];
+  return Array.isArray(v) ? v : [];
+}
+
 function saveSessionRecord(session) {
   if (!deps.store) return;
+  clearPendingRecordSave(session);
   if (session.scope === 'floating') {
-    const list = deps.store.get(FLOATING_SESSIONS_STORE_KEY, []);
+    const list = storedList(FLOATING_SESSIONS_STORE_KEY);
     if (session.isHostSession && !session.exited) {
       const snap = session.tracker.snapshot();
       const rec = {
@@ -1274,7 +1304,7 @@ function saveSessionRecord(session) {
     return;
   }
   if (!session.siteId) return;
-  const list = deps.store.get(SESSIONS_STORE_KEY, []);
+  const list = storedList(SESSIONS_STORE_KEY);
   const rec = toSessionRecord(session);
   const idx = list.findIndex((r) => r?.sessionId === session.sessionId);
   const next = idx >= 0 ? list.map((r, i) => (i === idx ? rec : r)) : [...list, rec];
@@ -1294,10 +1324,10 @@ function saveSessionRecord(session) {
 
 function removeSessionRecord(sessionId) {
   if (!deps.store) return;
-  const list = deps.store.get(SESSIONS_STORE_KEY, []);
+  const list = storedList(SESSIONS_STORE_KEY);
   const next = list.filter((r) => r?.sessionId !== sessionId);
   if (next.length !== list.length) deps.store.set(SESSIONS_STORE_KEY, next);
-  const flist = deps.store.get(FLOATING_SESSIONS_STORE_KEY, []);
+  const flist = storedList(FLOATING_SESSIONS_STORE_KEY);
   const fnext = flist.filter((r) => r?.sessionId !== sessionId);
   if (fnext.length !== flist.length) deps.store.set(FLOATING_SESSIONS_STORE_KEY, fnext);
 }
@@ -1332,7 +1362,7 @@ function restoreSessions({ projectIds = null } = {}) {
   const normalized = [];
   for (const r of kept) {
     const agent = agentsById.get(r.agentId);
-    const endedAt = r.endedAt || r.startedAt || now;
+    const endedAt = r.endedAt || r.savedAt || r.startedAt || now;
     const exitState = r.exitState === 'error' ? 'error' : 'exited';
     const exitCode = r.exitCode ?? (exitState === 'error' ? 1 : 0);
     const tracker = createTracker({
@@ -1380,7 +1410,7 @@ function restoreSessions({ projectIds = null } = {}) {
     sessions.set(session.sessionId, session);
     normalized.push(toSessionRecord(session));
   }
-  const floatingIds = (deps.store.get(FLOATING_SESSIONS_STORE_KEY, []) || [])
+  const floatingIds = storedList(FLOATING_SESSIONS_STORE_KEY)
     .map((r) => r?.sessionId)
     .filter(Boolean);
   deps.store.set(SESSIONS_STORE_KEY, normalized);
@@ -1911,7 +1941,7 @@ function handleProviderOutput(sessionId, data) {
     // Status and unread flips go out at once; title-only churn (spinner
     // frames) waits.
     const after = session.tracker.snapshot();
-    if (after.title !== beforeSnap.title) saveSessionRecord(session);
+    if (after.title !== beforeSnap.title) scheduleRecordSave(session);
     emitChange({
       immediate: after.state !== beforeSnap.state || after.unread !== beforeSnap.unread,
     });
@@ -2360,8 +2390,12 @@ function stop(sessionId) {
       .catch(() => {})
       .finally(() => closeIdleHostClientsIfDisabled());
   } else {
+    // The in-app provider keeps an exited pty's buffer for replay; once the
+    // Session is closed nothing will read it again.
+    if (session.provider === inAppProvider) inAppProvider.stop(sessionId);
     closeIdleHostClientsIfDisabled();
   }
+  clearPendingRecordSave(session);
   stopRegistryPin(session);
   sessions.delete(sessionId);
   removeSessionRecord(sessionId);
@@ -2383,12 +2417,15 @@ function shutdownAll({ forceStop = false } = {}) {
   try {
     for (const session of [...sessions.values()]) {
       stopRegistryPin(session);
+      if (session.recordSaveTimer) saveSessionRecord(session);
       if (!session.exited) {
         if (keepRunningOnQuit && !forceStop && session.isHostSession) {
           saveSessionRecord(session);
         } else {
+          // Stays listed as ended, so its history stays too.
           const res = (session.provider || activeProvider(session.scope)).stop(
-            session.sessionId
+            session.sessionId,
+            { keepHistory: true }
           );
           if (res && typeof res.then === 'function') {
             stopPromises.push(res.catch(() => {}));
@@ -2429,19 +2466,25 @@ function hasActiveSessions() {
 }
 
 // Count of live Site Sessions (excluding Floating Workspace terminals).
-function activeAgentCount() {
+// `hostOnly` counts just the ones a Session Host holds: the ones that keep
+// running after quit.
+function activeAgentCount({ hostOnly = false } = {}) {
   let count = 0;
   for (const s of sessions.values()) {
-    if (!s.exited && s.scope !== 'floating') count++;
+    if (!s.exited && s.scope !== 'floating' && (!hostOnly || s.isHostSession)) count++;
   }
   return count;
 }
 
 // Distinct Site ids that have a live Session — for the quit-confirmation dialog.
-function activeSiteIds() {
+// `inAppOnly` picks the Sites whose live Sessions quitting will stop even with
+// "Keep agents running" on: ones running in the app, not in a host.
+function activeSiteIds({ inAppOnly = false } = {}) {
   const ids = new Set();
   for (const s of sessions.values()) {
-    if (!s.exited && s.scope !== 'floating') ids.add(s.siteId);
+    if (!s.exited && s.scope !== 'floating' && (!inAppOnly || !s.isHostSession)) {
+      ids.add(s.siteId);
+    }
   }
   return [...ids];
 }
@@ -2459,7 +2502,9 @@ function stopAllBackgroundSessions() {
   for (const s of [...sessions.values()]) {
     if (!s.exited && s.isHostSession) {
       stopRegistryPin(s);
-      const res = (s.provider || activeProvider(s.scope)).stop(s.sessionId);
+      const res = (s.provider || activeProvider(s.scope)).stop(s.sessionId, {
+        keepHistory: true,
+      });
       if (res && typeof res.then === 'function') {
         stopPromises.push(res.catch(() => {}));
       }

@@ -335,14 +335,17 @@ app.on('before-quit', (e) => {
   // WPXen's own services would stop (quitPrompt.cjs).
   const agents = require('./services/agents.cjs');
   const quitPrompt = require('./services/quitPrompt.cjs');
-  let agentSiteNames = [];
-  const keepAgentsRunning =
-    getSetting('agents.keepRunningOnQuit') && !agents.getHostStatus().fallback;
-  const liveAgentCount = agents.activeAgentCount();
-  if (!keepAgentsRunning && liveAgentCount > 0) {
-    const sitesById = new Map((store?.get('sites', []) || []).map((s) => [s.id, s.name]));
-    agentSiteNames = agents.activeSiteIds().map((id) => sitesById.get(id) || id);
-  }
+  // With the setting on, only host-held Sessions survive quitting; any that
+  // run in the app (started before the setting was on, or after a fallback)
+  // stop, and are named. Fallback can clear mid-run, so count, don't infer.
+  const keepAgentsRunning = !!getSetting('agents.keepRunningOnQuit');
+  const liveAgentCount = keepAgentsRunning
+    ? agents.activeAgentCount({ hostOnly: true })
+    : 0;
+  const sitesById = new Map((store?.get('sites', []) || []).map((s) => [s.id, s.name]));
+  const agentSiteNames = agents
+    .activeSiteIds({ inAppOnly: keepAgentsRunning })
+    .map((id) => sitesById.get(id) || id);
   const confirmation = quitPrompt.quitConfirmation({
     confirmOnQuit: getSetting('app.confirmOnQuit'),
     keepRunningOnQuit: keepAgentsRunning,

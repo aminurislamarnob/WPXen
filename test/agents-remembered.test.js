@@ -322,6 +322,54 @@ describe('remembered Sessions across quit, crash and restart (#228)', () => {
     ).toHaveLength(50);
   });
 
+  it('keeps a long-running Session when it ends after 50 others have ended', () => {
+    const shop = site('shop');
+    clock += 100;
+    const { sessionId: longId } = agents.launch({ site: shop, agentId: 'codex' });
+    const longPty = ptys.at(-1);
+    for (let i = 0; i < 50; i++) {
+      clock += 100;
+      agents.launch({ site: shop, agentId: 'codex' });
+      ptys.at(-1).emitExit(0);
+    }
+    clock += 100;
+    longPty.emitExit(0);
+
+    const shopRows = agents.listAllSessions().filter((r) => r.siteId === 'shop');
+    expect(shopRows).toHaveLength(50);
+    expect(shopRows.map((r) => r.sessionId)).toContain(longId);
+    expect(
+      store.get(agents.SESSIONS_STORE_KEY, []).some((r) => r.sessionId === longId)
+    ).toBe(true);
+  });
+
+  it('survives a damaged store instead of failing launch and restore', () => {
+    store.set(agents.SESSIONS_STORE_KEY, 'not a list');
+    store.set('floatingAgentSessions', { not: 'a list' });
+    expect(() => agents.restoreSessions({ projectIds: ['shop'] })).not.toThrow();
+    store.set(agents.SESSIONS_STORE_KEY, { broken: true });
+    const { sessionId } = agents.launch({ site: site('shop'), agentId: 'claude' });
+    expect(store.get(agents.SESSIONS_STORE_KEY, []).map((r) => r.sessionId)).toEqual([
+      sessionId,
+    ]);
+  });
+
+  it('saves title-only changes at most once a second, not once per change', async () => {
+    vi.useFakeTimers();
+    try {
+      const { sessionId } = agents.launch({ site: site('shop'), agentId: 'claude' });
+      const set = vi.spyOn(store, 'set');
+      for (let i = 0; i < 100; i++) ptys[0].emitData(`\x1b]0;Build ${i}s\x07`);
+      expect(set).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1100);
+      const saves = set.mock.calls.filter(([k]) => k === agents.SESSIONS_STORE_KEY);
+      expect(saves).toHaveLength(1);
+      expect(saves[0][1].find((r) => r.sessionId === sessionId).title).toBe('Build 99s');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('drops records whose Project no longer exists', () => {
     const shop = site('shop');
     const blog = site('blog');

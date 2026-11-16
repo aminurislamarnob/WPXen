@@ -6,6 +6,7 @@ import agents from '../electron/services/agents.cjs';
 import { createSessionHost } from '../electron/services/sessionHost.cjs';
 import { createSessionHostClient } from '../electron/services/sessionHostClient.cjs';
 import { socketPathForVersion } from '../electron/services/sessionHostManager.cjs';
+import { historyDir, readHistory } from '../electron/services/sessionHistory.cjs';
 import {
   backgroundSessionsLabel,
   shouldShowBackgroundSessionsRow,
@@ -223,5 +224,87 @@ describe('stopAllBackgroundSessions (#236)', () => {
       totalRunning: 0,
       connectedHostCount: 0,
     });
+  });
+
+  it('keeps the terminal history of Sessions it stops, since they stay listed', async () => {
+    const sockPath = socketPathForVersion(userData, '0.6.4');
+    host = createSessionHost({
+      socketPath: sockPath,
+      appVersion: '0.6.4',
+      historyDir: historyDir(userData),
+      spawnPty: fakePtyFactory(ptys),
+    });
+    await host.start();
+    agents.__setDeps({
+      connectHost: async (ver) => {
+        const sp = socketPathForVersion(userData, ver);
+        const client = createSessionHostClient({ socketPath: sp });
+        const hello = await client.hello();
+        return { client, hello, socketPath: sp };
+      },
+    });
+    await agents.setKeepRunningOnQuit(true);
+    const { sessionId } = agents.launch({
+      site: { id: 'site-1', name: 'One', path: siteDir },
+      agentId: 'claude',
+    });
+    await until(() => ptys.length === 1);
+    ptys[0].emitData('work in progress\r\n');
+    await until(() => readHistory(historyDir(userData), sessionId).length > 0);
+
+    agents.stopAllBackgroundSessions();
+    await until(() => ptys[0].kill.mock.calls.length > 0);
+    expect(readHistory(historyDir(userData), sessionId)).toBe('work in progress\r\n');
+  });
+
+  it('closing an idle older host leaves the current host’s Sessions running', async () => {
+    const old = createSessionHost({
+      socketPath: socketPathForVersion(userData, '0.6.3'),
+      appVersion: '0.6.3',
+      spawnPty: fakePtyFactory([]),
+    });
+    await old.start();
+    host = createSessionHost({
+      socketPath: socketPathForVersion(userData, '0.6.4'),
+      appVersion: '0.6.4',
+      spawnPty: fakePtyFactory(ptys),
+    });
+    await host.start();
+    const connect = async (ver) => {
+      const sp = socketPathForVersion(userData, ver);
+      const client = createSessionHostClient({ socketPath: sp });
+      const hello = await client.hello();
+      return { client, hello, socketPath: sp, version: ver };
+    };
+    agents.__setDeps({
+      connectHost: connect,
+      discoverHosts: async () => ({
+        hosts: [await connect('0.6.3'), await connect('0.6.4')],
+      }),
+    });
+    try {
+      await agents.setKeepRunningOnQuit(true, { deferConnect: true });
+      await agents.initSessionHost();
+      const { sessionId } = agents.launch({
+        site: { id: 'site-1', name: 'One', path: siteDir },
+        agentId: 'claude',
+      });
+      await until(() => ptys.length === 1);
+      expect(agents.getHostSummary().connectedHostCount).toBe(2);
+
+      // Turning the setting off closes the idle 0.6.3 client; its close event
+      // arrives after it left the client map.
+      await agents.setKeepRunningOnQuit(false);
+      await new Promise((r) => setTimeout(r, 50));
+      expect(
+        agents.listAllSessions().find((r) => r.sessionId === sessionId)
+      ).toMatchObject({
+        exited: false,
+      });
+      expect(agents.getHostSummary().totalRunning).toBe(1);
+    } finally {
+      agents.__setDeps({ discoverHosts: null });
+      await old.close();
+    }
   });
 });

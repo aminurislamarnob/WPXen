@@ -171,8 +171,9 @@ export function needsAttention(sessions) {
 
 // ── Layout persistence ───────────────────────────────────────────────────────
 // What survives a restart: tab order, the focused tab and where each terminal
-// was opened. Never a sessionId — after a restart every shell is a fresh one
-// (ADR 0001: no daemon, nothing outlives the app).
+// was opened. Never a sessionId: shells a Session Host kept alive (ADR 0003)
+// are matched from the main process's records, and any other shell after a
+// restart is a fresh one.
 
 export const LAYOUT_STORAGE_KEY = 'wpxen.floatingWorkspace.tabs';
 const NOTE_PATH = /^\/.+\.(md|markdown)$/i;
