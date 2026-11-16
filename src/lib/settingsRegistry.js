@@ -9,6 +9,8 @@
 // here with no matching schema key is fine (rows like "Set up DNS" are actions,
 // not stored values); a schema key with no entry here just isn't searchable.
 
+import { GUIDES } from './guides';
+
 export const SECTIONS = [
   {
     group: 'Personal',
@@ -40,6 +42,10 @@ export const SECTIONS = [
       { id: 'dependencies', label: 'Dependencies', icon: 'package' },
       { id: 'about', label: 'About', icon: 'info' },
     ],
+  },
+  {
+    group: 'Help',
+    items: [{ id: 'guides', label: 'Guides', icon: 'book' }],
   },
 ];
 
@@ -799,6 +805,15 @@ export const SETTINGS_ITEMS = [
       'diagnostics',
     ],
   },
+  // ── Guides ───────────────────────────────────────────────────────────────
+  // One entry per guide, built from guides.js so the two never drift.
+  ...GUIDES.map((g) => ({
+    id: `guides.${g.id}`,
+    section: 'guides',
+    title: g.title,
+    description: g.summary,
+    keywords: [...g.keywords, 'guide', 'help', 'how to', 'tutorial'],
+  })),
 ];
 
 const BY_SECTION = SETTINGS_ITEMS.reduce((acc, item) => {

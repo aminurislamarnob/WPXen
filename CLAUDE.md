@@ -173,6 +173,13 @@ _and_ the presentation entry in `src/lib/settingsRegistry.js` (which drives the
 sections list and the search index in `settingsSearch.js`). They're parallel
 lists — a schema key with no registry entry is invisible in the UI.
 
+**Guides** (Settings → Help → Guides, `/settings/guides/:guideId`) are plain
+data in `src/lib/guides.js`, rendered by `sections/GuidesSection.jsx`; the
+registry builds each guide's search entry from that list, so adding a guide is
+one edit. A guide quotes UI labels in “curly quotes”, and
+`test/guides.test.js` fails if a quoted label no longer exists in the UI it
+describes. Rename a button, update its guide.
+
 There is **no Save button**. `src/lib/useSettings.js` writes optimistically:
 local state updates immediately so the UI never lags the pointer, then
 persists, and rolls back with a reason if the main process rejects. The

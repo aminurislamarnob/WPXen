@@ -24,6 +24,7 @@ import DnsSection from './components/settings/sections/DnsSection';
 import BlueprintsSection from './components/settings/sections/BlueprintsSection';
 import DependenciesSection from './components/settings/sections/DependenciesSection';
 import AboutSection from './components/settings/sections/AboutSection';
+import GuidesSection from './components/settings/sections/GuidesSection';
 import Onboarding from './components/Onboarding';
 import { SettingsProvider } from './lib/useSettings';
 import BrandLogo from './components/BrandLogo';
@@ -163,6 +164,8 @@ export default function App() {
               <Route path="dns" element={<DnsSection />} />
               <Route path="dependencies" element={<DependenciesSection />} />
               <Route path="about" element={<AboutSection />} />
+              <Route path="guides" element={<GuidesSection />} />
+              <Route path="guides/:guideId" element={<GuidesSection />} />
             </Route>
           </Route>
         </Routes>
