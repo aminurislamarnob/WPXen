@@ -17,6 +17,7 @@ import { Utf8Base64 } from './utf8Base64';
 import { attachWebgl } from './webgl';
 import { registerQuerySuppression } from './querySuppression';
 import { createFileLinkProvider } from './fileLinkProvider';
+import { classifyHyperlink } from './hyperlinks';
 
 // Renderer-side terminal cache (Superset's "hide attach" pattern). Each xterm
 // opens into a detached wrapper div that is re-parented across React
@@ -72,11 +73,51 @@ function createEntry(sessionId, handlers) {
   const api = window.electronAPI;
   const entry = { sessionId, handlers, exited: false, exitCode: null };
 
+  // A clicked URL, whether matched in plain text or carried by an OSC 8 link.
+  const openWebLink = (event, uri) => {
+    if (entry.handlers.onLinkClick) entry.handlers.onLinkClick(event, uri);
+    else if (event.metaKey) api.openSiteInBrowser(uri);
+  };
+
   const term = new XTerm({
     cursorInactiveStyle: 'outline',
     allowProposedApi: true,
     scrollback: 5000,
     macOptionIsMeta: false,
+    // Show bold text in the colour the program asked for. xterm defaults to
+    // swapping bold ANSI 0–7 for their bright variants, as iTerm and
+    // Terminal.app do; Ghostty, Alacritty and Kitty don't, and the agent CLIs
+    // pick their colours expecting the plain ones.
+    drawBoldTextInBrightColors: false,
+    // OSC 8 hyperlinks (advertised to programs by FORCE_HYPERLINK in the pty
+    // env). Without a handler xterm falls back to window.confirm + window.open,
+    // which would both block the renderer and bypass openExternalSafely.
+    // file: is let through to reach classifyHyperlink, which drops everything
+    // but http(s) and file.
+    linkHandler: {
+      allowNonHttpProtocols: true,
+      activate: (event, uri) => {
+        const link = classifyHyperlink(uri);
+        if (!link) return;
+        if (link.kind === 'web') return openWebLink(event, link.uri);
+        // Same rule as plain-text file paths: ⌘-click, confined to the root.
+        const root = entry.handlers.rootPath;
+        if (!event.metaKey || !root) return;
+        api.terminalStatPath(root, link.path).then(
+          (st) => {
+            if (st?.exists) {
+              entry.handlers.onOpenFile?.(
+                st.resolved,
+                link.line,
+                link.col,
+                st.isDirectory
+              );
+            }
+          },
+          () => {}
+        );
+      },
+    },
     theme: terminalThemes[themeName()],
     // Font, size, cursor and contrast come from Settings → Appearance.
     ...terminalOptions(),
@@ -103,12 +144,7 @@ function createEntry(sessionId, handlers) {
   // means (lib/terminal/linkActions: plain click → the action card, ⌘ → the
   // default destination, ⇧⌘ → the other); without one, ⌘-click goes to the
   // system browser.
-  term.loadAddon(
-    new WebLinksAddon((event, uri) => {
-      if (entry.handlers.onLinkClick) entry.handlers.onLinkClick(event, uri);
-      else if (event.metaKey) api.openSiteInBrowser(uri);
-    })
-  );
+  term.loadAddon(new WebLinksAddon(openWebLink));
 
   term.open(wrapper);
   entry.detachWebgl = attachWebgl(term);

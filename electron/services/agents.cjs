@@ -1089,6 +1089,10 @@ function startSession({ cwd, command, meta, failLabel, phpBinDir = null }) {
         // behind every prompt. An app launched from Finder has no COLORTERM to
         // inherit, so set it.
         COLORTERM: 'truecolor',
+        // The terminal handles OSC 8 hyperlinks (sessionCache's linkHandler),
+        // but supports-hyperlinks only trusts a known TERM_PROGRAM list, which
+        // WPXen isn't on. This is its override, so CLIs print links as labels.
+        FORCE_HYPERLINK: '1',
         // Suppress oh-my-zsh's auto-update check. It fires during rc sourcing and
         // blocks on an interactive `[Y/n]` prompt (a single-char `read`); the
         // settle-window that types the agent command can't reliably out-wait it,

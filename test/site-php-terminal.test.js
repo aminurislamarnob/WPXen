@@ -66,6 +66,11 @@ describe("a Site's terminal", () => {
     expect(ptys[0].spawnedWith.opts.env.COLORTERM).toBe('truecolor');
   });
 
+  it('advertises OSC 8 hyperlinks, which the renderer handles', () => {
+    agents.launch({ site: site(), agentId: 'shell' });
+    expect(ptys[0].spawnedWith.opts.env.FORCE_HYPERLINK).toBe('1');
+  });
+
   it('is left alone when the Site has no PHP version to pin', () => {
     agents.launch({ site: site({ phpVersion: undefined }), agentId: 'shell' });
     const { env } = ptys[0].spawnedWith.opts;
