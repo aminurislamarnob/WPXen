@@ -9,6 +9,7 @@
 //   { type: 'list', items: [text] }     bullet points
 //   { type: 'note', tone, text }        a callout; tone 'info' | 'warning'
 //   { type: 'table', head: [a, b], rows: [[a, b]] }
+//   { type: 'code', text }              a shell command, with a Copy button
 //
 // `action` is an optional button at the top of the guide: `{ label, to,
 // state }`, a route inside the app. Text is plain: write the UI's own labels
@@ -31,24 +32,12 @@ export const GUIDES = [
         blocks: [
           {
             type: 'p',
-            text: 'WPXen adopts a Herd site in place: it serves the same folder, under the same domain, from the same database. Nothing is copied or moved, so your git checkouts, editor workspaces and agent sessions keep working.',
+            text: 'WPXen serves each Herd WordPress site in place: same folder, domain and database. Nothing is copied, and Herd’s files are not changed. WPXen only adds its own nginx config, an HTTPS certificate if Herd had one, and its local-trust mu-plugin.',
           },
           {
-            type: 'p',
-            text: 'WPXen reads Herd’s own configuration files to find the sites, so Herd doesn’t need to be running. Only WordPress sites are listed: other Herd projects (Laravel, static sites, Node apps) are left out.',
-          },
-        ],
-      },
-      {
-        heading: 'Before you start',
-        blocks: [
-          {
-            type: 'list',
-            items: [
-              'MySQL is running in WPXen (Services). WPXen needs it to find each site’s database.',
-              'The PHP version Herd uses is installed in WPXen (PHP Versions). If it isn’t, you can pick another version during the import.',
-              'The site’s database is on this Mac’s MySQL (localhost, port 3306). Herd’s free edition has no MySQL of its own, so this is usually already true.',
-            ],
+            type: 'note',
+            tone: 'info',
+            text: 'Needs MySQL running in WPXen, with the site’s database on this Mac (localhost:3306). Removing an imported site only unregisters it.',
           },
         ],
       },
@@ -58,11 +47,9 @@ export const GUIDES = [
           {
             type: 'steps',
             items: [
-              'Open Sites and click “From Herd”. The button only appears when Herd is installed.',
-              'Every importable site starts ticked. Untick “Select all importable”, then tick the one site you want.',
-              'Check the PHP version on the right of its row. A ✓ marks the version Herd uses.',
-              'Click “Import 1 site”.',
-              'When the row shows a link, click it to open the site.',
+              'On Sites, click “From Herd”.',
+              'Untick “Select all importable”, tick one site and check its PHP version (✓ is Herd’s).',
+              'Click “Import 1 site”, then open it from the link on its row.',
             ],
           },
         ],
@@ -73,17 +60,10 @@ export const GUIDES = [
           {
             type: 'steps',
             items: [
-              'Open Sites and click “From Herd”. Every importable site is already ticked.',
-              'Untick any site you want to keep only in Herd.',
-              'Adjust the PHP version of any row that needs it.',
-              'Click “Import N sites”. Sites are imported one after another, and each row shows its progress.',
-              'When it finishes, the summary shows how many were imported. If any failed, click “Retry failed” to go back with just those sites ticked, fix the cause, and import again.',
+              'On Sites, click “From Herd”. Every importable site is already ticked.',
+              'Untick any you want to leave in Herd, and adjust PHP per row.',
+              'Click “Import N sites”. If any fail, fix the cause and click “Retry failed”.',
             ],
-          },
-          {
-            type: 'note',
-            tone: 'info',
-            text: 'One site failing never stops the rest. Each site is checked on its own, and a site that fails leaves nothing behind.',
           },
         ],
       },
@@ -92,53 +72,24 @@ export const GUIDES = [
         blocks: [
           {
             type: 'table',
-            head: ['Message', 'What to do'],
+            head: ['Reason', 'Fix'],
             rows: [
-              ['Already in WPXen as …', 'Nothing. That site was imported before.'],
+              ['Already in WPXen', 'Nothing to do.'],
+              ['Multisite networks are not supported', 'Keep it in Herd.'],
+              ['No literal DB_NAME', 'Write DB_NAME into wp-config.php as plain text.'],
               [
-                'Multisite networks are not supported yet',
-                'Keep the site in Herd. WPXen serves single sites only.',
+                'Database is not on WPXen’s MySQL',
+                'Move it to localhost:3306 and update DB_HOST.',
               ],
+              ['Database was not found', 'Fix DB_NAME, or create the database.'],
+              ['Start MySQL to check this database', 'Start MySQL in Services.'],
               [
-                'wp-config.php has no literal DB_NAME',
-                'The database name is computed (for example from getenv). Write it into wp-config.php as plain text, then click Rescan.',
-              ],
-              [
-                'The database is on …, not WPXen’s MySQL',
-                'Move the database to this Mac’s MySQL (export and import it), update DB_HOST, then Rescan.',
-              ],
-              [
-                'Database … was not found on WPXen’s MySQL',
-                'Check DB_NAME in wp-config.php, or create the database, then Rescan.',
-              ],
-              [
-                'Start MySQL to check this database',
-                'Start MySQL in Services, then Rescan.',
-              ],
-              [
-                'WPXen’s nginx already has a config for …',
-                'Another WPXen site uses that domain. Remove or rename it first.',
+                'nginx already has a config for it',
+                'Remove or rename the other WPXen site.',
               ],
             ],
           },
-        ],
-      },
-      {
-        heading: 'What changes, and what doesn’t',
-        blocks: [
-          {
-            type: 'list',
-            items: [
-              'WPXen adds its own nginx config for the domain and, where Herd served the site over HTTPS, its own local certificate.',
-              'WPXen adds its local-trust mu-plugin to wp-content/mu-plugins, so the site can call other local HTTPS sites.',
-              'The site’s files, wp-config.php and database are not changed, and neither is anything in Herd.',
-            ],
-          },
-          {
-            type: 'note',
-            tone: 'info',
-            text: 'Removing an imported site in WPXen only unregisters it: its folder and database stay, because Herd may still use them.',
-          },
+          { type: 'p', text: 'After fixing, click Rescan.' },
         ],
       },
       {
@@ -147,20 +98,19 @@ export const GUIDES = [
           {
             type: 'note',
             tone: 'warning',
-            text: 'Quit Herd before you test. While Herd runs, its nginx answers every .test address, WPXen’s sites included.',
+            text: 'Quit Herd before testing: while it runs, its nginx answers every .test address.',
           },
           {
             type: 'p',
-            text: 'If you plan to uninstall Herd afterwards:',
+            text: 'To uninstall Herd, back up ~/Herd first, then use Herd’s own uninstaller. Then remove the lines Herd added to ~/.zshrc: each sits under a `# Herd injected …` comment, and `NODE_EXTRA_CA_CERTS` points at Herd’s certificate. Run this in Terminal. It keeps a backup at ~/.zshrc.bak:',
           },
           {
-            type: 'steps',
-            items: [
-              'Import every WordPress site you want to keep, and check that each one loads with Herd quit.',
-              'Back up ~/Herd. Your site folders live there, and the Herd uninstaller may not leave it alone.',
-              'Uninstall Herd from its own settings, so its helper service and certificate authority go too.',
-              'Remove the lines Herd added to ~/.zshrc: the Herd PATH entry, the HERD_PHP_*_INI_SCAN_DIR exports and NODE_EXTRA_CA_CERTS. Open a new terminal and check that `which php` shows Homebrew’s PHP.',
-            ],
+            type: 'code',
+            text: "cp ~/.zshrc ~/.zshrc.bak && sed -i '' -e '/^# Herd injected/{N;d;}' -e '/Application Support\\/Herd/d' ~/.zshrc",
+          },
+          {
+            type: 'p',
+            text: 'Open a new Terminal window and check: `grep -i herd ~/.zshrc` should print nothing, and `which php` should show Homebrew’s PHP. If anything breaks, restore with `cp ~/.zshrc.bak ~/.zshrc`.',
           },
         ],
       },

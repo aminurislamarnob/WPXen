@@ -5,7 +5,7 @@ import { GUIDES, findGuide, guideText } from '../src/lib/guides';
 import { SECTIONS, SETTINGS_ITEMS } from '../src/lib/settingsRegistry';
 import { matchesQuery } from '../src/lib/settingsSearch';
 
-const BLOCK_TYPES = new Set(['p', 'steps', 'list', 'note', 'table']);
+const BLOCK_TYPES = new Set(['p', 'steps', 'list', 'note', 'table', 'code']);
 
 describe('guides', () => {
   it('have unique ids and well-formed blocks', () => {

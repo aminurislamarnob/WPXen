@@ -1,5 +1,14 @@
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { AlertTriangle, ArrowLeft, ArrowRight, BookOpen, Info } from 'lucide-react';
+import { useState } from 'react';
+import {
+  AlertTriangle,
+  ArrowLeft,
+  ArrowRight,
+  BookOpen,
+  Check,
+  Copy,
+  Info,
+} from 'lucide-react';
 import { Card, SectionLabel } from '../../ui';
 import { GUIDES, findGuide } from '../../../lib/guides';
 import { isItemVisible } from '../../../lib/settingsSearch';
@@ -54,10 +63,10 @@ function GuideReader({ guide }) {
         <ArrowLeft size={12} />
         All guides
       </Link>
-      <div className="flex items-start justify-between gap-4 mb-4">
+      <div className="flex items-start justify-between gap-4 mb-3">
         <div>
-          <h1 className="text-[17px] font-semibold text-foreground">{guide.title}</h1>
-          <p className="text-[13px] text-muted-foreground mt-1">{guide.summary}</p>
+          <h1 className="text-[15px] font-semibold text-foreground">{guide.title}</h1>
+          <p className="text-xs text-muted-foreground mt-0.5">{guide.summary}</p>
         </div>
         {guide.action && (
           <button
@@ -69,18 +78,18 @@ function GuideReader({ guide }) {
         )}
       </div>
 
-      <div className="space-y-5">
+      <Card className="divide-y divide-border">
         {guide.sections.map((section) => (
-          <section key={section.heading}>
-            <SectionLabel>{section.heading}</SectionLabel>
-            <Card className="p-4 space-y-3">
-              {section.blocks.map((block, i) => (
-                <Block key={i} block={block} />
-              ))}
-            </Card>
+          <section key={section.heading} className="px-4 py-3 space-y-2">
+            <h2 className="text-[12px] font-semibold text-foreground">
+              {section.heading}
+            </h2>
+            {section.blocks.map((block, i) => (
+              <Block key={i} block={block} />
+            ))}
           </section>
         ))}
-      </div>
+      </Card>
     </article>
   );
 }
@@ -107,19 +116,19 @@ function Block({ block }) {
   switch (block.type) {
     case 'p':
       return (
-        <p className="text-[13px] leading-relaxed text-foreground">
+        <p className="text-[12.5px] leading-normal text-muted-foreground">
           <Inline text={block.text} />
         </p>
       );
     case 'steps':
       return (
-        <ol className="space-y-2">
+        <ol className="space-y-1">
           {block.items.map((item, i) => (
             <li
               key={i}
-              className="flex gap-3 text-[13px] leading-relaxed text-foreground"
+              className="flex gap-2 text-[12.5px] leading-normal text-foreground"
             >
-              <span className="flex-shrink-0 w-5 h-5 rounded-full bg-muted text-muted-foreground text-[11px] font-medium flex items-center justify-center mt-px">
+              <span className="flex-shrink-0 w-4 h-4 rounded-full bg-muted text-muted-foreground text-[10px] font-medium flex items-center justify-center mt-0.5">
                 {i + 1}
               </span>
               <span>
@@ -131,9 +140,9 @@ function Block({ block }) {
       );
     case 'list':
       return (
-        <ul className="space-y-1.5 list-disc pl-5 marker:text-muted-foreground">
+        <ul className="space-y-1 list-disc pl-4 marker:text-muted-foreground">
           {block.items.map((item, i) => (
-            <li key={i} className="text-[13px] leading-relaxed text-foreground">
+            <li key={i} className="text-[12.5px] leading-normal text-foreground">
               <Inline text={item} />
             </li>
           ))}
@@ -144,13 +153,13 @@ function Block({ block }) {
       const Icon = warning ? AlertTriangle : Info;
       return (
         <div
-          className={`flex items-start gap-2 rounded-lg px-3 py-2.5 text-xs leading-relaxed ${
+          className={`flex items-start gap-2 rounded-md px-2.5 py-1.5 text-xs leading-normal ${
             warning
               ? 'bg-status-warning/10 text-status-warning'
               : 'bg-highlight/10 text-highlight'
           }`}
         >
-          <Icon size={13} className="flex-shrink-0 mt-0.5" />
+          <Icon size={12} className="flex-shrink-0 mt-0.5" />
           <span>
             <Inline text={block.text} />
           </span>
@@ -159,12 +168,12 @@ function Block({ block }) {
     }
     case 'table':
       return (
-        <div className="overflow-hidden rounded-lg border border-border">
+        <div className="overflow-hidden rounded-md border border-border">
           <table className="w-full text-xs">
             <thead className="bg-muted text-muted-foreground">
               <tr>
                 {block.head.map((h) => (
-                  <th key={h} className="text-left font-medium px-3 py-2">
+                  <th key={h} className="text-left font-medium px-2.5 py-1.5">
                     {h}
                   </th>
                 ))}
@@ -176,7 +185,7 @@ function Block({ block }) {
                   {row.map((cell, j) => (
                     <td
                       key={j}
-                      className={`px-3 py-2 leading-relaxed ${j === 0 ? 'text-foreground font-medium w-[45%]' : 'text-muted-foreground'}`}
+                      className={`px-2.5 py-1.5 leading-normal ${j === 0 ? 'text-foreground w-[45%]' : 'text-muted-foreground'}`}
                     >
                       <Inline text={cell} />
                     </td>
@@ -187,6 +196,8 @@ function Block({ block }) {
           </table>
         </div>
       );
+    case 'code':
+      return <CodeBlock text={block.text} />;
     default:
       return null;
   }
@@ -202,6 +213,36 @@ function GuideNotFound() {
           See all guides
         </Link>
       </Card>
+    </div>
+  );
+}
+
+// A command to paste into Terminal. Copy goes through the clipboard API the
+// renderer already has; nothing here runs the command.
+function CodeBlock({ text }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Clipboard refused: the command is still selectable text.
+    }
+  };
+  return (
+    <div className="flex items-start gap-2 rounded-md border border-border bg-muted px-2.5 py-1.5">
+      <code className="flex-1 min-w-0 font-mono text-[11.5px] leading-normal text-foreground break-all select-text">
+        {text}
+      </code>
+      <button
+        type="button"
+        onClick={copy}
+        aria-label="Copy command"
+        className="flex-shrink-0 text-muted-foreground hover:text-foreground mt-0.5"
+      >
+        {copied ? <Check size={13} /> : <Copy size={13} />}
+      </button>
     </div>
   );
 }

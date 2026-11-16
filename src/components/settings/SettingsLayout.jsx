@@ -31,11 +31,16 @@ export default function SettingsLayout(props) {
       )}
 
       <div className="flex gap-6 items-start">
-        <SettingsSidebar
-          query={query}
-          onQueryChange={setQuery}
-          matchCounts={matchCounts}
-        />
+        {/* Pinned while the section scrolls: sticky within the app's scroll
+            area (Layout's overflow-y-auto), with its own scroll if the window
+            is shorter than the nav. 2.75rem is Layout's drag strip. */}
+        <div className="sticky top-0 self-start max-h-[calc(100vh-2.75rem)] overflow-y-auto pb-6">
+          <SettingsSidebar
+            query={query}
+            onQueryChange={setQuery}
+            matchCounts={matchCounts}
+          />
+        </div>
         <div className="flex-1 min-w-0">
           {query && (
             <p className="text-xs text-muted-foreground mb-3 px-1">
