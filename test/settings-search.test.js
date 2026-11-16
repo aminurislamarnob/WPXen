@@ -117,3 +117,19 @@ describe('agents keep running on quit (#231)', () => {
     ).toContain('agents.keepRunningOnQuit');
   });
 });
+
+describe('agents background sessions action row (#236)', () => {
+  it('exists in Settings → Agents and is found by settings search', () => {
+    const entry = SETTINGS_ITEMS.find((i) => i.id === 'agents.backgroundSessions');
+    expect(entry).toMatchObject({
+      id: 'agents.backgroundSessions',
+      section: 'agents',
+      title: 'Background sessions',
+    });
+    expect(
+      SETTINGS_ITEMS.filter((i) => matchesQuery(i, 'background sessions')).map(
+        (i) => i.id
+      )
+    ).toContain('agents.backgroundSessions');
+  });
+});

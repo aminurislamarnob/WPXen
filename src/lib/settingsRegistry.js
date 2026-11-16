@@ -469,6 +469,23 @@ export const SETTINGS_ITEMS = [
       'persist',
     ],
   },
+  // An action row (count + Stop all), not a stored value.
+  {
+    id: 'agents.backgroundSessions',
+    section: 'agents',
+    title: 'Background sessions',
+    description: 'View and stop sessions running in background Session Hosts',
+    keywords: [
+      'background',
+      'sessions',
+      'host',
+      'stop',
+      'running',
+      'older',
+      'version',
+      'agents',
+    ],
+  },
   {
     id: 'agents.notifications.enabled',
     section: 'agents',

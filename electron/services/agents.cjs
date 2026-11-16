@@ -2311,6 +2311,27 @@ function stopAll() {
   for (const sessionId of [...sessions.keys()]) stop(sessionId);
 }
 
+// Stop every live background (Session Host) Session without dismissing its
+// record, so it stays listed as ended (#236).
+function stopAllBackgroundSessions() {
+  const now = deps.now();
+  let changed = false;
+  for (const s of [...sessions.values()]) {
+    if (!s.exited && s.isHostSession) {
+      stopRegistryPin(s);
+      const res = (s.provider || activeProvider(s.scope)).stop(s.sessionId);
+      res?.catch?.(() => {});
+      s.exited = true;
+      s.endedAt = now;
+      s.exitCode = s.exitCode ?? 0;
+      s.tracker.exit(s.exitCode);
+      saveSessionRecord(s);
+      changed = true;
+    }
+  }
+  if (changed) emitChange({ immediate: true });
+}
+
 const agentChat = require('./agentChat.cjs');
 const {
   sendChat,
@@ -2635,5 +2656,6 @@ module.exports = {
   activeAgentCount,
   activeSiteIds,
   stopAll,
+  stopAllBackgroundSessions,
   __setDeps,
 };
