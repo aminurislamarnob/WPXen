@@ -42,6 +42,7 @@ const VALID_EVENT_CHANNELS = [
   'site-log-follow-update',
   'site-upgrade-report',
   'php-updates',
+  'app-updates',
   'app-navigate',
 ];
 
@@ -166,6 +167,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getPhpUpdates: () => ipcRenderer.invoke('php-updates-get'),
   checkPhpUpdates: () => ipcRenderer.invoke('php-updates-check'),
   dismissPhpUpdates: () => ipcRenderer.invoke('php-updates-dismiss'),
+  // Daily WPXen update check: { current, latest, available, notice,
+  // checkedAt, checking, error }. Also pushed on 'app-updates'.
+  getAppUpdates: () => ipcRenderer.invoke('app-updates-get'),
+  checkAppUpdates: () => ipcRenderer.invoke('app-updates-check'),
+  dismissAppUpdates: () => ipcRenderer.invoke('app-updates-dismiss'),
+  // 'download' opens the DMG for this Mac; anything else the release page.
+  openAppUpdate: (which) => ipcRenderer.invoke('app-updates-open', which),
   getPhpIniSettings: () => ipcRenderer.invoke('get-php-ini-settings'),
   setPhpIniSetting: (version, key, value) =>
     ipcRenderer.invoke('set-php-ini-setting', version, key, value),

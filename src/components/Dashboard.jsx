@@ -19,6 +19,7 @@ import {
 import { Button, Card, IconTile, Row, SectionLabel, Tooltip } from './ui';
 import { StatusBadge } from './StatusBadge';
 import { phpUpdatesLabel, usePhpUpdates } from '../lib/usePhpUpdates';
+import { useAppUpdates } from '../lib/useAppUpdates';
 
 const SERVICE_ROWS = [
   { id: 'nginx', name: 'nginx', icon: Server, color: 'green' },
@@ -42,6 +43,8 @@ export default function Dashboard({ serviceStatus, sites, refreshStatus }) {
   const [upgradeReport, setUpgradeReport] = useState(null);
   // PHP releases the daily check found and you haven't dismissed.
   const phpNotice = usePhpUpdates()?.notice || [];
+  // A newer WPXen release the daily check found and you haven't dismissed.
+  const appUpdates = useAppUpdates();
 
   useEffect(() => {
     window.electronAPI
@@ -134,6 +137,14 @@ export default function Dashboard({ serviceStatus, sites, refreshStatus }) {
             setUpgradeReport(null);
             window.electronAPI.dismissSiteUpgradeReport().catch(() => {});
           }}
+        />
+      )}
+
+      {appUpdates?.notice && (
+        <AppUpdateNotice
+          updates={appUpdates}
+          onDownload={() => window.electronAPI.openAppUpdate('download').catch(() => {})}
+          onDismiss={() => window.electronAPI.dismissAppUpdates().catch(() => {})}
         />
       )}
 
@@ -310,6 +321,31 @@ function SiteUpgradeNotice({ report, onDismiss }) {
       >
         <Button variant="ghost" onClick={onDismiss} className="flex-shrink-0">
           Dismiss
+        </Button>
+      </Row>
+    </Card>
+  );
+}
+
+// Shown until WPXen is updated or the notice dismissed; a newer release
+// brings it back.
+function AppUpdateNotice({ updates, onDownload, onDismiss }) {
+  return (
+    <Card className="mb-4">
+      <Row
+        icon={<ArrowUpCircle size={18} className="text-highlight flex-shrink-0" />}
+        title={
+          <span className="font-semibold">
+            WPXen {updates.latest.version} is available
+          </span>
+        }
+        subtitle={`You have ${updates.current}. Download it, then drag it into Applications.`}
+      >
+        <Button variant="ghost" onClick={onDismiss} className="flex-shrink-0">
+          Dismiss
+        </Button>
+        <Button variant="secondary" onClick={onDownload} className="flex-shrink-0">
+          Download
         </Button>
       </Row>
     </Card>
