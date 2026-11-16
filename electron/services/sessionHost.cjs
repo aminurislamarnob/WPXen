@@ -28,6 +28,7 @@ const PROTOCOL_VERSION = 1;
 const MAX_LINE_BYTES = 8 * 1024 * 1024;
 const MAX_BUFFER = 1024 * 1024; // ~1 MB in-memory ring buffer per Session
 const KILL_GRACE_MS = 3000;
+const MAX_IDLE_MS = 24 * 60 * 60 * 1000; // 24-hour disconnected limit (#234)
 
 const KNOWN_CLIENT_TYPES = new Set([
   'hello',
@@ -100,6 +101,9 @@ function createSessionHost({
   now = () => Date.now(),
   maxBuffer = MAX_BUFFER,
   killGraceMs = KILL_GRACE_MS,
+  idleTimeoutMs = MAX_IDLE_MS,
+  setTimeoutFn = setTimeout,
+  clearTimeoutFn = clearTimeout,
   onExit = null,
 } = {}) {
   if (!socketPath) throw new Error('socketPath is required');
@@ -109,6 +113,33 @@ function createSessionHost({
   let server = null;
   let closed = false;
   let hadSession = false;
+  let idleTimer = null;
+  let lastDisconnectedAt = null;
+
+  function clearIdleTimer() {
+    if (idleTimer) {
+      clearTimeoutFn(idleTimer);
+      idleTimer = null;
+    }
+    lastDisconnectedAt = null;
+  }
+
+  function scheduleIdleTimer() {
+    if (closed || clients.size > 0 || idleTimeoutMs <= 0) return;
+    if (idleTimer) clearTimeoutFn(idleTimer);
+    lastDisconnectedAt = now();
+    idleTimer = setTimeoutFn(() => {
+      idleTimer = null;
+      if (closed || clients.size > 0) return;
+      if (lastDisconnectedAt != null && now() - lastDisconnectedAt < idleTimeoutMs) {
+        return;
+      }
+      close().then(() => {
+        if (typeof onExit === 'function') onExit();
+      });
+    }, idleTimeoutMs);
+    idleTimer?.unref?.();
+  }
 
   function sendLine(conn, payload) {
     if (conn.destroyed) return;
@@ -402,6 +433,7 @@ function createSessionHost({
 
     server = net.createServer((conn) => {
       clients.add(conn);
+      clearIdleTimer();
       let buf = '';
       conn.on('data', (chunk) => {
         buf += chunk.toString('utf8');
@@ -416,6 +448,7 @@ function createSessionHost({
       const cleanup = () => {
         if (clients.delete(conn)) {
           maybeAutoExit();
+          if (!closed && clients.size === 0) scheduleIdleTimer();
         }
       };
       conn.on('close', cleanup);
@@ -441,6 +474,7 @@ function createSessionHost({
   function close() {
     if (closed) return Promise.resolve();
     closed = true;
+    clearIdleTimer();
     for (const s of sessions.values()) {
       if (!s.exited && s.term) {
         try {
@@ -512,6 +546,7 @@ if (require.main === module) {
 
 module.exports = {
   PROTOCOL_VERSION,
+  MAX_IDLE_MS,
   KNOWN_CLIENT_TYPES,
   KNOWN_HOST_EVENT_TYPES,
   parseClientMessage,

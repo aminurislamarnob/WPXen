@@ -40,9 +40,33 @@ function servicesQuitStops(procStatus) {
   return [...known, ...unknown];
 }
 
-// Which confirmation a quit needs: { kind: 'agents' | 'services', names }, or
-// null to quit straight away.
-function quitConfirmation({ confirmOnQuit, agentSiteNames, procStatus }) {
+// Which confirmation a quit needs:
+//   - { kind: 'agents-keep-running', count, message, detail, buttons, defaultId, cancelId }
+//   - { kind: 'agents' | 'services', names }
+//   - null to quit straight away.
+function quitConfirmation({
+  confirmOnQuit,
+  agentSiteNames,
+  procStatus,
+  keepRunningOnQuit = false,
+  liveAgentCount = 0,
+}) {
+  if (keepRunningOnQuit && liveAgentCount > 0) {
+    if (confirmOnQuit === false) return null;
+    return {
+      kind: 'agents-keep-running',
+      count: liveAgentCount,
+      message:
+        liveAgentCount === 1
+          ? '1 agent is still running.'
+          : `${liveAgentCount} agents are still running.`,
+      detail:
+        'They keep working after WPXen quits, for up to 24 hours. Your sites will be offline until you open WPXen again.',
+      buttons: ['Keep running and quit', 'Stop agents and quit', 'Cancel'],
+      defaultId: 0,
+      cancelId: 2,
+    };
+  }
   if (agentSiteNames && agentSiteNames.length > 0) {
     return { kind: 'agents', names: agentSiteNames };
   }
@@ -51,4 +75,15 @@ function quitConfirmation({ confirmOnQuit, agentSiteNames, procStatus }) {
   return names.length > 0 ? { kind: 'services', names } : null;
 }
 
-module.exports = { servicesQuitStops, quitConfirmation };
+// Map the user's dialog button choice (or null confirmation) to a quit action.
+function quitAction(choice, confirmation) {
+  if (!confirmation) return 'keep-and-quit';
+  if (confirmation.kind === 'agents-keep-running') {
+    if (choice === 0) return 'keep-and-quit';
+    if (choice === 1) return 'stop-and-quit';
+    return 'cancel';
+  }
+  return choice === 0 ? 'stop-and-quit' : 'cancel';
+}
+
+module.exports = { servicesQuitStops, quitConfirmation, quitAction };

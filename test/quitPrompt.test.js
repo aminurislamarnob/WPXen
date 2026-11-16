@@ -4,6 +4,7 @@ import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const {
   quitConfirmation,
+  quitAction,
   servicesQuitStops,
 } = require('../electron/services/quitPrompt.cjs');
 
@@ -98,5 +99,64 @@ describe('quitConfirmation', () => {
         procStatus: { nginx: live() },
       })
     ).toEqual({ kind: 'agents', names: ['Theme'] });
+  });
+
+  describe('with keepRunningOnQuit enabled (#234)', () => {
+    it('shows the 3-button dialog with Keep running as default when liveAgentCount > 0 and confirmOnQuit is on', () => {
+      const res = quitConfirmation({
+        confirmOnQuit: true,
+        keepRunningOnQuit: true,
+        liveAgentCount: 3,
+        agentSiteNames: ['Theme'],
+        procStatus: { nginx: live() },
+      });
+      expect(res).toEqual({
+        kind: 'agents-keep-running',
+        count: 3,
+        message: '3 agents are still running.',
+        detail:
+          'They keep working after WPXen quits, for up to 24 hours. Your sites will be offline until you open WPXen again.',
+        buttons: ['Keep running and quit', 'Stop agents and quit', 'Cancel'],
+        defaultId: 0,
+        cancelId: 2,
+      });
+      expect(quitAction(0, res)).toBe('keep-and-quit');
+      expect(quitAction(1, res)).toBe('stop-and-quit');
+      expect(quitAction(2, res)).toBe('cancel');
+    });
+
+    it('uses singular grammar when liveAgentCount is 1', () => {
+      const res = quitConfirmation({
+        confirmOnQuit: true,
+        keepRunningOnQuit: true,
+        liveAgentCount: 1,
+        agentSiteNames: ['Theme'],
+        procStatus: {},
+      });
+      expect(res.message).toBe('1 agent is still running.');
+    });
+
+    it('quits silently and keeps Sessions running when confirmOnQuit is off', () => {
+      const res = quitConfirmation({
+        confirmOnQuit: false,
+        keepRunningOnQuit: true,
+        liveAgentCount: 2,
+        agentSiteNames: ['Theme'],
+        procStatus: { nginx: live() },
+      });
+      expect(res).toBeNull();
+      expect(quitAction(0, res)).toBe('keep-and-quit');
+    });
+
+    it('falls back to service confirmation when keepRunningOnQuit is on but liveAgentCount is 0', () => {
+      const res = quitConfirmation({
+        confirmOnQuit: true,
+        keepRunningOnQuit: true,
+        liveAgentCount: 0,
+        agentSiteNames: [],
+        procStatus: { nginx: live() },
+      });
+      expect(res).toEqual({ kind: 'services', names: ['nginx'] });
+    });
   });
 });
