@@ -16,6 +16,13 @@ const fs = require('fs');
 const net = require('net');
 const pty = require('node-pty');
 const { createTracker, isTerminalReply } = require('./agentStatus.cjs');
+const {
+  MAX_HISTORY_BYTES,
+  appendHistory,
+  readHistory,
+  clearHistory,
+  deleteHistory,
+} = require('./sessionHistory.cjs');
 
 const PROTOCOL_VERSION = 1;
 const MAX_LINE_BYTES = 8 * 1024 * 1024;
@@ -87,6 +94,8 @@ function parseHostMessage(line) {
 function createSessionHost({
   socketPath,
   appVersion = '0.0.0',
+  historyDir = null,
+  maxHistoryBytes = MAX_HISTORY_BYTES,
   spawnPty = (file, args, opts) => pty.spawn(file, args, opts),
   now = () => Date.now(),
   maxBuffer = MAX_BUFFER,
@@ -166,6 +175,7 @@ function createSessionHost({
 
   function stopSession(sessionId) {
     const s = sessions.get(sessionId);
+    if (historyDir) deleteHistory(historyDir, sessionId);
     if (!s) return;
     sessions.delete(sessionId);
     if (!s.exited && s.term) {
@@ -264,9 +274,13 @@ function createSessionHost({
 
         term.onData((data) => {
           if (entry.exited) return;
-          entry.buffer += data;
-          if (entry.buffer.length > maxBuffer) {
-            entry.buffer = entry.buffer.slice(entry.buffer.length - maxBuffer);
+          if (historyDir) {
+            appendHistory(historyDir, sessionId, data, maxHistoryBytes);
+          } else {
+            entry.buffer += data;
+            if (entry.buffer.length > maxBuffer) {
+              entry.buffer = entry.buffer.slice(entry.buffer.length - maxBuffer);
+            }
           }
           broadcastEvent({ type: 'output', sessionId, data });
           if (entry.tracker.output(data)) {
@@ -329,11 +343,12 @@ function createSessionHost({
           return;
         }
         const snap = s.tracker.snapshot();
+        const data = historyDir ? readHistory(historyDir, s.sessionId) : s.buffer;
         sendLine(conn, {
           id,
           ok: true,
           sessionId: s.sessionId,
-          data: s.buffer,
+          data,
           exited: s.exited,
           exitCode: s.exitCode,
           state: snap.state,
@@ -366,6 +381,7 @@ function createSessionHost({
       case 'clear-buffer': {
         const s = sessions.get(msg.sessionId);
         if (s) s.buffer = '';
+        if (historyDir) clearHistory(historyDir, msg.sessionId);
         sendLine(conn, { id, ok: true });
         return;
       }
@@ -463,18 +479,21 @@ function createSessionHost({
 function parseCliArgs(argv = process.argv.slice(2)) {
   let socketPath = process.env.WPXEN_SESSION_HOST_SOCKET || null;
   let appVersion = process.env.WPXEN_SESSION_HOST_VERSION || '0.0.0';
+  let historyDir = process.env.WPXEN_SESSION_HISTORY_DIR || null;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--socket' && argv[i + 1]) {
       socketPath = argv[++i];
     } else if (argv[i] === '--version' && argv[i + 1]) {
       appVersion = argv[++i];
+    } else if (argv[i] === '--history-dir' && argv[i + 1]) {
+      historyDir = argv[++i];
     }
   }
-  return { socketPath, appVersion };
+  return { socketPath, appVersion, historyDir };
 }
 
 if (require.main === module) {
-  const { socketPath, appVersion } = parseCliArgs();
+  const { socketPath, appVersion, historyDir } = parseCliArgs();
   if (!socketPath) {
     process.stderr.write('sessionHost: --socket is required\n');
     process.exit(1);
@@ -482,6 +501,7 @@ if (require.main === module) {
   const host = createSessionHost({
     socketPath,
     appVersion,
+    historyDir,
     onExit: () => process.exit(0),
   });
   host.start().catch((err) => {

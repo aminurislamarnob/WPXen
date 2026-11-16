@@ -14,6 +14,7 @@ const fs = require('fs');
 const path = require('path');
 const childProcess = require('child_process');
 const { createSessionHostClient } = require('./sessionHostClient.cjs');
+const { historyDir } = require('./sessionHistory.cjs');
 
 // Naming law (CLAUDE.md "Legacy names"): everything written outside the app
 // bundle carries the `wpxen` prefix via a named constant at the top of its
@@ -80,7 +81,7 @@ function stageRuntimeFiles({
   fs.mkdirSync(versionDir, { recursive: true });
 
   // Copy host runtime scripts.
-  for (const file of ['sessionHost.cjs', 'agentStatus.cjs']) {
+  for (const file of ['sessionHost.cjs', 'agentStatus.cjs', 'sessionHistory.cjs']) {
     const src = path.join(servicesDir, file);
     if (fs.existsSync(src)) {
       fs.writeFileSync(path.join(versionDir, file), fs.readFileSync(src));
@@ -116,22 +117,21 @@ function spawnDetachedHost({
   hostScriptPath,
   socketPath,
   version,
+  historyDirPath = null,
   execPath = process.execPath,
   spawn = childProcess.spawn,
 } = {}) {
-  const child = spawn(
-    execPath,
-    [hostScriptPath, '--socket', socketPath, '--version', String(version)],
-    {
-      cwd: versionDir,
-      detached: true,
-      stdio: 'ignore',
-      env: {
-        ...process.env,
-        ELECTRON_RUN_AS_NODE: '1',
-      },
-    }
-  );
+  const args = [hostScriptPath, '--socket', socketPath, '--version', String(version)];
+  if (historyDirPath) args.push('--history-dir', historyDirPath);
+  const child = spawn(execPath, args, {
+    cwd: versionDir,
+    detached: true,
+    stdio: 'ignore',
+    env: {
+      ...process.env,
+      ELECTRON_RUN_AS_NODE: '1',
+    },
+  });
   child?.unref?.();
   return { pid: child?.pid ?? null };
 }
@@ -175,6 +175,7 @@ async function connectOrStartHost({
     hostScriptPath: staged.hostScriptPath,
     socketPath: staged.socketPath,
     version,
+    historyDirPath: historyDir(userDataDir),
   });
 
   const deadline = Date.now() + connectTimeoutMs;
