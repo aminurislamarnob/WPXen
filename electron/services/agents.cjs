@@ -1082,6 +1082,13 @@ function startSession({ cwd, command, meta, failLabel, phpBinDir = null }) {
         ...phpEnv,
         TERM: 'xterm-256color',
         TERM_PROGRAM: 'WPXen',
+        // xterm.js renders 24-bit color, but CLIs only use it when told so:
+        // supports-color (chalk, Ink) reads COLORTERM, and without it settles on
+        // 256 colors. Claude Code's near-black, faintly blue prompt background
+        // then quantizes to palette navy (#00005f/#000087) — a loud blue bar
+        // behind every prompt. An app launched from Finder has no COLORTERM to
+        // inherit, so set it.
+        COLORTERM: 'truecolor',
         // Suppress oh-my-zsh's auto-update check. It fires during rc sourcing and
         // blocks on an interactive `[Y/n]` prompt (a single-char `read`); the
         // settle-window that types the agent command can't reliably out-wait it,
