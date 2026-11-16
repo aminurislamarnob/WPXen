@@ -413,4 +413,78 @@ describe('Run Sessions in the Session Host behind a setting (#231)', () => {
     expect(resumed.ok).toBe(true);
     expect(agents.getSession(resumed.sessionId).transcriptId).toBe('conv-host-crash-1');
   });
+
+  it('tracks done/needs-input/title/unread in the host across quit, clears unread on view, and fires no notification on reconnect (#232)', async () => {
+    host = createSessionHost({
+      socketPath: sockPath,
+      appVersion: '0.6.3',
+      spawnPty: fakePtyFactory(hostPtys),
+      now: () => clock,
+    });
+    await host.start();
+
+    agents.__setDeps({
+      connectHost: async () => {
+        const client = createSessionHostClient({ socketPath: sockPath });
+        const hello = await client.hello();
+        return { client, hello, socketPath: sockPath };
+      },
+    });
+
+    const alerts = [];
+    const offAlert = agents.onAlert((a) => alerts.push(a));
+
+    try {
+      await agents.setKeepRunningOnQuit(true);
+      const { sessionId } = agents.launch({ site: site(), agentId: 'claude' });
+      await until(() => hostPtys.length === 1);
+
+      // Quit WPXen while Session is running.
+      agents.shutdownAll();
+
+      // While closed, the agent works and finishes.
+      hostPtys[0].emitData('\x1b]0;⠋ Refactoring\x07');
+      hostPtys[0].emitData('\x1b]0;✳ Refactoring done\x07');
+
+      // Reopen WPXen: reconnects with done + unread + title, and fires NO alert.
+      agents.restoreSessions({ projectIds: ['site-1'] });
+      await agents.initSessionHost();
+
+      const row1 = agents.listAllSessions().find((r) => r.sessionId === sessionId);
+      expect(row1).toMatchObject({
+        sessionId,
+        state: 'done',
+        title: 'Refactoring done',
+        unread: true,
+        exited: false,
+      });
+      expect(alerts).toEqual([]);
+
+      // Selecting the Session in the app clears unread in the host too.
+      agents.setView({ focused: true, selected: sessionId });
+      await until(
+        () =>
+          agents.listAllSessions().find((r) => r.sessionId === sessionId)?.unread ===
+          false
+      );
+
+      // Quit and reopen again: unread stays cleared!
+      agents.shutdownAll();
+      agents.setView({ focused: false, selected: null });
+      agents.restoreSessions({ projectIds: ['site-1'] });
+      await agents.initSessionHost();
+
+      const row2 = agents.listAllSessions().find((r) => r.sessionId === sessionId);
+      expect(row2).toMatchObject({
+        sessionId,
+        state: 'done',
+        title: 'Refactoring done',
+        unread: false,
+      });
+      expect(alerts).toEqual([]);
+    } finally {
+      offAlert();
+      agents.setView({ focused: false, selected: null });
+    }
+  });
 });

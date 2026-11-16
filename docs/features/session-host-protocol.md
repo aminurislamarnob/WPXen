@@ -127,6 +127,13 @@ Terminates `sessionId` gracefully (`SIGTERM`, escalating to `SIGKILL` after the 
 - **Request:** `{ "v": 1, "id": 8, "type": "stop", "sessionId": "s-1" }`
 - **Reply:** `{ "v": 1, "id": 8, "ok": true }`
 
+### `mark-read`
+
+Updates the Session's `unread` state in the host (`read` defaults to `true`). Also added in #232: `list` and `attach` replies include `state`, `title`, `changedAt`, and `unread`, and `start` accepts optional `agent: boolean`.
+
+- **Request:** `{ "v": 1, "id": 9, "type": "mark-read", "sessionId": "s-1", "read": true }`
+- **Reply:** `{ "v": 1, "id": 9, "ok": true, "sessionId": "s-1", "state": "done", "title": "...", "changedAt": 1700000000000, "unread": false }`
+
 ## Host → Client Events
 
 Every connected client receives asynchronous events as JSON lines with `v` and `type` (and no `id`).
@@ -137,6 +144,22 @@ Emitted in order whenever `sessionId`'s pty produces output, never after `exit`.
 
 ```json
 { "v": 1, "type": "output", "sessionId": "s-1", "data": "chunk" }
+```
+
+### `status`
+
+Emitted whenever a Session's derived `state`, `title`, or `unread` changes (from `agentStatus.cjs` inside the host).
+
+```json
+{
+  "v": 1,
+  "type": "status",
+  "sessionId": "s-1",
+  "state": "done",
+  "title": "Fixed auth",
+  "changedAt": 1700000000000,
+  "unread": true
+}
 ```
 
 ### `exit`

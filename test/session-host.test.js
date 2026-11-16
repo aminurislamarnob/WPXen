@@ -262,6 +262,85 @@ describe('Session Host server and client (#230)', () => {
     });
     conn.destroy();
   });
+
+  it('tracks status, title and unread in the host while disconnected and clears unread via mark-read (#232)', async () => {
+    const client1 = createSessionHostClient({ socketPath: sockPath });
+    await client1.start({
+      sessionId: 's-status',
+      file: '/bin/zsh',
+      args: ['-il'],
+      cwd: tmp,
+      agent: true,
+    });
+    await client1.close();
+
+    // Agent becomes busy, then finishes with a title while no client is connected.
+    ptys[0].emitData('\x1b]0;⠋ Building\x07');
+    ptys[0].emitData('\x1b]0;✳ Fixed auth\x07');
+
+    const client2 = createSessionHostClient({ socketPath: sockPath });
+    try {
+      const list = await client2.list();
+      expect(list[0]).toMatchObject({
+        sessionId: 's-status',
+        state: 'done',
+        title: 'Fixed auth',
+        unread: true,
+      });
+
+      const attached = await client2.attach('s-status');
+      expect(attached).toMatchObject({
+        sessionId: 's-status',
+        state: 'done',
+        title: 'Fixed auth',
+        unread: true,
+      });
+
+      // Mark read in host and verify it persists for a third client.
+      await client2.markRead('s-status', true);
+    } finally {
+      await client2.close();
+    }
+
+    const client3 = createSessionHostClient({ socketPath: sockPath });
+    try {
+      const list3 = await client3.list();
+      expect(list3[0]).toMatchObject({
+        sessionId: 's-status',
+        state: 'done',
+        title: 'Fixed auth',
+        unread: false,
+      });
+    } finally {
+      await client3.close();
+    }
+  });
+
+  it('reports needs-input and unread when an agent waits for input while disconnected (#232)', async () => {
+    const client1 = createSessionHostClient({ socketPath: sockPath });
+    await client1.start({
+      sessionId: 's-input',
+      file: '/bin/zsh',
+      args: ['-il'],
+      cwd: tmp,
+      agent: true,
+    });
+    await client1.close();
+
+    ptys[0].emitData('\x1b]0;✋ Permission required\x07');
+
+    const client2 = createSessionHostClient({ socketPath: sockPath });
+    try {
+      const list = await client2.list();
+      expect(list[0]).toMatchObject({
+        sessionId: 's-input',
+        state: 'needs-input',
+        unread: true,
+      });
+    } finally {
+      await client2.close();
+    }
+  });
 });
 
 describe('protocol v1 contract fixture (#230)', () => {

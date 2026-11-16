@@ -23,6 +23,7 @@ function createSessionHostClient({ socketPath } = {}) {
   const exitedSessions = new Set();
   const outputListeners = new Set();
   const exitListeners = new Set();
+  const statusListeners = new Set();
   const disconnectListeners = new Set();
 
   function onOutput(cb) {
@@ -33,6 +34,11 @@ function createSessionHostClient({ socketPath } = {}) {
   function onExit(cb) {
     exitListeners.add(cb);
     return () => exitListeners.delete(cb);
+  }
+
+  function onStatus(cb) {
+    statusListeners.add(cb);
+    return () => statusListeners.delete(cb);
   }
 
   function onDisconnect(cb) {
@@ -51,6 +57,18 @@ function createSessionHostClient({ socketPath } = {}) {
         for (const cb of outputListeners) {
           try {
             cb({ sessionId: msg.sessionId, data: msg.data });
+          } catch {}
+        }
+      } else if (msg.type === 'status') {
+        for (const cb of statusListeners) {
+          try {
+            cb({
+              sessionId: msg.sessionId,
+              state: msg.state,
+              title: msg.title,
+              changedAt: msg.changedAt,
+              unread: msg.unread,
+            });
           } catch {}
         }
       } else if (msg.type === 'exit') {
@@ -176,6 +194,7 @@ function createSessionHostClient({ socketPath } = {}) {
       rows: opts.rows || 24,
       env: opts.env || {},
       name: opts.name || 'xterm-256color',
+      agent: opts.agent !== false,
     });
     if (res.pid != null) pids.set(opts.sessionId, res.pid);
     return { sessionId: res.sessionId, pid: res.pid };
@@ -199,7 +218,15 @@ function createSessionHostClient({ socketPath } = {}) {
       data: res.data || '',
       exited: !!res.exited,
       exitCode: res.exitCode ?? null,
+      state: res.state,
+      title: res.title,
+      changedAt: res.changedAt,
+      unread: res.unread,
     };
+  }
+
+  async function markRead(sessionId, read = true) {
+    await request('mark-read', { sessionId, read: !!read });
   }
 
   async function clearBuffer(sessionId) {
@@ -237,9 +264,11 @@ function createSessionHostClient({ socketPath } = {}) {
     stop,
     attach,
     clearBuffer,
+    markRead,
     getPid,
     onOutput,
     onExit,
+    onStatus,
     onDisconnect,
     close,
   };

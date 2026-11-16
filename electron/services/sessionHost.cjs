@@ -15,6 +15,7 @@
 const fs = require('fs');
 const net = require('net');
 const pty = require('node-pty');
+const { createTracker, isTerminalReply } = require('./agentStatus.cjs');
 
 const PROTOCOL_VERSION = 1;
 const MAX_LINE_BYTES = 8 * 1024 * 1024;
@@ -30,9 +31,10 @@ const KNOWN_CLIENT_TYPES = new Set([
   'stop',
   'attach',
   'clear-buffer',
+  'mark-read',
 ]);
 
-const KNOWN_HOST_EVENT_TYPES = new Set(['output', 'exit']);
+const KNOWN_HOST_EVENT_TYPES = new Set(['output', 'status', 'exit']);
 
 // Validate and parse one JSON line sent by a client to the host.
 // Used both by the server and by the protocol contract test.
@@ -135,6 +137,7 @@ function createSessionHost({
   }
 
   function sessionSummary(s) {
+    const snap = s.tracker.snapshot();
     return {
       sessionId: s.sessionId,
       pid: s.pid,
@@ -142,7 +145,23 @@ function createSessionHost({
       startedAt: s.startedAt,
       exited: s.exited,
       exitCode: s.exitCode,
+      state: snap.state,
+      title: snap.title,
+      changedAt: snap.changedAt,
+      unread: snap.unread,
     };
+  }
+
+  function broadcastStatus(s) {
+    const snap = s.tracker.snapshot();
+    broadcastEvent({
+      type: 'status',
+      sessionId: s.sessionId,
+      state: snap.state,
+      title: snap.title,
+      changedAt: snap.changedAt,
+      unread: snap.unread,
+    });
   }
 
   function stopSession(sessionId) {
@@ -226,6 +245,10 @@ function createSessionHost({
         }
 
         hadSession = true;
+        const tracker = createTracker({
+          now,
+          agent: msg.agent !== false,
+        });
         const entry = {
           sessionId,
           term,
@@ -235,6 +258,7 @@ function createSessionHost({
           buffer: '',
           exited: false,
           exitCode: null,
+          tracker,
         };
         sessions.set(sessionId, entry);
 
@@ -245,12 +269,24 @@ function createSessionHost({
             entry.buffer = entry.buffer.slice(entry.buffer.length - maxBuffer);
           }
           broadcastEvent({ type: 'output', sessionId, data });
+          if (entry.tracker.output(data)) {
+            entry.tracker.drainEvents();
+            broadcastStatus(entry);
+          } else {
+            entry.tracker.drainEvents();
+          }
         });
 
         term.onExit(({ exitCode } = {}) => {
           if (entry.exited) return;
           entry.exited = true;
           entry.exitCode = exitCode ?? 0;
+          if (entry.tracker.exit(entry.exitCode)) {
+            entry.tracker.drainEvents();
+            broadcastStatus(entry);
+          } else {
+            entry.tracker.drainEvents();
+          }
           broadcastEvent({ type: 'exit', sessionId, exitCode: entry.exitCode });
           maybeAutoExit();
         });
@@ -265,6 +301,9 @@ function createSessionHost({
           try {
             s.term.write(msg.data);
           } catch {}
+          if (!isTerminalReply(msg.data) && s.tracker.typed()) {
+            broadcastStatus(s);
+          }
         }
         sendLine(conn, { id, ok: true });
         return;
@@ -289,6 +328,7 @@ function createSessionHost({
           sendLine(conn, { id, ok: false, error: 'Session not found' });
           return;
         }
+        const snap = s.tracker.snapshot();
         sendLine(conn, {
           id,
           ok: true,
@@ -296,6 +336,29 @@ function createSessionHost({
           data: s.buffer,
           exited: s.exited,
           exitCode: s.exitCode,
+          state: snap.state,
+          title: snap.title,
+          changedAt: snap.changedAt,
+          unread: snap.unread,
+        });
+        return;
+      }
+
+      case 'mark-read': {
+        const s = sessions.get(msg.sessionId);
+        if (!s) {
+          sendLine(conn, { id, ok: false, error: 'Session not found' });
+          return;
+        }
+        const read = msg.read !== false;
+        const changed = read ? s.tracker.markRead() : s.tracker.markUnread();
+        if (changed) broadcastStatus(s);
+        const snap = s.tracker.snapshot();
+        sendLine(conn, {
+          id,
+          ok: true,
+          sessionId: s.sessionId,
+          ...snap,
         });
         return;
       }
