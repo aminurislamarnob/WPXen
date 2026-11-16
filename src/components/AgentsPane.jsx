@@ -30,7 +30,11 @@ import * as sessionCache from '../lib/terminal/sessionCache';
 import * as webviewCache from '../lib/browser/webviewCache';
 import { useSettings } from '../lib/useSettings';
 import { LAST_AGENTS_SITE_KEY, resolveLastSite } from '../lib/activityBar';
-import { useAgentSessions, setSelectedSession } from '../lib/useAgentSessions';
+import {
+  useAgentSessions,
+  getCachedSessions,
+  setSelectedSession,
+} from '../lib/useAgentSessions';
 import TabStrip, { ExplorerToggle } from './agents/TabStrip';
 import { cleanupOrphanedDrafts } from '../lib/chatDraft';
 import ContextMenu from './ContextMenu';
@@ -48,9 +52,19 @@ import {
   needsBulkConfirm,
   paneIds,
   neighbour,
+  pickActiveTab,
 } from '../lib/tabStrip';
 
 const CLOSE_CONFIRM_KEY = 'wpxen.terminalCloseConfirmSuppressed';
+
+// This screen unmounts whenever the user leaves Agents, so everything it knew
+// would otherwise restart empty on the way back: the empty state, a raw id
+// for the name and no Explorer, then the real screen once the IPC calls
+// return, resizing the terminal as the Explorer appeared. The session list is
+// remembered by useAgentSessions; these keep the rest per Site, so the first
+// frame back is already the screen the user left.
+const siteCache = new Map(); // siteId -> { meta, sitePath, agents, targets }
+const lastActiveTab = new Map(); // siteId -> sessionId
 // The registry id of the plain shell (`SHELL_ID` in services/agents.cjs).
 const SHELL_AGENT_ID = 'shell';
 
@@ -119,10 +133,11 @@ export default function AgentsPane() {
   const { controlsInset } = useOutletContext() || {};
   const { settings } = useSettings();
 
-  const [meta, setMeta] = useState({ siteName: siteId });
-  const [sitePath, setSitePath] = useState(null);
-  const [agents, setAgents] = useState([]); // registry, for the "+" menu
-  const [targets, setTargets] = useState([]); // saved Launch Targets for this Site
+  const cached = siteCache.get(siteId);
+  const [meta, setMeta] = useState(() => cached?.meta || { siteName: siteId });
+  const [sitePath, setSitePath] = useState(() => cached?.sitePath ?? null);
+  const [agents, setAgents] = useState(() => cached?.agents || []); // registry, for the "+" menu
+  const [targets, setTargets] = useState(() => cached?.targets || []); // saved Launch Targets for this Site
   const [settingsOpen, setSettingsOpen] = useState(false); // launch-settings dialog
   const [error, setError] = useState(null);
 
@@ -187,7 +202,9 @@ export default function AgentsPane() {
     for (const root of roots) add(root);
     return result;
   }, [allSessions, siteId]);
-  const [activeTab, setActiveTab] = useState(null); // sessionId
+  const [activeTab, setActiveTab] = useState(() =>
+    siteId ? pickActiveTab(getCachedSessions(), siteId, lastActiveTab.get(siteId)) : null
+  ); // sessionId
   // The focused pane of each split tab; an unsplit tab is its own pane.
   const [focusedPaneBySession, setFocusedPaneBySession] = useState({});
   const sessionsById = useMemo(
@@ -412,15 +429,22 @@ export default function AgentsPane() {
       if (cancelled) return;
       const site = (sites || []).find((s) => s.id === siteId);
       // url/dbName feed the browser target menu; keep them alongside the name.
-      setMeta({
-        siteName: site?.name || siteId,
-        kind: site?.kind || 'site',
-        url: site?.url || null,
-        dbName: site?.dbName || null,
-      });
-      setSitePath(site?.path || null);
-      setAgents(agentList || []);
-      setTargets(targetList || []);
+      const loaded = {
+        meta: {
+          siteName: site?.name || siteId,
+          kind: site?.kind || 'site',
+          url: site?.url || null,
+          dbName: site?.dbName || null,
+        },
+        sitePath: site?.path || null,
+        agents: agentList || [],
+        targets: targetList || [],
+      };
+      siteCache.set(siteId, loaded);
+      setMeta(loaded.meta);
+      setSitePath(loaded.sitePath);
+      setAgents(loaded.agents);
+      setTargets(loaded.targets);
 
       // A site quick action asked for this URL in-app (see useOpenLink). The
       // site-change effect clears browser tabs, so this has to run after the
@@ -453,10 +477,7 @@ export default function AgentsPane() {
         setActiveTab(rootId || preferActive);
         setView('session');
       } else {
-        const first = (all || [])
-          .filter((s) => s.siteId === siteId && !s.paneOf)
-          .sort((a, b) => a.startedAt - b.startedAt)[0];
-        setActiveTab(first?.sessionId || null);
+        setActiveTab(pickActiveTab(all, siteId, lastActiveTab.get(siteId)));
       }
     })();
 
@@ -538,6 +559,14 @@ export default function AgentsPane() {
     await window.electronAPI.terminalStop(sessionId);
     sessionCache.dispose(sessionId);
   };
+
+  // Remember the tab per Site, for the next visit. Only a tab of this Site:
+  // right after a Site switch, activeTab still names the previous Site's.
+  useEffect(() => {
+    if (siteId && activeTab && tabs.some((t) => t.sessionId === activeTab)) {
+      lastActiveTab.set(siteId, activeTab);
+    }
+  }, [siteId, activeTab, tabs]);
 
   // Keep the active tab valid as Sessions disappear — closed here, dismissed
   // from the sidebar, or reaped. Only a tab that was actually listed counts as
@@ -1170,7 +1199,7 @@ export default function AgentsPane() {
                       onHandoff={setHandoffSession}
                       sessionsById={sessionsById}
                     />
-                  ) : (
+                  ) : !sessionsLoaded ? null : (
                     <div className="h-full flex flex-col items-center justify-center text-center">
                       <p className="text-[13px] text-muted-foreground">
                         No sessions yet for {meta.siteName}.
