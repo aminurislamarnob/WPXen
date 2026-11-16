@@ -57,6 +57,25 @@ function fakeStore(initial = {}) {
   };
 }
 
+// A node-pty package laid out as npm installs it, with the macOS native files.
+// CI runs on Linux, where node-pty ships no spawn-helper, so tests that need a
+// complete package build one rather than use the installed copy.
+function fakeNodePty(root) {
+  const dir = path.join(root, 'node_modules', 'node-pty');
+  fs.mkdirSync(path.join(dir, 'lib'), { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, 'package.json'),
+    JSON.stringify({ name: 'node-pty', main: './lib/index.js' })
+  );
+  fs.writeFileSync(path.join(dir, 'lib', 'index.js'), 'module.exports = {};');
+  fs.mkdirSync(path.join(dir, 'build', 'Release'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'build', 'Release', 'pty.node'), 'native');
+  fs.writeFileSync(path.join(dir, 'build', 'Release', 'spawn-helper'), '#!/bin/sh\n', {
+    mode: 0o644,
+  });
+  return dir;
+}
+
 describe('Session Host runtime staging & detached spawn (#231)', () => {
   let tmp;
 
@@ -83,6 +102,7 @@ describe('Session Host runtime staging & detached spawn (#231)', () => {
     const staged = stageRuntimeFiles({
       userDataDir: tmp,
       version: '0.6.3',
+      nodePtyDir: fakeNodePty(path.join(tmp, 'pkg')),
     });
 
     expect(staged.versionDir).toBe(path.join(tmp, WPXEN_SESSION_HOST_DIR, '0.6.3'));
@@ -119,6 +139,24 @@ describe('Session Host runtime staging & detached spawn (#231)', () => {
     expect(fs.existsSync(spawnHelper)).toBe(true);
     expect(fs.statSync(spawnHelper).mode & 0o111).not.toBe(0);
   });
+
+  // The installed node-pty only has a spawn-helper on macOS, the one platform
+  // WPXen ships for.
+  it.runIf(process.platform === 'darwin')(
+    'stages the installed node-pty package as the host needs it',
+    () => {
+      const staged = stageRuntimeFiles({ userDataDir: tmp, version: '0.6.3' });
+      const release = path.join(
+        staged.versionDir,
+        'node_modules',
+        'node-pty',
+        'build',
+        'Release'
+      );
+      expect(fs.existsSync(path.join(release, 'pty.node'))).toBe(true);
+      expect(fs.statSync(path.join(release, 'spawn-helper')).mode & 0o111).not.toBe(0);
+    }
+  );
 
   it('stages native files from app.asar.unpacked in a packaged build layout', () => {
     const bundleResources = path.join(tmp, 'Resources');
@@ -187,7 +225,11 @@ describe('Session Host runtime staging & detached spawn (#231)', () => {
   });
 
   it('spawns the host detached under ELECTRON_RUN_AS_NODE=1 from the copied data folder, not the app bundle', () => {
-    const staged = stageRuntimeFiles({ userDataDir: tmp, version: '0.6.3' });
+    const staged = stageRuntimeFiles({
+      userDataDir: tmp,
+      version: '0.6.3',
+      nodePtyDir: fakeNodePty(path.join(tmp, 'pkg')),
+    });
     const unref = vi.fn();
     const spawnSpy = vi.fn(() => ({ pid: 9876, unref }));
 
