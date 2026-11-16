@@ -10,6 +10,7 @@ const {
   session,
   Notification,
   powerMonitor,
+  net,
 } = require('electron');
 const crypto = require('crypto');
 const path = require('path');
@@ -59,6 +60,7 @@ const transcripts = require('./services/transcripts.cjs');
 const officeEngine = require('./services/office/engine.cjs');
 const officeHooks = require('./services/office/hooksInstaller.cjs');
 const phpUpdatesService = require('./services/phpUpdates.cjs');
+const appUpdatesService = require('./services/appUpdates.cjs');
 const { humanize } = require('./services/errors.cjs');
 
 let store;
@@ -3128,6 +3130,71 @@ function registerHandlers(win, storeInstance) {
   ipcMain.handle('php-updates-get', () => phpUpdates.getState());
   ipcMain.handle('php-updates-check', () => phpUpdates.check());
   ipcMain.handle('php-updates-dismiss', () => phpUpdates.dismiss());
+
+  // Daily WPXen update check (services/appUpdates.cjs). It only finds a
+  // release: Download opens that release's DMG in the browser. `net.fetch`
+  // goes through the system proxy settings, like the rest of Chromium.
+  const appUpdates = appUpdatesService.createAppUpdateChecker({
+    currentVersion: app.getVersion(),
+    // An Intel build under Rosetta is offered the Apple Silicon DMG.
+    arch: app.runningUnderARM64Translation ? 'arm64' : process.arch,
+    fetchLatest: async () => {
+      const res = await net.fetch(appUpdatesService.LATEST_RELEASE_API, {
+        headers: {
+          Accept: 'application/vnd.github+json',
+          'User-Agent': `WPXen/${app.getVersion()}`,
+        },
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (res.status === 403 || res.status === 429) {
+        throw new Error('GitHub rate limit reached, try again later');
+      }
+      if (!res.ok) throw new Error(`GitHub answered ${res.status}`);
+      return res.json();
+    },
+    enabled: () => settings.get('app.checkForUpdates') !== false,
+    store,
+    onChange: (state) => {
+      for (const w of BrowserWindow.getAllWindows()) {
+        if (!w.isDestroyed()) w.webContents.send('app-updates', state);
+      }
+    },
+    onNew: (latest) => {
+      if (!settings.get('app.updateNotifications') || !Notification.isSupported()) return;
+      const n = new Notification({
+        title: 'WPXen update available',
+        body: `WPXen ${latest.version} is available (you have ${app.getVersion()}).`,
+      });
+      liveNotifications.add(n);
+      const drop = () => liveNotifications.delete(n);
+      n.on('close', drop);
+      n.on('click', () => {
+        drop();
+        if (win && !win.isDestroyed()) {
+          win.show();
+          win.focus();
+          win.webContents.send('app-navigate', { to: '/settings/about' });
+        }
+      });
+      n.show();
+    },
+  });
+  appUpdates.start();
+
+  ipcMain.handle('app-updates-get', () => appUpdates.getState());
+  ipcMain.handle('app-updates-check', () => appUpdates.check());
+  ipcMain.handle('app-updates-dismiss', () => appUpdates.dismiss());
+  // Download (the DMG) or the release page. Only GitHub URLs for this repo's
+  // releases, so the renderer can't turn this into a general URL opener.
+  ipcMain.handle('app-updates-open', (_, which) => {
+    const latest = appUpdates.getState().latest;
+    const url =
+      which === 'download' && latest?.download
+        ? latest.download
+        : latest?.url || appUpdatesService.RELEASES_PAGE;
+    if (!url.startsWith(`${appUpdatesService.RELEASES_PAGE}/`)) return false;
+    return openExternalSafely(url);
+  });
 
   ipcMain.handle('switch-php-version', async (_, version) => {
     try {

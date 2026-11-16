@@ -85,6 +85,11 @@ const SETTINGS = {
   // browser. Defaults to 'system' so the actions keep behaving as they always
   // have until someone opts in.
   'app.openLinksIn': { type: 'enum', values: ['system', 'app'], default: 'system' },
+  // Daily check of WPXen's latest GitHub release (services/appUpdates.cjs).
+  // It only finds updates; Download opens the DMG in the browser.
+  'app.checkForUpdates': { type: 'bool', default: true },
+  // A native notification once per new WPXen release the check finds.
+  'app.updateNotifications': { type: 'bool', default: true },
 
   // ── Floating Workspace ───────────────────────────────────────────────────
   // Off hides the launcher and minimises the panel; its tabs keep running.

@@ -123,6 +123,11 @@ Node directly. When adding a feature that crosses the boundary you must touch th
     failure): it feeds the Dashboard notice, the PHP sidebar dot and one
     notification per release, and never installs — `brew upgrade` stays a
     click on the PHP page, which then restarts that version's FPM.
+    `appUpdates.cjs` is the same shape for WPXen itself: GitHub's
+    `/releases/latest` once a day, a Dashboard notice and Settings → About
+    row, and Download opens this Mac's DMG in the browser. It deliberately
+    doesn't use `electron-updater`: Squirrel.Mac rejects updates for an
+    ad-hoc-signed app, so in-place install waits on Developer ID signing.
   - **Self-healing 502** — `errorPages.cjs` writes one shared nginx snippet
     plus the 502/504 pages into `{prefix}/etc/nginx/wpxen/`, included by every
     vhost; its `/__wpxen/repair` and `/__wpxen/status` routes answer loopback
