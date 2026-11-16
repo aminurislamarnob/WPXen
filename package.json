@@ -1,7 +1,7 @@
 {
   "name": "wpxen",
   "productName": "WPXen",
-  "version": "0.6.4",
+  "version": "0.6.5",
   "description": "AI-native WordPress development environment for macOS",
   "main": "electron/main.cjs",
   "scripts": {
