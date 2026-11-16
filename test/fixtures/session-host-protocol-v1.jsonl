@@ -1,0 +1,17 @@
+{"direction":"client","message":{"v":1,"id":1,"type":"hello"}}
+{"direction":"host","message":{"v":1,"id":1,"ok":true,"appVersion":"0.6.3","protocolVersion":1}}
+{"direction":"client","message":{"v":1,"id":2,"type":"start","sessionId":"s-1","file":"/bin/zsh","args":["-il"],"cwd":"/tmp","cols":80,"rows":24,"env":{"TERM":"xterm-256color"}}}
+{"direction":"host","message":{"v":1,"id":2,"ok":true,"sessionId":"s-1","pid":4242}}
+{"direction":"client","message":{"v":1,"id":3,"type":"list"}}
+{"direction":"host","message":{"v":1,"id":3,"ok":true,"sessions":[{"sessionId":"s-1","pid":4242,"cwd":"/tmp","startedAt":1700000000000,"exited":false,"exitCode":null}]}}
+{"direction":"client","message":{"v":1,"id":4,"type":"write","sessionId":"s-1","data":"ls -la\r"}}
+{"direction":"host","message":{"v":1,"id":4,"ok":true}}
+{"direction":"client","message":{"v":1,"id":5,"type":"resize","sessionId":"s-1","cols":120,"rows":40}}
+{"direction":"host","message":{"v":1,"id":5,"ok":true}}
+{"direction":"client","message":{"v":1,"id":6,"type":"attach","sessionId":"s-1"}}
+{"direction":"host","message":{"v":1,"id":6,"ok":true,"sessionId":"s-1","data":"hello world\r\n","exited":false,"exitCode":null}}
+{"direction":"client","message":{"v":1,"id":7,"type":"stop","sessionId":"s-1"}}
+{"direction":"host","message":{"v":1,"id":7,"ok":true}}
+{"direction":"host","message":{"v":1,"type":"output","sessionId":"s-1","data":"hello world\r\n"}}
+{"direction":"host","message":{"v":1,"type":"exit","sessionId":"s-1","exitCode":0}}
+{"direction":"host","message":{"v":1,"id":99,"ok":false,"error":"Unknown request type: bogus"}}
