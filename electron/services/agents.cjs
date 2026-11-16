@@ -698,11 +698,11 @@ function makeHostProviderProxy(version) {
   return proxy;
 }
 
-function activeProvider(scope = 'site') {
+function activeProvider() {
   if (deps.terminalProvider) {
     return wireProvider(deps.terminalProvider);
   }
-  if (keepRunningOnQuit && !hostStatus.fallback && scope === 'site') {
+  if (keepRunningOnQuit && !hostStatus.fallback) {
     return makeHostProviderProxy(deps.appVersion());
   }
   return wireProvider(inAppProvider);
@@ -770,6 +770,16 @@ async function initSessionHost() {
     }
   }
 
+  const floatingRecords = deps.store
+    ? deps.store.get(FLOATING_SESSIONS_STORE_KEY, []) || []
+    : [];
+  const floatingMap = new Map(
+    floatingRecords
+      .filter((r) => r && typeof r.sessionId === 'string')
+      .map((r) => [r.sessionId, r])
+  );
+  const revivedFloatingIds = new Set();
+
   let changed = false;
   for (const hostEntry of discoveredHosts) {
     const { client, hello, socketPath } = hostEntry;
@@ -786,7 +796,49 @@ async function initSessionHost() {
     }
 
     for (const hs of hostSessions) {
-      const session = sessions.get(hs.sessionId);
+      let session = sessions.get(hs.sessionId);
+      if (!session && !hs.exited && floatingMap.has(hs.sessionId)) {
+        const rec = floatingMap.get(hs.sessionId);
+        session = {
+          sessionId: hs.sessionId,
+          scope: 'floating',
+          siteId: null,
+          agentId: rec.agentId || SHELL_ID,
+          agentName: rec.agentName || SHELL_AGENT.name,
+          targetId: null,
+          label: null,
+          customTitle: rec.customTitle || null,
+          pinned: !!rec.pinned,
+          color: rec.color || null,
+          cwd: hs.cwd || rec.cwd || null,
+          paneOf: null,
+          provider: proxy,
+          isHostSession: true,
+          hostVersion: version,
+          pty: makePtyHandle(proxy, hs.sessionId),
+          buffer: '',
+          window: null,
+          exited: false,
+          exitCode: null,
+          startedAt: rec.startedAt || hs.startedAt || deps.now(),
+          endedAt: null,
+          lastOutputAt: deps.now(),
+          tracker: createTracker({
+            now: deps.now,
+            agent: false,
+            initial: {
+              state: hs.state || 'idle',
+              title: hs.title || rec.title || '',
+              changedAt: hs.changedAt || rec.startedAt || deps.now(),
+              unread: !!hs.unread,
+            },
+          }),
+          started: true,
+          scheduleRun: null,
+        };
+        sessions.set(hs.sessionId, session);
+        revivedFloatingIds.add(hs.sessionId);
+      }
       if (!session) continue;
       if (!hs.exited) {
         session.exited = false;
@@ -821,6 +873,14 @@ async function initSessionHost() {
         saveSessionRecord(session);
         changed = true;
       }
+    }
+  }
+  if (deps.store && floatingRecords.length > 0) {
+    const keptFloating = floatingRecords.filter((r) =>
+      revivedFloatingIds.has(r?.sessionId)
+    );
+    if (keptFloating.length !== floatingRecords.length) {
+      deps.store.set(FLOATING_SESSIONS_STORE_KEY, keptFloating);
     }
   }
   if (changed) emitChange({ immediate: true });
@@ -1101,6 +1161,7 @@ function resolveLaunch({ cmd, sitePath, globalArgs = '', target = null }) {
 const { randomUUID } = require('crypto');
 const MAX_BUFFER = 1024 * 1024; // ~1 MB ring buffer (Q9)
 const SESSIONS_STORE_KEY = 'agentSessions';
+const FLOATING_SESSIONS_STORE_KEY = 'floatingAgentSessions';
 const MAX_ENDED_SESSIONS_PER_PROJECT = 50;
 const sessions = new Map(); // sessionId -> session
 const layouts = new Map(); // rootId -> layout tree
@@ -1158,7 +1219,34 @@ function capEndedRecords(records, isLive = () => false) {
 }
 
 function saveSessionRecord(session) {
-  if (!deps.store || session.scope === 'floating' || !session.siteId) return;
+  if (!deps.store) return;
+  if (session.scope === 'floating') {
+    const list = deps.store.get(FLOATING_SESSIONS_STORE_KEY, []);
+    if (session.isHostSession && !session.exited) {
+      const snap = session.tracker.snapshot();
+      const rec = {
+        sessionId: session.sessionId,
+        scope: 'floating',
+        agentId: session.agentId,
+        agentName: session.agentName,
+        cwd: session.cwd || null,
+        customTitle: session.customTitle || null,
+        pinned: !!session.pinned,
+        color: session.color || null,
+        title: snap.title || '',
+        startedAt: session.startedAt,
+        hostVersion: session.hostVersion || null,
+      };
+      const idx = list.findIndex((r) => r?.sessionId === session.sessionId);
+      const next = idx >= 0 ? list.map((r, i) => (i === idx ? rec : r)) : [...list, rec];
+      deps.store.set(FLOATING_SESSIONS_STORE_KEY, next);
+    } else {
+      const next = list.filter((r) => r?.sessionId !== session.sessionId);
+      if (next.length !== list.length) deps.store.set(FLOATING_SESSIONS_STORE_KEY, next);
+    }
+    return;
+  }
+  if (!session.siteId) return;
   const list = deps.store.get(SESSIONS_STORE_KEY, []);
   const rec = toSessionRecord(session);
   const idx = list.findIndex((r) => r?.sessionId === session.sessionId);
@@ -1182,6 +1270,9 @@ function removeSessionRecord(sessionId) {
   const list = deps.store.get(SESSIONS_STORE_KEY, []);
   const next = list.filter((r) => r?.sessionId !== sessionId);
   if (next.length !== list.length) deps.store.set(SESSIONS_STORE_KEY, next);
+  const flist = deps.store.get(FLOATING_SESSIONS_STORE_KEY, []);
+  const fnext = flist.filter((r) => r?.sessionId !== sessionId);
+  if (fnext.length !== flist.length) deps.store.set(FLOATING_SESSIONS_STORE_KEY, fnext);
 }
 
 // Restore persisted Sessions from the store as ended. Records whose Project is
@@ -1262,11 +1353,14 @@ function restoreSessions({ projectIds = null } = {}) {
     sessions.set(session.sessionId, session);
     normalized.push(toSessionRecord(session));
   }
+  const floatingIds = (deps.store.get(FLOATING_SESSIONS_STORE_KEY, []) || [])
+    .map((r) => r?.sessionId)
+    .filter(Boolean);
   deps.store.set(SESSIONS_STORE_KEY, normalized);
-  pruneOrphanedHistory(
-    historyDir(deps.userDataDir()),
-    normalized.map((r) => r.sessionId)
-  );
+  pruneOrphanedHistory(historyDir(deps.userDataDir()), [
+    ...normalized.map((r) => r.sessionId),
+    ...floatingIds,
+  ]);
   emitChange({ immediate: true });
   return listAllSessions();
 }
