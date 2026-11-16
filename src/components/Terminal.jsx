@@ -222,7 +222,7 @@ export default function Terminal({
         <ArrowDown size={14} />
       </button>
       {exit && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/50">
+        <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/50">
           <div className="panel w-[320px] p-6 text-center">
             <p className="text-sm font-medium text-foreground">Session ended</p>
             <p className="mt-1 text-xs text-muted-foreground">
