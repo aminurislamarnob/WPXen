@@ -82,6 +82,13 @@ const EXPLORER_DEFAULT_WIDTH = 350;
 const EXPLORER_MIN_WIDTH = 220;
 const EXPLORER_MIN_REST = 320;
 
+// [a, b, c, d, e] → [[a, b, c, d], [e]] for size 4.
+function chunk(list, size) {
+  const rows = [];
+  for (let i = 0; i < list.length; i += size) rows.push(list.slice(i, i + size));
+  return rows;
+}
+
 function readExplorerWidth() {
   try {
     const n = Number(localStorage.getItem(EXPLORER_WIDTH_KEY));
@@ -1220,21 +1227,29 @@ export default function AgentsPane() {
                     />
                   ) : !sessionsLoaded ? null : (
                     <div className="h-full flex flex-col items-center justify-center text-center">
-                      <BrandIcon className="w-16 h-16 mb-5 rounded-[14px] shadow-lg" />
-                      <p className="text-[13px] text-muted-foreground">
+                      <BrandIcon className="w-16 h-16 rounded-[14px] shadow-lg" />
+                      <h2 className="mt-4 text-[32px] leading-none font-bold tracking-tight text-foreground">
+                        WPXen
+                      </h2>
+                      <p className="mt-4 text-sm text-muted-foreground">
                         No sessions yet for {meta.siteName}.
                       </p>
                       {detected.length > 0 && (
-                        <div className="mt-3 flex flex-wrap justify-center gap-2">
-                          {detected.map((a) => (
-                            <button
-                              key={a.id}
-                              className="btn btn-secondary"
-                              onClick={() => spawn(a.id)}
-                            >
-                              <ProviderIcon agentId={a.id} brand size={14} />
-                              {a.name}
-                            </button>
+                        // At most four Agents to a row, each row centered.
+                        <div className="mt-4 flex flex-col items-center gap-2">
+                          {chunk(detected, 4).map((row) => (
+                            <div key={row[0].id} className="flex justify-center gap-2">
+                              {row.map((a) => (
+                                <button
+                                  key={a.id}
+                                  className="btn btn-secondary"
+                                  onClick={() => spawn(a.id)}
+                                >
+                                  <ProviderIcon agentId={a.id} brand size={14} />
+                                  {a.name}
+                                </button>
+                              ))}
+                            </div>
                           ))}
                         </div>
                       )}
