@@ -389,6 +389,14 @@ export default function AgentsSidebar() {
         navigate(`/agents/${encodeURIComponent(siteId)}`, {
           state: { focus: id, handoff: id, nonce: Date.now() },
         }),
+      resume: () =>
+        navigate(`/agents/${encodeURIComponent(siteId)}`, {
+          state: { resume: id, nonce: Date.now() },
+        }),
+      reopen: () =>
+        navigate(`/agents/${encodeURIComponent(siteId)}`, {
+          state: { reopen: id, nonce: Date.now() },
+        }),
       toggleView: () => {
         toggleViewMode(id);
         openSession(siteId, id);

@@ -456,7 +456,23 @@ export default function AgentsPane() {
       let preferActive = location.state?.focus || null;
       // The sidebar row menu's Hand Off: the dialog lives here, with the tabs.
       if (location.state?.handoff) setHandoffSession(location.state.handoff);
-      if (spawnAgent) {
+      if (location.state?.resume) {
+        const res = await window.electronAPI.resumeChatSession(location.state.resume);
+        if (cancelled) return;
+        if (res?.error) setError(res.error);
+        else if (res?.sessionId) {
+          setViewMode(res.sessionId, 'chat');
+          preferActive = res.sessionId;
+        }
+      } else if (location.state?.reopen) {
+        const res = await window.electronAPI.respawnPane(location.state.reopen);
+        if (cancelled) return;
+        if (res?.error) setError(res.error);
+        else if (res?.sessionId) {
+          sessionCache.dispose(location.state.reopen);
+          preferActive = res.rootId || res.sessionId;
+        }
+      } else if (spawnAgent) {
         const res = await window.electronAPI.launchAgent(
           siteId,
           spawnAgent,
@@ -798,29 +814,19 @@ export default function AgentsPane() {
     });
   };
 
-  // Respawn the same Agent after its shell exited: launch a fresh Session and
-  // reap the dead one. The new Session takes the end of the tab strip. In a
-  // split, the main process swaps the pane in place instead. Either way the
-  // new Session inherits the old view mode, so a chat stays a chat.
+  // Respawn the same Agent after its shell exited: launch a fresh Session in
+  // the same folder and reap the dead one. In a split, the main process swaps
+  // the pane in place; for a standalone tab, respawnPane launches in the old
+  // Session's cwd and replaces it cleanly. Either way the new Session inherits
+  // the old view mode, so a chat stays a chat.
   const respawn = async (sessionId) => {
     const s = sessionsById[sessionId];
-    if (s?.paneOf || s?.layout) {
-      const res = await window.electronAPI.respawnPane(sessionId);
-      if (res?.error) return setError(res.error);
-      sessionCache.dispose(sessionId);
-      setViewMode(res.sessionId, getViewMode(sessionId));
-      if (res.rootId !== (s.paneOf || sessionId)) selectSession(res.rootId);
-      return;
-    }
-    const tab = tabs.find((t) => t.sessionId === sessionId);
-    if (!tab) return;
-    const res = await window.electronAPI.launchAgent(siteId, tab.agentId, tab.targetId);
+    if (!s) return;
+    const res = await window.electronAPI.respawnPane(sessionId);
     if (res?.error) return setError(res.error);
-    if (!res?.sessionId) return;
-    setViewMode(res.sessionId, getViewMode(sessionId));
-    selectSession(res.sessionId);
-    window.electronAPI.terminalStop(sessionId);
     sessionCache.dispose(sessionId);
+    setViewMode(res.sessionId, getViewMode(sessionId));
+    selectSession(res.rootId || res.sessionId);
   };
 
   // Resume a pinned transcript in a new Session beside the old one. Same

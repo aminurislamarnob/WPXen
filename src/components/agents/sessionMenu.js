@@ -8,12 +8,15 @@ import {
   Pencil,
   Pin,
   PinOff,
+  Play,
+  RotateCcw,
   SquareTerminal,
   Code2,
   Trash2,
   X,
 } from 'lucide-react';
 import { TAB_COLORS } from '../../lib/tabColors';
+import { canResumeSession } from '../../lib/chatView';
 
 // The Agents sidebar's right-click menu for one Session, after Orca's
 // worktree row menu: state toggles first (Mark Unread, Pin), naming and the
@@ -49,6 +52,22 @@ export function sessionMenuItems(s, act) {
       icon: ArrowRightLeft,
       onClick: act.handoff,
     });
+  }
+  if (ended) {
+    const canResume = canResumeSession(s, { resumeFlag: s.resumeFlag });
+    if (canResume && act.resume) {
+      items.push({
+        label: 'Resume',
+        icon: Play,
+        onClick: act.resume,
+      });
+    } else if (act.reopen) {
+      items.push({
+        label: 'Open Again',
+        icon: RotateCcw,
+        onClick: act.reopen,
+      });
+    }
   }
   if (s.chat) {
     items.push({

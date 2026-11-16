@@ -26,6 +26,7 @@ describe('isEndedSession', () => {
 
   it('ends on the tracker state', () => {
     expect(isEndedSession({ exited: false, state: 'exited' })).toBe(true);
+    expect(isEndedSession({ exited: false, state: 'error' })).toBe(true);
   });
 
   it('stays live while working', () => {

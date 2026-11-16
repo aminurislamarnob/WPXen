@@ -45,7 +45,9 @@ export function getReturnToChat(sessionId) {
 // either can lead, so the exit bar never waits on the slower one.
 export function isEndedSession(session) {
   if (!session) return false;
-  return session.exited === true || session.state === 'exited';
+  return (
+    session.exited === true || session.state === 'exited' || session.state === 'error'
+  );
 }
 
 // Resume only once the old Session has ended (two live Sessions must never

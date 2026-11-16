@@ -9,6 +9,8 @@ const act = () => ({
   togglePin: vi.fn(),
   rename: vi.fn(),
   handoff: vi.fn(),
+  resume: vi.fn(),
+  reopen: vi.fn(),
   toggleView: vi.fn(),
   openInFinder: vi.fn(),
   openInEditor: vi.fn(),
@@ -24,6 +26,7 @@ const live = {
   agentId: 'claude',
   isAgent: true,
   chat: 'claude',
+  resumeFlag: '--resume',
   state: 'working',
   unread: false,
   pinned: false,
@@ -50,16 +53,38 @@ describe('sessionMenuItems', () => {
     ]);
   });
 
-  it('flips the toggles to their undo, and offers Dismiss once ended', () => {
+  it('flips the toggles to their undo, and offers Resume and Dismiss once ended', () => {
+    const a = { ...act(), isChatView: true };
     const items = sessionMenuItems(
       { ...live, unread: true, pinned: true, state: 'exited' },
-      { ...act(), isChatView: true }
+      a
     );
     expect(labels(items)).toContain('Mark Read');
     expect(labels(items)).toContain('Unpin');
+    expect(labels(items)).toContain('Resume');
     expect(labels(items)).toContain('Switch to Terminal View');
     expect(labels(items)).not.toContain('Hand Off to Another Agent…');
     expect(labels(items).at(-1)).toBe('Dismiss');
+    items.find((i) => i.label === 'Resume').onClick();
+    expect(a.resume).toHaveBeenCalled();
+  });
+
+  it('offers Open Again instead of Resume when an ended Session has no resume support', () => {
+    const a = act();
+    const items = sessionMenuItems(
+      {
+        ...live,
+        agentId: 'codex',
+        resumeFlag: null,
+        transcriptId: null,
+        state: 'exited',
+      },
+      a
+    );
+    expect(labels(items)).toContain('Open Again');
+    expect(labels(items)).not.toContain('Resume');
+    items.find((i) => i.label === 'Open Again').onClick();
+    expect(a.reopen).toHaveBeenCalled();
   });
 
   it('asks for a second click before ending a live Session', () => {
