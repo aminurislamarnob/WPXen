@@ -461,8 +461,14 @@ function registerHandlers(win, storeInstance) {
     }
   });
 
+  // Resolved once initial startup reconnect to any live Session Host finishes.
+  let hostInitPromise = Promise.resolve();
+
   // The live Sessions for a Site — the renderer restores its terminal tabs.
-  ipcMain.handle('agent-sessions', (_e, siteId) => agents.listSessions(siteId));
+  ipcMain.handle('agent-sessions', async (_e, siteId) => {
+    await hostInitPromise;
+    return agents.listSessions(siteId);
+  });
 
   ipcMain.on('agent-chat-open', (_e, sessionId, viewerId) => {
     agents.openChat(sessionId, viewerId);
@@ -571,9 +577,9 @@ function registerHandlers(win, storeInstance) {
   agents.restoreSessions({ projectIds: getProjectIds() });
   const keepRunning = settings.get('agents.keepRunningOnQuit');
   agents.setKeepRunningOnQuit(keepRunning, { deferConnect: true });
-  if (keepRunning) {
-    agents.initSessionHost().catch(() => {});
-  }
+  hostInitPromise = keepRunning
+    ? agents.initSessionHost().catch(() => {})
+    : Promise.resolve();
 
   agents.onChatRows((data) => {
     if (win && !win.isDestroyed()) win.webContents.send('agent-chat-rows', data);
@@ -708,7 +714,10 @@ function registerHandlers(win, storeInstance) {
     sendProjects();
     return next;
   });
-  ipcMain.handle('agent-sessions-all', () => agents.listAllSessions());
+  ipcMain.handle('agent-sessions-all', async () => {
+    await hostInitPromise;
+    return agents.listAllSessions();
+  });
 
   // Floating Workspace terminals: plain shells owned by no Site, on their own
   // feed so the Projects list, keep-awake and the tray never see them.
@@ -717,7 +726,10 @@ function registerHandlers(win, storeInstance) {
       win.webContents.send('agent-floating-sessions-update', list);
     }
   });
-  ipcMain.handle('agent-floating-sessions', () => agents.listFloatingSessions());
+  ipcMain.handle('agent-floating-sessions', async () => {
+    await hostInitPromise;
+    return agents.listFloatingSessions();
+  });
   ipcMain.handle('agent-launch-floating', (_e, cwd, command) =>
     agents.launchFloating({ cwd, command })
   );
@@ -1233,7 +1245,8 @@ function registerHandlers(win, storeInstance) {
 
   // The embedded terminal calls this once xterm is mounted; bind the sender's
   // window to the Session and replay the ring buffer (Q9).
-  ipcMain.handle('terminal-ready', (event, sessionId) => {
+  ipcMain.handle('terminal-ready', async (event, sessionId) => {
+    await hostInitPromise;
     const win = BrowserWindow.fromWebContents(event.sender);
     if (!win) return { error: 'no window' };
     return agents.attach(sessionId, win);
@@ -3512,11 +3525,18 @@ function registerHandlers(win, storeInstance) {
   ipcMain.handle('keep-awake-status', () => keepAwake.getStatus());
 
   // Session Host fallback status (#231).
-  ipcMain.handle('agent-host-status', () => agents.getHostStatus());
+  ipcMain.handle('agent-host-status', async () => {
+    await hostInitPromise;
+    return agents.getHostStatus();
+  });
 
   // Background sessions summary & stop-all (#236).
-  ipcMain.handle('agent-host-summary', () => agents.getHostSummary());
-  ipcMain.handle('agent-host-stop-all', () => {
+  ipcMain.handle('agent-host-summary', async () => {
+    await hostInitPromise;
+    return agents.getHostSummary();
+  });
+  ipcMain.handle('agent-host-stop-all', async () => {
+    await hostInitPromise;
     agents.stopAllBackgroundSessions();
     return agents.getHostSummary();
   });

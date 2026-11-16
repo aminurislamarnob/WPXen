@@ -708,19 +708,35 @@ function activeProvider() {
   return wireProvider(inAppProvider);
 }
 
+function closeIdleHostClientsIfDisabled() {
+  if (keepRunningOnQuit) return Promise.resolve();
+  const closing = [];
+  for (const [ver, entry] of [...hostClients.entries()]) {
+    const hasLive = [...sessions.values()].some(
+      (s) => !s.exited && s.isHostSession && s.hostVersion === ver
+    );
+    if (!hasLive) {
+      hostClients.delete(ver);
+      hostConnectPromises.delete(ver);
+      closing.push(entry.client.close().catch(() => {}));
+    }
+  }
+  if (closing.length > 0) {
+    const snap = getHostStatus();
+    for (const cb of hostStatusListeners) {
+      try {
+        cb(snap);
+      } catch {}
+    }
+  }
+  return Promise.all(closing);
+}
+
 async function setKeepRunningOnQuit(enabled, { deferConnect = false } = {}) {
   keepRunningOnQuit = Boolean(enabled);
   if (!keepRunningOnQuit) {
     setHostStatus({ fallback: false, message: null, error: null });
-    const hasLiveHostSession = [...sessions.values()].some(
-      (s) => !s.exited && s.isHostSession
-    );
-    if (!hasLiveHostSession) {
-      const clientsToClose = [...hostClients.values()].map((e) => e.client);
-      hostClients.clear();
-      hostConnectPromises.clear();
-      await Promise.all(clientsToClose.map((c) => c.close().catch(() => {})));
-    }
+    await closeIdleHostClientsIfDisabled();
     return;
   }
   if (deferConnect) return;
@@ -861,6 +877,12 @@ async function initSessionHost() {
             unread: !!hs.unread,
           },
         });
+        if (isOnScreen(session.sessionId)) {
+          const clearedUnread = session.tracker.view(true);
+          if (clearedUnread && hs.unread) {
+            client.markRead?.(session.sessionId, true)?.catch?.(() => {});
+          }
+        }
         try {
           const snap = await client.attach(session.sessionId);
           if (typeof snap?.data === 'string') session.buffer = snap.data;
@@ -876,9 +898,14 @@ async function initSessionHost() {
     }
   }
   if (deps.store && floatingRecords.length > 0) {
-    const keptFloating = floatingRecords.filter((r) =>
-      revivedFloatingIds.has(r?.sessionId)
-    );
+    const keptFloating = [];
+    for (const rec of floatingRecords) {
+      if (rec?.sessionId && revivedFloatingIds.has(rec.sessionId)) {
+        keptFloating.push(rec);
+      } else if (rec?.sessionId) {
+        deleteHistory(historyDir(deps.userDataDir()), rec.sessionId);
+      }
+    }
     if (keptFloating.length !== floatingRecords.length) {
       deps.store.set(FLOATING_SESSIONS_STORE_KEY, keptFloating);
     }
@@ -1918,6 +1945,7 @@ function handleProviderExit(sessionId, exitCode) {
     saveSessionRecord(session);
     emitChange({ immediate: true });
   }
+  closeIdleHostClientsIfDisabled();
 }
 
 // Learn which Claude conversation the Session is running from Claude's own
@@ -1972,17 +2000,21 @@ function stopRegistryPin(session) {
   session.pinTimer = null;
 }
 
-// Bind a Terminal Window to its Session and replay the ring buffer (Q9). Setting
-// the window ref and sending replay happen synchronously, so no onData chunk can
-// interleave between them — live chunks that follow arrive after the replay.
+// Bind a Terminal Window to its Session and replay the ring buffer (Q9). For
+// async providers (Session Host), `session.window` is set right when the
+// attach reply arrives over the ordered socket so output chunks emitted before
+// the attach reply never get delivered twice (once via `terminal-data`, once via
+// `terminal-replay`).
 function attach(sessionId, win) {
   const session = sessions.get(sessionId);
   if (!session) return { error: 'no session' };
-  session.window = win;
+  const seq = (session.attachSeq = (session.attachSeq || 0) + 1);
   const attached = session.provider?.attach?.(sessionId);
   const diskReplay = () =>
     session.buffer || readHistory(historyDir(deps.userDataDir()), sessionId);
-  const sendReplay = (data, exited) => {
+  const finishAttach = (data, exited) => {
+    if (sessions.get(sessionId) !== session || session.attachSeq !== seq) return;
+    session.window = win;
     if (win && !win.isDestroyed()) {
       win.webContents.send('terminal-replay', {
         sessionId,
@@ -1995,11 +2027,11 @@ function attach(sessionId, win) {
     attached
       .then((snap) => {
         if (typeof snap?.data === 'string') session.buffer = snap.data;
-        sendReplay(snap?.data ?? diskReplay(), snap?.exited ?? session.exited);
+        finishAttach(snap?.data ?? diskReplay(), snap?.exited ?? session.exited);
       })
-      .catch(() => sendReplay(diskReplay(), session.exited));
+      .catch(() => finishAttach(diskReplay(), session.exited));
   } else {
-    sendReplay(attached?.data ?? diskReplay(), attached?.exited ?? session.exited);
+    finishAttach(attached?.data ?? diskReplay(), attached?.exited ?? session.exited);
   }
   return { ok: true };
 }
@@ -2324,7 +2356,11 @@ function stop(sessionId) {
 
   if (!session.exited) {
     const res = (session.provider || activeProvider(session.scope)).stop(sessionId);
-    res?.catch?.(() => {});
+    Promise.resolve(res)
+      .catch(() => {})
+      .finally(() => closeIdleHostClientsIfDisabled());
+  } else {
+    closeIdleHostClientsIfDisabled();
   }
   stopRegistryPin(session);
   sessions.delete(sessionId);
@@ -2343,6 +2379,7 @@ function stop(sessionId) {
 function shutdownAll({ forceStop = false } = {}) {
   const now = deps.now();
   detachingForQuit = true;
+  const stopPromises = [];
   try {
     for (const session of [...sessions.values()]) {
       stopRegistryPin(session);
@@ -2353,7 +2390,9 @@ function shutdownAll({ forceStop = false } = {}) {
           const res = (session.provider || activeProvider(session.scope)).stop(
             session.sessionId
           );
-          res?.catch?.(() => {});
+          if (res && typeof res.then === 'function') {
+            stopPromises.push(res.catch(() => {}));
+          }
           session.exited = true;
           session.endedAt = now;
           session.exitCode = session.exitCode ?? 0;
@@ -2364,13 +2403,19 @@ function shutdownAll({ forceStop = false } = {}) {
       sessions.delete(session.sessionId);
       notifier.forget(session.sessionId);
     }
-    for (const entry of hostClients.values()) {
-      entry.client.close().catch(() => {});
-    }
+    const clientsToClose = [...hostClients.values()].map((entry) => entry.client);
     hostClients.clear();
     hostConnectPromises.clear();
+    const closeAllClients = () => {
+      return Promise.all(clientsToClose.map((client) => client.close().catch(() => {})));
+    };
+    const cleanupPromise =
+      stopPromises.length > 0
+        ? Promise.all(stopPromises).finally(closeAllClients)
+        : closeAllClients();
     layouts.clear();
     emitChange({ immediate: true });
+    return cleanupPromise;
   } finally {
     detachingForQuit = false;
   }
@@ -2410,11 +2455,14 @@ function stopAll() {
 function stopAllBackgroundSessions() {
   const now = deps.now();
   let changed = false;
+  const stopPromises = [];
   for (const s of [...sessions.values()]) {
     if (!s.exited && s.isHostSession) {
       stopRegistryPin(s);
       const res = (s.provider || activeProvider(s.scope)).stop(s.sessionId);
-      res?.catch?.(() => {});
+      if (res && typeof res.then === 'function') {
+        stopPromises.push(res.catch(() => {}));
+      }
       s.exited = true;
       s.endedAt = now;
       s.exitCode = s.exitCode ?? 0;
@@ -2422,6 +2470,11 @@ function stopAllBackgroundSessions() {
       saveSessionRecord(s);
       changed = true;
     }
+  }
+  if (stopPromises.length > 0) {
+    Promise.all(stopPromises).finally(() => closeIdleHostClientsIfDisabled());
+  } else {
+    closeIdleHostClientsIfDisabled();
   }
   if (changed) emitChange({ immediate: true });
 }

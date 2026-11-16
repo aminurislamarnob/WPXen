@@ -394,8 +394,11 @@ app.on('before-quit', (e) => {
   e.preventDefault();
   quitCleanupDone = true;
 
+  let agentShutdown = Promise.resolve();
   try {
-    agents.shutdownAll({ forceStop: action === 'stop-and-quit' });
+    agentShutdown = Promise.resolve(
+      agents.shutdownAll({ forceStop: action === 'stop-and-quit' })
+    ).catch(() => {});
   } catch {}
   try {
     require('./services/browser.cjs').unregisterAll();
@@ -437,6 +440,7 @@ app.on('before-quit', (e) => {
   const deadline = new Promise((r) => setTimeout(r, 30_000));
   Promise.race([
     Promise.all([
+      agentShutdown,
       procman.stopAll({ deadlineMs: 25_000 }),
       gitClone.stopAll(),
       repairService.stopRepairService().catch(() => {}),

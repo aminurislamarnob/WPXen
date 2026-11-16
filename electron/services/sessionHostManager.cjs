@@ -44,26 +44,29 @@ function copyTreeJs(srcDir, destDir) {
   }
 }
 
-function findNativeBinaryDir(ptyRoot) {
+function findNativeBinaryDirs(ptyRoot) {
   const unpackedRoot = ptyRoot
     .replace('app.asar', 'app.asar.unpacked')
     .replace('node_modules.asar', 'node_modules.asar.unpacked');
   const platArch = `${process.platform}-${process.arch}`;
-  const candidates = [
-    path.join(unpackedRoot, 'build', 'Release'),
-    path.join(ptyRoot, 'build', 'Release'),
-    path.join(unpackedRoot, 'prebuilds', platArch),
-    path.join(ptyRoot, 'prebuilds', platArch),
-  ];
-  for (const dir of candidates) {
-    if (
-      fs.existsSync(path.join(dir, 'pty.node')) &&
-      fs.existsSync(path.join(dir, 'spawn-helper'))
-    ) {
-      return dir;
+  const subdirs = [path.join('build', 'Release'), path.join('prebuilds', platArch)];
+  const found = [];
+  for (const rel of subdirs) {
+    for (const root of [unpackedRoot, ptyRoot]) {
+      const dir = path.join(root, rel);
+      if (
+        fs.existsSync(path.join(dir, 'pty.node')) &&
+        fs.existsSync(path.join(dir, 'spawn-helper'))
+      ) {
+        found.push({ rel, dir });
+        break;
+      }
     }
   }
-  throw new Error(`Could not locate node-pty native binaries under ${ptyRoot}`);
+  if (found.length === 0) {
+    throw new Error(`Could not locate node-pty native binaries under ${ptyRoot}`);
+  }
+  return found;
 }
 
 function stageRuntimeFiles({
@@ -76,7 +79,7 @@ function stageRuntimeFiles({
     throw new Error('userDataDir and version are required');
   }
   const ptyRoot = nodePtyDir || path.dirname(require.resolve('node-pty/package.json'));
-  const nativeSrcDir = findNativeBinaryDir(ptyRoot);
+  const nativeDirs = findNativeBinaryDirs(ptyRoot);
   const versionDir = runtimeDirForVersion(userDataDir, version);
   fs.mkdirSync(versionDir, { recursive: true });
 
@@ -97,12 +100,14 @@ function stageRuntimeFiles({
   );
   copyTreeJs(path.join(ptyRoot, 'lib'), path.join(targetPtyRoot, 'lib'));
 
-  const targetReleaseDir = path.join(targetPtyRoot, 'build', 'Release');
-  fs.mkdirSync(targetReleaseDir, { recursive: true });
-  for (const binName of ['pty.node', 'spawn-helper']) {
-    const dest = path.join(targetReleaseDir, binName);
-    fs.writeFileSync(dest, fs.readFileSync(path.join(nativeSrcDir, binName)));
-    fs.chmodSync(dest, 0o755);
+  for (const { rel, dir } of nativeDirs) {
+    const targetBinDir = path.join(targetPtyRoot, rel);
+    fs.mkdirSync(targetBinDir, { recursive: true });
+    for (const binName of ['pty.node', 'spawn-helper']) {
+      const dest = path.join(targetBinDir, binName);
+      fs.writeFileSync(dest, fs.readFileSync(path.join(dir, binName)));
+      fs.chmodSync(dest, 0o755);
+    }
   }
 
   return {

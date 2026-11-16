@@ -47,14 +47,15 @@ function createSessionHostClient({ socketPath } = {}) {
     return () => disconnectListeners.delete(cb);
   }
 
+  // Returns true when an RPC response settled a pending promise.
   function handleLine(line) {
     const parsed = parseHostMessage(line);
-    if (!parsed.ok) return;
+    if (!parsed.ok) return false;
     const msg = parsed.message;
 
     if (parsed.kind === 'event') {
       if (msg.type === 'output') {
-        if (exitedSessions.has(msg.sessionId)) return;
+        if (exitedSessions.has(msg.sessionId)) return false;
         for (const cb of outputListeners) {
           try {
             cb({ sessionId: msg.sessionId, data: msg.data });
@@ -73,7 +74,7 @@ function createSessionHostClient({ socketPath } = {}) {
           } catch {}
         }
       } else if (msg.type === 'exit') {
-        if (exitedSessions.has(msg.sessionId)) return;
+        if (exitedSessions.has(msg.sessionId)) return false;
         exitedSessions.add(msg.sessionId);
         for (const cb of exitListeners) {
           try {
@@ -81,14 +82,15 @@ function createSessionHostClient({ socketPath } = {}) {
           } catch {}
         }
       }
-      return;
+      return false;
     }
 
     const entry = pending.get(msg.id);
-    if (!entry) return;
+    if (!entry) return false;
     pending.delete(msg.id);
     if (msg.ok) entry.resolve(msg);
     else entry.reject(new Error(msg.error || 'Session Host request failed'));
+    return true;
   }
 
   function failAllPending(err) {
@@ -116,15 +118,35 @@ function createSessionHostClient({ socketPath } = {}) {
         resolve(socket);
       });
 
+      const lineQueue = [];
+      let draining = false;
+      async function drainLines() {
+        draining = true;
+        try {
+          while (lineQueue.length > 0) {
+            const line = lineQueue.shift();
+            if (handleLine(line)) {
+              // Yield a handful of microtasks so chained promise handlers
+              // (e.g. `attach()` binding `session.window`) settle before
+              // subsequent events packed into the same socket read run.
+              for (let i = 0; i < 4; i++) await Promise.resolve();
+            }
+          }
+        } finally {
+          draining = false;
+        }
+      }
+
       socket.on('data', (chunk) => {
         buf += chunk.toString('utf8');
         let idx;
         while ((idx = buf.indexOf('\n')) !== -1) {
           const line = buf.slice(0, idx);
           buf = buf.slice(idx + 1);
-          if (line.trim()) handleLine(line);
+          if (line.trim()) lineQueue.push(line);
         }
         if (buf.length > MAX_LINE_BYTES) buf = '';
+        if (lineQueue.length > 0 && !draining) void drainLines();
       });
 
       const onGone = (err) => {

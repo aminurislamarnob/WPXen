@@ -188,4 +188,40 @@ describe('stopAllBackgroundSessions (#236)', () => {
     });
     expect(agents.getHostSummary().totalRunning).toBe(0);
   });
+
+  it('closes idle host client sockets once keepRunningOnQuit is disabled and background sessions stop', async () => {
+    const sockPath = socketPathForVersion(userData, '0.6.4');
+    host = createSessionHost({
+      socketPath: sockPath,
+      appVersion: '0.6.4',
+      spawnPty: fakePtyFactory(ptys),
+    });
+    await host.start();
+
+    agents.__setDeps({
+      connectHost: async (ver) => {
+        const sp = socketPathForVersion(userData, ver);
+        const client = createSessionHostClient({ socketPath: sp });
+        const hello = await client.hello();
+        return { client, hello, socketPath: sp };
+      },
+    });
+    await agents.setKeepRunningOnQuit(true);
+
+    agents.launch({
+      site: { id: 'site-1', name: 'One', path: siteDir },
+      agentId: 'claude',
+    });
+    await until(() => ptys.length === 1);
+
+    await agents.setKeepRunningOnQuit(false);
+    expect(agents.getHostSummary().connectedHostCount).toBe(1);
+
+    agents.stopAllBackgroundSessions();
+    await until(() => agents.getHostSummary().connectedHostCount === 0);
+    expect(agents.getHostSummary()).toMatchObject({
+      totalRunning: 0,
+      connectedHostCount: 0,
+    });
+  });
 });
