@@ -39,6 +39,7 @@ const VALID_EVENT_CHANNELS = [
   'settings-updated',
   'keep-awake-status-update',
   'agent-host-status-update',
+  'agent-host-summary-update',
   'office-update',
   'site-log-follow-update',
   'site-upgrade-report',
@@ -225,6 +226,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getKeepAwakeStatus: () => ipcRenderer.invoke('keep-awake-status'),
   // Session Host fallback status (#231): { fallback, message, error }.
   getAgentHostStatus: () => ipcRenderer.invoke('agent-host-status'),
+  // Background sessions summary & stop-all (#236).
+  getAgentHostSummary: () => ipcRenderer.invoke('agent-host-summary'),
+  stopAllBackgroundSessions: () => ipcRenderer.invoke('agent-host-stop-all'),
   // Editors/terminals detected on this machine, for the settings pickers.
   listExternalTools: () => ipcRenderer.invoke('list-external-tools'),
   // Every agent including ones hidden from the launcher (settings only).

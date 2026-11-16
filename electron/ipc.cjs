@@ -541,8 +541,18 @@ function registerHandlers(win, storeInstance) {
     }
   };
 
+  const broadcastHostSummary = () => {
+    const summary = agents.getHostSummary();
+    for (const w of BrowserWindow.getAllWindows()) {
+      if (!w.isDestroyed() && w.webContents) {
+        w.webContents.send('agent-host-summary-update', summary);
+      }
+    }
+  };
+
   agents.onSessionsChanged((list) => {
     if (win && !win.isDestroyed()) win.webContents.send('agent-sessions-update', list);
+    broadcastHostSummary();
   });
 
   agents.onHostStatusChanged((status) => {
@@ -551,6 +561,7 @@ function registerHandlers(win, storeInstance) {
         w.webContents.send('agent-host-status-update', status);
       }
     }
+    broadcastHostSummary();
   });
 
   // Restore remembered Sessions from the previous launch as ended, dropping
@@ -3502,6 +3513,13 @@ function registerHandlers(win, storeInstance) {
 
   // Session Host fallback status (#231).
   ipcMain.handle('agent-host-status', () => agents.getHostStatus());
+
+  // Background sessions summary & stop-all (#236).
+  ipcMain.handle('agent-host-summary', () => agents.getHostSummary());
+  ipcMain.handle('agent-host-stop-all', () => {
+    agents.stopAllBackgroundSessions();
+    return agents.getHostSummary();
+  });
 
   // Validated shallow patch. Always resolves — rejections come back on the
   // result so the UI can roll the control back and say why.

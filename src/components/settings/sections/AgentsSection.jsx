@@ -3,6 +3,7 @@ import { ChevronDown, Download, Loader, Plus, RotateCcw, Trash2 } from 'lucide-r
 import {
   Button,
   Card,
+  ConfirmDialog,
   SectionLabel,
   SegmentedTabs,
   SettingsRow,
@@ -21,6 +22,11 @@ import {
   useKeepAwakeStatus,
 } from '../../../lib/useKeepAwake';
 import { hostFallbackNotice, useAgentHostStatus } from '../../../lib/sessionHostNotice';
+import {
+  backgroundSessionsLabel,
+  shouldShowBackgroundSessionsRow,
+  useBackgroundSessionsSummary,
+} from '../../../lib/backgroundSessionsLabel';
 
 const TASKS_KEYS = ['tasks.startPrompt', 'tasks.branchTemplate', 'tasks.startMode'];
 const START_MODES = [
@@ -41,6 +47,8 @@ export default function AgentsSection() {
   const [open, setOpen] = useState(null);
   const keepAwake = useKeepAwakeStatus();
   const hostStatus = useAgentHostStatus();
+  const hostSummary = useBackgroundSessionsSummary();
+  const [stopAllConfirm, setStopAllConfirm] = useState(false);
 
   const refresh = useCallback(() => {
     window.electronAPI
@@ -264,7 +272,9 @@ export default function AgentsSection() {
         </div>
       )}
 
-      {(!visible || visible.includes('agents.keepRunningOnQuit')) && (
+      {(!visible ||
+        visible.includes('agents.keepRunningOnQuit') ||
+        visible.includes('agents.backgroundSessions')) && (
         <div>
           <SectionLabel>Background Sessions</SectionLabel>
           <Card>
@@ -280,6 +290,26 @@ export default function AgentsSection() {
                 label="Keep agents running when WPXen quits"
               />
             </SettingsRow>
+            {shouldShowBackgroundSessionsRow({
+              keepRunningOnQuit: settings['agents.keepRunningOnQuit'] === true,
+              connectedHostCount: hostSummary.connectedHostCount,
+              totalRunning: hostSummary.totalRunning,
+            }) && (
+              <SettingsRow
+                id="agents.backgroundSessions"
+                visible={visible}
+                title={backgroundSessionsLabel(hostSummary)}
+                subtitle="Sessions currently held by background Session Hosts across all versions"
+              >
+                <Button
+                  variant="secondary"
+                  disabled={hostSummary.totalRunning === 0}
+                  onClick={() => setStopAllConfirm(true)}
+                >
+                  Stop all
+                </Button>
+              </SettingsRow>
+            )}
           </Card>
           {fallbackNotice && (
             <p className="text-[11px] text-destructive mt-1.5 px-1">{fallbackNotice}</p>
@@ -550,6 +580,19 @@ export default function AgentsSection() {
           <p className="text-[11px] text-destructive mt-1.5 px-1">{addError}</p>
         )}
       </div>
+
+      <ConfirmDialog
+        open={stopAllConfirm}
+        title="Stop all background sessions?"
+        description="Every running Session held by a Session Host will be stopped. They will stay listed as ended so you can resume them later."
+        confirmLabel="Stop all"
+        danger
+        onConfirm={() => {
+          setStopAllConfirm(false);
+          window.electronAPI.stopAllBackgroundSessions().catch(() => {});
+        }}
+        onCancel={() => setStopAllConfirm(false)}
+      />
     </div>
   );
 }
