@@ -41,6 +41,8 @@ const VALID_EVENT_CHANNELS = [
   'office-update',
   'site-log-follow-update',
   'site-upgrade-report',
+  'php-updates',
+  'app-navigate',
 ];
 
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -159,6 +161,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getInstallablePhpVersions: () => ipcRenderer.invoke('get-installable-php-versions'),
   installPhpVersion: (version) => ipcRenderer.invoke('install-php-version', version),
   updatePhpVersion: (version) => ipcRenderer.invoke('update-php-version', version),
+  // Daily PHP update check: { updates, notice, checkedAt, checking, error }.
+  // Also pushed on 'php-updates'.
+  getPhpUpdates: () => ipcRenderer.invoke('php-updates-get'),
+  checkPhpUpdates: () => ipcRenderer.invoke('php-updates-check'),
+  dismissPhpUpdates: () => ipcRenderer.invoke('php-updates-dismiss'),
   getPhpIniSettings: () => ipcRenderer.invoke('get-php-ini-settings'),
   setPhpIniSetting: (version, key, value) =>
     ipcRenderer.invoke('set-php-ini-setting', version, key, value),

@@ -118,7 +118,11 @@ Node directly. When adding a feature that crosses the boundary you must touch th
     offset, level counts and search live in the pure `logReader.cjs` — the
     whole-file scans run sliced through its `*Async` drivers so a 200 MB log
     never stalls the main process; `logFollow.cjs` polls the open log for live
-    entries), `setup.cjs`.
+    entries), `setup.cjs`. `phpUpdates.cjs` is the daily PHP update check
+    (`brew update` then `brew outdated`, 2 min after launch, retried hourly on
+    failure): it feeds the Dashboard notice, the PHP sidebar dot and one
+    notification per release, and never installs — `brew upgrade` stays a
+    click on the PHP page, which then restarts that version's FPM.
   - **Self-healing 502** — `errorPages.cjs` writes one shared nginx snippet
     plus the 502/504 pages into `{prefix}/etc/nginx/wpxen/`, included by every
     vhost; its `/__wpxen/repair` and `/__wpxen/status` routes answer loopback

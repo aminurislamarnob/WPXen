@@ -215,6 +215,32 @@ export const SETTINGS_ITEMS = [
   },
 
   {
+    id: 'php.checkForUpdates',
+    section: 'sites',
+    title: 'Check for PHP updates',
+    description:
+      'Once a day, ask Homebrew whether installed PHP versions have a newer release',
+    keywords: [
+      'php',
+      'update',
+      'upgrade',
+      'outdated',
+      'patch',
+      'release',
+      'homebrew',
+      'brew',
+      'check',
+    ],
+  },
+  {
+    id: 'php.updateNotifications',
+    section: 'sites',
+    title: 'Notify about PHP updates',
+    description: 'Show a macOS notification when a new PHP release is found',
+    keywords: ['php', 'update', 'notification', 'notify', 'alert', 'release'],
+  },
+
+  {
     id: 'sites.defaultWpVersion',
     section: 'sites',
     title: 'Default WordPress Version',

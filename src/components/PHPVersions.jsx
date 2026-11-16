@@ -12,6 +12,7 @@ import {
 import { StatusBadge } from './StatusBadge';
 import PhpSettings from './PhpSettings';
 import { Card, Row, SectionLabel, Tooltip } from './ui';
+import { usePhpUpdates } from '../lib/usePhpUpdates';
 
 // Version-number tile (like System Settings colored tiles, but numeric).
 function VersionTile({ version, active }) {
@@ -26,7 +27,15 @@ function VersionTile({ version, active }) {
   );
 }
 
-function VersionRow({ version, onSwitch, switching, onUpdate, updating, logLine }) {
+function VersionRow({
+  version,
+  latest,
+  onSwitch,
+  switching,
+  onUpdate,
+  updating,
+  logLine,
+}) {
   const isLoading = switching === version.version;
   const isUpdating = updating === version.version;
 
@@ -51,18 +60,18 @@ function VersionRow({ version, onSwitch, switching, onUpdate, updating, logLine 
           <StatusBadge running={version.running} size="xs" />
           FPM {version.running ? 'on' : 'off'}
         </span>
-        {version.outdated && (
+        {(version.outdated || latest) && (
           <button
             onClick={() => onUpdate(version.version)}
             disabled={isLoading || isUpdating}
-            className="btn-secondary text-xs"
+            className="btn-secondary"
           >
             {isUpdating ? (
-              <Loader size={11} className="animate-spin mr-1.5" />
+              <Loader size={13} className="animate-spin" />
             ) : (
-              <ArrowUpCircle size={11} className="mr-1.5" />
+              <ArrowUpCircle size={13} />
             )}
-            Update
+            {latest ? `Update to ${latest}` : 'Update'}
           </button>
         )}
         {!version.active && (
@@ -139,6 +148,11 @@ export default function PHPVersions() {
   const [updating, setUpdating] = useState(null);
   const [logLine, setLogLine] = useState('');
   const [message, setMessage] = useState(null);
+  // The daily check's findings: the latest release per installed version.
+  const phpUpdates = usePhpUpdates();
+  const latestFor = Object.fromEntries(
+    (phpUpdates?.updates || []).map((u) => [u.version, u.latest])
+  );
 
   // Keep the version of the in-flight brew op available to the progress
   // listener without re-subscribing on every change.
@@ -226,7 +240,21 @@ export default function PHPVersions() {
     setLogLine('');
   }
 
+  // `brew update` + `brew outdated` now, then reload the rows so the Update
+  // buttons reflect it.
+  async function handleCheckUpdates() {
+    setMessage(null);
+    const state = await window.electronAPI.checkPhpUpdates().catch((err) => ({
+      error: err.message,
+    }));
+    await loadVersions();
+    if (state?.error) setMessage({ type: 'error', text: state.error });
+    else if (!state?.updates?.length)
+      setMessage({ type: 'success', text: 'All PHP versions are up to date.' });
+  }
+
   const busy = !!installing || !!updating;
+  const checking = !!phpUpdates?.checking;
   const notInstalled = installable.filter((v) => !v.installed);
 
   function scrollToSettings() {
@@ -244,6 +272,14 @@ export default function PHPVersions() {
             Configuration
           </button>
         </Tooltip>
+        <button
+          onClick={handleCheckUpdates}
+          disabled={busy || checking}
+          className="btn-secondary"
+        >
+          <ArrowUpCircle size={13} className={checking ? 'animate-pulse' : ''} />
+          {checking ? 'Checking…' : 'Check for updates'}
+        </button>
         <button onClick={loadVersions} disabled={busy} className="btn-secondary">
           <RefreshCw size={12} strokeWidth={2.5} className={busy ? 'animate-spin' : ''} />
           Refresh
@@ -285,6 +321,7 @@ export default function PHPVersions() {
               <VersionRow
                 key={v.version}
                 version={v}
+                latest={latestFor[v.version]}
                 onSwitch={handleSwitch}
                 switching={switching}
                 onUpdate={handleUpdate}
@@ -297,6 +334,17 @@ export default function PHPVersions() {
             Each site runs on its own PHP version (Sites → PHP). The active version is the
             CLI <span className="font-mono">php</span> and what phpMyAdmin runs on;
             switching it never changes a site.
+            {phpUpdates?.checkedAt && (
+              <>
+                {' '}
+                Last checked for updates{' '}
+                {new Date(phpUpdates.checkedAt).toLocaleString(undefined, {
+                  dateStyle: 'medium',
+                  timeStyle: 'short',
+                })}
+                .
+              </>
+            )}
           </p>
         </>
       )}

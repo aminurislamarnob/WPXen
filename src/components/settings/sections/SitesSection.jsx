@@ -58,6 +58,39 @@ export default function SitesSection() {
       </div>
 
       <div>
+        <SectionLabel>PHP Updates</SectionLabel>
+        <Card>
+          <SettingsRow
+            id="php.checkForUpdates"
+            visible={visible}
+            title="Check for PHP updates"
+            subtitle="Once a day, ask Homebrew whether installed PHP versions have a newer release"
+          >
+            <Toggle
+              checked={!!settings['php.checkForUpdates']}
+              onChange={(v) => setSetting('php.checkForUpdates', v)}
+              label="Check for PHP updates"
+            />
+          </SettingsRow>
+          <SettingsRow
+            id="php.updateNotifications"
+            visible={visible}
+            title="Notify about PHP updates"
+            subtitle="Show a macOS notification when a new release is found"
+          >
+            <Toggle
+              checked={!!settings['php.updateNotifications']}
+              onChange={(v) => setSetting('php.updateNotifications', v)}
+              label="Notify about PHP updates"
+            />
+          </SettingsRow>
+        </Card>
+        <p className="text-[11px] text-muted-foreground mt-1.5 px-1">
+          Nothing installs on its own: updates are applied from the PHP page.
+        </p>
+      </div>
+
+      <div>
         <SectionLabel>New Site Defaults</SectionLabel>
         <Card>
           <SettingsRow

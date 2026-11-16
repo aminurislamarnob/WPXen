@@ -58,6 +58,7 @@ const handoff = require('./services/handoff.cjs');
 const transcripts = require('./services/transcripts.cjs');
 const officeEngine = require('./services/office/engine.cjs');
 const officeHooks = require('./services/office/hooksInstaller.cjs');
+const phpUpdatesService = require('./services/phpUpdates.cjs');
 const { humanize } = require('./services/errors.cjs');
 
 let store;
@@ -3084,6 +3085,50 @@ function registerHandlers(win, storeInstance) {
     return phpService.getInstalledPhpVersionsWithDetailsAsync();
   });
 
+  // Daily PHP update check (services/phpUpdates.cjs). It only finds updates:
+  // the Dashboard notice, the sidebar dot and the notification all lead to the
+  // PHP page, where `update-php-version` does the upgrade on a click.
+  const phpUpdates = phpUpdatesService.createPhpUpdateChecker({
+    refreshIndex: () => brew.updateIndexAsync(),
+    listInstalled: () => phpService.installedPhpFormulae(),
+    listOutdated: () => brew.getOutdatedFormulaeDetails(),
+    enabled: () => settings.get('php.checkForUpdates') !== false,
+    store,
+    onChange: (state) => {
+      for (const w of BrowserWindow.getAllWindows()) {
+        if (!w.isDestroyed()) w.webContents.send('php-updates', state);
+      }
+    },
+    onNew: (fresh) => {
+      if (!settings.get('php.updateNotifications') || !Notification.isSupported()) return;
+      const n = new Notification({
+        title: fresh.length === 1 ? 'PHP update available' : 'PHP updates available',
+        body:
+          fresh.length === 1
+            ? `PHP ${fresh[0].latest} is available` +
+              (fresh[0].installed ? ` (you have ${fresh[0].installed}).` : '.')
+            : `New releases for PHP ${fresh.map((u) => u.version).join(', ')}.`,
+      });
+      liveNotifications.add(n);
+      const drop = () => liveNotifications.delete(n);
+      n.on('close', drop);
+      n.on('click', () => {
+        drop();
+        if (win && !win.isDestroyed()) {
+          win.show();
+          win.focus();
+          win.webContents.send('app-navigate', { to: '/php' });
+        }
+      });
+      n.show();
+    },
+  });
+  phpUpdates.start();
+
+  ipcMain.handle('php-updates-get', () => phpUpdates.getState());
+  ipcMain.handle('php-updates-check', () => phpUpdates.check());
+  ipcMain.handle('php-updates-dismiss', () => phpUpdates.dismiss());
+
   ipcMain.handle('switch-php-version', async (_, version) => {
     try {
       // Links the CLI and swaps a running FPM to the new version — sites would
@@ -3145,6 +3190,7 @@ function registerHandlers(win, storeInstance) {
       try {
         trustBundle.syncLocalTrust();
       } catch {}
+      phpUpdates.check({ refresh: false }).catch(() => {});
       return { success: true };
     } catch (err) {
       return { success: false, error: humanize(err) };
@@ -3159,6 +3205,8 @@ function registerHandlers(win, storeInstance) {
         }
       };
       await phpService.updatePhpVersion(version, progress);
+      // The index is current; only what's installed changed.
+      phpUpdates.check({ refresh: false }).catch(() => {});
       return { success: true };
     } catch (err) {
       return { success: false, error: humanize(err) };

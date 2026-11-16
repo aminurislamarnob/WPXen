@@ -14,9 +14,11 @@ import {
   ShieldAlert,
   AlertTriangle,
   Loader,
+  ArrowUpCircle,
 } from 'lucide-react';
 import { Button, Card, IconTile, Row, SectionLabel, Tooltip } from './ui';
 import { StatusBadge } from './StatusBadge';
+import { phpUpdatesLabel, usePhpUpdates } from '../lib/usePhpUpdates';
 
 const SERVICE_ROWS = [
   { id: 'nginx', name: 'nginx', icon: Server, color: 'green' },
@@ -38,6 +40,8 @@ export default function Dashboard({ serviceStatus, sites, refreshStatus }) {
   // What the launch-time Site upgrade pass couldn't do (#207). Pushed when
   // the pass finishes, which can be after this page has mounted.
   const [upgradeReport, setUpgradeReport] = useState(null);
+  // PHP releases the daily check found and you haven't dismissed.
+  const phpNotice = usePhpUpdates()?.notice || [];
 
   useEffect(() => {
     window.electronAPI
@@ -130,6 +134,14 @@ export default function Dashboard({ serviceStatus, sites, refreshStatus }) {
             setUpgradeReport(null);
             window.electronAPI.dismissSiteUpgradeReport().catch(() => {});
           }}
+        />
+      )}
+
+      {phpNotice.length > 0 && (
+        <PhpUpdateNotice
+          updates={phpNotice}
+          onOpen={() => navigate('/php')}
+          onDismiss={() => window.electronAPI.dismissPhpUpdates().catch(() => {})}
         />
       )}
 
@@ -298,6 +310,31 @@ function SiteUpgradeNotice({ report, onDismiss }) {
       >
         <Button variant="ghost" onClick={onDismiss} className="flex-shrink-0">
           Dismiss
+        </Button>
+      </Row>
+    </Card>
+  );
+}
+
+// Shown until you update or dismiss; a newer release brings it back.
+function PhpUpdateNotice({ updates, onOpen, onDismiss }) {
+  const one = updates.length === 1 ? updates[0] : null;
+  const title = `${phpUpdatesLabel(updates)} ${one ? 'is' : 'are'} available`;
+  const subtitle = one?.installed
+    ? `You have ${one.installed}. Update from the PHP page.`
+    : 'Update from the PHP page.';
+  return (
+    <Card className="mb-4">
+      <Row
+        icon={<ArrowUpCircle size={18} className="text-highlight flex-shrink-0" />}
+        title={<span className="font-semibold">{title}</span>}
+        subtitle={subtitle}
+      >
+        <Button variant="ghost" onClick={onDismiss} className="flex-shrink-0">
+          Dismiss
+        </Button>
+        <Button variant="secondary" onClick={onOpen} className="flex-shrink-0">
+          View update{one ? '' : 's'}
         </Button>
       </Row>
     </Card>

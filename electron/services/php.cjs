@@ -422,6 +422,22 @@ function getInstalledPhpVersionsWithDetails() {
   }));
 }
 
+// The formula a version is installed as (php vs php@X), as brew names it in
+// `outdated` and `upgrade`.
+function phpFormulaFor(version, prefix = brew.getBrewPrefix()) {
+  return prefix && fs.existsSync(`${prefix}/Cellar/php@${version}`)
+    ? `php@${version}`
+    : 'php';
+}
+
+// Every installed PHP version with its formula: [{ version, formula }].
+function installedPhpFormulae() {
+  const prefix = brew.getBrewPrefix();
+  return brew
+    .getInstalledPhpVersions()
+    .map((version) => ({ version, formula: phpFormulaFor(version, prefix) }));
+}
+
 // Non-blocking variant used by the get-php-versions IPC handler. Probes every
 // version's full number and FPM state in parallel so opening the PHP page
 // doesn't freeze the main thread.
@@ -436,9 +452,7 @@ async function getInstalledPhpVersionsWithDetailsAsync() {
   const fullVersions = await Promise.all(versions.map((v) => getPhpVersionAsync(v)));
 
   return versions.map((v, i) => {
-    // The formula name (php vs php@X) as brew reports it in `outdated`.
-    const formula =
-      prefix && fs.existsSync(`${prefix}/Cellar/php@${v}`) ? `php@${v}` : 'php';
+    const formula = phpFormulaFor(v, prefix);
     return {
       version: v,
       fullVersion: fullVersions[i] || v,
@@ -503,7 +517,20 @@ async function updatePhpVersion(version, onProgress) {
   if (TAP_PHP_VERSIONS.includes(version)) {
     await ensurePhpTapTrusted(onProgress);
   }
-  return brew.runBrewStreaming(['upgrade', formula], onProgress);
+  const result = await brew.runBrewStreaming(['upgrade', formula], onProgress);
+  // A running FPM keeps executing the old binary until it restarts, so
+  // without this the sites on `version` would stay on the old release.
+  if (isUp(version)) {
+    onProgress?.(`Restarting PHP ${version} FPM…`);
+    try {
+      await restartPhpFpm(version);
+    } catch (err) {
+      throw new Error(
+        `PHP ${version} was updated, but its PHP-FPM didn’t restart: ${err.message}`
+      );
+    }
+  }
+  return result;
 }
 
 function switchActivePhpVersion(version) {
@@ -989,6 +1016,8 @@ function setPhpIniSettingAllVersions(key, value) {
 }
 
 module.exports = {
+  phpFormulaFor,
+  installedPhpFormulae,
   getPhpBinPath,
   getPhpFpmBinPath,
   isPhpFpmRunning,

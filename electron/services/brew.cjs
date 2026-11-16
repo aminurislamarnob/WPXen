@@ -50,12 +50,12 @@ function isPackageInstalled(name) {
 
 // Non-blocking `brew` runner for the dependency check (see asyncExec.cjs).
 // `brew list` spawns Ruby and can take 1-3s — synchronous calls freeze the UI.
-function execBrewAsync(command) {
+function execBrewAsync(command, { timeout = 8000, env = {} } = {}) {
   const brewBin = getBrewPath();
   if (!brewBin) return Promise.reject(new Error('Homebrew is not installed'));
   return execAsync(`${brewBin} ${command}`, {
-    env: { ...process.env, PATH: `${getBrewPrefix()}/bin:${process.env.PATH}` },
-    timeout: 8000,
+    env: { ...process.env, PATH: `${getBrewPrefix()}/bin:${process.env.PATH}`, ...env },
+    timeout,
   });
 }
 
@@ -204,18 +204,39 @@ async function getActivePhpVersionAsync() {
 // installed formula has an update available. Best-effort — resolves to an empty
 // set on any error.
 async function getOutdatedFormulae() {
-  try {
-    const { stdout } = await execBrewAsync('outdated --json=v2');
-    const data = JSON.parse(stdout);
-    const names = new Set();
-    for (const f of data.formulae || []) {
-      if (f.name) names.add(f.name);
-      if (f.full_name) names.add(f.full_name);
-    }
-    return names;
-  } catch {
-    return new Set();
+  const names = new Set();
+  for (const f of await getOutdatedFormulaeDetails()) {
+    if (f.name) names.add(f.name);
+    if (f.full_name) names.add(f.full_name);
   }
+  return names;
+}
+
+// `brew outdated --json=v2`'s formulae: [{ name, full_name?, installed_versions,
+// current_version, pinned }]. Compared against Homebrew's *local* index, so it
+// only knows about releases since the last `brew update` (updateIndexAsync).
+// Best-effort — [] on any error.
+async function getOutdatedFormulaeDetails() {
+  try {
+    const { stdout } = await execBrewAsync('outdated --json=v2', {
+      timeout: 30_000,
+      env: { HOMEBREW_NO_AUTO_UPDATE: '1' },
+    });
+    const data = JSON.parse(stdout);
+    return Array.isArray(data.formulae) ? data.formulae : [];
+  } catch {
+    return [];
+  }
+}
+
+// `brew update`: refreshes Homebrew's index of formula versions (and taps, so
+// shivammathur/php's EOL versions too). Changes nothing that is installed.
+// Rejects on failure (offline, another brew holding the lock).
+async function updateIndexAsync() {
+  await execBrewAsync('update --quiet', {
+    timeout: 180_000,
+    env: { HOMEBREW_NO_ENV_HINTS: '1' },
+  });
 }
 
 function isNginxInstalled() {
@@ -454,6 +475,8 @@ module.exports = {
   phpBinaryVersion,
   phpFormulaForVersion,
   getOutdatedFormulae,
+  getOutdatedFormulaeDetails,
+  updateIndexAsync,
   getActivePhpVersion,
   getActivePhpVersionAsync,
   isNginxInstalled,
