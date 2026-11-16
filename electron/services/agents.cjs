@@ -16,6 +16,12 @@ const {
   createInAppTerminalProvider,
   defaultSpawnPty,
 } = require('./terminalProvider.cjs');
+const {
+  historyDir,
+  readHistory,
+  deleteHistory,
+  pruneOrphanedHistory,
+} = require('./sessionHistory.cjs');
 const shellIntegration = require('./shellIntegration.cjs');
 
 // ── Registry ────────────────────────────────────────────────────────────────
@@ -1073,6 +1079,7 @@ function saveSessionRecord(session) {
     if (r?.sessionId && !capped.includes(r)) {
       sessions.delete(r.sessionId);
       notifier.forget(r.sessionId);
+      deleteHistory(historyDir(deps.userDataDir()), r.sessionId);
     }
   }
   deps.store.set(SESSIONS_STORE_KEY, capped);
@@ -1164,6 +1171,10 @@ function restoreSessions({ projectIds = null } = {}) {
     normalized.push(toSessionRecord(session));
   }
   deps.store.set(SESSIONS_STORE_KEY, normalized);
+  pruneOrphanedHistory(
+    historyDir(deps.userDataDir()),
+    normalized.map((r) => r.sessionId)
+  );
   emitChange({ immediate: true });
   return listAllSessions();
 }
@@ -1782,6 +1793,8 @@ function attach(sessionId, win) {
   if (!session) return { error: 'no session' };
   session.window = win;
   const attached = session.provider?.attach?.(sessionId);
+  const diskReplay = () =>
+    session.buffer || readHistory(historyDir(deps.userDataDir()), sessionId);
   const sendReplay = (data, exited) => {
     if (win && !win.isDestroyed()) {
       win.webContents.send('terminal-replay', {
@@ -1795,11 +1808,11 @@ function attach(sessionId, win) {
     attached
       .then((snap) => {
         if (typeof snap?.data === 'string') session.buffer = snap.data;
-        sendReplay(snap?.data ?? session.buffer, snap?.exited ?? session.exited);
+        sendReplay(snap?.data ?? diskReplay(), snap?.exited ?? session.exited);
       })
-      .catch(() => sendReplay(session.buffer, session.exited));
+      .catch(() => sendReplay(diskReplay(), session.exited));
   } else {
-    sendReplay(attached?.data ?? session.buffer, attached?.exited ?? session.exited);
+    sendReplay(attached?.data ?? diskReplay(), attached?.exited ?? session.exited);
   }
   return { ok: true };
 }
@@ -2129,6 +2142,7 @@ function stop(sessionId) {
   stopRegistryPin(session);
   sessions.delete(sessionId);
   removeSessionRecord(sessionId);
+  deleteHistory(historyDir(deps.userDataDir()), sessionId);
   notifier.forget(sessionId);
   require('./chatImages.cjs')
     .clearChatImages(sessionId)
