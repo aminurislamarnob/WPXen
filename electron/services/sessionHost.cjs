@@ -242,6 +242,7 @@ function createSessionHost({
           ok: true,
           appVersion,
           protocolVersion: PROTOCOL_VERSION,
+          capabilities: ['status', 'mark-read', 'history'],
         });
         return;
       }
