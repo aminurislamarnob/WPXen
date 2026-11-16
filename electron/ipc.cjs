@@ -318,6 +318,8 @@ function registerHandlers(win, storeInstance) {
   store = storeInstance;
   // The DNS mode and port live in the store (see dnsmasq.cjs).
   dnsmasq.bindStore(storeInstance);
+  // Persisted agent Session records live in the store (see agents.cjs).
+  agents.bindStore(storeInstance);
   // The in-app browser pushes guest events (new windows, and later console
   // output) back to the renderer through this window.
   browser.setWindow(win);
@@ -535,6 +537,10 @@ function registerHandlers(win, storeInstance) {
   agents.onSessionsChanged((list) => {
     if (win && !win.isDestroyed()) win.webContents.send('agent-sessions-update', list);
   });
+
+  // Restore remembered Sessions from the previous launch as ended, dropping
+  // any whose Project is no longer in the working set or no longer exists.
+  agents.restoreSessions({ projectIds: getProjectIds() });
 
   agents.onChatRows((data) => {
     if (win && !win.isDestroyed()) win.webContents.send('agent-chat-rows', data);
@@ -1616,6 +1622,10 @@ function registerHandlers(win, storeInstance) {
         site,
         site.adoptedFrom ? { removeFiles: false, removeDatabase: false } : opts
       );
+
+      for (const s of agents.listAllSessions()) {
+        if (s.siteId === id) agents.stop(s.sessionId);
+      }
 
       store.set(
         'sites',

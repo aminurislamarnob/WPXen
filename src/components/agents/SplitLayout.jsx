@@ -10,6 +10,7 @@ import {
   setViewMode as setViewModeGlobal,
   setReturnToChat,
   toggleViewMode,
+  canResumeSession,
 } from '../../lib/chatView';
 import { useEffect, useRef, useState } from 'react';
 
@@ -109,6 +110,13 @@ export default function SplitLayout({
             onOpenLink={onOpenLink}
             onExited={() => onExited(tree.leaf)}
             onRestart={() => onRestart(tree.leaf)}
+            onResume={
+              canResumeSession(sessionsById[tree.leaf], {
+                resumeFlag: sessionsById[tree.leaf]?.resumeFlag,
+              }) && onResume
+                ? () => onResume(tree.leaf)
+                : undefined
+            }
             onClosePane={split ? () => onClosePane(tree.leaf) : undefined}
             onFocus={() => onFocusPane?.(tree.leaf)}
             onBlur={() => onBlurPane?.()}

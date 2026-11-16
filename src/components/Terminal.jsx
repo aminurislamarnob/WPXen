@@ -17,6 +17,7 @@ export default function Terminal({
   sessionId,
   onExited,
   onRestart,
+  onResume,
   rootPath,
   onOpenFile,
   onOpenLink,
@@ -230,8 +231,16 @@ export default function Terminal({
                 : `The shell exited (code ${exit.code}).`}
             </p>
             <div className="mt-4 flex justify-center gap-2">
+              {onResume && (
+                <button className="btn btn-primary" onClick={onResume}>
+                  Resume
+                </button>
+              )}
               {onRestart && (
-                <button className="btn btn-primary" onClick={onRestart}>
+                <button
+                  className={`btn ${onResume ? 'btn-secondary' : 'btn-primary'}`}
+                  onClick={onRestart}
+                >
                   Restart
                 </button>
               )}

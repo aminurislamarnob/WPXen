@@ -376,7 +376,7 @@ app.on('before-quit', (e) => {
   quitCleanupDone = true;
 
   try {
-    agents.stopAll();
+    agents.shutdownAll();
   } catch {}
   try {
     require('./services/browser.cjs').unregisterAll();

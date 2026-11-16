@@ -146,8 +146,13 @@ const ATTENTION = new Set(['done', 'needs-input', 'error']);
 // `agent: false` for a plain shell session: no keyword title rules (a shell's
 // title is a path), and its bell — a failed tab completion, usually — marks
 // the row unread but doesn't claim anything needs input.
-function createTracker({ now = Date.now, agent = true } = {}) {
-  const snap = { state: 'idle', title: '', changedAt: now(), unread: false };
+function createTracker({ now = Date.now, agent = true, initial = null } = {}) {
+  const snap = {
+    state: initial?.state || 'idle',
+    title: initial?.title || '',
+    changedAt: initial?.changedAt ?? now(),
+    unread: Boolean(initial?.unread),
+  };
   let dirty = false;
   let onScreen = false; // selected in the Agents pane AND the window focused
   let beforeInput = 'idle'; // the state needs-input interrupted

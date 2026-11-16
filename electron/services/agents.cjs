@@ -425,6 +425,8 @@ function listAgents({ all = false, shell = true } = {}) {
 // brew.cjs is required lazily so this module stays importable outside Electron
 // (brew.cjs itself is safe, but the seam below is what tests swap).
 const deps = {
+  store: null,
+  now: () => Date.now(),
   runBrewStreaming: (args, onProgress) =>
     require('./brew.cjs').runBrewStreaming(args, onProgress),
   isBrewInstalled: () => require('./brew.cjs').isBrewInstalled(),
@@ -446,6 +448,10 @@ const deps = {
     return keg ? `${keg}/bin` : null;
   },
 };
+
+function bindStore(store) {
+  deps.store = store;
+}
 
 function __setDeps(next) {
   Object.assign(deps, next);
@@ -709,10 +715,178 @@ function resolveLaunch({ cmd, sitePath, globalArgs = '', target = null }) {
 // A Site may host MANY concurrent Sessions (any mix of Agents, incl. several of
 // the same provider). Sessions are therefore keyed by a unique sessionId, not by
 // siteId; each carries its own pty + ring buffer.
+//
+// Each non-floating Session's record is persisted in the store under
+// SESSIONS_STORE_KEY as it changes (launch, title/transcriptId change, exit).
+// On the next launch restoreSessions() reloads them as ended, capped at
+// MAX_ENDED_SESSIONS_PER_PROJECT per Project with the oldest dropped first.
 const { randomUUID } = require('crypto');
 const MAX_BUFFER = 1024 * 1024; // ~1 MB ring buffer (Q9)
+const SESSIONS_STORE_KEY = 'agentSessions';
+const MAX_ENDED_SESSIONS_PER_PROJECT = 50;
 const sessions = new Map(); // sessionId -> session
 const layouts = new Map(); // rootId -> layout tree
+
+// Serialise a live or restored Session into its persisted store record.
+function toSessionRecord(s) {
+  const snap = s.tracker.snapshot();
+  const exitState =
+    snap.state === 'error' || (s.exited && s.exitCode != null && s.exitCode !== 0)
+      ? 'error'
+      : 'exited';
+  return {
+    sessionId: s.sessionId,
+    siteId: s.siteId,
+    agentId: s.agentId,
+    agentName: s.agentName,
+    targetId: s.targetId || null,
+    label: s.label || null,
+    customTitle: s.customTitle || null,
+    pinned: !!s.pinned,
+    color: s.color || null,
+    cwd: s.cwd || null,
+    title: snap.title || '',
+    transcriptId: s.transcriptId || null,
+    handoffFrom: s.handoffFrom || null,
+    handoffFile: s.handoffFile || null,
+    resumeFrom: s.resumeFrom || null,
+    issue: s.issue || null,
+    startedAt: s.startedAt,
+    endedAt: s.endedAt || null,
+    exitCode: s.exitCode ?? null,
+    exitState: s.exited ? exitState : null,
+    hostVersion: s.hostVersion || null,
+  };
+}
+
+// Keep all live Sessions plus at most MAX_ENDED_SESSIONS_PER_PROJECT ended
+// records per Project (oldest dropped first, by startedAt).
+function capEndedRecords(records, isLive = () => false) {
+  const byProject = new Map();
+  for (const r of records) {
+    if (!r || !r.sessionId || !r.siteId) continue;
+    if (isLive(r.sessionId)) continue;
+    if (!byProject.has(r.siteId)) byProject.set(r.siteId, []);
+    byProject.get(r.siteId).push(r);
+  }
+  const dropped = new Set();
+  for (const list of byProject.values()) {
+    if (list.length <= MAX_ENDED_SESSIONS_PER_PROJECT) continue;
+    const sorted = [...list].sort((a, b) => (a.startedAt || 0) - (b.startedAt || 0));
+    const excess = sorted.length - MAX_ENDED_SESSIONS_PER_PROJECT;
+    for (let i = 0; i < excess; i++) dropped.add(sorted[i].sessionId);
+  }
+  return dropped.size ? records.filter((r) => !dropped.has(r.sessionId)) : records;
+}
+
+function saveSessionRecord(session) {
+  if (!deps.store || session.scope === 'floating' || !session.siteId) return;
+  const list = deps.store.get(SESSIONS_STORE_KEY, []);
+  const rec = toSessionRecord(session);
+  const idx = list.findIndex((r) => r?.sessionId === session.sessionId);
+  const next = idx >= 0 ? list.map((r, i) => (i === idx ? rec : r)) : [...list, rec];
+  const capped = capEndedRecords(next, (id) => {
+    const s = sessions.get(id);
+    return !!s && !s.exited;
+  });
+  for (const r of next) {
+    if (r?.sessionId && !capped.includes(r)) {
+      sessions.delete(r.sessionId);
+      notifier.forget(r.sessionId);
+    }
+  }
+  deps.store.set(SESSIONS_STORE_KEY, capped);
+}
+
+function removeSessionRecord(sessionId) {
+  if (!deps.store) return;
+  const list = deps.store.get(SESSIONS_STORE_KEY, []);
+  const next = list.filter((r) => r?.sessionId !== sessionId);
+  if (next.length !== list.length) deps.store.set(SESSIONS_STORE_KEY, next);
+}
+
+// Restore persisted Sessions from the store as ended. Records whose Project is
+// not in `projectIds` (when provided) are dropped; ended records per Project
+// are capped at 50 (oldest dropped first).
+function restoreSessions({ projectIds = null } = {}) {
+  for (const s of [...sessions.values()]) {
+    if (s.scope === 'floating') continue;
+    stopRegistryPin(s);
+    sessions.delete(s.sessionId);
+  }
+  layouts.clear();
+  if (!deps.store) {
+    emitChange({ immediate: true });
+    return [];
+  }
+  const knownProjects = projectIds ? new Set(projectIds) : null;
+  const raw = deps.store.get(SESSIONS_STORE_KEY, []);
+  const valid = (Array.isArray(raw) ? raw : []).filter(
+    (r) =>
+      r &&
+      typeof r.sessionId === 'string' &&
+      typeof r.siteId === 'string' &&
+      (!knownProjects || knownProjects.has(r.siteId))
+  );
+  const kept = capEndedRecords(valid);
+  const now = deps.now();
+  const agentsById = new Map(listAgents({ all: true }).map((a) => [a.id, a]));
+
+  const normalized = [];
+  for (const r of kept) {
+    const agent = agentsById.get(r.agentId);
+    const endedAt = r.endedAt || r.startedAt || now;
+    const exitState = r.exitState === 'error' ? 'error' : 'exited';
+    const exitCode = r.exitCode ?? (exitState === 'error' ? 1 : 0);
+    const tracker = createTracker({
+      now: deps.now,
+      agent: r.agentId !== SHELL_ID,
+      initial: {
+        state: exitState,
+        title: r.title || '',
+        changedAt: endedAt,
+        unread: false,
+      },
+    });
+    const session = {
+      sessionId: r.sessionId,
+      scope: 'site',
+      siteId: r.siteId,
+      agentId: r.agentId,
+      agentName: agent?.name || r.agentName || r.agentId,
+      targetId: r.targetId || null,
+      label: r.label || null,
+      customTitle: r.customTitle || null,
+      pinned: !!r.pinned,
+      color: r.color || null,
+      cwd: r.cwd || null,
+      paneOf: null,
+      handoffFrom: r.handoffFrom || null,
+      handoffFile: r.handoffFile || null,
+      resumeFrom: r.resumeFrom || null,
+      transcriptId: r.transcriptId || null,
+      chat: agent?.chat || null,
+      ask: agent?.ask || null,
+      resumeFlag: agent?.resumeFlag || null,
+      issue: r.issue || null,
+      pty: null,
+      buffer: '',
+      window: null,
+      exited: true,
+      exitCode,
+      startedAt: r.startedAt || endedAt,
+      endedAt,
+      lastOutputAt: endedAt,
+      tracker,
+      started: true,
+    };
+    sessions.set(session.sessionId, session);
+    normalized.push(toSessionRecord(session));
+  }
+  deps.store.set(SESSIONS_STORE_KEY, normalized);
+  emitChange({ immediate: true });
+  return listAllSessions();
+}
 
 // Change feed for the Agents sidebar. Title updates arrive at spinner rate, so
 // notifications are coalesced into one per CHANGE_DEBOUNCE_MS; launches, exits
@@ -880,9 +1054,11 @@ function sessionRow(s) {
     transcriptId: s.transcriptId || null,
     chat: s.chat || null,
     ask: s.ask || null,
+    resumeFlag: s.resumeFlag || null,
     // The issue or PR Start → launched this Session for, else null.
     issue: s.issue || null,
     startedAt: s.startedAt,
+    endedAt: s.endedAt || null,
     exited: s.exited,
     exitCode: s.exitCode,
     title: snap.title,
@@ -984,6 +1160,7 @@ function launch({
       pinFromRegistry: !!agent.sessionRegistry,
       chat: agent.chat || null,
       ask: agent.ask || null,
+      resumeFlag: agent.resumeFlag || null,
     },
     failLabel: agent.name,
   });
@@ -1000,7 +1177,8 @@ function resumeChatSession(sessionId, { site, target = null, globalArgs = '' } =
   if (!old.transcriptId) return { error: 'No pinned transcript to resume' };
   // Two live Sessions must never drive one conversation: the old Agent has
   // to have exited (its shell may still be up) before a second one resumes.
-  if (!old.exited && old.tracker.snapshot().state !== 'exited')
+  const oldState = old.tracker.snapshot().state;
+  if (!old.exited && oldState !== 'exited' && oldState !== 'error')
     return { error: 'The Session is still running — resume once it has exited' };
   const agent = listAgents({ all: true }).find((a) => a.id === old.agentId);
   if (!agent) return { error: `Unknown agent: ${old.agentId}` };
@@ -1114,6 +1292,7 @@ function startSession({ cwd, command, meta, failLabel, phpBinDir = null }) {
   // A plain shell has nothing to type — the pty is already what was asked for.
   const startsImmediately = !command;
 
+  const now = deps.now();
   const session = {
     sessionId,
     ...meta,
@@ -1123,15 +1302,17 @@ function startSession({ cwd, command, meta, failLabel, phpBinDir = null }) {
     window: null,
     exited: false,
     exitCode: null,
-    startedAt: Date.now(),
-    lastOutputAt: Date.now(),
-    tracker: createTracker({ agent: meta.agentId !== SHELL_ID }),
+    startedAt: now,
+    endedAt: null,
+    lastOutputAt: now,
+    tracker: createTracker({ now: deps.now, agent: meta.agentId !== SHELL_ID }),
     // `started` gates the type-the-command step; a shell session has already
     // arrived at what the user wanted, so it starts out done.
     started: startsImmediately,
   };
   sessions.set(sessionId, session);
   session.tracker.view(isOnScreen(sessionId));
+  saveSessionRecord(session);
 
   // Run the agent once the shell is ready: wait a short settle window after the
   // first output (so rc files that print during init don't swallow the typed
@@ -1151,15 +1332,17 @@ function startSession({ cwd, command, meta, failLabel, phpBinDir = null }) {
   if (!startsImmediately) setTimeout(runAgent, 1200); // fallback: no output first
 
   term.onData((data) => {
-    session.lastOutputAt = Date.now();
+    session.lastOutputAt = deps.now();
     scheduleRun();
-    const before = session.tracker.snapshot().state;
-    const unreadBefore = session.tracker.snapshot().unread;
+    const beforeSnap = session.tracker.snapshot();
     if (session.tracker.output(data)) {
       // Status and unread flips go out at once; title-only churn (spinner
       // frames) waits.
       const after = session.tracker.snapshot();
-      emitChange({ immediate: after.state !== before || after.unread !== unreadBefore });
+      if (after.title !== beforeSnap.title) saveSessionRecord(session);
+      emitChange({
+        immediate: after.state !== beforeSnap.state || after.unread !== beforeSnap.unread,
+      });
     }
     deliverAlerts(session);
     session.buffer += data;
@@ -1176,6 +1359,7 @@ function startSession({ cwd, command, meta, failLabel, phpBinDir = null }) {
 
   term.onExit(({ exitCode }) => {
     session.exited = true;
+    session.endedAt = deps.now();
     stopRegistryPin(session);
     session.exitCode = exitCode;
     session.tracker.exit(exitCode);
@@ -1185,7 +1369,10 @@ function startSession({ cwd, command, meta, failLabel, phpBinDir = null }) {
       win.webContents.send('terminal-exit', { sessionId, code: exitCode });
     }
     // stop() already deleted a dismissed session; don't resurrect its row.
-    if (sessions.has(sessionId)) emitChange({ immediate: true });
+    if (sessions.has(sessionId)) {
+      saveSessionRecord(session);
+      emitChange({ immediate: true });
+    }
   });
 
   emitChange({ immediate: true });
@@ -1227,6 +1414,7 @@ function startRegistryPin(session) {
       if (id && id !== session.transcriptId) {
         session.transcriptId = id;
         session.transcriptPending = false;
+        saveSessionRecord(session);
         emitChange({ immediate: true });
       }
     } catch {
@@ -1367,17 +1555,19 @@ function renameSession(sessionId, title) {
       : '';
   if ((session.customTitle || '') === clean) return { ok: true };
   session.customTitle = clean || null;
+  saveSessionRecord(session);
   emitChange({ immediate: true });
   return { ok: true };
 }
 
 // Pin a Session to the top of its project in the Agents sidebar (row menu →
-// Pin, after Orca's Pin). In memory, like the name: it ends with the Session.
+// Pin, after Orca's Pin).
 function setSessionPinned(sessionId, pinned) {
   const session = sessions.get(sessionId);
   if (!session) return { error: 'session not found' };
   if (!!session.pinned === !!pinned) return { ok: true };
   session.pinned = !!pinned;
+  saveSessionRecord(session);
   emitChange({ immediate: true });
   return { ok: true };
 }
@@ -1396,8 +1586,7 @@ const TAB_COLOR_VALUES = [
   '#9ca3af',
 ];
 
-// Mark a Session's tab (and sidebar row) with a color, or null for none. In
-// memory, like the name and the pin.
+// Mark a Session's tab (and sidebar row) with a color, or null for none.
 function setSessionColor(sessionId, color) {
   const session = sessions.get(sessionId);
   if (!session) return { error: 'session not found' };
@@ -1406,6 +1595,7 @@ function setSessionColor(sessionId, color) {
     return { error: 'unknown tab color' };
   if ((session.color || null) === next) return { ok: true };
   session.color = next;
+  saveSessionRecord(session);
   emitChange({ immediate: true });
   return { ok: true };
 }
@@ -1542,13 +1732,18 @@ function respawnPane(sessionId, { site, target = null, globalArgs = '' }) {
 }
 
 // Graceful stop: SIGTERM, escalate to SIGKILL after a grace period (Q11).
+// User-initiated dismissal also removes the persisted Session record so it does
+// not return on the next launch.
 function stop(sessionId) {
   const session = sessions.get(sessionId);
-  if (!session) return;
+  if (!session) {
+    removeSessionRecord(sessionId);
+    return;
+  }
 
   closePane(sessionId);
 
-  if (!session.exited) {
+  if (!session.exited && session.pty) {
     try {
       session.pty.kill('SIGTERM');
     } catch {}
@@ -1563,10 +1758,45 @@ function stop(sessionId) {
   }
   stopRegistryPin(session);
   sessions.delete(sessionId);
+  removeSessionRecord(sessionId);
   notifier.forget(sessionId);
   require('./chatImages.cjs')
     .clearChatImages(sessionId)
     .catch(() => {});
+  emitChange({ immediate: true });
+}
+
+// App quit teardown: terminate live ptys and record each live Session as ended
+// in the store, without deleting the persisted records (unlike stop(), which is
+// user dismissal).
+function shutdownAll() {
+  const now = deps.now();
+  for (const session of [...sessions.values()]) {
+    stopRegistryPin(session);
+    if (!session.exited) {
+      if (session.pty) {
+        try {
+          session.pty.kill('SIGTERM');
+        } catch {}
+        const term = session.pty;
+        setTimeout(() => {
+          if (!session.exited) {
+            try {
+              term.kill('SIGKILL');
+            } catch {}
+          }
+        }, 3000);
+      }
+      session.exited = true;
+      session.endedAt = now;
+      session.exitCode = session.exitCode ?? 0;
+      session.tracker.exit(session.exitCode);
+      saveSessionRecord(session);
+    }
+    sessions.delete(session.sessionId);
+    notifier.forget(session.sessionId);
+  }
+  layouts.clear();
   emitChange({ immediate: true });
 }
 
@@ -1843,6 +2073,11 @@ function chatSnapshot(sessionId, lines = 15) {
 
 module.exports = {
   SHELL_ID,
+  SESSIONS_STORE_KEY,
+  MAX_ENDED_SESSIONS_PER_PROJECT,
+  bindStore,
+  restoreSessions,
+  shutdownAll,
   setConfig,
   effectiveRegistry,
   listAgents,
