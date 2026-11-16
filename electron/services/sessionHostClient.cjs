@@ -131,8 +131,7 @@ function createSessionHostClient({ socketPath } = {}) {
     return connecting;
   }
 
-  async function request(type, payload = {}) {
-    const socket = await ensureConnected();
+  function sendOnSocket(socket, type, payload) {
     const id = nextId++;
     const line = JSON.stringify({ v: PROTOCOL_VERSION, id, type, ...payload }) + '\n';
     return new Promise((resolve, reject) => {
@@ -144,6 +143,13 @@ function createSessionHostClient({ socketPath } = {}) {
         }
       });
     });
+  }
+
+  function request(type, payload = {}) {
+    if (conn && !conn.destroyed) {
+      return sendOnSocket(conn, type, payload);
+    }
+    return ensureConnected().then((socket) => sendOnSocket(socket, type, payload));
   }
 
   async function hello() {

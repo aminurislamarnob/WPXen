@@ -439,6 +439,9 @@ const deps = {
   // Default delegates to the in-app terminal provider's node-pty spawn.
   spawnPty: null,
   terminalProvider: null,
+  connectHost: null,
+  userDataDir: () => os.tmpdir(),
+  appVersion: () => '0.0.0',
   shellEnv: () => resolveShellEnv(),
   userShell: () => getUserShell(),
   homedir: () => os.homedir(),
@@ -464,14 +467,223 @@ const inAppProvider = createInAppTerminalProvider({
 });
 const wiredProviders = new WeakSet();
 
-function activeProvider() {
-  const provider = deps.terminalProvider || inAppProvider;
-  if (!wiredProviders.has(provider)) {
-    wiredProviders.add(provider);
-    provider.onOutput(({ sessionId, data }) => handleProviderOutput(sessionId, data));
-    provider.onExit(({ sessionId, exitCode }) => handleProviderExit(sessionId, exitCode));
+// ── Session Host state (#231) ────────────────────────────────────────────────
+let keepRunningOnQuit = false;
+let hostClient = null;
+let hostHello = null;
+let hostConnectPromise = null;
+let detachingForQuit = false;
+let hostStatus = { fallback: false, message: null, error: null };
+const hostStatusListeners = new Set();
+
+function getHostStatus() {
+  return { ...hostStatus };
+}
+
+function onHostStatusChanged(cb) {
+  hostStatusListeners.add(cb);
+  return () => hostStatusListeners.delete(cb);
+}
+
+function setHostStatus(next) {
+  hostStatus = {
+    fallback: !!next?.fallback,
+    message: next?.message || null,
+    error: next?.error || null,
+  };
+  const snap = getHostStatus();
+  for (const cb of hostStatusListeners) {
+    try {
+      cb(snap);
+    } catch {}
   }
+}
+
+function activateHostFallback(err) {
+  setHostStatus({
+    fallback: true,
+    message:
+      'Background session host could not start — sessions won’t survive quitting WPXen.',
+    error: err?.message || String(err || 'unknown error'),
+  });
+}
+
+function wireProvider(provider) {
+  if (!provider || wiredProviders.has(provider)) return provider;
+  wiredProviders.add(provider);
+  provider.onOutput?.(({ sessionId, data }) => handleProviderOutput(sessionId, data));
+  provider.onExit?.(({ sessionId, exitCode }) => handleProviderExit(sessionId, exitCode));
+  provider.onDisconnect?.(() => handleHostDisconnect(provider));
   return provider;
+}
+
+function handleHostDisconnect(disconnectedClient) {
+  if (detachingForQuit) return;
+  if (hostClient === disconnectedClient) {
+    hostClient = null;
+    hostHello = null;
+    hostConnectPromise = null;
+  }
+  for (const s of [...sessions.values()]) {
+    if (!s.exited && s.isHostSession) {
+      handleProviderExit(s.sessionId, 1);
+    }
+  }
+}
+
+async function ensureHostClient() {
+  if (hostClient) return hostClient;
+  if (hostConnectPromise) return hostConnectPromise;
+  hostConnectPromise = (async () => {
+    try {
+      const connector =
+        deps.connectHost ||
+        (() =>
+          require('./sessionHostManager.cjs').connectOrStartHost({
+            userDataDir: deps.userDataDir(),
+            version: deps.appVersion(),
+          }));
+      const res = await connector();
+      const client = res?.client || res;
+      wireProvider(client);
+      hostClient = client;
+      hostHello = res?.hello || null;
+      setHostStatus({ fallback: false, message: null, error: null });
+      return client;
+    } catch (err) {
+      hostClient = null;
+      hostHello = null;
+      activateHostFallback(err);
+      throw err;
+    } finally {
+      hostConnectPromise = null;
+    }
+  })();
+  return hostConnectPromise;
+}
+
+const hostProviderProxy = {
+  isHostProvider: true,
+  start: (opts) =>
+    hostClient ? hostClient.start(opts) : ensureHostClient().then((c) => c.start(opts)),
+  write: (sessionId, data) =>
+    hostClient
+      ? hostClient.write(sessionId, data)
+      : ensureHostClient().then((c) => c.write(sessionId, data)),
+  resize: (sessionId, cols, rows) =>
+    hostClient
+      ? hostClient.resize(sessionId, cols, rows)
+      : ensureHostClient().then((c) => c.resize(sessionId, cols, rows)),
+  stop: (sessionId) =>
+    hostClient
+      ? hostClient.stop(sessionId)
+      : ensureHostClient().then((c) => c.stop(sessionId)),
+  attach: (sessionId) =>
+    hostClient
+      ? hostClient.attach(sessionId)
+      : ensureHostClient().then((c) => c.attach(sessionId)),
+  clearBuffer: (sessionId) =>
+    hostClient
+      ? hostClient.clearBuffer(sessionId)
+      : ensureHostClient().then((c) => c.clearBuffer(sessionId)),
+  getPid: (sessionId) => hostClient?.getPid?.(sessionId) ?? null,
+};
+
+function activeProvider(scope = 'site') {
+  if (deps.terminalProvider) {
+    return wireProvider(deps.terminalProvider);
+  }
+  if (keepRunningOnQuit && !hostStatus.fallback && scope === 'site') {
+    return hostProviderProxy;
+  }
+  return wireProvider(inAppProvider);
+}
+
+async function setKeepRunningOnQuit(enabled, { deferConnect = false } = {}) {
+  keepRunningOnQuit = Boolean(enabled);
+  if (!keepRunningOnQuit) {
+    setHostStatus({ fallback: false, message: null, error: null });
+    if (hostClient) {
+      const hasLiveHostSession = [...sessions.values()].some(
+        (s) => !s.exited && s.isHostSession
+      );
+      if (!hasLiveHostSession) {
+        const client = hostClient;
+        hostClient = null;
+        hostHello = null;
+        hostConnectPromise = null;
+        await client.close().catch(() => {});
+      }
+    }
+    return;
+  }
+  if (deferConnect) return;
+  try {
+    await ensureHostClient();
+  } catch {
+    // Fallback status already recorded by ensureHostClient.
+  }
+}
+
+function getKeepRunningOnQuit() {
+  return keepRunningOnQuit;
+}
+
+async function initSessionHost() {
+  if (!keepRunningOnQuit) return listAllSessions();
+  let client;
+  try {
+    client = await ensureHostClient();
+  } catch {
+    return listAllSessions();
+  }
+  let hostSessions = [];
+  try {
+    hostSessions = (await client.list()) || [];
+  } catch {
+    return listAllSessions();
+  }
+
+  let changed = false;
+  for (const hs of hostSessions) {
+    const session = sessions.get(hs.sessionId);
+    if (!session) continue;
+    if (!hs.exited) {
+      session.exited = false;
+      session.endedAt = null;
+      session.exitCode = null;
+      session.provider = hostProviderProxy;
+      session.isHostSession = true;
+      session.hostVersion = hostHello?.appVersion || deps.appVersion();
+      session.pty = makePtyHandle(hostProviderProxy, session.sessionId);
+      session.started = true;
+      session.scheduleRun = null;
+      const prevTitle = session.tracker.snapshot().title;
+      session.tracker = createTracker({
+        now: deps.now,
+        agent: session.agentId !== SHELL_ID,
+        initial: {
+          state: hs.state || 'idle',
+          title: hs.title || prevTitle || '',
+          changedAt: hs.changedAt || session.startedAt,
+          unread: !!hs.unread,
+        },
+      });
+      try {
+        const snap = await client.attach(session.sessionId);
+        if (typeof snap?.data === 'string') session.buffer = snap.data;
+      } catch {}
+      if (session.resumeFlag) startRegistryPin(session);
+      saveSessionRecord(session);
+      changed = true;
+    } else if (hs.exitCode != null && session.exitCode !== hs.exitCode) {
+      session.exitCode = hs.exitCode;
+      saveSessionRecord(session);
+      changed = true;
+    }
+  }
+  if (changed) emitChange({ immediate: true });
+  return listAllSessions();
 }
 
 function bindStore(store) {
@@ -1252,6 +1464,26 @@ function launchFloating({ cwd, command = '' } = {}) {
   });
 }
 
+function makePtyHandle(provider, sessionId) {
+  return {
+    get pid() {
+      return provider.getPid?.(sessionId) ?? null;
+    },
+    write: (data) => {
+      const res = provider.write(sessionId, data);
+      res?.catch?.(() => {});
+    },
+    resize: (cols, rows) => {
+      const res = provider.resize(sessionId, cols, rows);
+      res?.catch?.(() => {});
+    },
+    kill: () => {
+      const res = provider.stop(sessionId);
+      res?.catch?.(() => {});
+    },
+  };
+}
+
 // Spawn the pty for a resolved launch and register its Session. `meta` carries
 // who owns it (a Site's agent, or the Floating Workspace); `command` is typed
 // into the shell once it settles, or nothing for a plain shell.
@@ -1278,62 +1510,70 @@ function startSession({ cwd, command, meta, failLabel, phpBinDir = null }) {
   // a normal shell prompt (like Superset), and the Session only ends when the
   // shell itself exits. `-il` sources the user's rc files.
   const shell = deps.userShell();
-  const provider = activeProvider();
+  let provider = activeProvider(meta.scope);
+  const startOpts = {
+    sessionId,
+    file: shell,
+    args: ['-il'],
+    name: 'xterm-256color',
+    cols: 80,
+    rows: 24,
+    cwd,
+    env: {
+      ...env,
+      ...phpEnv,
+      TERM: 'xterm-256color',
+      TERM_PROGRAM: 'WPXen',
+      // xterm.js renders 24-bit color, but CLIs only use it when told so:
+      // supports-color (chalk, Ink) reads COLORTERM, and without it settles on
+      // 256 colors. Claude Code's near-black, faintly blue prompt background
+      // then quantizes to palette navy (#00005f/#000087) — a loud blue bar
+      // behind every prompt. An app launched from Finder has no COLORTERM to
+      // inherit, so set it.
+      COLORTERM: 'truecolor',
+      // The terminal handles OSC 8 hyperlinks (sessionCache's linkHandler),
+      // but supports-hyperlinks only trusts a known TERM_PROGRAM list, which
+      // WPXen isn't on. This is its override, so CLIs print links as labels.
+      FORCE_HYPERLINK: '1',
+      // Suppress oh-my-zsh's auto-update check. It fires during rc sourcing and
+      // blocks on an interactive `[Y/n]` prompt (a single-char `read`); the
+      // settle-window that types the agent command can't reliably out-wait it,
+      // so the first char gets eaten by the prompt and the rest runs as a bad
+      // command. `DISABLE_AUTO_UPDATE=true` maps to omz `update_mode=disabled`,
+      // so the prompt never appears. Only affects this agent shell.
+      DISABLE_AUTO_UPDATE: 'true',
+    },
+  };
+  let startResult;
   try {
-    provider.start({
-      sessionId,
-      file: shell,
-      args: ['-il'],
-      name: 'xterm-256color',
-      cols: 80,
-      rows: 24,
-      cwd,
-      env: {
-        ...env,
-        ...phpEnv,
-        TERM: 'xterm-256color',
-        TERM_PROGRAM: 'WPXen',
-        // xterm.js renders 24-bit color, but CLIs only use it when told so:
-        // supports-color (chalk, Ink) reads COLORTERM, and without it settles on
-        // 256 colors. Claude Code's near-black, faintly blue prompt background
-        // then quantizes to palette navy (#00005f/#000087) — a loud blue bar
-        // behind every prompt. An app launched from Finder has no COLORTERM to
-        // inherit, so set it.
-        COLORTERM: 'truecolor',
-        // The terminal handles OSC 8 hyperlinks (sessionCache's linkHandler),
-        // but supports-hyperlinks only trusts a known TERM_PROGRAM list, which
-        // WPXen isn't on. This is its override, so CLIs print links as labels.
-        FORCE_HYPERLINK: '1',
-        // Suppress oh-my-zsh's auto-update check. It fires during rc sourcing and
-        // blocks on an interactive `[Y/n]` prompt (a single-char `read`); the
-        // settle-window that types the agent command can't reliably out-wait it,
-        // so the first char gets eaten by the prompt and the rest runs as a bad
-        // command. `DISABLE_AUTO_UPDATE=true` maps to omz `update_mode=disabled`,
-        // so the prompt never appears. Only affects this agent shell.
-        DISABLE_AUTO_UPDATE: 'true',
-      },
-    });
+    startResult = provider.start(startOpts);
   } catch (err) {
-    return { error: `Failed to launch ${failLabel}: ${err.message}` };
+    if (provider.isHostProvider) {
+      activateHostFallback(err);
+      provider = wireProvider(inAppProvider);
+      try {
+        startResult = provider.start(startOpts);
+      } catch (err2) {
+        return { error: `Failed to launch ${failLabel}: ${err2.message}` };
+      }
+    } else {
+      return { error: `Failed to launch ${failLabel}: ${err.message}` };
+    }
   }
 
   // A plain shell has nothing to type — the pty is already what was asked for.
   const startsImmediately = !command;
 
   const now = deps.now();
+  const isHostSession = !!provider.isHostProvider;
   const session = {
     sessionId,
     ...meta,
     cwd,
     provider,
-    pty: {
-      get pid() {
-        return provider.getPid?.(sessionId) ?? null;
-      },
-      write: (data) => provider.write(sessionId, data),
-      resize: (cols, rows) => provider.resize(sessionId, cols, rows),
-      kill: () => provider.stop(sessionId),
-    },
+    isHostSession,
+    hostVersion: isHostSession ? hostHello?.appVersion || deps.appVersion() : null,
+    pty: makePtyHandle(provider, sessionId),
     buffer: '',
     window: null,
     exited: false,
@@ -1351,6 +1591,25 @@ function startSession({ cwd, command, meta, failLabel, phpBinDir = null }) {
   session.tracker.view(isOnScreen(sessionId));
   saveSessionRecord(session);
 
+  if (startResult && typeof startResult.catch === 'function') {
+    startResult.catch((err) => {
+      const s = sessions.get(sessionId);
+      if (!s || s.exited) return;
+      activateHostFallback(err);
+      try {
+        const fallback = wireProvider(inAppProvider);
+        fallback.start(startOpts);
+        s.provider = fallback;
+        s.isHostSession = false;
+        s.hostVersion = null;
+        s.pty = makePtyHandle(fallback, sessionId);
+        saveSessionRecord(s);
+      } catch {
+        handleProviderExit(sessionId, 1);
+      }
+    });
+  }
+
   // Run the agent once the shell is ready: wait a short settle window after the
   // first output (so rc files that print during init don't swallow the typed
   // command), with an absolute fallback if the shell prints nothing first.
@@ -1358,7 +1617,8 @@ function startSession({ cwd, command, meta, failLabel, phpBinDir = null }) {
   const runAgent = () => {
     if (session.started || session.exited) return;
     session.started = true;
-    provider.write(sessionId, `${command}\r`);
+    const res = session.provider.write(sessionId, `${command}\r`);
+    res?.catch?.(() => {});
   };
   session.scheduleRun = () => {
     if (session.started || settleTimer) return;
@@ -1489,9 +1749,10 @@ function attach(sessionId, win) {
   };
   if (attached && typeof attached.then === 'function') {
     attached
-      .then((snap) =>
-        sendReplay(snap?.data ?? session.buffer, snap?.exited ?? session.exited)
-      )
+      .then((snap) => {
+        if (typeof snap?.data === 'string') session.buffer = snap.data;
+        sendReplay(snap?.data ?? session.buffer, snap?.exited ?? session.exited);
+      })
       .catch(() => sendReplay(session.buffer, session.exited));
   } else {
     sendReplay(attached?.data ?? session.buffer, attached?.exited ?? session.exited);
@@ -1502,7 +1763,11 @@ function attach(sessionId, win) {
 function write(sessionId, data) {
   const session = sessions.get(sessionId);
   if (session && !session.exited) {
-    (session.provider || activeProvider()).write(sessionId, data);
+    const res = (session.provider || activeProvider(session.scope)).write(
+      sessionId,
+      data
+    );
+    res?.catch?.(() => {});
     // xterm's own replies (device/cursor reports, focus events) share this
     // path with keystrokes but aren't the user answering anything.
     if (!isTerminalReply(data) && session.tracker.typed()) {
@@ -1544,14 +1809,20 @@ function clearBuffer(sessionId) {
   const session = sessions.get(sessionId);
   if (session) {
     session.buffer = '';
-    session.provider?.clearBuffer?.(sessionId);
+    const res = session.provider?.clearBuffer?.(sessionId);
+    res?.catch?.(() => {});
   }
 }
 
 function resize(sessionId, cols, rows) {
   const session = sessions.get(sessionId);
   if (session && !session.exited && cols > 0 && rows > 0) {
-    (session.provider || activeProvider()).resize(sessionId, cols, rows);
+    const res = (session.provider || activeProvider(session.scope)).resize(
+      sessionId,
+      cols,
+      rows
+    );
+    res?.catch?.(() => {});
   }
 }
 
@@ -1798,7 +2069,8 @@ function stop(sessionId) {
   closePane(sessionId);
 
   if (!session.exited) {
-    (session.provider || activeProvider()).stop(sessionId);
+    const res = (session.provider || activeProvider(session.scope)).stop(sessionId);
+    res?.catch?.(() => {});
   }
   stopRegistryPin(session);
   sessions.delete(sessionId);
@@ -1810,26 +2082,45 @@ function stop(sessionId) {
   emitChange({ immediate: true });
 }
 
-// App quit teardown: terminate live ptys and record each live Session as ended
-// in the store, without deleting the persisted records (unlike stop(), which is
-// user dismissal).
-function shutdownAll() {
+// App quit teardown: when keepRunningOnQuit is enabled, host-owned Sessions
+// keep running in the Session Host and the client simply detaches; in-app
+// Sessions are stopped and recorded as ended in the store.
+function shutdownAll({ forceStop = false } = {}) {
   const now = deps.now();
-  for (const session of [...sessions.values()]) {
-    stopRegistryPin(session);
-    if (!session.exited) {
-      (session.provider || activeProvider()).stop(session.sessionId);
-      session.exited = true;
-      session.endedAt = now;
-      session.exitCode = session.exitCode ?? 0;
-      session.tracker.exit(session.exitCode);
-      saveSessionRecord(session);
+  detachingForQuit = true;
+  try {
+    for (const session of [...sessions.values()]) {
+      stopRegistryPin(session);
+      if (!session.exited) {
+        if (keepRunningOnQuit && !forceStop && session.isHostSession) {
+          saveSessionRecord(session);
+        } else {
+          const res = (session.provider || activeProvider(session.scope)).stop(
+            session.sessionId
+          );
+          res?.catch?.(() => {});
+          session.exited = true;
+          session.endedAt = now;
+          session.exitCode = session.exitCode ?? 0;
+          session.tracker.exit(session.exitCode);
+          saveSessionRecord(session);
+        }
+      }
+      sessions.delete(session.sessionId);
+      notifier.forget(session.sessionId);
     }
-    sessions.delete(session.sessionId);
-    notifier.forget(session.sessionId);
+    if (hostClient) {
+      const client = hostClient;
+      hostClient = null;
+      hostHello = null;
+      hostConnectPromise = null;
+      client.close().catch(() => {});
+    }
+    layouts.clear();
+    emitChange({ immediate: true });
+  } finally {
+    detachingForQuit = false;
   }
-  layouts.clear();
-  emitChange({ immediate: true });
 }
 
 // Live Site Sessions only — a Floating Workspace shell is scratch and doesn't
@@ -2110,6 +2401,11 @@ module.exports = {
   bindStore,
   restoreSessions,
   shutdownAll,
+  setKeepRunningOnQuit,
+  getKeepRunningOnQuit,
+  initSessionHost,
+  getHostStatus,
+  onHostStatusChanged,
   setConfig,
   effectiveRegistry,
   listAgents,

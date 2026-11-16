@@ -179,6 +179,9 @@ const SETTINGS = {
   // New chat-capable Sessions start in chat view instead of the terminal.
   // Off by default: the terminal stays the landing view until asked.
   'agents.chatViewDefault': { type: 'bool', default: false },
+  // Run Sessions in the detached Session Host so they survive quitting and
+  // updating WPXen (#231). Off by default in its first release.
+  'agents.keepRunningOnQuit': { type: 'bool', default: false },
   // Native notifications when an agent session finishes (or crashes), needs
   // input, or rings the terminal bell — see agentStatus.cjs createNotifier.
   'agents.notifications.enabled': { type: 'bool', default: true },

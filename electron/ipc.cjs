@@ -320,6 +320,10 @@ function registerHandlers(win, storeInstance) {
   dnsmasq.bindStore(storeInstance);
   // Persisted agent Session records live in the store (see agents.cjs).
   agents.bindStore(storeInstance);
+  agents.__setDeps({
+    userDataDir: () => app.getPath('userData'),
+    appVersion: () => app.getVersion(),
+  });
   // The in-app browser pushes guest events (new windows, and later console
   // output) back to the renderer through this window.
   browser.setWindow(win);
@@ -367,6 +371,9 @@ function registerHandlers(win, storeInstance) {
       'agents.notifications.suppressWhenFocused': (_v, all) =>
         applyNotificationConfig(all),
       'agents.keepAwake': (value) => keepAwake.setMode(value),
+      'agents.keepRunningOnQuit': (value) => {
+        agents.setKeepRunningOnQuit(value).catch(() => {});
+      },
     },
   });
   settings.migrateLegacy();
@@ -538,9 +545,24 @@ function registerHandlers(win, storeInstance) {
     if (win && !win.isDestroyed()) win.webContents.send('agent-sessions-update', list);
   });
 
+  agents.onHostStatusChanged((status) => {
+    for (const w of BrowserWindow.getAllWindows()) {
+      if (!w.isDestroyed() && w.webContents) {
+        w.webContents.send('agent-host-status-update', status);
+      }
+    }
+  });
+
   // Restore remembered Sessions from the previous launch as ended, dropping
   // any whose Project is no longer in the working set or no longer exists.
+  // When "Keep agents running when WPXen quits" is on, reconnect to any live
+  // Session Host and revive its Sessions as live.
   agents.restoreSessions({ projectIds: getProjectIds() });
+  const keepRunning = settings.get('agents.keepRunningOnQuit');
+  agents.setKeepRunningOnQuit(keepRunning, { deferConnect: true });
+  if (keepRunning) {
+    agents.initSessionHost().catch(() => {});
+  }
 
   agents.onChatRows((data) => {
     if (win && !win.isDestroyed()) win.webContents.send('agent-chat-rows', data);
@@ -3477,6 +3499,9 @@ function registerHandlers(win, storeInstance) {
   // { mode, active, workingCount } — the mode lives in settings; this adds
   // whether a sleep assertion is actually held right now.
   ipcMain.handle('keep-awake-status', () => keepAwake.getStatus());
+
+  // Session Host fallback status (#231).
+  ipcMain.handle('agent-host-status', () => agents.getHostStatus());
 
   // Validated shallow patch. Always resolves — rejections come back on the
   // result so the UI can roll the control back and say why.

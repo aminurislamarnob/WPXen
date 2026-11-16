@@ -98,3 +98,22 @@ describe('agents chat view default', () => {
     expect(found.map((i) => i.id)).toContain('agents.chatViewDefault');
   });
 });
+
+describe('agents keep running on quit (#231)', () => {
+  it('exists in Settings → Agents and is found by settings search', () => {
+    const entry = SETTINGS_ITEMS.find((i) => i.id === 'agents.keepRunningOnQuit');
+    expect(entry).toMatchObject({
+      id: 'agents.keepRunningOnQuit',
+      section: 'agents',
+      title: 'Keep agents running when WPXen quits',
+    });
+    expect(
+      SETTINGS_ITEMS.filter((i) => matchesQuery(i, 'keep agents running')).map(
+        (i) => i.id
+      )
+    ).toContain('agents.keepRunningOnQuit');
+    expect(
+      SETTINGS_ITEMS.filter((i) => matchesQuery(i, 'survive')).map((i) => i.id)
+    ).toContain('agents.keepRunningOnQuit');
+  });
+});

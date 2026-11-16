@@ -35,6 +35,7 @@ import {
   getCachedSessions,
   setSelectedSession,
 } from '../lib/useAgentSessions';
+import { hostFallbackNotice, useAgentHostStatus } from '../lib/sessionHostNotice';
 import TabStrip, { ExplorerToggle } from './agents/TabStrip';
 import { cleanupOrphanedDrafts } from '../lib/chatDraft';
 import ContextMenu from './ContextMenu';
@@ -132,6 +133,11 @@ export default function AgentsPane() {
   // floating window controls; inset it so they don't overlap.
   const { controlsInset } = useOutletContext() || {};
   const { settings } = useSettings();
+  const hostStatus = useAgentHostStatus();
+  const fallbackNotice = hostFallbackNotice(
+    hostStatus,
+    settings['agents.keepRunningOnQuit'] === true
+  );
 
   const cached = siteCache.get(siteId);
   const [meta, setMeta] = useState(() => cached?.meta || { siteName: siteId });
@@ -1151,6 +1157,12 @@ export default function AgentsPane() {
                       setSettingsOpen(true);
                     }}
                   />
+                )}
+
+                {fallbackNotice && (
+                  <div className="px-3 py-1.5 text-[12px] text-status-attention bg-status-attention/10 border-b border-border">
+                    {fallbackNotice}
+                  </div>
                 )}
 
                 {error && (
